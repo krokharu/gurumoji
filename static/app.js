@@ -50,6 +50,9 @@ let thumbnailRequestId = 0;
 let speakerRegistry = [];
 let speakerRegistryDeletedIds = new Set();
 let speakerRegistryLoaded = false;
+let browserFilePickerOnly = browsePathButton
+  ? browsePathButton.dataset.pickerMode === 'browser'
+  : false;
 
 const speakerRoleLabels = {
   participant: '参加者',
@@ -492,6 +495,10 @@ listen(sourcePath, 'input', () => {
 listen(browsePathButton, 'click', async () => {
   setAlert(pathError, '');
   if (!browsePathButton) return;
+  if (browserFilePickerOnly) {
+    if (inputFile) inputFile.click();
+    return;
+  }
   browsePathButton.disabled = true;
   browsePathButton.textContent = '選択画面を開いています…';
   try {
@@ -507,7 +514,7 @@ listen(browsePathButton, 'click', async () => {
     setAlert(pathError, error.message || 'ファイル選択に失敗しました。', true);
   } finally {
     browsePathButton.disabled = false;
-    browsePathButton.textContent = 'ファイルを選択';
+    browsePathButton.textContent = browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択';
   }
 });
 
@@ -516,7 +523,9 @@ listen(inputFile, 'change', () => {
   const file = inputFile.files && inputFile.files[0];
   if (!file) return;
   sourcePath.value = '';
-  pathDetail.textContent = `${file.name} / ${formatBytes(file.size)} — このPC内だけで一時コピーして処理します`;
+  pathDetail.textContent = browserFilePickerOnly
+    ? `${file.name} / ${formatBytes(file.size)} — Colabへ一時アップロードして処理します`
+    : `${file.name} / ${formatBytes(file.size)} — このPC内だけで一時コピーして処理します`;
   hideSourcePreview();
 });
 
@@ -607,6 +616,12 @@ async function loadConfig() {
     const response = await fetch('/api/config', {cache: 'no-store', signal: controller.signal});
     const data = await readJsonResponse(response);
     applyMachineProfile(data.machine);
+    const runtime = data.runtime || {};
+    browserFilePickerOnly = Boolean(runtime.browser_upload);
+    if (browsePathButton) {
+      browsePathButton.dataset.pickerMode = browserFilePickerOnly ? 'browser' : 'native';
+      browsePathButton.textContent = browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択';
+    }
     if (!response.ok || !data.ok) throw new Error(data.error || '設定を取得できません');
     const recognized = [];
     [['hf', 'huggingface', 'Hugging Face'], ['openai', 'openai', 'OpenAI'], ['google', 'google', 'Google']].forEach(([id, key, label]) => {

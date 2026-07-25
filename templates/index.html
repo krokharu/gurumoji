@@ -140,16 +140,20 @@
             <span class="step">01</span>
             <div>
               <h2>処理するファイルを選ぶ</h2>
+              {% if runtime.colab %}
+              <p>端末からColabへアップロードするか、Google Drive上のパスを指定します</p>
+              {% else %}
               <p>このPC上の動画・音声をブラウザーの選択画面から指定します</p>
+              {% endif %}
             </div>
           </div>
           <div class="path-picker">
             <label class="field path-input-field">
-              <span>音声・動画（フルパスの貼り付けも可能）</span>
-              <input id="source-path" name="source_path" type="text" placeholder="C:\... のパスを直接貼り付ける場合はこちら" autocomplete="off">
+              <span>音声・動画（{% if runtime.colab %}Colab / Drive{% else %}フルパス{% endif %}の貼り付けも可能）</span>
+              <input id="source-path" name="source_path" type="text" placeholder="{% if runtime.colab %}/content/drive/MyDrive/...{% else %}C:\... のパスを直接貼り付ける場合はこちら{% endif %}" autocomplete="off">
             </label>
             <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac,audio/*,video/*">
-            <button id="browse-path-button" class="secondary-button browse-button" type="button">ファイルを選択</button>
+            <button id="browse-path-button" class="secondary-button browse-button" type="button" data-picker-mode="{{ 'native' if runtime.native_file_dialog else 'browser' }}">{{ 'ファイルを選択' if runtime.native_file_dialog else '端末からアップロード' }}</button>
           </div>
           <div id="path-detail" class="path-detail">MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC に対応</div>
           <div id="path-error" class="alert error" hidden></div>
@@ -163,9 +167,12 @@
             </div>
           </div>
           <label class="field output-path">
-            <span>保存先フォルダー（この PC 上のパス）</span>
+            <span>保存先フォルダー（{% if runtime.colab %}Colab / Google Drive上のパス{% else %}この PC 上のパス{% endif %}）</span>
               <input id="output-dir" name="output_dir" type="text" placeholder="既定の output フォルダー（実行ごとにサブフォルダーを作成）">
           </label>
+          {% if runtime.colab %}
+          <p class="privacy-note">Colabのランタイムは停止時に消去されます。ノートブックでGoogle Drive保存を有効にすると、出力・話者台帳・編集履歴をDriveへ保持できます。</p>
+          {% endif %}
         </section>
 
         <div class="divider"></div>

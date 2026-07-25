@@ -1,10 +1,13 @@
 # 話者分離文字起こし Web UI
 
-動画・音声をローカルの Whisper / WhisperX で文字起こしし、pyannote で話者分離する Windows 向け Web UI です。処理画面はブラウザーで開きますが、サーバーはこの PC の `127.0.0.1` だけで待ち受けます。
+動画・音声を Whisper / WhisperX で文字起こしし、pyannote で話者分離する Windows / Google Colab 対応 Web UI です。Windows版のサーバーはこの PC の `127.0.0.1` だけで待ち受けます。Colab版はノートブック内の認証付きポート表示を使用します。
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/krokharu/gurumoji/blob/main/Gurumoji_Colab.ipynb)
 
 ## 主な機能
 
 - MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC を文字起こし
+- Windowsローカル実行とGoogle Colab GPU実行に対応
 - Windows のファイル選択画面またはフルパス入力に対応し、選択したパスのファイルを直接処理
 - 処理前に選択した動画のサムネイルを表示
 - 発話ごとの話者分離とタイムスタンプ
@@ -201,6 +204,18 @@ $env:MOJIOKOSI_NO_BROWSER="1"
 $env:MOJIOKOSI_PORT="8080"
 .\.venv\Scripts\python.exe app.py
 ```
+
+## Google Colabで使う
+
+1. 上部の「Open in Colab」または [`Gurumoji_Colab.ipynb`](Gurumoji_Colab.ipynb) を開きます。
+2. 「ランタイム」→「ランタイムのタイプを変更」で T4 GPU 以上を選択します。
+3. ノートブックを上から順に実行し、Hugging Face tokenを非表示入力します。OpenAI / GoogleのキーはAI仕上げを使う場合だけ入力します。
+4. 出力と話者台帳を残す場合は `USE_GOOGLE_DRIVE = True` のままGoogle Driveをマウントします。
+5. 最後の起動セルに表示されるWeb UIで「端末からアップロード」を押すか、`/content/drive/MyDrive/...` のパスを入力します。
+
+Colab版ではWindowsのファイル選択ダイアログを呼び出さず、ブラウザーアップロードへ自動的に切り替えます。Google Drive保存を有効にすると、`MyDrive/gurumoji/output` に出力、`MyDrive/gurumoji/data` にSQLiteライブラリ・元メディア・話者台帳を保存します。AIST感情分析を使う場合だけ、任意セルの `ENABLE_AIST_EMOTION = True` に変更してください。
+
+Colabのランタイム、GPU、利用可能時間は保証されません。Googleは最新ランタイムの利用と必要パッケージの明示的なインストールを推奨しています。また、Web UIはColab上の対話的な文字起こし処理に限って使用してください。[Colabランタイム情報](https://research.google.com/colaboratory/runtime-version-faq.html)と[Colab FAQ](https://research.google.com/colaboratory/faq.html)も確認してください。
 
 仮想環境だけを削除する場合は `cleanup_env.bat` を使います。モデルキャッシュと `output` は削除しません。
 

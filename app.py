@@ -54,9 +54,13 @@ APP_VERSION = "1.0.0"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
-DEFAULT_OUTPUT_DIRECTORY = APP_DIRECTORY / "output"
+DEFAULT_OUTPUT_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_OUTPUT_DIR", str(APP_DIRECTORY / "output"))
+).expanduser()
 UPLOAD_DIRECTORY = APP_DIRECTORY / "uploads"
-DATA_DIRECTORY = APP_DIRECTORY / "data"
+DATA_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_DATA_DIR", str(APP_DIRECTORY / "data"))
+).expanduser()
 MEDIA_DIRECTORY = DATA_DIRECTORY / "media"
 THUMBNAIL_DIRECTORY = DATA_DIRECTORY / "thumbnails"
 TRAINING_DIRECTORY = DATA_DIRECTORY / "kushinada_training"
@@ -500,6 +504,25 @@ def media_kind(path: Path | None) -> str | None:
         return None
     mime = mimetypes.guess_type(path.name)[0] or ""
     return "video" if mime.startswith("video/") or path.suffix.lower() in {".mp4", ".m4v", ".mov", ".mkv"} else "audio"
+
+
+def is_colab_runtime() -> bool:
+    return (
+        os.environ.get("MOJIOKOSI_RUNTIME", "").strip().casefold() == "colab"
+        or "COLAB_RELEASE_TAG" in os.environ
+    )
+
+
+def runtime_info() -> dict[str, Any]:
+    colab = is_colab_runtime()
+    native_file_dialog = platform.system() == "Windows" and not colab
+    return {
+        "kind": "colab" if colab else "local",
+        "colab": colab,
+        "native_file_dialog": native_file_dialog,
+        "browser_upload": not native_file_dialog,
+        "ephemeral_storage": colab and not str(DATA_DIRECTORY).startswith("/content/drive/"),
+    }
 
 
 @contextmanager
@@ -3959,12 +3982,14 @@ import_existing_outputs()
 
 @app.get("/")
 def index() -> str:
+    runtime = runtime_info()
     return render_template(
         "index.html",
         app_name=APP_NAME,
         product_name=PRODUCT_NAME,
         app_version=APP_VERSION,
         app_creator=APP_CREATOR,
+        runtime=runtime,
     )
 
 
@@ -3978,6 +4003,7 @@ def api_config():
             **config.availability(),
             "default_output_dir": str(DEFAULT_OUTPUT_DIRECTORY),
             "machine": machine,
+            "runtime": runtime_info(),
         })
     except RuntimeError as exc:
         return jsonify({
@@ -3985,6 +4011,7 @@ def api_config():
             "error": str(exc),
             "token_file": TOKEN_FILE.name,
             "machine": machine,
+            "runtime": runtime_info(),
         }), 500
 
 
@@ -4043,6 +4070,12 @@ def export_speaker_registry():
 
 @app.post("/api/select-input")
 def select_input_file():
+    if not runtime_info()["native_file_dialog"]:
+        return jsonify({
+            "error": "この実行環境ではOSのファイル選択画面を利用できません。",
+            "hint": "ブラウザーのファイルアップロードを使用してください。",
+            "browser_upload_only": True,
+        }), 409
     if not file_dialog_lock.acquire(blocking=False):
         return jsonify({"error": "ファイル選択画面をすでに開いています。"}), 409
     try:
@@ -4592,7 +4625,7 @@ def download_file(job_id: str, filename: str):
 
 
 def main() -> int:
-    host = "127.0.0.1"
+    host = os.environ.get("MOJIOKOSI_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = int(os.environ.get("MOJIOKOSI_PORT", "7860"))
     url = f"http://{host}:{port}"
     machine = get_machine_profile()
