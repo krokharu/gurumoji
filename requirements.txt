@@ -1,0 +1,7 @@
+Flask>=3.1,<4
+whisperx==3.8.6
+openai-whisper==20250625
+# Keep Numba (used by OpenAI Whisper) compatible with NumPy.
+numpy==2.2.6
+# WhisperX/faster-whisper uses CTranslate2 for CUDA inference.
+ctranslate2==4.8.1

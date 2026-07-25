@@ -1,0 +1,7 @@
+{
+  "huggingface_token": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "openai_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "google_api_key": "AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "openai_model": "gpt-5.6-luna",
+  "google_model": "gemini-3.5-flash"
+}

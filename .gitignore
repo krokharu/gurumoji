@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local credentials and environment overrides
+tokens.json
+.env
+.env.*
+!.env.example
+
+# User uploads, generated outputs, and local application state
+uploads/
+output/
+data/
+output.zip
+/0
+
+# Downloaded model/runtime files
+models/
+
+# Local logs and OS/editor artifacts
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
