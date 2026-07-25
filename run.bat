@@ -2,6 +2,15 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+cls
+echo.
+echo ============================================================
+echo   GURUMOJI IS STARTING...
+echo   Preparing the transcription workspace.
+echo ============================================================
+echo.
+ping 127.0.0.1 -n 3 >nul
+
 rem Keep the complete Python environment inside this project folder.
 set "VENV_DIR=%CD%\.venv"
 set "SETUP_MARKER=%VENV_DIR%\.setup_complete_cuda128_v2"

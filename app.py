@@ -15,6 +15,7 @@ import inspect
 import json
 import mimetypes
 import os
+import platform
 import re
 import shutil
 import sqlite3
@@ -49,13 +50,17 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.1"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
-DEFAULT_OUTPUT_DIRECTORY = APP_DIRECTORY / "output"
+DEFAULT_OUTPUT_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_OUTPUT_DIR", str(APP_DIRECTORY / "output"))
+).expanduser()
 UPLOAD_DIRECTORY = APP_DIRECTORY / "uploads"
-DATA_DIRECTORY = APP_DIRECTORY / "data"
+DATA_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_DATA_DIR", str(APP_DIRECTORY / "data"))
+).expanduser()
 MEDIA_DIRECTORY = DATA_DIRECTORY / "media"
 THUMBNAIL_DIRECTORY = DATA_DIRECTORY / "thumbnails"
 TRAINING_DIRECTORY = DATA_DIRECTORY / "kushinada_training"
@@ -74,6 +79,28 @@ DIARIZATION_ACCESS_REPOS = (
 )
 ALLOWED_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".wav", ".mp3", ".m4a", ".flac"}
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv"}
+SPEAKER_THEME_COLORS = (
+    "#E86A5A",
+    "#2F80ED",
+    "#27AE60",
+    "#9B51E0",
+    "#F2994A",
+    "#00A6A6",
+    "#EB5FA7",
+    "#7A6FBE",
+    "#6C8B3C",
+    "#C47F17",
+    "#3E8ED0",
+    "#B85C5C",
+    "#D1495B",
+    "#00798C",
+    "#6A4C93",
+    "#8F5B34",
+    "#B33C86",
+    "#4D9078",
+    "#E4572E",
+    "#577590",
+)
 MODEL_NAMES = {"tiny", "base", "small", "medium", "large-v3"}
 LANGUAGES = {None, "ja", "en", "zh", "ko"}
 AI_PROVIDERS = {"none", "openai", "google"}
@@ -159,6 +186,17 @@ QUIET_SUPPLEMENT_MIN_DEDUPE_CHARS = 8
 QUIET_SUPPLEMENT_MAX_NO_SPEECH_PROB = 0.95
 QUIET_SUPPLEMENT_MIN_AVG_LOGPROB = -1.35
 QUIET_SUPPLEMENT_MAX_COMPRESSION_RATIO = 3.2
+TRIPLE_PASS_MIN_GAP_SECONDS = 3.0
+TRIPLE_PASS_GAP_CONTEXT_SECONDS = 0.75
+WHISPER_SAMPLE_RATE = 16000
+SESSION_TYPES = {"focus_group", "meeting", "interview", "workshop", "other"}
+SPEAKER_ROLES = {
+    "participant", "moderator", "facilitator", "assistant_moderator", "observer",
+    "note_taker", "interviewer", "chair", "presenter", "decision_maker",
+    "attendee", "guest", "other",
+}
+CONSENT_STATUSES = {"unknown", "pending", "granted", "declined", "not_required"}
+ATTENDANCE_STATUSES = {"unknown", "planned", "attended", "absent", "left_early", "remote"}
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_AS_ASCII"] = False
@@ -212,6 +250,7 @@ class JobOptions:
     no_speech_threshold: float
     write_srt: bool
     write_json: bool
+    burn_subtitled_video: bool
     ai_provider: str
     clean_transcript: bool
     detect_speaker_names: bool
@@ -229,18 +268,22 @@ class JobRecord:
     output_dir: Path
     write_srt: bool
     write_json: bool
+    burn_subtitled_video: bool = False
     status: str = "queued"
     progress: int = 0
     message: str = "開始を待っています…"
     logs: list[str] = field(default_factory=list)
     segments: list[dict[str, Any]] = field(default_factory=list)
     speaker_names: dict[str, str] = field(default_factory=dict)
+    session_profile: dict[str, Any] = field(default_factory=dict)
+    speaker_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     outline: dict[str, Any] | None = None
     emotion_analysis: dict[str, Any] | None = None
     media_path: Path | None = None
     files: list[Path] = field(default_factory=list)
     language: str | None = None
     error: str = ""
+    output_warning: str = ""
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     created_at: float = field(default_factory=time.time)
 
@@ -256,6 +299,16 @@ class JobRecord:
                 "logs": list(self.logs),
                 "segments": [dict(item) for item in self.segments] if self.status == "completed" else [],
                 "speaker_names": dict(self.speaker_names) if self.status == "completed" else {},
+                "session_profile": (
+                    dict(self.session_profile) if self.status == "completed" else {}
+                ),
+                "speaker_profiles": (
+                    {key: dict(value) for key, value in self.speaker_profiles.items()}
+                    if self.status == "completed" else {}
+                ),
+                "write_srt": self.write_srt,
+                "write_json": True,
+                "burn_subtitled_video": self.burn_subtitled_video,
                 "outline": dict(self.outline) if self.status == "completed" and self.outline else None,
                 "emotion_analysis": (
                     dict(self.emotion_analysis)
@@ -272,6 +325,7 @@ class JobRecord:
                     for path in self.files
                 ],
                 "error": self.error,
+                "output_warning": self.output_warning,
             }
 
 
@@ -279,10 +333,170 @@ jobs: dict[str, JobRecord] = {}
 jobs_lock = threading.RLock()
 training_lock = threading.Lock()
 file_dialog_lock = threading.Lock()
+machine_profile_lock = threading.Lock()
+machine_profile_cache: dict[str, Any] | None = None
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def total_system_memory_gib() -> float:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return round(status.ullTotalPhys / (1024**3), 1)
+        except (AttributeError, OSError, ValueError):
+            pass
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        page_count = int(os.sysconf("SC_PHYS_PAGES"))
+        return round(page_size * page_count / (1024**3), 1)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 0.0
+
+
+def recommend_machine_settings(
+    cpu_threads: int,
+    memory_gib: float,
+    cuda_available: bool,
+    vram_gib: float = 0.0,
+    capability_major: int = 0,
+) -> dict[str, str]:
+    if cuda_available:
+        if capability_major < 7:
+            model_name = "base" if vram_gib >= 4 else "tiny"
+            reason = "旧世代CUDA GPUのため、互換性を優先した軽量設定です。"
+        elif vram_gib >= 11.5:
+            model_name = "large-v3"
+            reason = "VRAM 12 GB以上のCUDA GPUを活かす最高精度設定です。"
+        elif vram_gib >= 7.5:
+            model_name = "medium"
+            reason = "VRAM 8 GB以上のCUDA GPU向け高精度設定です。"
+        elif vram_gib >= 5.5:
+            model_name = "small"
+            reason = "VRAM容量と精度のバランスを取ったGPU設定です。"
+        elif vram_gib >= 3.5:
+            model_name = "base"
+            reason = "VRAM 4 GB級GPUで安定性を優先した設定です。"
+        else:
+            model_name = "tiny"
+            reason = "GPUメモリが少ないため、最軽量モデルを推奨します。"
+        diarization_device = "cuda" if capability_major >= 7 and vram_gib >= 7.5 else "cpu"
+        return {
+            "model_name": model_name,
+            "device": "cuda",
+            "diarization_device": diarization_device,
+            "reason": reason,
+        }
+
+    if memory_gib >= 16 and cpu_threads >= 8:
+        model_name = "small"
+        reason = "CUDAを利用できないため、CPUとRAMを活かす高精度寄りの設定です。"
+    elif memory_gib >= 8 and cpu_threads >= 4:
+        model_name = "base"
+        reason = "CUDAを利用できないため、CPUで安定しやすい標準設定です。"
+    else:
+        model_name = "tiny"
+        reason = "CUDAを利用できずCPU/RAMも限られるため、最軽量設定です。"
+    return {
+        "model_name": model_name,
+        "device": "cpu",
+        "diarization_device": "cpu",
+        "reason": reason,
+    }
+
+
+def detect_machine_profile() -> dict[str, Any]:
+    cpu_threads = max(1, os.cpu_count() or 1)
+    cpu_name = (
+        platform.processor()
+        or os.environ.get("PROCESSOR_IDENTIFIER", "")
+        or platform.machine()
+        or "CPU"
+    ).strip()
+    memory_gib = total_system_memory_gib()
+    gpu: dict[str, Any] = {
+        "cuda_available": False,
+        "name": "",
+        "vram_gib": 0.0,
+        "cuda_version": "",
+        "capability": "",
+        "device_count": 0,
+        "reason": "PyTorchでCUDAを利用できません。",
+    }
+    try:
+        import torch
+
+        gpu["torch_version"] = str(getattr(torch, "__version__", ""))
+        gpu["cuda_version"] = str(getattr(torch.version, "cuda", "") or "")
+        gpu["cuda_available"] = bool(torch.cuda.is_available())
+        if gpu["cuda_available"]:
+            gpu["device_count"] = int(torch.cuda.device_count())
+            properties = torch.cuda.get_device_properties(0)
+            capability = torch.cuda.get_device_capability(0)
+            gpu.update({
+                "name": str(properties.name),
+                "vram_gib": round(properties.total_memory / (1024**3), 1),
+                "capability": f"{capability[0]}.{capability[1]}",
+                "capability_major": int(capability[0]),
+                "reason": "",
+            })
+        elif not gpu["cuda_version"]:
+            gpu["reason"] = "インストール済みPyTorchがCUDA対応ではありません。"
+        else:
+            gpu["reason"] = "CUDA対応PyTorchからGPUを使用できません。ドライバーを確認してください。"
+    except Exception as exc:
+        gpu["reason"] = f"GPU診断に失敗しました: {exc}"
+
+    recommended = recommend_machine_settings(
+        cpu_threads,
+        memory_gib,
+        bool(gpu["cuda_available"]),
+        float(gpu["vram_gib"]),
+        int(gpu.get("capability_major", 0)),
+    )
+    return {
+        "checked_at": utc_now_iso(),
+        "cpu": {
+            "available": True,
+            "name": cpu_name,
+            "logical_threads": cpu_threads,
+        },
+        "memory_gib": memory_gib,
+        "gpu": gpu,
+        "recommended": recommended,
+    }
+
+
+def get_machine_profile(*, refresh: bool = False) -> dict[str, Any]:
+    global machine_profile_cache
+    with machine_profile_lock:
+        if machine_profile_cache is None or refresh:
+            machine_profile_cache = detect_machine_profile()
+        return {
+            **machine_profile_cache,
+            "cpu": dict(machine_profile_cache["cpu"]),
+            "gpu": dict(machine_profile_cache["gpu"]),
+            "recommended": dict(machine_profile_cache["recommended"]),
+        }
 
 
 def media_kind(path: Path | None) -> str | None:
@@ -290,6 +504,25 @@ def media_kind(path: Path | None) -> str | None:
         return None
     mime = mimetypes.guess_type(path.name)[0] or ""
     return "video" if mime.startswith("video/") or path.suffix.lower() in {".mp4", ".m4v", ".mov", ".mkv"} else "audio"
+
+
+def is_colab_runtime() -> bool:
+    return (
+        os.environ.get("MOJIOKOSI_RUNTIME", "").strip().casefold() == "colab"
+        or "COLAB_RELEASE_TAG" in os.environ
+    )
+
+
+def runtime_info() -> dict[str, Any]:
+    colab = is_colab_runtime()
+    native_file_dialog = platform.system() == "Windows" and not colab
+    return {
+        "kind": "colab" if colab else "local",
+        "colab": colab,
+        "native_file_dialog": native_file_dialog,
+        "browser_upload": not native_file_dialog,
+        "ephemeral_storage": colab and not str(DATA_DIRECTORY).startswith("/content/drive/"),
+    }
 
 
 @contextmanager
@@ -327,13 +560,62 @@ def initialize_library() -> None:
                 files_json TEXT NOT NULL,
                 write_srt INTEGER NOT NULL DEFAULT 1,
                 write_json INTEGER NOT NULL DEFAULT 1,
+                burn_subtitled_video INTEGER NOT NULL DEFAULT 0,
                 revision_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        library_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(library_items)").fetchall()
+        }
+        if "session_profile_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN session_profile_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "speaker_profiles_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN speaker_profiles_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "burn_subtitled_video" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN burn_subtitled_video INTEGER NOT NULL DEFAULT 0"
+            )
+        connection.execute("UPDATE library_items SET write_json = 1 WHERE write_json <> 1")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS speaker_registry (
+                id TEXT PRIMARY KEY,
+                participant_code TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                pseudonym TEXT NOT NULL DEFAULT '',
+                default_role TEXT NOT NULL DEFAULT 'participant',
+                organization TEXT NOT NULL DEFAULT '',
+                department TEXT NOT NULL DEFAULT '',
+                job_title TEXT NOT NULL DEFAULT '',
+                consent_status TEXT NOT NULL DEFAULT 'unknown',
+                recording_consent TEXT NOT NULL DEFAULT 'unknown',
+                confidentiality_status TEXT NOT NULL DEFAULT 'unknown',
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                attributes_json TEXT NOT NULL DEFAULT '{}',
+                notes TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS library_updated_idx ON library_items(updated_at DESC)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS speaker_registry_code_idx "
+            "ON speaker_registry(participant_code)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS speaker_registry_updated_idx "
+            "ON speaker_registry(updated_at DESC)"
+        )
         for row in connection.execute("SELECT id, source_name FROM library_items").fetchall():
             source_path = Path(str(row["source_name"]))
             if source_path.is_absolute() and source_path.name:
@@ -350,6 +632,386 @@ def json_load(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return fallback
+
+
+def clean_single_line(value: Any, limit: int) -> str:
+    return str(value or "").strip().replace("\r", " ").replace("\n", " ")[:limit]
+
+
+def clean_multiline(value: Any, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def normalize_tags(value: Any) -> list[str]:
+    raw_values = value if isinstance(value, list) else re.split(r"[,、;\n]", str(value or ""))
+    tags: list[str] = []
+    for raw in raw_values:
+        tag = clean_single_line(raw, 80)
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags[:100]
+
+
+def normalize_attributes(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    attributes: dict[str, str] = {}
+    for raw_key, raw_value in list(value.items())[:200]:
+        key = clean_single_line(raw_key, 120)
+        if not key:
+            continue
+        attributes[key] = clean_multiline(raw_value, 2000)
+    return attributes
+
+
+def speaker_registry_public(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "participant_code": row["participant_code"],
+        "display_name": row["display_name"],
+        "pseudonym": row["pseudonym"],
+        "default_role": row["default_role"],
+        "organization": row["organization"],
+        "department": row["department"],
+        "job_title": row["job_title"],
+        "consent_status": row["consent_status"],
+        "recording_consent": row["recording_consent"],
+        "confidentiality_status": row["confidentiality_status"],
+        "tags": json_load(row["tags_json"], []),
+        "attributes": json_load(row["attributes_json"], {}),
+        "notes": row["notes"],
+        "active": bool(row["active"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def normalize_speaker_registry_record(
+    raw: Any,
+    *,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("話者データの形式が不正です。")
+    base = existing or {}
+    record_id = clean_single_line(raw.get("id") or base.get("id") or uuid.uuid4().hex, 80)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", record_id):
+        record_id = uuid.uuid4().hex
+    default_role = clean_single_line(raw.get("default_role", base.get("default_role", "participant")), 40)
+    if default_role not in SPEAKER_ROLES:
+        default_role = "participant"
+
+    def consent(field_name: str) -> str:
+        value = clean_single_line(raw.get(field_name, base.get(field_name, "unknown")), 30)
+        return value if value in CONSENT_STATUSES else "unknown"
+
+    display_name = clean_single_line(raw.get("display_name", base.get("display_name", "")), 120)
+    pseudonym = clean_single_line(raw.get("pseudonym", base.get("pseudonym", "")), 120)
+    participant_code = clean_single_line(
+        raw.get("participant_code", base.get("participant_code", "")), 120
+    )
+    if not (display_name or pseudonym or participant_code):
+        raise ValueError("話者には氏名、仮名、参加者コードのいずれかを入力してください。")
+    return {
+        "id": record_id,
+        "participant_code": participant_code,
+        "display_name": display_name,
+        "pseudonym": pseudonym,
+        "default_role": default_role,
+        "organization": clean_single_line(raw.get("organization", base.get("organization", "")), 200),
+        "department": clean_single_line(raw.get("department", base.get("department", "")), 200),
+        "job_title": clean_single_line(raw.get("job_title", base.get("job_title", "")), 200),
+        "consent_status": consent("consent_status"),
+        "recording_consent": consent("recording_consent"),
+        "confidentiality_status": consent("confidentiality_status"),
+        "tags": normalize_tags(raw.get("tags", base.get("tags", []))),
+        "attributes": normalize_attributes(raw.get("attributes", base.get("attributes", {}))),
+        "notes": clean_multiline(raw.get("notes", base.get("notes", "")), 10000),
+        "active": bool(raw.get("active", base.get("active", True))),
+    }
+
+
+def list_speaker_registry(*, include_inactive: bool = True) -> list[dict[str, Any]]:
+    query = "SELECT * FROM speaker_registry"
+    if not include_inactive:
+        query += " WHERE active = 1"
+    query += " ORDER BY active DESC, pseudonym, display_name, participant_code, updated_at DESC"
+    with database_connection() as connection:
+        rows = connection.execute(query).fetchall()
+    return [speaker_registry_public(row) for row in rows]
+
+
+def save_speaker_registry_records(
+    raw_records: Any,
+    *,
+    delete_ids: Any = None,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_records, list) or len(raw_records) > 10000:
+        raise ValueError("話者台帳は配列で指定してください。")
+    existing_records = {item["id"]: item for item in list_speaker_registry()}
+    normalized = [
+        normalize_speaker_registry_record(
+            raw,
+            existing=existing_records.get(str(raw.get("id"))) if isinstance(raw, dict) else None,
+        )
+        for raw in raw_records
+    ]
+    requested_delete_ids = {
+        clean_single_line(value, 80)
+        for value in (delete_ids if isinstance(delete_ids, list) else [])
+        if clean_single_line(value, 80)
+    }
+    now = utc_now_iso()
+    with database_connection() as connection:
+        for record in normalized:
+            previous = existing_records.get(record["id"])
+            connection.execute(
+                """
+                INSERT INTO speaker_registry (
+                    id, participant_code, display_name, pseudonym, default_role,
+                    organization, department, job_title, consent_status,
+                    recording_consent, confidentiality_status, tags_json,
+                    attributes_json, notes, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    participant_code=excluded.participant_code,
+                    display_name=excluded.display_name,
+                    pseudonym=excluded.pseudonym,
+                    default_role=excluded.default_role,
+                    organization=excluded.organization,
+                    department=excluded.department,
+                    job_title=excluded.job_title,
+                    consent_status=excluded.consent_status,
+                    recording_consent=excluded.recording_consent,
+                    confidentiality_status=excluded.confidentiality_status,
+                    tags_json=excluded.tags_json,
+                    attributes_json=excluded.attributes_json,
+                    notes=excluded.notes,
+                    active=excluded.active,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    record["id"], record["participant_code"], record["display_name"],
+                    record["pseudonym"], record["default_role"], record["organization"],
+                    record["department"], record["job_title"], record["consent_status"],
+                    record["recording_consent"], record["confidentiality_status"],
+                    json.dumps(record["tags"], ensure_ascii=False),
+                    json.dumps(record["attributes"], ensure_ascii=False), record["notes"],
+                    int(record["active"]), previous["created_at"] if previous else now, now,
+                ),
+            )
+        if requested_delete_ids:
+            placeholders = ",".join("?" for _ in requested_delete_ids)
+            connection.execute(
+                f"DELETE FROM speaker_registry WHERE id IN ({placeholders})",
+                tuple(sorted(requested_delete_ids)),
+            )
+    return list_speaker_registry()
+
+
+def normalized_csv_header(value: Any) -> str:
+    return re.sub(r"[\s_\-（）()\[\]【】]+", "", str(value or "").strip().casefold())
+
+
+SPEAKER_CSV_FIELD_ALIASES = {
+    "タイムスタンプ": "",
+    "timestamp": "",
+    "id": "participant_code",
+    "参加者id": "participant_code",
+    "回答者id": "participant_code",
+    "参加者コード": "participant_code",
+    "participantid": "participant_code",
+    "participantcode": "participant_code",
+    "氏名": "display_name",
+    "名前": "display_name",
+    "お名前": "display_name",
+    "name": "display_name",
+    "displayname": "display_name",
+    "仮名": "pseudonym",
+    "匿名名": "pseudonym",
+    "pseudonym": "pseudonym",
+    "役割": "default_role",
+    "デフォルト役割": "default_role",
+    "role": "default_role",
+    "defaultrole": "default_role",
+    "組織": "organization",
+    "会社": "organization",
+    "所属組織": "organization",
+    "organization": "organization",
+    "company": "organization",
+    "部署": "department",
+    "所属部署": "department",
+    "department": "department",
+    "役職": "job_title",
+    "職位": "job_title",
+    "jobtitle": "job_title",
+    "title": "job_title",
+    "研究同意": "consent_status",
+    "参加同意": "consent_status",
+    "consent": "consent_status",
+    "consentstatus": "consent_status",
+    "録音同意": "recording_consent",
+    "recordingconsent": "recording_consent",
+    "守秘同意": "confidentiality_status",
+    "confidentiality": "confidentiality_status",
+    "confidentialitystatus": "confidentiality_status",
+    "タグ": "tags",
+    "tags": "tags",
+    "備考": "notes",
+    "メモ": "notes",
+    "notes": "notes",
+    "有効": "active",
+    "active": "active",
+}
+
+SPEAKER_ROLE_ALIASES = {
+    "参加者": "participant",
+    "司会": "moderator",
+    "モデレーター": "moderator",
+    "進行": "facilitator",
+    "ファシリテーター": "facilitator",
+    "副司会": "assistant_moderator",
+    "観察者": "observer",
+    "記録者": "note_taker",
+    "書記": "note_taker",
+    "インタビュアー": "interviewer",
+    "議長": "chair",
+    "発表者": "presenter",
+    "意思決定者": "decision_maker",
+    "出席者": "attendee",
+    "ゲスト": "guest",
+    "その他": "other",
+}
+
+
+def normalize_csv_role(value: Any) -> str:
+    cleaned = clean_single_line(value, 40)
+    mapped = SPEAKER_ROLE_ALIASES.get(cleaned, cleaned)
+    return mapped if mapped in SPEAKER_ROLES else "participant"
+
+
+def normalize_csv_consent(value: Any) -> str:
+    cleaned = clean_single_line(value, 40).casefold()
+    if cleaned in {"yes", "y", "true", "1", "同意", "同意済み", "許可", "済", "承諾"}:
+        return "granted"
+    if cleaned in {"no", "n", "false", "0", "拒否", "非同意", "不許可"}:
+        return "declined"
+    if cleaned in {"pending", "保留", "確認中", "未回答"}:
+        return "pending"
+    if cleaned in {"notrequired", "不要", "対象外"}:
+        return "not_required"
+    return cleaned if cleaned in CONSENT_STATUSES else "unknown"
+
+
+def speaker_csv_field_for_header(header: str) -> str | None:
+    normalized = normalized_csv_header(header)
+    exact = SPEAKER_CSV_FIELD_ALIASES.get(normalized)
+    if exact is not None:
+        return exact
+    if "録音" in normalized and ("同意" in normalized or "許可" in normalized):
+        return "recording_consent"
+    if "守秘" in normalized and ("同意" in normalized or "確認" in normalized):
+        return "confidentiality_status"
+    if ("研究" in normalized or "参加" in normalized) and "同意" in normalized:
+        return "consent_status"
+    if "参加者" in normalized and ("コード" in normalized or "id" in normalized):
+        return "participant_code"
+    return None
+
+
+def import_speaker_registry_csv(content: bytes) -> tuple[list[dict[str, Any]], int]:
+    if len(content) > 10 * 1024 * 1024:
+        raise ValueError("CSVは10MB以内にしてください。")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("cp932")
+        except UnicodeDecodeError as exc:
+            raise ValueError("CSVの文字コードはUTF-8またはWindows日本語にしてください。") from exc
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("CSVに見出し行がありません。")
+    existing = list_speaker_registry()
+    by_code = {
+        item["participant_code"].casefold(): item
+        for item in existing
+        if item["participant_code"]
+    }
+    imported: list[dict[str, Any]] = []
+    for row_index, row in enumerate(reader, 2):
+        if row_index > 10001:
+            raise ValueError("一度に取り込める話者は10000件までです。")
+        fixed: dict[str, Any] = {"attributes": {}}
+        for raw_header, raw_value in row.items():
+            header = clean_single_line(raw_header, 120)
+            value = clean_multiline(raw_value, 10000)
+            if not header or not value:
+                continue
+            field_name = speaker_csv_field_for_header(header)
+            if field_name == "":
+                continue
+            if field_name:
+                fixed[field_name] = value
+            else:
+                fixed["attributes"][header] = value
+        if not any(fixed.get(key) for key in ("participant_code", "display_name", "pseudonym")):
+            continue
+        if fixed.get("default_role"):
+            fixed["default_role"] = normalize_csv_role(fixed["default_role"])
+        for field_name in ("consent_status", "recording_consent", "confidentiality_status"):
+            if fixed.get(field_name):
+                fixed[field_name] = normalize_csv_consent(fixed[field_name])
+        if "active" in fixed:
+            fixed["active"] = str(fixed["active"]).strip().casefold() not in {
+                "0", "false", "no", "n", "無効",
+            }
+        code = clean_single_line(fixed.get("participant_code"), 120).casefold()
+        if code and code in by_code:
+            fixed["id"] = by_code[code]["id"]
+            merged_attributes = {
+                **by_code[code].get("attributes", {}),
+                **fixed.get("attributes", {}),
+            }
+            fixed = {**by_code[code], **fixed, "attributes": merged_attributes}
+        imported.append(fixed)
+    if not imported:
+        raise ValueError("取り込める話者行がありませんでした。見出しと値を確認してください。")
+    return save_speaker_registry_records(imported), len(imported)
+
+
+def speaker_registry_csv_bytes(records: list[dict[str, Any]]) -> bytes:
+    custom_headers = sorted({
+        key
+        for record in records
+        for key in (record.get("attributes") or {})
+    })
+    fixed_headers = [
+        "参加者コード", "氏名", "仮名", "役割", "組織", "部署", "役職",
+        "研究同意", "録音同意", "守秘同意", "タグ", "備考", "有効",
+    ]
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fixed_headers + custom_headers)
+    writer.writeheader()
+    for record in records:
+        row = {
+            "参加者コード": record["participant_code"],
+            "氏名": record["display_name"],
+            "仮名": record["pseudonym"],
+            "役割": record["default_role"],
+            "組織": record["organization"],
+            "部署": record["department"],
+            "役職": record["job_title"],
+            "研究同意": record["consent_status"],
+            "録音同意": record["recording_consent"],
+            "守秘同意": record["confidentiality_status"],
+            "タグ": ",".join(record["tags"]),
+            "備考": record["notes"],
+            "有効": "1" if record["active"] else "0",
+            **record["attributes"],
+        }
+        writer.writerow(row)
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
 
 
 def stable_segment_id(item_id: str, index: int, segment: dict[str, Any]) -> str:
@@ -382,6 +1044,90 @@ def library_row(item_id: str) -> sqlite3.Row | None:
 def row_segments(row: sqlite3.Row) -> list[dict[str, Any]]:
     raw = json_load(row["segments_json"], [])
     return ensure_segment_ids(row["id"], raw if isinstance(raw, list) else [])
+
+
+def normalize_session_profile(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raw = {}
+    session_type = clean_single_line(raw.get("session_type", "focus_group"), 40)
+    if session_type not in SESSION_TYPES:
+        session_type = "other"
+    return {
+        "session_type": session_type,
+        "session_date": clean_single_line(raw.get("session_date"), 40),
+        "location": clean_single_line(raw.get("location"), 300),
+        "objective": clean_multiline(raw.get("objective"), 10000),
+        "moderator_guide": clean_multiline(raw.get("moderator_guide"), 20000),
+        "group_conditions": clean_multiline(raw.get("group_conditions"), 10000),
+        "confidentiality_notes": clean_multiline(raw.get("confidentiality_notes"), 10000),
+        "field_notes": clean_multiline(raw.get("field_notes"), 30000),
+    }
+
+
+def normalize_conversation_speaker_profiles(
+    raw: Any,
+    labels: set[str],
+    speaker_names: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    source = raw if isinstance(raw, dict) else {}
+    profiles: dict[str, dict[str, Any]] = {}
+    for index, label in enumerate(sorted(labels)):
+        value = source.get(label)
+        value = value if isinstance(value, dict) else {}
+        role = clean_single_line(value.get("session_role", "participant"), 40)
+        if role not in SPEAKER_ROLES:
+            role = "participant"
+        consent_status = clean_single_line(value.get("consent_status", "unknown"), 30)
+        recording_consent = clean_single_line(value.get("recording_consent", "unknown"), 30)
+        attendance_status = clean_single_line(value.get("attendance_status", "attended"), 30)
+        theme_color = clean_single_line(value.get("theme_color"), 7).upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", theme_color):
+            theme_color = SPEAKER_THEME_COLORS[index % len(SPEAKER_THEME_COLORS)]
+        profiles[label] = {
+            "speaker_label": label,
+            "global_speaker_id": clean_single_line(value.get("global_speaker_id"), 80),
+            "display_name": clean_single_line(
+                value.get("display_name") or speaker_names.get(label), 120
+            ),
+            "theme_color": theme_color,
+            "session_role": role,
+            "organization": clean_single_line(value.get("organization"), 200),
+            "department": clean_single_line(value.get("department"), 200),
+            "job_title": clean_single_line(value.get("job_title"), 200),
+            "consent_status": (
+                consent_status if consent_status in CONSENT_STATUSES else "unknown"
+            ),
+            "recording_consent": (
+                recording_consent if recording_consent in CONSENT_STATUSES else "unknown"
+            ),
+            "attendance_status": (
+                attendance_status if attendance_status in ATTENDANCE_STATUSES else "unknown"
+            ),
+            "conditions": clean_multiline(value.get("conditions"), 10000),
+            "notes": clean_multiline(value.get("notes"), 10000),
+        }
+    return profiles
+
+
+def row_session_profile(row: sqlite3.Row) -> dict[str, str]:
+    return normalize_session_profile(json_load(row["session_profile_json"], {}))
+
+
+def row_speaker_profiles(
+    row: sqlite3.Row,
+    segments: list[dict[str, Any]] | None = None,
+    speaker_names: dict[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    segments = segments if segments is not None else row_segments(row)
+    if speaker_names is None:
+        raw_names = json_load(row["speaker_names_json"], {})
+        speaker_names = raw_names if isinstance(raw_names, dict) else {}
+    labels = {str(item.get("speaker") or "UNKNOWN") for item in segments}
+    return normalize_conversation_speaker_profiles(
+        json_load(row["speaker_profiles_json"], {}),
+        labels,
+        speaker_names,
+    )
 
 
 def emotion_values(segment: dict[str, Any]) -> list[str]:
@@ -434,6 +1180,7 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
         "updated_at": row["updated_at"],
         "revision_count": int(row["revision_count"] or 0),
         "match_count": match_count,
+        "speaker_data_url": f"/api/library/{row['id']}/speakers.csv",
         "files": [
             {"name": path.name, "url": f"/api/library/{row['id']}/files/{urllib.parse.quote(path.name)}"}
             for path in file_paths if path.is_file()
@@ -444,10 +1191,13 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
             "status": "completed",
             "segments": segments,
             "speaker_names": speaker_names,
+            "session_profile": row_session_profile(row),
+            "speaker_profiles": row_speaker_profiles(row, segments, speaker_names),
             "outline": json_load(row["outline_json"], None),
             "emotion_analysis": json_load(row["emotion_analysis_json"], None),
             "write_srt": bool(row["write_srt"]),
-            "write_json": bool(row["write_json"]),
+            "write_json": True,
+            "burn_subtitled_video": bool(row["burn_subtitled_video"]),
         })
     return result
 
@@ -457,18 +1207,27 @@ def upsert_library_item(
     language: str | None, segments: list[dict[str, Any]], speaker_names: dict[str, str],
     outline: dict[str, Any] | None, emotion_analysis: dict[str, Any] | None,
     files: list[Path], write_srt: bool, write_json: bool, increment_revision: bool = False,
-    created_at: str | None = None,
+    created_at: str | None = None, session_profile: dict[str, Any] | None = None,
+    speaker_profiles: dict[str, Any] | None = None, burn_subtitled_video: bool = False,
 ) -> sqlite3.Row:
     now = utc_now_iso()
     segments = ensure_segment_ids(item_id, segments)
+    session_profile = normalize_session_profile(session_profile)
+    labels = {str(item.get("speaker") or "UNKNOWN") for item in segments}
+    speaker_profiles = normalize_conversation_speaker_profiles(
+        speaker_profiles,
+        labels,
+        speaker_names,
+    )
     with database_connection() as connection:
         connection.execute(
             """
             INSERT INTO library_items (
                 id, source_name, output_dir, media_path, language, segments_json,
                 speaker_names_json, outline_json, emotion_analysis_json, files_json,
-                write_srt, write_json, revision_count, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                write_srt, write_json, burn_subtitled_video, revision_count, created_at, updated_at,
+                session_profile_json, speaker_profiles_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 source_name=excluded.source_name, output_dir=excluded.output_dir,
                 media_path=excluded.media_path, language=excluded.language,
@@ -476,6 +1235,9 @@ def upsert_library_item(
                 outline_json=excluded.outline_json, emotion_analysis_json=excluded.emotion_analysis_json,
                 files_json=excluded.files_json, write_srt=excluded.write_srt,
                 write_json=excluded.write_json,
+                burn_subtitled_video=excluded.burn_subtitled_video,
+                session_profile_json=excluded.session_profile_json,
+                speaker_profiles_json=excluded.speaker_profiles_json,
                 revision_count=library_items.revision_count + ?, updated_at=excluded.updated_at
             """,
             (
@@ -485,7 +1247,10 @@ def upsert_library_item(
                 json.dumps(outline, ensure_ascii=False) if outline else None,
                 json.dumps(emotion_analysis, ensure_ascii=False) if emotion_analysis else None,
                 json.dumps([str(path) for path in files], ensure_ascii=False),
-                int(write_srt), int(write_json), int(increment_revision), created_at or now, now,
+                int(write_srt), 1, int(burn_subtitled_video),
+                int(increment_revision), created_at or now, now,
+                json.dumps(session_profile, ensure_ascii=False),
+                json.dumps(speaker_profiles, ensure_ascii=False),
                 int(increment_revision),
             ),
         )
@@ -860,6 +1625,64 @@ def run_audio_preprocess(input_path: Path, output_path: Path, preset: str) -> Pa
     return output_path
 
 
+def run_audio_interval_preprocess(
+    input_path: Path,
+    output_path: Path,
+    start: float,
+    end: float,
+    preset: str,
+) -> Path:
+    if preset not in AUDIO_PREPROCESS_PRESETS:
+        raise RuntimeError(f"未対応の音声前処理です: {preset}")
+    start = max(0.0, float(start))
+    end = max(start, float(end))
+    if end - start < 0.05:
+        raise RuntimeError("再文字起こし区間が短すぎます。")
+    filters = AUDIO_PREPROCESS_PRESETS[preset]["filters"]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(input_path),
+        "-t",
+        f"{end - start:.3f}",
+        "-map",
+        "0:a:0",
+        "-vn",
+    ]
+    if filters:
+        command.extend(["-af", ",".join(filters)])
+    command.extend([
+        "-ac",
+        "1",
+        "-ar",
+        str(WHISPER_SAMPLE_RATE),
+        "-c:a",
+        "pcm_s16le",
+        str(output_path),
+    ])
+    completed = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout or "").strip()[-1500:]
+        raise RuntimeError(f"再文字起こし区間の切り出しに失敗しました: {details}")
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise RuntimeError("再文字起こし区間の音声ファイルが作成されませんでした。")
+    return output_path
+
+
 def segment_bounds(segment: dict[str, Any]) -> tuple[float, float]:
     start = float(segment.get("start", 0) or 0)
     end = float(segment.get("end", start) or start)
@@ -882,6 +1705,62 @@ def normalize_asr_segments(raw_segments: list[dict[str, Any]]) -> list[dict[str,
         normalized.append(item)
     normalized.sort(key=lambda item: (float(item.get("start", 0)), float(item.get("end", 0))))
     return normalized
+
+
+def find_long_asr_gaps(
+    raw_segments: list[dict[str, Any]],
+    audio_duration: float,
+    min_gap_seconds: float = TRIPLE_PASS_MIN_GAP_SECONDS,
+) -> list[tuple[float, float]]:
+    duration = max(0.0, float(audio_duration))
+    minimum = max(0.05, float(min_gap_seconds))
+    covered: list[tuple[float, float]] = []
+    for segment in normalize_asr_segments(raw_segments):
+        start, end = segment_bounds(segment)
+        start = min(duration, max(0.0, start))
+        end = min(duration, max(start, end))
+        if end > start:
+            covered.append((start, end))
+
+    gaps: list[tuple[float, float]] = []
+    cursor = 0.0
+    for start, end in covered:
+        if start > cursor and start - cursor >= minimum:
+            gaps.append((cursor, start))
+        cursor = max(cursor, end)
+    if duration > cursor and duration - cursor >= minimum:
+        gaps.append((cursor, duration))
+    return gaps
+
+
+def offset_asr_segments_to_gap(
+    raw_segments: list[dict[str, Any]],
+    clip_start: float,
+    gap_start: float,
+    gap_end: float,
+) -> list[dict[str, Any]]:
+    shifted: list[dict[str, Any]] = []
+    for raw in normalize_asr_segments(raw_segments):
+        item = dict(raw)
+        local_start, local_end = segment_bounds(raw)
+        global_start = clip_start + local_start
+        global_end = clip_start + local_end
+        if min(global_end, gap_end) - max(global_start, gap_start) <= 0.05:
+            continue
+        item["start"] = global_start
+        item["end"] = global_end
+        words: list[dict[str, Any]] = []
+        for raw_word in raw.get("words") or []:
+            word = dict(raw_word)
+            if word.get("start") is not None:
+                word["start"] = clip_start + float(word["start"])
+            if word.get("end") is not None:
+                word["end"] = clip_start + float(word["end"])
+            words.append(word)
+        if words:
+            item["words"] = words
+        shifted.append(item)
+    return shifted
 
 
 def merged_interval_coverage(
@@ -1232,6 +2111,162 @@ def job_output_directory(output_root: Path, source_name: str, job_id: str) -> Pa
     return output_root / f"{timestamp}_{source_stem}_{job_id[:8]}"
 
 
+def speaker_theme_color_map(
+    segments: list[dict[str, Any]],
+    speaker_profiles: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    """Return stable, distinct RGB colors for every speaker label."""
+    profiles = speaker_profiles if isinstance(speaker_profiles, dict) else {}
+    labels = sorted({str(item.get("speaker") or "UNKNOWN") for item in segments})
+    colors: dict[str, str] = {}
+    for index, label in enumerate(labels):
+        profile = profiles.get(label)
+        profile = profile if isinstance(profile, dict) else {}
+        requested = clean_single_line(profile.get("theme_color"), 7).upper()
+        colors[label] = (
+            requested
+            if re.fullmatch(r"#[0-9A-F]{6}", requested)
+            else SPEAKER_THEME_COLORS[index % len(SPEAKER_THEME_COLORS)]
+        )
+    return colors
+
+
+def rgb_to_ass_color(value: str) -> str:
+    """Convert #RRGGBB to libass' &H00BBGGRR format."""
+    normalized = value.lstrip("#").upper()
+    if not re.fullmatch(r"[0-9A-F]{6}", normalized):
+        normalized = "FFFFFF"
+    red, green, blue = normalized[0:2], normalized[2:4], normalized[4:6]
+    return f"&H00{blue}{green}{red}"
+
+
+def ass_time(seconds: Any) -> str:
+    centiseconds = max(0, round(float(seconds or 0) * 100))
+    hours, remainder = divmod(centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    whole_seconds, fraction = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{whole_seconds:02d}.{fraction:02d}"
+
+
+def ass_escape_text(value: Any) -> str:
+    text = str(value or "").strip()
+    return (
+        text.replace("\\", r"\\")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("\r\n", r"\N")
+        .replace("\r", r"\N")
+        .replace("\n", r"\N")
+    )
+
+
+def write_ass_subtitles(
+    target: Path,
+    source_name: str,
+    segments: list[dict[str, Any]],
+    speaker_names: dict[str, str],
+    speaker_profiles: dict[str, dict[str, Any]] | None = None,
+) -> Path:
+    colors = speaker_theme_color_map(segments, speaker_profiles)
+    header = f"""[Script Info]
+Title: {ass_escape_text(source_name)}
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Yu Gothic UI,48,&H00FFFFFF,&H00FFFFFF,&H00101010,&H90000000,0,0,0,0,100,100,0,0,1,3,1,2,90,90,58,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events: list[str] = []
+    for item in segments:
+        label = str(item.get("speaker") or "UNKNOWN")
+        name = str(speaker_names.get(label) or default_speaker_name(label)).strip()
+        start = max(0.0, float(item.get("start", 0) or 0))
+        end = max(start + 0.2, float(item.get("end", start) or start))
+        color = rgb_to_ass_color(colors.get(label, "#FFFFFF"))
+        name_text = ass_escape_text(name)
+        body_text = ass_escape_text(item.get("text", ""))
+        dialogue = f"{{\\c{color}\\b1}}{name_text}{{\\rDefault}}\\N{body_text}"
+        events.append(
+            f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,{ass_escape_text(label)},"
+            f"0,0,0,,{dialogue}"
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(header + "\n".join(events) + ("\n" if events else ""), encoding="utf-8-sig")
+    return target
+
+
+def burn_ass_subtitles_into_video(source_path: Path, ass_path: Path, target: Path) -> Path:
+    if not is_video_path(source_path):
+        raise ValueError("字幕焼き込み動画は MP4/M4V/MOV/MKV からだけ作成できます。")
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("字幕動画の作成に必要な ffmpeg が見つかりません。")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    escaped_ass_name = (
+        ass_path.name.replace("\\", r"\\")
+        .replace("'", r"\'")
+        .replace(",", r"\,")
+        .replace("[", r"\[")
+        .replace("]", r"\]")
+    )
+    completed = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-i", str(source_path.resolve()),
+            "-vf", f"ass='{escaped_ass_name}'",
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-max_muxing_queue_size", "2048",
+            target.name,
+        ],
+        cwd=str(target.parent),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if completed.returncode != 0 or not target.is_file() or target.stat().st_size == 0:
+        target.unlink(missing_ok=True)
+        details = completed.stderr.strip()[-2000:]
+        raise RuntimeError("字幕動画を作成できませんでした。" + (f"\n{details}" if details else ""))
+    return target
+
+
+def write_subtitled_video_assets(
+    source_path: Path,
+    source_name: str,
+    output_dir: Path,
+    segments: list[dict[str, Any]],
+    speaker_names: dict[str, str],
+    speaker_profiles: dict[str, dict[str, Any]] | None = None,
+) -> list[Path]:
+    stem = safe_output_stem(source_name)
+    ass_path = write_ass_subtitles(
+        output_dir / f"{stem}_話者カラー字幕.ass",
+        source_name,
+        segments,
+        speaker_names,
+        speaker_profiles,
+    )
+    video_path = burn_ass_subtitles_into_video(
+        source_path,
+        ass_path,
+        output_dir / f"{stem}_字幕付き.mp4",
+    )
+    return [ass_path, video_path]
+
+
 def write_outputs(
     source_name: str,
     output_dir: Path,
@@ -1242,6 +2277,7 @@ def write_outputs(
     write_json: bool,
     outline: dict[str, Any] | None = None,
     emotion_analysis: dict[str, Any] | None = None,
+    speaker_profiles: dict[str, dict[str, Any]] | None = None,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = safe_output_stem(source_name)
@@ -1251,6 +2287,33 @@ def write_outputs(
         if label and speaker_names.get(label, "").strip():
             return speaker_names[label].strip()
         return default_speaker_name(label)
+
+    # JSON is the durable machine-readable result and is intentionally written
+    # before every optional presentation format.
+    theme_colors = speaker_theme_color_map(segments, speaker_profiles)
+    json_path = output_dir / f"{stem}_話者分離.json"
+    payload = {
+        "source": source_name,
+        "language": language,
+        "speaker_names": speaker_names,
+        "speaker_theme_colors": theme_colors,
+        "speaker_profiles": speaker_profiles or {},
+        "speakers": [
+            {
+                "label": label,
+                "name": speaker_names.get(label) or default_speaker_name(label),
+                "theme_color": color,
+            }
+            for label, color in theme_colors.items()
+        ],
+        "segments": segments,
+    }
+    if outline:
+        payload["outline"] = outline
+    if emotion_analysis:
+        payload["emotion_analysis"] = emotion_analysis
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    written.append(json_path)
 
     text_path = output_dir / f"{stem}_話者分離.txt"
     lines = [f"元ファイル: {source_name}", ""]
@@ -1284,20 +2347,6 @@ def write_outputs(
         srt_path.write_text("\n\n".join(blocks) + ("\n" if blocks else ""), encoding="utf-8")
         written.append(srt_path)
 
-    if write_json:
-        json_path = output_dir / f"{stem}_話者分離.json"
-        payload = {
-            "source": source_name,
-            "language": language,
-            "speaker_names": speaker_names,
-            "segments": segments,
-        }
-        if outline:
-            payload["outline"] = outline
-        if emotion_analysis:
-            payload["emotion_analysis"] = emotion_analysis
-        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        written.append(json_path)
     if outline:
         outline_path = output_dir / f"{stem}_アウトライン.txt"
         outline_path.write_text(format_outline_text(source_name, outline), encoding="utf-8")
@@ -2133,21 +3182,6 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             status("前処理済み音声を使用します（16kHz / mono / WAV）。")
         else:
             status("音声前処理は行わず、元ファイルの音声を使用します。")
-        quiet_light_input_path: Path | None = None
-        quiet_strong_input_path: Path | None = None
-        if options.triple_pass:
-            status("三重実行用に小さい声取得モードの音声を作成しています（軽め）…")
-            quiet_light_input_path = run_audio_preprocess(
-                options.input_path,
-                options.work_dir / "quiet_light.wav",
-                "light",
-            )
-            status("三重実行用に小さい声取得モードの音声を作成しています（強め）…")
-            quiet_strong_input_path = run_audio_preprocess(
-                options.input_path,
-                options.work_dir / "quiet_strong.wav",
-                "strong",
-            )
         check_cancelled()
         progress(8)
         try:
@@ -2189,7 +3223,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         backend = "OpenAI Whisper" if use_openai_whisper else "WhisperX (faster-whisper)"
         if options.triple_pass:
             status(
-                "三重実行を使います。通常モードを主結果にし、小さい声取得モード（軽め/強め）は不足区間だけ補完します。"
+                "三重実行を使います。通常結果の3秒以上の空白だけを、軽め・強めの順で切り出して補完します。"
             )
         elif options.boost_quiet_speech:
             status(
@@ -2206,17 +3240,13 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        def transcribe_pass(
-            pass_label: str,
-            audio_path: Path,
+        def load_asr_model(
             language_hint: str | None,
             vad_onset: float,
             vad_offset: float,
             no_speech_threshold: float,
-            progress_value: int,
-        ) -> tuple[dict[str, Any], Any]:
+        ) -> Any:
             nonlocal model
-            status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
             if use_openai_whisper:
                 import whisper
 
@@ -2231,6 +3261,24 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                     asr_options={"no_speech_threshold": no_speech_threshold},
                     vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
                 )
+            return model
+
+        def transcribe_pass(
+            pass_label: str,
+            audio_path: Path,
+            language_hint: str | None,
+            vad_onset: float,
+            vad_offset: float,
+            no_speech_threshold: float,
+            progress_value: int,
+        ) -> tuple[dict[str, Any], Any]:
+            status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
+            pass_model = load_asr_model(
+                language_hint,
+                vad_onset,
+                vad_offset,
+                no_speech_threshold,
+            )
             check_cancelled()
 
             status(
@@ -2239,7 +3287,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             )
             pass_audio = whisperx.load_audio(str(audio_path))
             if use_openai_whisper:
-                pass_result = model.transcribe(
+                pass_result = pass_model.transcribe(
                     pass_audio,
                     language=language_hint,
                     fp16=False,
@@ -2248,11 +3296,88 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                     no_speech_threshold=no_speech_threshold,
                 )
             else:
-                pass_result = model.transcribe(pass_audio, batch_size=1)
+                pass_result = pass_model.transcribe(pass_audio, batch_size=1)
             release_asr_model()
             check_cancelled()
             progress(progress_value)
             return pass_result, pass_audio
+
+        def transcribe_gap_pass(
+            pass_label: str,
+            preset: str,
+            gaps: list[tuple[float, float]],
+            audio_duration: float,
+            language_hint: str | None,
+            vad_onset: float,
+            vad_offset: float,
+            no_speech_threshold: float,
+            progress_value: int,
+        ) -> dict[str, Any]:
+            if not gaps:
+                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:.0f}秒以上の空白はありません。")
+                progress(progress_value)
+                return {"segments": [], "language": language_hint}
+
+            total_gap_seconds = sum(end - start for start, end in gaps)
+            status(
+                f"{pass_label}: {len(gaps)}か所、計{total_gap_seconds:.1f}秒の空白だけを再確認します。"
+            )
+            status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
+            pass_model = load_asr_model(
+                language_hint,
+                vad_onset,
+                vad_offset,
+                no_speech_threshold,
+            )
+            detected_language = language_hint
+            collected: list[dict[str, Any]] = []
+            try:
+                for index, (gap_start, gap_end) in enumerate(gaps, 1):
+                    check_cancelled()
+                    clip_start = max(0.0, gap_start - TRIPLE_PASS_GAP_CONTEXT_SECONDS)
+                    clip_end = min(audio_duration, gap_end + TRIPLE_PASS_GAP_CONTEXT_SECONDS)
+                    status(
+                        f"{pass_label}: 空白 {index}/{len(gaps)} "
+                        f"（{display_time(gap_start)}–{display_time(gap_end)}）を切り出して再文字起こししています…"
+                    )
+                    clip_path = options.work_dir / f"gap_{preset}_{index:04d}.wav"
+                    try:
+                        run_audio_interval_preprocess(
+                            options.input_path,
+                            clip_path,
+                            clip_start,
+                            clip_end,
+                            preset,
+                        )
+                        clip_audio = whisperx.load_audio(str(clip_path))
+                        if use_openai_whisper:
+                            clip_result = pass_model.transcribe(
+                                clip_audio,
+                                language=detected_language,
+                                fp16=False,
+                                verbose=False,
+                                condition_on_previous_text=False,
+                                no_speech_threshold=no_speech_threshold,
+                            )
+                        else:
+                            clip_result = pass_model.transcribe(clip_audio, batch_size=1)
+                        if not detected_language:
+                            detected_language = clip_result.get("language")
+                        collected.extend(
+                            offset_asr_segments_to_gap(
+                                clip_result.get("segments", []),
+                                clip_start,
+                                gap_start,
+                                gap_end,
+                            )
+                        )
+                    finally:
+                        clip_path.unlink(missing_ok=True)
+            finally:
+                release_asr_model()
+            check_cancelled()
+            progress(progress_value)
+            return {"segments": collected, "language": detected_language}
 
         if options.triple_pass:
             primary_vad_onset = NORMAL_VAD_ONSET
@@ -2277,11 +3402,16 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         language_code = options.language or result.get("language")
 
         if options.triple_pass:
-            if quiet_light_input_path is None or quiet_strong_input_path is None:
-                raise RuntimeError("三重実行用の小さい声取得モード音声を作成できませんでした。")
-            light_result, _ = transcribe_pass(
-                "小さい声取得モード（軽め）",
-                quiet_light_input_path,
+            audio_duration = len(audio) / WHISPER_SAMPLE_RATE
+            original_segments = result.get("segments", [])
+            original_count = len(normalize_asr_segments(original_segments))
+
+            light_gaps = find_long_asr_gaps(original_segments, audio_duration)
+            light_result = transcribe_gap_pass(
+                "2回目（軽め）",
+                "light",
+                light_gaps,
+                audio_duration,
                 language_code,
                 options.vad_onset,
                 options.vad_offset,
@@ -2290,9 +3420,17 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             )
             if not language_code:
                 language_code = light_result.get("language")
-            strong_result, _ = transcribe_pass(
-                "小さい声取得モード（強め）",
-                quiet_strong_input_path,
+            after_light, light_counts = merge_supplemental_asr_segments(
+                original_segments,
+                [("長い空白・軽め", light_result.get("segments", []))],
+            )
+
+            strong_gaps = find_long_asr_gaps(after_light, audio_duration)
+            strong_result = transcribe_gap_pass(
+                "3回目（強め）",
+                "strong",
+                strong_gaps,
+                audio_duration,
                 language_code,
                 options.vad_onset,
                 options.vad_offset,
@@ -2301,14 +3439,10 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             )
             if not language_code:
                 language_code = strong_result.get("language")
-            merged_segments, added_counts = merge_supplemental_asr_segments(
-                result.get("segments", []),
-                [
-                    ("小声軽め", light_result.get("segments", [])),
-                    ("小声強め", strong_result.get("segments", [])),
-                ],
+            merged_segments, strong_counts = merge_supplemental_asr_segments(
+                after_light,
+                [("長い空白・強め", strong_result.get("segments", []))],
             )
-            original_count = len(normalize_asr_segments(result.get("segments", [])))
             result = dict(result)
             result["segments"] = merged_segments
             if language_code:
@@ -2316,8 +3450,8 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             status(
                 "三重実行の統合完了: "
                 f"通常 {original_count} 区間、"
-                f"小声軽め +{added_counts.get('小声軽め', 0)}、"
-                f"小声強め +{added_counts.get('小声強め', 0)} を追加しました。"
+                f"2回目 {len(light_gaps)} 空白から +{light_counts.get('長い空白・軽め', 0)}、"
+                f"3回目 {len(strong_gaps)} 空白から +{strong_counts.get('長い空白・強め', 0)} を追加しました。"
             )
         check_cancelled()
         progress(52)
@@ -2407,6 +3541,11 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             speaker_names = detect_speaker_names_with_ai(
                 segments, options.ai_provider, options.ai_api_key, options.ai_model
             )
+        speaker_profiles = normalize_conversation_speaker_profiles(
+            None,
+            {str(item.get("speaker") or "UNKNOWN") for item in segments},
+            speaker_names,
+        )
         progress(94)
         outline: dict[str, Any] | None = None
         if options.create_outline:
@@ -2433,7 +3572,27 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             options.write_json,
             outline,
             emotion_analysis,
+            speaker_profiles,
         )
+        if options.burn_subtitled_video:
+            if is_video_path(options.input_path):
+                status("話者名・テーマカラー付き字幕を動画へ焼き込んでいます…")
+                try:
+                    files.extend(write_subtitled_video_assets(
+                        options.input_path,
+                        options.source_name,
+                        options.output_dir,
+                        segments,
+                        speaker_names,
+                        speaker_profiles,
+                    ))
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                    warning = f"字幕動画の作成を完了できませんでした: {exc}"
+                    with jobs_lock:
+                        job.output_warning = warning
+                    status(warning)
+            else:
+                status("音声ファイルのため、字幕焼き込み動画の作成は省略しました。")
         status("元の音声・動画をライブラリへ保存しています…")
         saved_media_path = archive_media(job.id, options.input_path)
         persisted = upsert_library_item(
@@ -2448,11 +3607,15 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             emotion_analysis=emotion_analysis,
             files=files,
             write_srt=options.write_srt,
-            write_json=options.write_json,
+            write_json=True,
+            burn_subtitled_video=options.burn_subtitled_video,
+            speaker_profiles=speaker_profiles,
         )
         with jobs_lock:
             job.segments = row_segments(persisted)
             job.speaker_names = speaker_names
+            job.session_profile = row_session_profile(persisted)
+            job.speaker_profiles = row_speaker_profiles(persisted, job.segments, speaker_names)
             job.outline = outline
             job.emotion_analysis = emotion_analysis
             job.media_path = saved_media_path
@@ -2696,6 +3859,21 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
     source_name = str(payload.get("source_name") or row["source_name"]).strip()
     if not source_name or len(source_name) > 255:
         raise ValueError("データ名は 1～255 文字で指定してください。")
+    session_profile = (
+        normalize_session_profile(payload.get("session_profile"))
+        if "session_profile" in payload
+        else row_session_profile(row)
+    )
+    speaker_profiles = normalize_conversation_speaker_profiles(
+        payload.get("speaker_profiles")
+        if "speaker_profiles" in payload
+        else json_load(row["speaker_profiles_json"], {}),
+        labels,
+        new_names,
+    )
+    for label, profile in speaker_profiles.items():
+        if profile["display_name"]:
+            new_names[label] = profile["display_name"]
 
     outline = json_load(row["outline_json"], None)
     emotion_analysis = json_load(row["emotion_analysis_json"], None)
@@ -2709,8 +3887,22 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
     output_dir = Path(row["output_dir"])
     files = write_outputs(
         source_name, output_dir, new_segments, row["language"], new_names,
-        bool(row["write_srt"]), bool(row["write_json"]), outline, emotion_analysis,
+        bool(row["write_srt"]), True, outline, emotion_analysis, speaker_profiles,
     )
+    output_warning = ""
+    media_path = Path(row["media_path"]) if row["media_path"] else None
+    if bool(row["burn_subtitled_video"]) and media_path and media_path.is_file() and is_video_path(media_path):
+        try:
+            files.extend(write_subtitled_video_assets(
+                media_path,
+                source_name,
+                output_dir,
+                new_segments,
+                new_names,
+                speaker_profiles,
+            ))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            output_warning = f"字幕動画の再作成に失敗しました: {exc}"
     learning_warning = ""
     try:
         learning_events = record_training_corrections(row, old_segments, new_segments, old_names, new_names)
@@ -2719,11 +3911,13 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
         learning_warning = f"学習データの記録に失敗しました: {exc}"
     updated = upsert_library_item(
         item_id=item_id, source_name=source_name, output_dir=output_dir,
-        media_path=Path(row["media_path"]) if row["media_path"] else None,
+        media_path=media_path,
         language=row["language"], segments=new_segments, speaker_names=new_names,
         outline=outline, emotion_analysis=emotion_analysis, files=files,
-        write_srt=bool(row["write_srt"]), write_json=bool(row["write_json"]),
+        write_srt=bool(row["write_srt"]), write_json=True,
         increment_revision=True, created_at=row["created_at"],
+        session_profile=session_profile, speaker_profiles=speaker_profiles,
+        burn_subtitled_video=bool(row["burn_subtitled_video"]),
     )
     with jobs_lock:
         job = jobs.get(item_id)
@@ -2731,11 +3925,14 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
             job.source_name = source_name
             job.segments = row_segments(updated)
             job.speaker_names = new_names
+            job.session_profile = session_profile
+            job.speaker_profiles = speaker_profiles
             job.emotion_analysis = emotion_analysis
             job.files = files
     result = library_public(updated)
     result["learning_events"] = learning_events
     result["learning_warning"] = learning_warning
+    result["output_warning"] = output_warning
     return result
 
 
@@ -2785,26 +3982,100 @@ import_existing_outputs()
 
 @app.get("/")
 def index() -> str:
+    runtime = runtime_info()
     return render_template(
         "index.html",
         app_name=APP_NAME,
         product_name=PRODUCT_NAME,
         app_version=APP_VERSION,
         app_creator=APP_CREATOR,
+        runtime=runtime,
     )
 
 
 @app.get("/api/config")
 def api_config():
+    machine = get_machine_profile()
     try:
         config = load_token_config()
-        return jsonify({"ok": True, **config.availability(), "default_output_dir": str(DEFAULT_OUTPUT_DIRECTORY)})
+        return jsonify({
+            "ok": True,
+            **config.availability(),
+            "default_output_dir": str(DEFAULT_OUTPUT_DIRECTORY),
+            "machine": machine,
+            "runtime": runtime_info(),
+        })
     except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc), "token_file": TOKEN_FILE.name}), 500
+        return jsonify({
+            "ok": False,
+            "error": str(exc),
+            "token_file": TOKEN_FILE.name,
+            "machine": machine,
+            "runtime": runtime_info(),
+        }), 500
+
+
+@app.get("/api/speakers")
+def get_speaker_registry():
+    include_inactive = request.args.get("include_inactive", "1") != "0"
+    records = list_speaker_registry(include_inactive=include_inactive)
+    return jsonify({"speakers": records, "total": len(records)})
+
+
+@app.put("/api/speakers")
+def update_speaker_registry():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "話者台帳の編集内容がJSONではありません。"}), 400
+    try:
+        records = save_speaker_registry_records(
+            payload.get("speakers"),
+            delete_ids=payload.get("delete_ids"),
+        )
+        return jsonify({"speakers": records, "total": len(records)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except sqlite3.Error as exc:
+        return jsonify({"error": f"話者台帳を保存できません: {exc}"}), 500
+
+
+@app.post("/api/speakers/import")
+def import_speaker_registry():
+    upload = request.files.get("csv_file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "GoogleフォームまたはスプレッドシートのCSVを選択してください。"}), 400
+    try:
+        records, imported_count = import_speaker_registry_csv(upload.read())
+        return jsonify({
+            "speakers": records,
+            "total": len(records),
+            "imported_count": imported_count,
+        })
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (OSError, sqlite3.Error) as exc:
+        return jsonify({"error": f"CSVを取り込めません: {exc}"}), 500
+
+
+@app.get("/api/speakers/export.csv")
+def export_speaker_registry():
+    content = speaker_registry_csv_bytes(list_speaker_registry())
+    return send_file(
+        io.BytesIO(content),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name="gurumoji_speaker_registry.csv",
+    )
 
 
 @app.post("/api/select-input")
 def select_input_file():
+    if not runtime_info()["native_file_dialog"]:
+        return jsonify({
+            "error": "この実行環境ではOSのファイル選択画面を利用できません。",
+            "hint": "ブラウザーのファイルアップロードを使用してください。",
+            "browser_upload_only": True,
+        }), 409
     if not file_dialog_lock.acquire(blocking=False):
         return jsonify({"error": "ファイル選択画面をすでに開いています。"}), 409
     try:
@@ -2951,6 +4222,79 @@ def get_library_item(item_id: str):
     if row is None:
         return jsonify({"error": "データが見つかりません。"}), 404
     return jsonify(library_public(row))
+
+
+@app.get("/api/library/<item_id>/speakers.csv")
+def export_conversation_speakers(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "データが見つかりません。"}), 404
+    segments = row_segments(row)
+    raw_names = json_load(row["speaker_names_json"], {})
+    speaker_names = raw_names if isinstance(raw_names, dict) else {}
+    profiles = row_speaker_profiles(row, segments, speaker_names)
+    session = row_session_profile(row)
+    registry = {item["id"]: item for item in list_speaker_registry()}
+    metrics: dict[str, dict[str, float | int]] = {}
+    for segment in segments:
+        label = str(segment.get("speaker") or "UNKNOWN")
+        start, end = segment_bounds(segment)
+        data = metrics.setdefault(label, {"count": 0, "seconds": 0.0, "characters": 0})
+        data["count"] = int(data["count"]) + 1
+        data["seconds"] = float(data["seconds"]) + max(0.0, end - start)
+        data["characters"] = int(data["characters"]) + len(str(segment.get("text") or ""))
+    custom_headers = sorted({
+        key
+        for profile in profiles.values()
+        for key in (
+            registry.get(profile.get("global_speaker_id"), {}).get("attributes", {}) or {}
+        )
+    })
+    fixed_headers = [
+        "会話ID", "データ名", "会話種別", "実施日", "場所", "目的",
+        "話者ラベル", "表示名", "グローバル話者ID", "参加者コード",
+        "テーマカラー", "会話役割", "組織", "部署", "役職", "参加状態", "研究同意",
+        "録音同意", "会話固有条件", "メモ", "発話数", "発話秒数", "文字数",
+    ]
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fixed_headers + custom_headers)
+    writer.writeheader()
+    for label, profile in profiles.items():
+        global_record = registry.get(profile.get("global_speaker_id"), {})
+        metric = metrics.get(label, {"count": 0, "seconds": 0.0, "characters": 0})
+        writer.writerow({
+            "会話ID": row["id"],
+            "データ名": row["source_name"],
+            "会話種別": session["session_type"],
+            "実施日": session["session_date"],
+            "場所": session["location"],
+            "目的": session["objective"],
+            "話者ラベル": label,
+            "表示名": profile["display_name"] or speaker_names.get(label, ""),
+            "グローバル話者ID": profile["global_speaker_id"],
+            "参加者コード": global_record.get("participant_code", ""),
+            "テーマカラー": profile["theme_color"],
+            "会話役割": profile["session_role"],
+            "組織": profile["organization"],
+            "部署": profile["department"],
+            "役職": profile["job_title"],
+            "参加状態": profile["attendance_status"],
+            "研究同意": profile["consent_status"],
+            "録音同意": profile["recording_consent"],
+            "会話固有条件": profile["conditions"],
+            "メモ": profile["notes"],
+            "発話数": metric["count"],
+            "発話秒数": round(float(metric["seconds"]), 3),
+            "文字数": metric["characters"],
+            **(global_record.get("attributes", {}) or {}),
+        })
+    content = ("\ufeff" + stream.getvalue()).encode("utf-8")
+    return send_file(
+        io.BytesIO(content),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name=f"{Path(row['source_name']).stem}_speakers.csv",
+    )
 
 
 @app.get("/api/library/<item_id>/thumbnail")
@@ -3104,6 +4448,12 @@ def create_job():
         diarization_device = request.form.get("diarization_device", "cpu")
         if device not in {"cpu", "cuda"} or diarization_device not in {"cpu", "cuda"}:
             raise ValueError("処理装置の指定が不正です。")
+        machine = get_machine_profile()
+        if (device == "cuda" or diarization_device == "cuda") and not machine["gpu"]["cuda_available"]:
+            raise ValueError(
+                "このマシンではGPU (CUDA)を利用できません。"
+                "文字起こし装置と話者分離装置をCPUに設定してください。"
+            )
         min_speakers = parse_optional_int("min_speakers")
         max_speakers = parse_optional_int("max_speakers")
         if min_speakers and max_speakers and min_speakers > max_speakers:
@@ -3187,7 +4537,8 @@ def create_job():
             vad_offset=vad_offset,
             no_speech_threshold=no_speech_threshold,
             write_srt=parse_bool("write_srt"),
-            write_json=parse_bool("write_json"),
+            write_json=True,
+            burn_subtitled_video=parse_bool("burn_subtitled_video"),
             ai_provider=provider,
             clean_transcript=clean_transcript,
             detect_speaker_names=detect_names,
@@ -3202,7 +4553,8 @@ def create_job():
             source_name=original_name,
             output_dir=output_dir,
             write_srt=options.write_srt,
-            write_json=options.write_json,
+            write_json=True,
+            burn_subtitled_video=options.burn_subtitled_video,
         )
         with jobs_lock:
             jobs[job_id] = job
@@ -3273,10 +4625,31 @@ def download_file(job_id: str, filename: str):
 
 
 def main() -> int:
-    host = "127.0.0.1"
+    host = os.environ.get("MOJIOKOSI_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = int(os.environ.get("MOJIOKOSI_PORT", "7860"))
     url = f"http://{host}:{port}"
+    machine = get_machine_profile()
+    recommendation = machine["recommended"]
+    cpu = machine["cpu"]
+    gpu = machine["gpu"]
     print(f"{APP_NAME}: {url}")
+    print(
+        f"CPU利用可: {cpu['name']} / {cpu['logical_threads']} threads / "
+        f"RAM {machine['memory_gib']:.1f} GB"
+    )
+    if gpu["cuda_available"]:
+        print(
+            f"GPU利用可: {gpu['name']} / VRAM {gpu['vram_gib']:.1f} GB / "
+            f"CUDA {gpu['cuda_version']} / Compute Capability {gpu['capability']}"
+        )
+    else:
+        print(f"GPU利用不可: {gpu['reason']}")
+    print(
+        "推奨設定: "
+        f"model={recommendation['model_name']} / "
+        f"transcription={recommendation['device']} / "
+        f"diarization={recommendation['diarization_device']}"
+    )
     print("終了するにはこのウィンドウで Ctrl+C を押してください。")
     if os.environ.get("MOJIOKOSI_NO_BROWSER") != "1":
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
