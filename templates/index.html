@@ -41,6 +41,13 @@
           <span id="status-google" class="status-pill loading">Google</span>
         </div>
         <p id="token-message">設定を確認しています…</p>
+        <div class="processor-status" aria-label="CPUとGPUの利用状態">
+          <div class="processor-status-title">PROCESSOR STATUS</div>
+          <div class="hardware-lights hero-hardware-lights">
+            <span id="header-status-cpu" data-hardware="cpu" class="hardware-light checking">CPU 確認中</span>
+            <span id="header-status-gpu" data-hardware="gpu" class="hardware-light checking">GPU 確認中</span>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -192,8 +199,8 @@
                 <span>起動時に利用可能な処理装置を確認</span>
               </div>
               <div class="hardware-lights">
-                <span id="status-cpu" class="hardware-light checking">CPU 確認中</span>
-                <span id="status-gpu" class="hardware-light checking">GPU 確認中</span>
+                <span id="status-cpu" data-hardware="cpu" class="hardware-light checking">CPU 確認中</span>
+                <span id="status-gpu" data-hardware="gpu" class="hardware-light checking">GPU 確認中</span>
               </div>
             </div>
             <p id="machine-summary">マシン構成を読み込んでいます…</p>

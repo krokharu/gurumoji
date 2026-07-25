@@ -1,5 +1,6 @@
 import unittest
 
+import app
 from app import detect_machine_profile, recommend_machine_settings
 
 
@@ -61,6 +62,13 @@ class DetectMachineProfileTests(unittest.TestCase):
     def test_cuda_recommendation_matches_cuda_availability(self):
         expected_device = "cuda" if self.profile["gpu"]["cuda_available"] else "cpu"
         self.assertEqual(self.profile["recommended"]["device"], expected_device)
+
+    def test_cpu_and_gpu_lights_are_visible_in_header_and_settings(self):
+        page = app.app.test_client().get("/").data.decode("utf-8")
+
+        self.assertEqual(page.count('data-hardware="cpu"'), 2)
+        self.assertEqual(page.count('data-hardware="gpu"'), 2)
+        self.assertIn("PROCESSOR STATUS", page)
 
 
 if __name__ == "__main__":

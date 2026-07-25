@@ -4,7 +4,7 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/krokharu/gurumoji/blob/main/Gurumoji_Colab.ipynb)
 
-現在のバージョン: **1.1.0**
+現在のバージョン: **1.1.1**
 
 ## 主な機能
 

@@ -537,28 +537,32 @@ function setHardwareLight(element, available, availableText, unavailableText, ti
   element.title = title;
 }
 
+function setHardwareLights(kind, available, availableText, unavailableText, title = '') {
+  document.querySelectorAll(`[data-hardware="${kind}"]`).forEach(element => {
+    setHardwareLight(element, available, availableText, unavailableText, title);
+  });
+}
+
 function applyMachineProfile(machine) {
   if (!machine) return;
   const cpu = machine.cpu || {};
   const gpu = machine.gpu || {};
   const recommended = machine.recommended || {};
-  const cpuLight = document.querySelector('#status-cpu');
-  const gpuLight = document.querySelector('#status-gpu');
   const summary = document.querySelector('#machine-summary');
   const recommendation = document.querySelector('#machine-recommendation');
   const modelSelect = document.querySelector('#model-name');
   const transcriptionDevice = document.querySelector('#transcription-device');
   const diarizationDevice = document.querySelector('#diarization-device');
 
-  setHardwareLight(
-    cpuLight,
+  setHardwareLights(
+    'cpu',
     Boolean(cpu.available),
     'CPU 利用可',
     'CPU 利用不可',
     `${cpu.name || 'CPU'} / ${cpu.logical_threads || '?'} threads`
   );
-  setHardwareLight(
-    gpuLight,
+  setHardwareLights(
+    'gpu',
     Boolean(gpu.cuda_available),
     'GPU 利用可',
     'GPU 利用不可',
