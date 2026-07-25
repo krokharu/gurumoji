@@ -56,7 +56,93 @@
         <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="job-form" aria-selected="true">＋ 新規作成</button>
         <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card result-card" aria-selected="false">処理済みデータ</button>
         <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者管理</button>
+        <button id="show-analysis-button" class="view-tab" type="button" role="tab" aria-controls="analysis-card" aria-selected="false">分析・可視化</button>
       </nav>
+
+      <section id="analysis-card" class="analysis-card" role="tabpanel" aria-labelledby="show-analysis-button analysis-title" hidden>
+        <div class="analysis-header">
+          <div>
+            <p class="eyebrow">GROUP INTERVIEW ANALYSIS</p>
+            <h2 id="analysis-title">分析・可視化</h2>
+            <p>自動集計と研究者が設定・確認する分析を分け、発言の偏り、相互作用、テーマを根拠データとともに確認します。</p>
+          </div>
+          <div class="analysis-header-actions">
+            <a id="analysis-json-export" class="secondary-button" href="#" download hidden>全分析JSON</a>
+            <button id="analysis-refresh-button" class="secondary-button compact-button" type="button">↻ 再集計</button>
+          </div>
+        </div>
+
+        <div class="analysis-target-bar">
+          <label class="field">
+            <span>分析対象の処理済みデータ</span>
+            <select id="analysis-item-select">
+              <option value="">データを読み込んでいます…</option>
+            </select>
+          </label>
+          <div class="analysis-target-status">
+            <span>現在の対象</span>
+            <strong id="analysis-target-name">未選択</strong>
+            <small id="analysis-target-meta">処理済みデータを選択してください</small>
+          </div>
+        </div>
+
+        <div id="analysis-message" class="alert" role="alert" hidden></div>
+        <div id="analysis-loading" class="analysis-loading" aria-live="polite" hidden>
+          <i aria-hidden="true"></i>
+          <div><strong>分析データを集計しています</strong><span>発話、話者、無音、相互作用を確認中です…</span></div>
+        </div>
+        <div id="analysis-empty" class="analysis-empty">
+          <strong>分析するデータを選択してください</strong>
+          <p>文字起こし済みデータを選ぶと、ローカルで自動集計と可視化を行います。</p>
+        </div>
+
+        <div id="analysis-shell" class="analysis-shell" hidden>
+          <div class="analysis-desktop-layout desktop-only">
+            <aside class="analysis-sidebar">
+              <div class="analysis-sidebar-heading">
+                <span>ANALYSIS WORKSPACE</span>
+                <strong>分析の境界を明確に</strong>
+                <p>数値で分かることと、研究者の確認が必要なことを分けて表示します。</p>
+              </div>
+              <div class="analysis-boundary-list">
+                <article class="automatic">
+                  <span>自動集計</span>
+                  <strong>データから計算</strong>
+                  <p>発話量、参加バランス、遷移、無音、特徴語を再現可能な方法で集計します。</p>
+                </article>
+                <article class="configured">
+                  <span>要設定</span>
+                  <strong>分析条件を指定</strong>
+                  <p>司会除外、比較軸、しきい値、コードブックは目的に合わせて設定します。</p>
+                </article>
+                <article class="manual">
+                  <span>要確認・解釈</span>
+                  <strong>文脈を人が判断</strong>
+                  <p>合意・対立、沈黙の意味、重要引用、テーマは発話を読んで確定します。</p>
+                </article>
+              </div>
+              <div class="analysis-mode-switch" role="group" aria-label="分析表示">
+                <button type="button" data-analysis-mode="automatic" aria-pressed="true">自動分析</button>
+                <button type="button" data-analysis-mode="manual" aria-pressed="false">設定・手動分析</button>
+              </div>
+              <div id="analysis-desktop-side-status" class="analysis-side-status"></div>
+            </aside>
+            <div id="analysis-desktop-content" class="analysis-content"></div>
+          </div>
+
+          <div class="analysis-mobile-layout mobile-only">
+            <div class="analysis-mobile-boundary">
+              <strong>自動集計と人の解釈を分離</strong>
+              <p>自動値は意味や影響力を断定しません。設定・コード・解釈は手動で保存します。</p>
+            </div>
+            <div class="analysis-mode-switch mobile" role="group" aria-label="分析表示">
+              <button type="button" data-analysis-mode="automatic" aria-pressed="true">自動分析</button>
+              <button type="button" data-analysis-mode="manual" aria-pressed="false">設定・手動</button>
+            </div>
+            <div id="analysis-mobile-content" class="analysis-content mobile"></div>
+          </div>
+        </div>
+      </section>
 
       <section id="library-card" class="library-card" role="tabpanel" aria-labelledby="show-library-button library-title" hidden>
         <div class="library-header">

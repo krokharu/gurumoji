@@ -13,6 +13,7 @@ import html
 import io
 import inspect
 import json
+import math
 import mimetypes
 import os
 import platform
@@ -50,7 +51,7 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -197,6 +198,32 @@ SPEAKER_ROLES = {
 }
 CONSENT_STATUSES = {"unknown", "pending", "granted", "declined", "not_required"}
 ATTENDANCE_STATUSES = {"unknown", "planned", "attended", "absent", "left_early", "remote"}
+ANALYSIS_UNITS = {"turn"}
+ANALYSIS_GROUP_FIELDS = {"none", "role", "organization", "department", "job_title"}
+ANALYSIS_INTERPRETATION_STATUSES = {"draft", "reviewed"}
+ANALYSIS_INTERACTION_TAGS = {
+    "agreement": "同意・賛同",
+    "disagreement": "不一致・反対",
+    "differentiation": "立場の差異化",
+    "change": "意見の変化",
+    "word_use": "言葉の意味の違い",
+    "repetition": "反復・強調",
+    "engagement": "関与・発展",
+    "silencing": "沈黙・発言抑制",
+}
+ANALYSIS_FACILITATOR_ROLES = {
+    "moderator", "facilitator", "assistant_moderator", "interviewer", "chair",
+}
+ANALYSIS_NON_PARTICIPANT_ROLES = ANALYSIS_FACILITATOR_ROLES | {
+    "observer", "note_taker",
+}
+ANALYSIS_MAX_TIMELINE_SECONDS = 31 * 86400
+ANALYSIS_MAX_TIME_BINS = 5000
+
+
+class AnalysisConflictError(RuntimeError):
+    pass
+
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_AS_ASCII"] = False
@@ -561,6 +588,10 @@ def initialize_library() -> None:
                 write_srt INTEGER NOT NULL DEFAULT 1,
                 write_json INTEGER NOT NULL DEFAULT 1,
                 burn_subtitled_video INTEGER NOT NULL DEFAULT 0,
+                analysis_config_json TEXT NOT NULL DEFAULT '{}',
+                analysis_annotations_json TEXT NOT NULL DEFAULT '{}',
+                analysis_revision INTEGER NOT NULL DEFAULT 0,
+                analysis_updated_at TEXT,
                 revision_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -582,6 +613,22 @@ def initialize_library() -> None:
         if "burn_subtitled_video" not in library_columns:
             connection.execute(
                 "ALTER TABLE library_items ADD COLUMN burn_subtitled_video INTEGER NOT NULL DEFAULT 0"
+            )
+        if "analysis_config_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN analysis_config_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "analysis_annotations_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN analysis_annotations_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "analysis_revision" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN analysis_revision INTEGER NOT NULL DEFAULT 0"
+            )
+        if "analysis_updated_at" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN analysis_updated_at TEXT"
             )
         connection.execute("UPDATE library_items SET write_json = 1 WHERE write_json <> 1")
         connection.execute(
@@ -1026,6 +1073,8 @@ def ensure_segment_ids(item_id: str, segments: list[dict[str, Any]]) -> list[dic
     normalized: list[dict[str, Any]] = []
     used: set[str] = set()
     for index, raw in enumerate(segments):
+        if not isinstance(raw, dict):
+            continue
         segment = dict(raw)
         segment_id = stable_segment_id(item_id, index, segment)
         if segment_id in used:
@@ -1179,8 +1228,12 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "revision_count": int(row["revision_count"] or 0),
+        "analysis_revision": int(row["analysis_revision"] or 0),
+        "analysis_updated_at": row["analysis_updated_at"],
         "match_count": match_count,
         "speaker_data_url": f"/api/library/{row['id']}/speakers.csv",
+        "analysis_url": f"/api/library/{row['id']}/analysis",
+        "analysis_export_url": f"/api/library/{row['id']}/analysis/export.json",
         "files": [
             {"name": path.name, "url": f"/api/library/{row['id']}/files/{urllib.parse.quote(path.name)}"}
             for path in file_paths if path.is_file()
@@ -1303,19 +1356,1142 @@ TEXT_MINING_STOP_WORDS = {
 }
 
 
-def text_mining_terms(segments: list[dict[str, Any]], limit: int = 18) -> list[tuple[str, int]]:
-    """Extract useful frequent terms without requiring a morphological analyzer."""
+def text_mining_counter(
+    segments: list[dict[str, Any]],
+    extra_stop_words: set[str] | None = None,
+) -> Counter[str]:
     text = " ".join(str(item.get("text") or "") for item in segments)
     candidates = re.findall(
         r"[一-龯々〆ヵヶ]{2,}|[ァ-ヴー]{2,}|[A-Za-z][A-Za-z0-9_-]{2,}",
         text,
     )
-    counts = Counter(
+    stop_words = TEXT_MINING_STOP_WORDS | {
+        str(value).casefold() for value in (extra_stop_words or set()) if str(value).strip()
+    }
+    return Counter(
         token.casefold() if token.isascii() else token
         for token in candidates
-        if token.casefold() not in TEXT_MINING_STOP_WORDS
+        if token.casefold() not in stop_words
     )
-    return counts.most_common(limit)
+
+
+def text_mining_terms(
+    segments: list[dict[str, Any]],
+    limit: int = 18,
+    extra_stop_words: set[str] | None = None,
+) -> list[tuple[str, int]]:
+    """Extract useful frequent terms without requiring a morphological analyzer."""
+    return text_mining_counter(segments, extra_stop_words).most_common(limit)
+
+
+def analysis_number(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return round(min(max(number, minimum), maximum), 3)
+
+
+def analysis_bool(value: Any, default: bool = False) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def default_analysis_config() -> dict[str, Any]:
+    return {
+        "research_question": "",
+        "analysis_unit": "turn",
+        "exclude_moderator": True,
+        "excluded_speakers": [],
+        "group_by": "none",
+        "long_gap_seconds": 3.0,
+        "overlap_seconds": 0.2,
+        "low_participation_percent": 10.0,
+        "time_bin_seconds": 300,
+        "stop_words": [],
+        "codebook": [],
+        "analyst_memo": "",
+        "interpretation_status": "draft",
+    }
+
+
+def normalize_analysis_codebook(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    codebook: list[dict[str, str]] = []
+    used_ids: set[str] = set()
+    for index, value in enumerate(raw[:100]):
+        if not isinstance(value, dict):
+            continue
+        label = clean_single_line(value.get("label"), 120)
+        if not label:
+            continue
+        code_id = clean_single_line(value.get("id"), 80)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code_id) or code_id in used_ids:
+            seed = f"gurumoji-analysis-code:{index}:{label}"
+            code_id = f"code_{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex[:16]}"
+        used_ids.add(code_id)
+        color = clean_single_line(value.get("color"), 7).upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", color):
+            color = SPEAKER_THEME_COLORS[index % len(SPEAKER_THEME_COLORS)]
+        codebook.append({
+            "id": code_id,
+            "label": label,
+            "description": clean_multiline(value.get("description"), 4000),
+            "include_example": clean_multiline(value.get("include_example"), 2000),
+            "exclude_example": clean_multiline(value.get("exclude_example"), 2000),
+            "color": color,
+        })
+    return codebook
+
+
+def normalize_analysis_config(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    config = default_analysis_config()
+    unit = clean_single_line(source.get("analysis_unit", config["analysis_unit"]), 30)
+    group_by = clean_single_line(source.get("group_by", config["group_by"]), 30)
+    status = clean_single_line(
+        source.get("interpretation_status", config["interpretation_status"]), 30
+    )
+    config.update({
+        "research_question": clean_multiline(source.get("research_question"), 10000),
+        "analysis_unit": unit if unit in ANALYSIS_UNITS else "turn",
+        "exclude_moderator": analysis_bool(source.get("exclude_moderator"), True),
+        "excluded_speakers": [
+            clean_single_line(value, 80)
+            for value in (source.get("excluded_speakers") or [])[:200]
+            if clean_single_line(value, 80)
+        ] if isinstance(source.get("excluded_speakers"), list) else [],
+        "group_by": group_by if group_by in ANALYSIS_GROUP_FIELDS else "none",
+        "long_gap_seconds": analysis_number(source.get("long_gap_seconds"), 3.0, 0.2, 120.0),
+        "overlap_seconds": analysis_number(source.get("overlap_seconds"), 0.2, 0.0, 30.0),
+        "low_participation_percent": analysis_number(
+            source.get("low_participation_percent"), 10.0, 0.0, 50.0
+        ),
+        "time_bin_seconds": int(analysis_number(source.get("time_bin_seconds"), 300, 30, 3600)),
+        "stop_words": normalize_tags(source.get("stop_words"))[:200],
+        "codebook": normalize_analysis_codebook(source.get("codebook")),
+        "analyst_memo": clean_multiline(source.get("analyst_memo"), 30000),
+        "interpretation_status": (
+            status if status in ANALYSIS_INTERPRETATION_STATUSES else "draft"
+        ),
+    })
+    return config
+
+
+def normalize_analysis_annotations(
+    raw: Any,
+    segments: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    source = raw if isinstance(raw, dict) else {}
+    segment_ids = {str(item.get("id") or "") for item in segments}
+    code_ids = {str(item["id"]) for item in config.get("codebook", [])}
+    annotations: dict[str, dict[str, Any]] = {}
+    for segment_id, value in list(source.items())[:100000]:
+        segment_id = str(segment_id)
+        if segment_id not in segment_ids or not isinstance(value, dict):
+            continue
+        codes = []
+        raw_codes = value.get("codes") if isinstance(value.get("codes"), list) else []
+        for code_id in raw_codes[:100]:
+            code_id = str(code_id)
+            if code_id in code_ids and code_id not in codes:
+                codes.append(code_id)
+        tags = []
+        raw_tags = (
+            value.get("interaction_tags")
+            if isinstance(value.get("interaction_tags"), list)
+            else []
+        )
+        for tag in raw_tags[:50]:
+            tag = str(tag)
+            if tag in ANALYSIS_INTERACTION_TAGS and tag not in tags:
+                tags.append(tag)
+        annotation = {
+            "codes": codes,
+            "interaction_tags": tags,
+            "memo": clean_multiline(value.get("memo"), 5000),
+            "important": analysis_bool(value.get("important"), False),
+            "excluded": analysis_bool(value.get("excluded"), False),
+        }
+        if any((codes, tags, annotation["memo"], annotation["important"], annotation["excluded"])):
+            annotations[segment_id] = annotation
+    return annotations
+
+
+def row_analysis_config(row: sqlite3.Row) -> dict[str, Any]:
+    return normalize_analysis_config(json_load(row["analysis_config_json"], {}))
+
+
+def row_analysis_annotations(
+    row: sqlite3.Row,
+    segments: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    annotations, _ = row_analysis_annotation_state(row, segments, config)
+    return annotations
+
+
+def row_analysis_annotation_state(
+    row: sqlite3.Row,
+    segments: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    raw_value = json_load(row["analysis_annotations_json"], {})
+    raw = raw_value if isinstance(raw_value, dict) else {}
+    annotations = normalize_analysis_annotations(raw, segments, config)
+    segment_ids = {str(item.get("id") or "") for item in segments}
+    orphaned: dict[str, dict[str, Any]] = {}
+    for index, (segment_id, value) in enumerate(raw.items()):
+        if index >= 100000:
+            break
+        segment_id = str(segment_id)
+        if segment_id in segment_ids or not isinstance(value, dict):
+            continue
+        normalized = normalize_analysis_annotations(
+            {segment_id: value}, [{"id": segment_id}], config
+        )
+        if segment_id in normalized:
+            orphaned[segment_id] = normalized[segment_id]
+    return annotations, orphaned
+
+
+def analysis_gini(values: list[float]) -> float:
+    clean = sorted(max(0.0, float(value)) for value in values)
+    total = sum(clean)
+    if len(clean) <= 1 or total <= 0:
+        return 0.0
+    count = len(clean)
+    weighted = sum((2 * index - count - 1) * value for index, value in enumerate(clean, 1))
+    return weighted / (count * total)
+
+
+def analysis_evenness(values: list[float]) -> float:
+    clean = [max(0.0, float(value)) for value in values]
+    total = sum(clean)
+    if not clean or total <= 0:
+        return 0.0
+    if len(clean) == 1:
+        return 1.0
+    entropy = -sum(
+        (value / total) * math.log(value / total)
+        for value in clean if value > 0
+    )
+    return entropy / math.log(len(clean))
+
+
+def analysis_segment_bounds(segment: dict[str, Any]) -> tuple[float, float, bool]:
+    try:
+        raw_start = float(segment.get("start", 0) or 0)
+        raw_end = float(segment.get("end", raw_start) or raw_start)
+    except (TypeError, ValueError):
+        return 0.0, 0.0, False
+    if not math.isfinite(raw_start) or not math.isfinite(raw_end):
+        return 0.0, 0.0, False
+    valid = (
+        raw_start >= 0
+        and raw_end >= raw_start
+        and raw_start <= ANALYSIS_MAX_TIMELINE_SECONDS
+        and raw_end <= ANALYSIS_MAX_TIMELINE_SECONDS
+    )
+    start = min(max(raw_start, 0.0), float(ANALYSIS_MAX_TIMELINE_SECONDS))
+    end = min(max(raw_end, start), float(ANALYSIS_MAX_TIMELINE_SECONDS))
+    return start, end, valid
+
+
+def analysis_emotion_entries(segment: dict[str, Any]) -> list[dict[str, str]]:
+    raw = segment.get("emotions")
+    if not isinstance(raw, dict):
+        return []
+    entries: list[dict[str, str]] = []
+    for model_key, value in raw.items():
+        if not isinstance(value, dict):
+            continue
+        raw_label = clean_single_line(value.get("label"), 80)
+        explicit_label_ja = clean_single_line(value.get("label_ja"), 80)
+        if not raw_label and not explicit_label_ja:
+            continue
+        label_ja = clean_single_line(
+            explicit_label_ja or emotion_label_ja(raw_label), 80
+        )
+        if not raw_label and not label_ja:
+            continue
+        entries.append({
+            "model": clean_single_line(model_key, 80) or "unknown",
+            "model_name": clean_single_line(value.get("model_name"), 120),
+            "label": raw_label,
+            "label_ja": label_ja or raw_label,
+        })
+    return entries
+
+
+def group_analysis_for_row(row: sqlite3.Row) -> dict[str, Any]:
+    segments = row_segments(row)
+    config = row_analysis_config(row)
+    annotations, orphaned_annotations = row_analysis_annotation_state(
+        row, segments, config
+    )
+    raw_names = json_load(row["speaker_names_json"], {})
+    speaker_names = raw_names if isinstance(raw_names, dict) else {}
+    raw_profiles_value = json_load(row["speaker_profiles_json"], {})
+    raw_profiles = raw_profiles_value if isinstance(raw_profiles_value, dict) else {}
+    profiles = row_speaker_profiles(row, segments, speaker_names)
+    session_profile = row_session_profile(row)
+    codebook = {str(item["id"]): item for item in config["codebook"]}
+    excluded_speakers = set(config["excluded_speakers"])
+
+    ordered = sorted(segments, key=lambda item: analysis_segment_bounds(item)[:2])
+    included: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    speaker_buckets: dict[str, dict[str, Any]] = {}
+    emotion_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
+    emotion_covered = 0
+    empty_text_count = 0
+    zero_duration_count = 0
+    invalid_time_count = 0
+
+    for segment in ordered:
+        segment_id = str(segment.get("id") or "")
+        speaker = str(segment.get("speaker") or "UNKNOWN")
+        start, end, valid_time = analysis_segment_bounds(segment)
+        if not valid_time:
+            invalid_time_count += 1
+        duration = max(0.0, end - start)
+        text = str(segment.get("text") or "").strip()
+        annotation = annotations.get(segment_id, {
+            "codes": [], "interaction_tags": [], "memo": "",
+            "important": False, "excluded": False,
+        })
+        profile = profiles.get(speaker, {})
+        display_name = str(
+            profile.get("display_name")
+            or speaker_names.get(speaker)
+            or default_speaker_name(speaker)
+        )
+        role = str(profile.get("session_role") or "participant")
+        color = str(profile.get("theme_color") or "#1C6B50")
+        emotion_details = analysis_emotion_entries(segment)
+        emotions = list(dict.fromkeys(item["label_ja"] for item in emotion_details))
+        if emotion_details:
+            emotion_covered += 1
+        if not text:
+            empty_text_count += 1
+        if duration <= 0:
+            zero_duration_count += 1
+        excluded = bool(annotation.get("excluded")) or speaker in excluded_speakers
+        question_candidate = bool(
+            re.search(r"[?？]|(?:です|ます|でしょう)か[。．]?$", text)
+        )
+        item = {
+            "id": segment_id,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "duration": round(duration, 3),
+            "speaker": speaker,
+            "speaker_name": display_name,
+            "role": role,
+            "color": color,
+            "text": text,
+            "characters": len(re.sub(r"\s+", "", text)),
+            "emotions": emotions,
+            "emotion_details": emotion_details,
+            "question_candidate": question_candidate,
+            "valid_time": valid_time,
+            "annotation": annotation,
+            "excluded": excluded,
+        }
+        timeline.append(item)
+        if excluded:
+            continue
+        included.append(item)
+        bucket = speaker_buckets.setdefault(speaker, {
+            "speaker": speaker,
+            "speaker_name": display_name,
+            "role": role,
+            "color": color,
+            "turn_count": 0,
+            "speaking_seconds": 0.0,
+            "characters": 0,
+            "question_candidates": 0,
+            "first_start": start,
+            "last_end": end,
+            "emotion_counts": Counter(),
+            "code_counts": Counter(),
+        })
+        bucket["turn_count"] += 1
+        bucket["speaking_seconds"] += duration
+        bucket["characters"] += item["characters"]
+        bucket["first_start"] = min(float(bucket["first_start"]), start)
+        bucket["last_end"] = max(float(bucket["last_end"]), end)
+        if question_candidate:
+            bucket["question_candidates"] += 1
+        for emotion in emotion_details:
+            bucket["emotion_counts"][emotion["label_ja"]] += 1
+            key = (speaker, emotion["model"], emotion["label_ja"])
+            emotion_row = emotion_rows.setdefault(key, {
+                "speaker": speaker,
+                "speaker_name": display_name,
+                "model": emotion["model"],
+                "model_name": emotion["model_name"],
+                "label": emotion["label"],
+                "emotion": emotion["label_ja"],
+                "count": 0,
+                "seconds": 0.0,
+            })
+            emotion_row["count"] += 1
+            emotion_row["seconds"] += duration
+        for code_id in annotation.get("codes", []):
+            bucket["code_counts"][code_id] += 1
+
+    valid_included = [
+        item for item in included
+        if item["valid_time"] and float(item["end"]) > float(item["start"])
+    ]
+    physical_timeline = [
+        item for item in timeline
+        if item["valid_time"] and float(item["end"]) > float(item["start"])
+    ]
+
+    total_speaking = sum(float(item["speaking_seconds"]) for item in speaker_buckets.values())
+    actual_participant_labels = [
+        label for label, item in speaker_buckets.items()
+        if item["role"] not in ANALYSIS_NON_PARTICIPANT_ROLES
+    ]
+    balance_labels = (
+        actual_participant_labels
+        if config["exclude_moderator"]
+        else list(speaker_buckets)
+    )
+    balance_total = sum(
+        float(speaker_buckets[label]["speaking_seconds"]) for label in balance_labels
+    )
+    actual_participant_total = sum(
+        float(speaker_buckets[label]["speaking_seconds"])
+        for label in actual_participant_labels
+    )
+    speaker_metrics: list[dict[str, Any]] = []
+    for label, bucket in sorted(
+        speaker_buckets.items(),
+        key=lambda pair: (-float(pair[1]["speaking_seconds"]), pair[1]["speaker_name"]),
+    ):
+        seconds = float(bucket["speaking_seconds"])
+        turns = int(bucket["turn_count"])
+        participant_share = (
+            seconds / balance_total if label in balance_labels and balance_total > 0 else 0.0
+        )
+        speaker_metrics.append({
+            "speaker": label,
+            "speaker_name": bucket["speaker_name"],
+            "role": bucket["role"],
+            "color": bucket["color"],
+            "turn_count": turns,
+            "speaking_seconds": round(seconds, 3),
+            "speaking_percent": round(100 * seconds / total_speaking, 2) if total_speaking else 0.0,
+            "participant_percent": round(100 * participant_share, 2),
+            "average_turn_seconds": round(seconds / turns, 3) if turns else 0.0,
+            "characters": int(bucket["characters"]),
+            "characters_per_minute": round(60 * int(bucket["characters"]) / seconds, 2) if seconds else 0.0,
+            "question_candidates": int(bucket["question_candidates"]),
+            "first_start": round(float(bucket["first_start"]), 3),
+            "last_end": round(float(bucket["last_end"]), 3),
+            "emotion_counts": dict(bucket["emotion_counts"]),
+            "code_counts": dict(bucket["code_counts"]),
+            "included_in_balance": label in balance_labels,
+        })
+
+    balance_seconds = [
+        float(speaker_buckets[label]["speaking_seconds"]) for label in balance_labels
+    ]
+    balance_shares = [
+        value / balance_total for value in balance_seconds if balance_total > 0
+    ]
+    dominant = max(
+        (item for item in speaker_metrics if item["included_in_balance"]),
+        key=lambda item: item["participant_percent"],
+        default=None,
+    )
+    balance = {
+        "participant_count": len(actual_participant_labels),
+        "participant_speaking_seconds": round(actual_participant_total, 3),
+        "balance_speaker_count": len(balance_labels),
+        "balance_speaking_seconds": round(balance_total, 3),
+        "max_participant_percent": dominant["participant_percent"] if dominant else 0.0,
+        "max_participant_name": dominant["speaker_name"] if dominant else "",
+        "gini": round(analysis_gini(balance_seconds), 4),
+        "normalized_evenness": round(analysis_evenness(balance_seconds), 4),
+        "hhi": round(sum(value * value for value in balance_shares), 4),
+        "denominator": "participant_only" if config["exclude_moderator"] else "all_speakers",
+    }
+
+    transitions: dict[tuple[str, str], dict[str, Any]] = {}
+    overlap_candidates: list[dict[str, Any]] = []
+    consecutive_gaps: list[float] = []
+    moderator_response_gaps: list[float] = []
+    moderator_to_participant = 0
+    participant_to_participant = 0
+    cross_speaker_transitions = 0
+    for previous, current in zip(valid_included, valid_included[1:]):
+        if previous["speaker"] == current["speaker"]:
+            continue
+        gap = float(current["start"]) - float(previous["end"])
+        cross_speaker_transitions += 1
+        consecutive_gaps.append(gap)
+        key = (str(previous["speaker"]), str(current["speaker"]))
+        transition = transitions.setdefault(key, {
+            "from_speaker": previous["speaker"],
+            "from_name": previous["speaker_name"],
+            "from_role": previous["role"],
+            "to_speaker": current["speaker"],
+            "to_name": current["speaker_name"],
+            "to_role": current["role"],
+            "count": 0,
+            "gap_total": 0.0,
+            "overlap_candidates": 0,
+        })
+        transition["count"] += 1
+        transition["gap_total"] += gap
+        overlap_end = min(float(previous["end"]), float(current["end"]))
+        overlap_seconds = max(0.0, overlap_end - float(current["start"]))
+        if (
+            overlap_seconds > 0
+            and overlap_seconds >= float(config["overlap_seconds"])
+        ):
+            transition["overlap_candidates"] += 1
+        previous_moderator = previous["role"] in ANALYSIS_FACILITATOR_ROLES
+        current_participant = current["role"] not in ANALYSIS_NON_PARTICIPANT_ROLES
+        previous_participant = previous["role"] not in ANALYSIS_NON_PARTICIPANT_ROLES
+        if previous_moderator and current_participant:
+            moderator_to_participant += 1
+            if previous["question_candidate"]:
+                moderator_response_gaps.append(gap)
+        if previous_participant and current_participant:
+            participant_to_participant += 1
+
+    transition_rows = []
+    for value in transitions.values():
+        count = int(value["count"])
+        transition_rows.append({
+            **{key: item for key, item in value.items() if key != "gap_total"},
+            "average_gap_seconds": round(float(value["gap_total"]) / count, 3) if count else 0.0,
+        })
+    transition_rows.sort(key=lambda item: (-item["count"], item["from_name"], item["to_name"]))
+
+    overlap_truncated = False
+    active_segments: list[dict[str, Any]] = []
+    for current in physical_timeline:
+        current_start = float(current["start"])
+        active_segments = [
+            item for item in active_segments if float(item["end"]) > current_start
+        ]
+        if len(active_segments) > 1000:
+            active_segments = active_segments[-1000:]
+            overlap_truncated = True
+        for previous in active_segments:
+            if previous["speaker"] == current["speaker"]:
+                continue
+            overlap_end = min(float(previous["end"]), float(current["end"]))
+            seconds = max(0.0, overlap_end - current_start)
+            if seconds <= 0 or seconds < float(config["overlap_seconds"]):
+                continue
+            if len(overlap_candidates) >= 10000:
+                overlap_truncated = True
+                continue
+            overlap_candidates.append({
+                "start": round(current_start, 3),
+                "end": round(overlap_end, 3),
+                "seconds": round(seconds, 3),
+                "from_speaker": previous["speaker"],
+                "from_name": previous["speaker_name"],
+                "to_speaker": current["speaker"],
+                "to_name": current["speaker_name"],
+            })
+        active_segments.append(current)
+
+    long_gaps: list[dict[str, Any]] = []
+    coverage_end = 0.0
+    previous_name = "開始"
+    for segment in physical_timeline:
+        start = float(segment["start"])
+        if start > coverage_end:
+            duration = start - coverage_end
+            if duration >= float(config["long_gap_seconds"]):
+                long_gaps.append({
+                    "start": round(coverage_end, 3),
+                    "end": round(start, 3),
+                    "seconds": round(duration, 3),
+                    "previous_name": previous_name,
+                    "next_name": segment["speaker_name"],
+                })
+        if float(segment["end"]) >= coverage_end:
+            coverage_end = float(segment["end"])
+            previous_name = str(segment["speaker_name"])
+
+    session_duration = max((float(item["end"]) for item in physical_timeline), default=0.0)
+    requested_bin_seconds = int(config["time_bin_seconds"])
+    bin_seconds = requested_bin_seconds
+    if session_duration and math.ceil(session_duration / bin_seconds) > ANALYSIS_MAX_TIME_BINS:
+        bin_seconds = max(
+            requested_bin_seconds,
+            int(math.ceil(session_duration / ANALYSIS_MAX_TIME_BINS)),
+        )
+    bin_count = max(1, int(math.ceil(session_duration / bin_seconds))) if session_duration else 1
+    time_bins = [
+        {
+            "index": index,
+            "start": index * bin_seconds,
+            "end": min((index + 1) * bin_seconds, session_duration) if session_duration else bin_seconds,
+            "speaking_seconds": 0.0,
+            "turn_count": 0,
+            "speakers": Counter(),
+        }
+        for index in range(bin_count)
+    ]
+    for segment in valid_included:
+        start = float(segment["start"])
+        end = float(segment["end"])
+        if end <= start:
+            continue
+        first_bin = min(int(start // bin_seconds), bin_count - 1)
+        last_bin = min(int(max(start, end - 0.000001) // bin_seconds), bin_count - 1)
+        time_bins[first_bin]["turn_count"] += 1
+        for index in range(first_bin, last_bin + 1):
+            piece_start = max(start, index * bin_seconds)
+            piece_end = min(end, (index + 1) * bin_seconds)
+            seconds = max(0.0, piece_end - piece_start)
+            time_bins[index]["speaking_seconds"] += seconds
+            time_bins[index]["speakers"][segment["speaker"]] += seconds
+    serialized_bins = [{
+        **{key: value for key, value in item.items() if key != "speakers"},
+        "speaking_seconds": round(float(item["speaking_seconds"]), 3),
+        "speakers": [
+            {
+                "speaker": key,
+                "speaker_name": speaker_buckets.get(key, {}).get("speaker_name", key),
+                "seconds": round(value, 3),
+            }
+            for key, value in item["speakers"].items()
+        ],
+    } for item in time_bins]
+
+    stop_words = set(config["stop_words"])
+    keyword_pairs = text_mining_terms(included, limit=30, extra_stop_words=stop_words)
+    speaker_segments: dict[str, list[dict[str, Any]]] = {}
+    for item in included:
+        speaker_segments.setdefault(item["speaker"], []).append(item)
+    speaker_term_counts = {
+        speaker: text_mining_counter(values, stop_words)
+        for speaker, values in speaker_segments.items()
+    }
+    keywords = []
+    for term, count in keyword_pairs:
+        by_speaker = []
+        for metric in speaker_metrics:
+            occurrences = int(speaker_term_counts.get(metric["speaker"], Counter()).get(term, 0))
+            if occurrences:
+                by_speaker.append({
+                    "speaker": metric["speaker"],
+                    "speaker_name": metric["speaker_name"],
+                    "count": occurrences,
+                })
+        keywords.append({"term": term, "count": count, "by_speaker": by_speaker})
+
+    code_metrics = []
+    for code_id, code in codebook.items():
+        coded = [item for item in included if code_id in item["annotation"].get("codes", [])]
+        code_metrics.append({
+            **code,
+            "segment_count": len(coded),
+            "speaking_seconds": round(sum(float(item["duration"]) for item in coded), 3),
+            "characters": sum(int(item["characters"]) for item in coded),
+            "speaker_count": len({item["speaker"] for item in coded}),
+            "important_count": sum(1 for item in coded if item["annotation"].get("important")),
+        })
+    interaction_counts = Counter(
+        tag
+        for item in included
+        for tag in item["annotation"].get("interaction_tags", [])
+    )
+    interaction_summary = [
+        {"tag": key, "label": label, "count": int(interaction_counts.get(key, 0))}
+        for key, label in ANALYSIS_INTERACTION_TAGS.items()
+    ]
+    case_code_matrix = []
+    for metric in speaker_metrics:
+        case_code_matrix.append({
+            "speaker": metric["speaker"],
+            "speaker_name": metric["speaker_name"],
+            "role": metric["role"],
+            "codes": [
+                {
+                    "code_id": code_id,
+                    "code_label": code["label"],
+                    "count": int(metric["code_counts"].get(code_id, 0)),
+                }
+                for code_id, code in codebook.items()
+            ],
+        })
+
+    groups: dict[str, dict[str, Any]] = {}
+    if config["group_by"] != "none":
+        for metric in speaker_metrics:
+            profile = profiles.get(metric["speaker"], {})
+            if config["group_by"] == "role":
+                group_name = str(metric["role"] or "未設定")
+            else:
+                group_name = str(profile.get(config["group_by"]) or "未設定")
+            group = groups.setdefault(group_name, {
+                "group": group_name, "speaker_count": 0, "turn_count": 0,
+                "speaking_seconds": 0.0, "characters": 0,
+            })
+            group["speaker_count"] += 1
+            group["turn_count"] += int(metric["turn_count"])
+            group["speaking_seconds"] += float(metric["speaking_seconds"])
+            group["characters"] += int(metric["characters"])
+    group_rows = [{
+        **value,
+        "speaking_seconds": round(float(value["speaking_seconds"]), 3),
+        "speaking_percent": round(100 * float(value["speaking_seconds"]) / total_speaking, 2) if total_speaking else 0.0,
+    } for value in groups.values()]
+
+    moderator_seconds = sum(
+        float(item["speaking_seconds"])
+        for item in speaker_metrics if item["role"] in ANALYSIS_FACILITATOR_ROLES
+    )
+    moderator = {
+        "assigned": any(
+            item["role"] in ANALYSIS_FACILITATOR_ROLES for item in speaker_metrics
+        ),
+        "speaking_seconds": round(moderator_seconds, 3),
+        "speaking_percent": round(100 * moderator_seconds / total_speaking, 2) if total_speaking else 0.0,
+        "question_candidates": sum(
+            int(item["question_candidates"])
+            for item in speaker_metrics if item["role"] in ANALYSIS_FACILITATOR_ROLES
+        ),
+        "participant_responses": len(moderator_response_gaps),
+        "moderator_to_participant_transitions": moderator_to_participant,
+        "average_response_gap_seconds": round(
+            sum(moderator_response_gaps) / len(moderator_response_gaps), 3
+        ) if moderator_response_gaps else None,
+        "participant_to_participant_transitions": participant_to_participant,
+        "cross_speaker_transitions": cross_speaker_transitions,
+    }
+
+    observations: list[dict[str, str]] = []
+    if dominant and float(dominant["participant_percent"]) >= 50:
+        observations.append({
+            "level": "attention",
+            "label": "発話時間の集中候補",
+            "message": f"{dominant['speaker_name']}の参加者内発話時間が{dominant['participant_percent']:.1f}%です。重要性や影響力を意味する値ではありません。",
+        })
+    low_names = [
+        item["speaker_name"] for item in speaker_metrics
+        if item["included_in_balance"]
+        and float(item["participant_percent"]) < float(config["low_participation_percent"])
+    ]
+    if low_names:
+        observations.append({
+            "level": "attention",
+            "label": "発言機会の確認候補",
+            "message": f"設定した{config['low_participation_percent']:g}%未満: {', '.join(low_names)}。沈黙の意味は記録・文脈と合わせて判断してください。",
+        })
+    if moderator["speaking_percent"] >= 40:
+        observations.append({
+            "level": "attention",
+            "label": "司会発話比率の確認",
+            "message": f"司会・進行役の発話時間は全体の{moderator['speaking_percent']:.1f}%です。進行品質の得点ではありません。",
+        })
+    if long_gaps:
+        observations.append({
+            "level": "info", "label": "長い無音候補",
+            "message": f"{config['long_gap_seconds']:g}秒以上の無音候補が{len(long_gaps)}件あります。無音の理由は自動判定できません。",
+        })
+    if overlap_candidates:
+        observations.append({
+            "level": "info", "label": "発話重なり候補",
+            "message": f"{config['overlap_seconds']:g}秒以上の時間重なり候補が{len(overlap_candidates)}件あります。遮りとは断定しません。",
+        })
+
+    context_checks = [
+        {"id": "research_question", "label": "研究質問", "ready": bool(config["research_question"]), "kind": "manual"},
+        {"id": "objective", "label": "会話目的", "ready": bool(session_profile.get("objective")), "kind": "manual"},
+        {"id": "moderator", "label": "司会・進行役", "ready": moderator["assigned"], "kind": "manual"},
+        {
+            "id": "participant_roles",
+            "label": "話者役割",
+            "ready": bool(speaker_metrics) and all(
+                isinstance(raw_profiles.get(item["speaker"]), dict)
+                and bool(raw_profiles[item["speaker"]].get("session_role"))
+                for item in speaker_metrics
+            ),
+            "kind": "manual",
+        },
+        {"id": "guide", "label": "質問ガイド・議題", "ready": bool(session_profile.get("moderator_guide")), "kind": "manual"},
+        {"id": "conditions", "label": "参加条件・グループ条件", "ready": bool(session_profile.get("group_conditions")), "kind": "manual"},
+        {"id": "field_notes", "label": "観察・フィールドノート", "ready": bool(session_profile.get("field_notes")), "kind": "manual"},
+        {"id": "codebook", "label": "コードブック", "ready": bool(codebook), "kind": "manual"},
+        {
+            "id": "coding",
+            "label": "手動コーディング",
+            "ready": any(
+                value.get("codes") or value.get("interaction_tags")
+                for value in annotations.values()
+            ),
+            "kind": "manual",
+        },
+    ]
+
+    return {
+        "schema_version": 1,
+        "algorithm_version": "focus-group-local-1",
+        "generated_at": utc_now_iso(),
+        "item": {
+            "id": row["id"],
+            "source_name": row["source_name"],
+            "revision_count": int(row["revision_count"] or 0),
+            "analysis_revision": int(row["analysis_revision"] or 0),
+            "analysis_updated_at": row["analysis_updated_at"],
+            "updated_at": row["updated_at"],
+            "session_profile": session_profile,
+        },
+        "config": config,
+        "annotations": annotations,
+        "classification": {
+            "automatic": ["発話量", "参加バランス", "話者遷移", "無音・重なり候補", "簡易頻出語", "感情分布"],
+            "configured": ["司会除外", "比較属性", "判定しきい値", "ストップワード", "コードブック"],
+            "manual": ["コード適用", "テーマ構築", "相互作用の意味", "司会影響", "重要引用", "研究上の解釈"],
+        },
+        "cautions": [
+            "発話時間の多さは重要性・影響力を意味しません。",
+            "簡易頻出語は重要テーマではありません。",
+            "発話遷移は影響関係を意味しません。",
+            "無音や重なりの意味、合意・対立、テーマは研究者が文脈とともに確認してください。",
+            "音声感情モデルの推定は本人の感情を確定するものではありません。",
+            "COREQは研究品質の得点ではなく、報告項目の確認に用います。",
+        ],
+        "automatic": {
+            "overview": {
+                "session_duration": round(session_duration, 3),
+                "segment_count": len(timeline),
+                "included_segment_count": len(included),
+                "speaker_count": len(speaker_metrics),
+                "participant_count": len(actual_participant_labels),
+                "total_speaking_seconds": round(total_speaking, 3),
+                "average_cross_speaker_gap_seconds": round(sum(consecutive_gaps) / len(consecutive_gaps), 3) if consecutive_gaps else None,
+            },
+            "speaker_metrics": speaker_metrics,
+            "balance": balance,
+            "moderator": moderator,
+            "transitions": transition_rows,
+            "long_gaps": long_gaps,
+            "overlap_candidates": overlap_candidates,
+                "time_bins": serialized_bins,
+                "requested_time_bin_seconds": requested_bin_seconds,
+                "effective_time_bin_seconds": bin_seconds,
+            "keywords": keywords,
+            "emotions": [{**value, "seconds": round(float(value["seconds"]), 3)} for value in emotion_rows.values()],
+            "groups": group_rows,
+            "observations": observations,
+            "data_quality": {
+                "unknown_speaker_segments": sum(1 for item in timeline if item["speaker"] == "UNKNOWN"),
+                "empty_text_segments": empty_text_count,
+                "zero_duration_segments": zero_duration_count,
+                "invalid_time_segments": invalid_time_count,
+                "overlap_candidates_truncated": overlap_truncated,
+                "emotion_coverage_percent": round(100 * emotion_covered / len(timeline), 2) if timeline else 0.0,
+                "excluded_segments": sum(1 for item in timeline if item["excluded"]),
+            },
+        },
+        "manual": {
+            "codebook": list(codebook.values()),
+            "code_metrics": code_metrics,
+            "interaction_tags": [
+                {"id": key, "label": label} for key, label in ANALYSIS_INTERACTION_TAGS.items()
+            ],
+            "interaction_summary": interaction_summary,
+            "case_code_matrix": case_code_matrix,
+            "coded_segment_count": sum(1 for item in included if item["annotation"].get("codes")),
+            "important_quote_count": sum(1 for item in included if item["annotation"].get("important")),
+            "context_checks": context_checks,
+            "analyst_memo": config["analyst_memo"],
+            "interpretation_status": config["interpretation_status"],
+            "orphaned_annotation_count": len(orphaned_annotations),
+            "orphaned_annotations": [
+                {"segment_id": segment_id, **value}
+                for segment_id, value in orphaned_annotations.items()
+            ],
+        },
+        "segments": timeline,
+        "exports": {
+            "json": f"/api/library/{row['id']}/analysis/export.json",
+            "speakers": f"/api/library/{row['id']}/analysis/export.csv?dataset=speakers",
+            "transitions": f"/api/library/{row['id']}/analysis/export.csv?dataset=transitions",
+            "gaps": f"/api/library/{row['id']}/analysis/export.csv?dataset=gaps",
+            "overlaps": f"/api/library/{row['id']}/analysis/export.csv?dataset=overlaps",
+            "keywords": f"/api/library/{row['id']}/analysis/export.csv?dataset=keywords",
+            "emotions": f"/api/library/{row['id']}/analysis/export.csv?dataset=emotions",
+            "timeline": f"/api/library/{row['id']}/analysis/export.csv?dataset=timeline",
+            "codes": f"/api/library/{row['id']}/analysis/export.csv?dataset=codes",
+            "groups": f"/api/library/{row['id']}/analysis/export.csv?dataset=groups",
+            "coded_segments": f"/api/library/{row['id']}/analysis/export.csv?dataset=coded_segments",
+            "interactions": f"/api/library/{row['id']}/analysis/export.csv?dataset=interactions",
+            "case_matrix": f"/api/library/{row['id']}/analysis/export.csv?dataset=case_matrix",
+            "context": f"/api/library/{row['id']}/analysis/export.csv?dataset=context",
+            "summary": f"/api/library/{row['id']}/analysis/export.csv?dataset=summary",
+            "observations": f"/api/library/{row['id']}/analysis/export.csv?dataset=observations",
+            "important_quotes": f"/api/library/{row['id']}/analysis/export.csv?dataset=important_quotes",
+        },
+    }
+
+
+ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
+    "speakers": [
+        "speaker", "speaker_name", "role", "turn_count", "speaking_seconds",
+        "speaking_percent", "participant_percent", "average_turn_seconds",
+        "characters", "characters_per_minute", "question_candidates",
+        "first_start", "last_end", "included_in_balance", "emotion_counts",
+        "code_counts",
+    ],
+    "transitions": [
+        "from_speaker", "from_name", "from_role", "to_speaker", "to_name",
+        "to_role", "count", "average_gap_seconds", "overlap_candidates",
+    ],
+    "gaps": ["start", "end", "seconds", "previous_name", "next_name"],
+    "overlaps": [
+        "start", "end", "seconds", "from_speaker", "from_name",
+        "to_speaker", "to_name",
+    ],
+    "keywords": ["term", "count", "by_speaker"],
+    "emotions": [
+        "speaker", "speaker_name", "model", "model_name", "label", "emotion",
+        "count", "seconds",
+    ],
+    "timeline": [
+        "index", "start", "end", "speaking_seconds", "turn_count", "speakers",
+    ],
+    "codes": [
+        "id", "label", "description", "include_example", "exclude_example",
+        "color", "segment_count", "speaking_seconds", "characters",
+        "speaker_count", "important_count",
+    ],
+    "groups": [
+        "group", "speaker_count", "turn_count", "speaking_seconds",
+        "speaking_percent", "characters",
+    ],
+    "coded_segments": [
+        "segment_id", "start", "end", "duration", "speaker", "speaker_name",
+        "role", "text", "code_ids", "code_labels", "interaction_tags", "memo",
+        "important", "excluded",
+    ],
+    "interactions": ["tag", "label", "count"],
+    "case_matrix": ["speaker", "speaker_name", "role", "codes"],
+    "context": ["id", "label", "ready", "kind"],
+    "summary": ["section", "metric", "value"],
+    "observations": ["level", "label", "message"],
+    "important_quotes": [
+        "segment_id", "start", "end", "speaker", "speaker_name", "role", "text",
+        "code_labels", "memo", "excluded",
+    ],
+}
+
+
+def analysis_csv_safe(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if not isinstance(value, str):
+        return value
+    visible = value.lstrip(" \t\r\n")
+    if visible.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
+def analysis_csv_rows(
+    analysis: dict[str, Any],
+    dataset: str,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    automatic = analysis["automatic"]
+    manual = analysis["manual"]
+    code_labels = {
+        str(item["id"]): str(item["label"]) for item in manual["codebook"]
+    }
+    coded_segments = []
+    important_quotes = []
+    for segment in analysis["segments"]:
+        annotation = segment["annotation"]
+        labels = [
+            code_labels.get(str(code_id), str(code_id))
+            for code_id in annotation.get("codes", [])
+        ]
+        row = {
+            "segment_id": segment["id"],
+            "start": segment["start"],
+            "end": segment["end"],
+            "duration": segment["duration"],
+            "speaker": segment["speaker"],
+            "speaker_name": segment["speaker_name"],
+            "role": segment["role"],
+            "text": segment["text"],
+            "code_ids": annotation.get("codes", []),
+            "code_labels": labels,
+            "interaction_tags": annotation.get("interaction_tags", []),
+            "memo": annotation.get("memo", ""),
+            "important": annotation.get("important", False),
+            "excluded": segment.get("excluded", False),
+        }
+        if any((
+            row["code_ids"], row["interaction_tags"], row["memo"],
+            row["important"], row["excluded"],
+        )):
+            coded_segments.append(row)
+        if row["important"] and not row["excluded"]:
+            important_quotes.append(row)
+    summary_rows = [
+        {"section": section, "metric": key, "value": value}
+        for section, values in (
+            ("overview", automatic["overview"]),
+            ("balance", automatic["balance"]),
+            ("moderator", automatic["moderator"]),
+            ("data_quality", automatic["data_quality"]),
+        )
+        for key, value in values.items()
+    ]
+    sources: dict[str, list[dict[str, Any]]] = {
+        "speakers": automatic["speaker_metrics"],
+        "transitions": automatic["transitions"],
+        "gaps": automatic["long_gaps"],
+        "overlaps": automatic["overlap_candidates"],
+        "keywords": automatic["keywords"],
+        "emotions": automatic["emotions"],
+        "timeline": automatic["time_bins"],
+        "codes": manual["code_metrics"],
+        "groups": automatic["groups"],
+        "coded_segments": coded_segments,
+        "interactions": manual["interaction_summary"],
+        "case_matrix": manual["case_code_matrix"],
+        "context": manual["context_checks"],
+        "summary": summary_rows,
+        "observations": automatic["observations"],
+        "important_quotes": important_quotes,
+    }
+    if dataset not in ANALYSIS_CSV_FIELDS:
+        raise ValueError("出力する分析データの種類が正しくありません。")
+    common = {
+        "schema_version": analysis["schema_version"],
+        "item_id": analysis["item"]["id"],
+        "source_name": analysis["item"]["source_name"],
+        "revision_count": analysis["item"]["revision_count"],
+        "analysis_revision": analysis["item"]["analysis_revision"],
+        "analysis_updated_at": analysis["item"]["analysis_updated_at"],
+        "generated_at": analysis["generated_at"],
+        "algorithm_version": analysis["algorithm_version"],
+    }
+    rows = [{**common, **dict(value)} for value in sources[dataset]]
+    fields = list(common) + ANALYSIS_CSV_FIELDS[dataset]
+    return fields, rows
+
+
+def analysis_csv_content(analysis: dict[str, Any], dataset: str) -> bytes:
+    fields, rows = analysis_csv_rows(analysis, dataset)
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: analysis_csv_safe(row.get(key)) for key in fields})
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def save_group_analysis(item_id: str, payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("分析設定はJSONオブジェクトで送信してください。")
+    row = library_row(item_id)
+    if row is None:
+        raise LookupError("処理済みデータが見つかりません。")
+    missing_revisions = [
+        key for key in ("source_revision", "analysis_revision") if key not in payload
+    ]
+    if missing_revisions:
+        raise ValueError("保存前に分析データを再読み込みしてください。")
+    if "config" in payload and not isinstance(payload["config"], dict):
+        raise ValueError("分析設定の形式が正しくありません。")
+    provided_config = payload.get("config")
+    if (
+        isinstance(provided_config, dict)
+        and "exclude_moderator" in provided_config
+        and not isinstance(provided_config["exclude_moderator"], bool)
+    ):
+        raise ValueError("司会・運営役の除外設定はtrueまたはfalseで指定してください。")
+    if "annotations" in payload and not isinstance(payload["annotations"], dict):
+        raise ValueError("発話注釈の形式が正しくありません。")
+    provided_annotations = payload.get("annotations")
+    if isinstance(provided_annotations, dict):
+        for index, value in enumerate(provided_annotations.values()):
+            if index >= 100000:
+                break
+            if not isinstance(value, dict):
+                continue
+            for key in ("important", "excluded"):
+                if key in value and not isinstance(value[key], bool):
+                    raise ValueError(f"注釈の{key}はtrueまたはfalseで指定してください。")
+    segments = row_segments(row)
+    source_revision = int(row["revision_count"] or 0)
+    analysis_revision = int(row["analysis_revision"] or 0)
+    for key, actual in (
+        ("source_revision", source_revision),
+        ("analysis_revision", analysis_revision),
+    ):
+        if key not in payload:
+            continue
+        try:
+            expected = int(payload[key])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} が正しくありません。") from exc
+        if expected != actual:
+            raise AnalysisConflictError(
+                "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
+            )
+    current_config = row_analysis_config(row)
+    current_annotations, orphaned_annotations = row_analysis_annotation_state(
+        row, segments, current_config
+    )
+    config_source = payload.get("config", current_config)
+    config = normalize_analysis_config(config_source)
+    annotations_source = payload.get("annotations", current_annotations)
+    annotations = normalize_analysis_annotations(annotations_source, segments, config)
+    stored_annotations = {**orphaned_annotations, **annotations}
+    now = utc_now_iso()
+    with database_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE library_items SET
+                analysis_config_json = ?, analysis_annotations_json = ?,
+                analysis_revision = analysis_revision + 1, analysis_updated_at = ?
+            WHERE id = ? AND revision_count = ? AND analysis_revision = ?
+            """,
+            (
+                json.dumps(config, ensure_ascii=False),
+                json.dumps(stored_annotations, ensure_ascii=False),
+                now,
+                item_id,
+                source_revision,
+                analysis_revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise AnalysisConflictError(
+                "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
+            )
+    updated = library_row(item_id)
+    if updated is None:
+        raise LookupError("処理済みデータが見つかりません。")
+    return group_analysis_for_row(updated)
 
 
 WORD_CLOUD_SLOTS = (
@@ -4222,6 +5398,78 @@ def get_library_item(item_id: str):
     if row is None:
         return jsonify({"error": "データが見つかりません。"}), 404
     return jsonify(library_public(row))
+
+
+@app.get("/api/library/<item_id>/analysis")
+def get_library_analysis(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+    try:
+        return jsonify(group_analysis_for_row(row))
+    except (ValueError, TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "分析データを生成できません。元データを確認してください。"}), 500
+
+
+@app.put("/api/library/<item_id>/analysis")
+def update_library_analysis(item_id: str):
+    if request.content_length and request.content_length > 16 * 1024 * 1024:
+        return jsonify({"error": "分析設定が大きすぎます。"}), 413
+    try:
+        return jsonify(save_group_analysis(item_id, request.get_json(silent=True)))
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except AnalysisConflictError as exc:
+        return jsonify({"error": str(exc), "conflict": True}), 409
+    except sqlite3.Error:
+        return jsonify({"error": "分析設定を保存できません。"}), 500
+
+
+@app.get("/api/library/<item_id>/analysis/export.json")
+def export_library_analysis_json(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+    try:
+        analysis = group_analysis_for_row(row)
+        content = json.dumps(
+            analysis,
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (ValueError, TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "分析データを出力できません。元データを確認してください。"}), 500
+    return send_file(
+        io.BytesIO(content),
+        mimetype="application/json; charset=utf-8",
+        as_attachment=True,
+        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_analysis.json",
+    )
+
+
+@app.get("/api/library/<item_id>/analysis/export.csv")
+def export_library_analysis_csv(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+    dataset = request.args.get("dataset", "speakers").strip().lower()
+    try:
+        content = analysis_csv_content(group_analysis_for_row(row), dataset)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "分析データを出力できません。元データを確認してください。"}), 500
+    return send_file(
+        io.BytesIO(content),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name=(
+            f"{safe_output_stem(str(row['source_name']))[:64]}_analysis_{dataset}.csv"
+        ),
+    )
 
 
 @app.get("/api/library/<item_id>/speakers.csv")

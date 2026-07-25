@@ -110,6 +110,43 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("@media (min-width: 960px)", styles)
         self.assertIn("@media (max-width: 959px)", styles)
 
+    def test_analysis_has_separate_responsive_workspace_and_manual_boundaries(self):
+        response = app.app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertEqual(
+            len(re.findall(r'class="[^"]*\bview-tab\b[^"]*"', page)),
+            4,
+        )
+        self.assertIn('id="show-analysis-button"', page)
+        self.assertIn('id="analysis-card"', page)
+        self.assertIn('class="analysis-desktop-layout desktop-only"', page)
+        self.assertIn('class="analysis-mobile-layout mobile-only"', page)
+        self.assertIn("自動集計", page)
+        self.assertIn("要設定", page)
+        self.assertIn("要確認・解釈", page)
+        self.assertIn('id="analysis-json-export"', page)
+
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("async function loadAnalysisCatalog(", script)
+        self.assertIn("async function loadAnalysisItem(", script)
+        self.assertIn("function renderAutomaticAnalysis(", script)
+        self.assertIn("function renderManualAnalysis(", script)
+        self.assertIn("async function saveAnalysis(", script)
+        self.assertIn("source_revision:", script)
+        self.assertIn("analysis_revision:", script)
+        self.assertIn("['coded_segments', 'コード済み発話 CSV']", script)
+        self.assertIn("['overlaps', '重なり候補 CSV']", script)
+        self.assertNotIn("participant: '参加者単位'", script)
+        self.assertNotIn("topic: 'テーマ単位'", script)
+
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".analysis-desktop-layout", styles)
+        self.assertIn(".analysis-mobile-layout", styles)
+        self.assertIn("grid-template-columns: repeat(2, 1fr)", styles)
+        self.assertIn(".analysis-save-bar", styles)
+
 
 if __name__ == "__main__":
     unittest.main()
