@@ -54,94 +54,162 @@
     <main>
       <nav class="view-tabs" aria-label="表示切り替え" role="tablist">
         <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="job-form" aria-selected="true">＋ 新規作成</button>
-        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card" aria-selected="false">処理済みデータ</button>
-        <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者台帳</button>
+        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card result-card" aria-selected="false">処理済みデータ</button>
+        <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者管理</button>
       </nav>
 
-      <section id="library-card" class="library-card" hidden>
+      <section id="library-card" class="library-card" role="tabpanel" aria-labelledby="show-library-button library-title" hidden>
         <div class="library-header">
           <div>
             <p class="eyebrow">TRANSCRIPT LIBRARY</p>
-            <h2>処理済みデータ</h2>
-            <p>文字起こしを検索・閲覧し、編集、削除、手動追加できます。</p>
+            <h2 id="library-title">処理済みデータ</h2>
+            <p>過去の文字起こしをすばやく探し、内容の確認・修正・再利用ができます。</p>
           </div>
-          <button id="add-record-button" class="secondary-button" type="button">＋ 空のデータを追加</button>
+          <div class="library-header-actions">
+            <button id="library-refresh-button" class="secondary-button compact-button" type="button">↻ 更新</button>
+            <button id="add-record-button" class="secondary-button" type="button">空のデータを追加</button>
+            <button id="library-create-new-button" class="primary-button small" type="button">＋ 新しい文字起こし</button>
+          </div>
         </div>
-        <div class="library-filters">
-          <label class="field filter-keyword">
-            <span>キーワード</span>
-            <input id="library-keyword" type="search" placeholder="本文・ファイル名を検索">
-          </label>
-          <label class="field">
-            <span>話者</span>
-            <select id="library-speaker"><option value="">すべての話者</option></select>
-          </label>
-          <label class="field">
-            <span>感情</span>
-            <select id="library-emotion"><option value="">すべての感情</option></select>
-          </label>
-          <label class="field">
-            <span>並べ替え</span>
-            <select id="library-sort">
-              <option value="updated_desc">更新が新しい順</option>
-              <option value="created_desc">作成が新しい順</option>
-              <option value="name">名前順</option>
-              <option value="speaker">話者別</option>
-              <option value="emotion">感情別</option>
-              <option value="keyword">キーワード一致数順</option>
-            </select>
-          </label>
+
+        <div class="library-overview" aria-label="処理済みデータの概要">
+          <div><span>表示中</span><strong id="library-total-metric">—</strong><small>件</small></div>
+          <div><span>合計時間</span><strong id="library-duration-metric">—</strong></div>
+          <div><span>話者</span><strong id="library-speaker-metric">—</strong><small>人</small></div>
+          <div><span>最終更新</span><strong id="library-updated-metric">—</strong></div>
         </div>
-        <div class="library-status-row">
-          <p id="library-count">読み込んでいます…</p>
-          <div id="training-status" class="training-status"></div>
+
+        <button id="library-filter-toggle" class="library-filter-toggle mobile-only" type="button" aria-expanded="false" aria-controls="library-filter-panel">
+          <span>検索・絞り込み</span><strong id="library-filter-badge">条件なし</strong>
+        </button>
+
+        <div class="library-workspace">
+          <aside id="library-filter-panel" class="library-filter-panel" aria-label="検索・絞り込み">
+            <div class="library-filter-heading">
+              <div><span>FILTERS</span><strong>データを絞り込む</strong></div>
+              <button id="library-clear-filters" type="button">条件をクリア</button>
+            </div>
+            <div class="library-filters">
+              <label class="field filter-keyword">
+                <span>キーワード</span>
+                <input id="library-keyword" type="search" placeholder="本文・ファイル名を検索">
+              </label>
+              <label class="field">
+                <span>話者</span>
+                <select id="library-speaker"><option value="">すべての話者</option></select>
+              </label>
+              <label class="field">
+                <span>感情</span>
+                <select id="library-emotion"><option value="">すべての感情</option></select>
+              </label>
+              <label class="field">
+                <span>並べ替え</span>
+                <select id="library-sort">
+                  <option value="updated_desc">更新が新しい順</option>
+                  <option value="created_desc">作成が新しい順</option>
+                  <option value="name">名前順</option>
+                  <option value="speaker">話者別</option>
+                  <option value="emotion">感情別</option>
+                  <option value="keyword">キーワード一致数順</option>
+                </select>
+              </label>
+            </div>
+            <p id="library-filter-summary" class="library-filter-summary">すべてのデータを表示しています</p>
+          </aside>
+
+          <div class="library-results">
+            <div class="library-status-row">
+              <p id="library-count" aria-live="polite">読み込んでいます…</p>
+              <div id="training-status" class="training-status"></div>
+            </div>
+            <div id="library-message" class="alert error" role="alert" hidden></div>
+            <div id="library-list" class="library-list" aria-live="polite"></div>
+          </div>
         </div>
-        <div id="library-message" class="alert error" hidden></div>
-        <div id="library-list" class="library-list"></div>
       </section>
 
-      <section id="speaker-registry-card" class="speaker-registry-card" hidden>
+      <dialog id="add-record-dialog" class="app-dialog" aria-labelledby="add-record-dialog-title">
+        <form id="add-record-form" method="dialog">
+          <div class="app-dialog-header">
+            <p class="eyebrow">MANUAL RECORD</p>
+            <h2 id="add-record-dialog-title">空のデータを追加</h2>
+            <p>音声がない記録や、あとから発話を手入力したい場合に使います。</p>
+          </div>
+          <label class="field">
+            <span>データ名</span>
+            <input id="add-record-name" type="text" maxlength="255" placeholder="例：7月26日 定例会議" required>
+          </label>
+          <div id="add-record-error" class="alert error" role="alert" hidden></div>
+          <div class="app-dialog-actions">
+            <button id="cancel-add-record-button" class="secondary-button" type="button">キャンセル</button>
+            <button id="confirm-add-record-button" class="primary-button small" type="submit">追加して編集</button>
+          </div>
+        </form>
+      </dialog>
+
+      <section id="speaker-registry-card" class="speaker-registry-card" role="tabpanel" aria-labelledby="show-speakers-button speaker-management-title" hidden>
         <div class="registry-header">
           <div>
-            <p class="eyebrow">GLOBAL SPEAKER REGISTRY</p>
-            <h2>グローバル話者台帳</h2>
-            <p>参加者・司会・観察者・会議メンバーを会話横断で管理します。個人情報はこのPC内に保存されます。</p>
+            <p class="eyebrow">SPEAKER MANAGEMENT</p>
+            <h2 id="speaker-management-title">話者管理</h2>
+            <p>参加者・司会・観察者・会議メンバーの属性や同意状況を、会話をまたいで一元管理します。</p>
           </div>
           <div class="registry-actions">
-            <button id="add-speaker-button" class="secondary-button" type="button">＋ 話者を追加</button>
-            <button id="import-speakers-button" class="secondary-button" type="button">Google Forms CSV</button>
+            <button id="import-speakers-button" class="secondary-button" type="button">CSVを読み込む</button>
             <a class="secondary-button registry-export" href="/api/speakers/export.csv" download>CSVを書き出す</a>
-            <button id="save-speakers-button" class="primary-button small" type="button">台帳を保存</button>
+            <button id="add-speaker-button" class="primary-button small" type="button">＋ 新しい話者</button>
             <input id="speaker-csv-input" class="visually-hidden" type="file" accept=".csv,text/csv">
           </div>
         </div>
-        <div class="registry-guide">
-          <strong>Googleフォーム連携</strong>
-          <span>フォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。未知の質問列も追加属性として保持します。</span>
+
+        <div class="registry-overview" aria-label="話者管理の概要">
+          <div><span>登録話者</span><strong id="registry-total-metric">—</strong><small>人</small></div>
+          <div><span>有効</span><strong id="registry-active-metric">—</strong><small>人</small></div>
+          <div><span>同意確認済み</span><strong id="registry-consent-metric">—</strong><small>人</small></div>
+          <div><span>保存状態</span><strong id="registry-dirty-metric">確認中</strong></div>
         </div>
-        <div class="registry-toolbar">
-          <label class="field"><span>台帳を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ"></label>
-          <label class="field"><span>役割</span><select id="speaker-registry-role-filter"><option value="">すべて</option></select></label>
-          <label class="mini-check"><input id="speaker-registry-show-inactive" type="checkbox" checked>無効な話者も表示</label>
-          <p id="speaker-registry-count">読み込んでいます…</p>
+
+        <details class="registry-guide">
+          <summary>Googleフォーム・CSVとの連携方法</summary>
+          <p>Googleフォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。未知の質問列も追加属性として保持します。</p>
+        </details>
+
+        <div class="registry-toolbar-shell">
+          <div class="registry-toolbar">
+            <label class="field"><span>話者を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ"></label>
+            <label class="field"><span>役割</span><select id="speaker-registry-role-filter"><option value="">すべての役割</option></select></label>
+            <label class="mini-check"><input id="speaker-registry-show-inactive" type="checkbox" checked>無効な話者も表示</label>
+            <button id="speaker-registry-clear-filters" class="secondary-button compact-button" type="button">条件をクリア</button>
+          </div>
+          <p id="speaker-registry-count" aria-live="polite">読み込んでいます…</p>
         </div>
-        <div id="speaker-registry-message" class="alert" hidden></div>
+
+        <div id="speaker-registry-message" class="alert" role="alert" hidden></div>
         <div class="spreadsheet-shell">
-          <table class="speaker-sheet">
+          <table class="speaker-sheet" aria-label="話者管理表">
             <thead>
               <tr>
-                <th>有効</th><th>参加者コード</th><th>氏名</th><th>仮名・表示名</th>
-                <th>既定役割</th><th>組織</th><th>部署</th><th>役職</th>
-                <th>研究同意</th><th>録音同意</th><th>守秘同意</th>
-                <th>タグ</th><th>追加属性</th><th>備考</th><th></th>
+                <th scope="col">有効</th><th scope="col">参加者コード</th><th scope="col">氏名</th><th scope="col">仮名・表示名</th>
+                <th scope="col">既定役割</th><th scope="col">組織</th><th scope="col">部署</th><th scope="col">役職</th>
+                <th scope="col">研究同意</th><th scope="col">録音同意</th><th scope="col">守秘同意</th>
+                <th scope="col">タグ</th><th scope="col">追加属性</th><th scope="col">備考</th><th scope="col">操作</th>
               </tr>
             </thead>
             <tbody id="speaker-registry-body"></tbody>
           </table>
         </div>
+        <div id="speaker-registry-list" class="speaker-registry-list" aria-live="polite"></div>
+
+        <div class="registry-save-bar">
+          <div>
+            <strong id="registry-save-state">保存済み</strong>
+            <span>変更内容は「変更を保存」でこのPCに反映されます。</span>
+          </div>
+          <button id="save-speakers-button" class="primary-button small" type="button" disabled>変更を保存</button>
+        </div>
       </section>
 
-      <form id="job-form" class="workspace-card mobile-step-1">
+      <form id="job-form" class="workspace-card mobile-step-1" role="tabpanel" aria-labelledby="show-new-button">
         <header class="new-job-header desktop-create-header desktop-only">
           <div>
             <p class="eyebrow">NEW TRANSCRIPTION</p>
@@ -251,7 +319,7 @@
             </div>
           </details>
           {% if runtime.colab %}
-          <p class="privacy-note">Colabのランタイムは停止時に消去されます。ノートブックでGoogle Drive保存を有効にすると、出力・話者台帳・編集履歴をDriveへ保持できます。</p>
+          <p class="privacy-note">Colabのランタイムは停止時に消去されます。ノートブックでGoogle Drive保存を有効にすると、出力・話者管理データ・編集履歴をDriveへ保持できます。</p>
           {% endif %}
         </section>
 
@@ -498,7 +566,7 @@
         <button id="cancel-button" class="secondary-button danger" type="button">処理を中止</button>
       </section>
 
-      <section id="result-card" class="result-card" hidden>
+      <section id="result-card" class="result-card" role="tabpanel" aria-labelledby="show-library-button" hidden>
         <div class="result-header">
           <div><p class="eyebrow">TRANSCRIPT READY</p><h2 id="result-title">確認・手動編集</h2></div>
           <div id="download-links" class="download-links"></div>

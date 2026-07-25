@@ -50,7 +50,7 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -747,7 +747,7 @@ def save_speaker_registry_records(
     delete_ids: Any = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(raw_records, list) or len(raw_records) > 10000:
-        raise ValueError("話者台帳は配列で指定してください。")
+        raise ValueError("話者管理データは配列で指定してください。")
     existing_records = {item["id"]: item for item in list_speaker_registry()}
     normalized = [
         normalize_speaker_registry_record(
@@ -4026,7 +4026,7 @@ def get_speaker_registry():
 def update_speaker_registry():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
-        return jsonify({"error": "話者台帳の編集内容がJSONではありません。"}), 400
+        return jsonify({"error": "話者管理の編集内容がJSONではありません。"}), 400
     try:
         records = save_speaker_registry_records(
             payload.get("speakers"),
@@ -4036,7 +4036,7 @@ def update_speaker_registry():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except sqlite3.Error as exc:
-        return jsonify({"error": f"話者台帳を保存できません: {exc}"}), 500
+        return jsonify({"error": f"話者管理データを保存できません: {exc}"}), 500
 
 
 @app.post("/api/speakers/import")

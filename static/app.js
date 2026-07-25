@@ -2,6 +2,9 @@ const form = document.querySelector('#job-form');
 const libraryCard = document.querySelector('#library-card');
 const speakerRegistryCard = document.querySelector('#speaker-registry-card');
 const speakerRegistryBody = document.querySelector('#speaker-registry-body');
+const speakerRegistryList = document.querySelector('#speaker-registry-list');
+const speakerRegistrySaveButton = document.querySelector('#save-speakers-button');
+const speakerRegistrySaveState = document.querySelector('#registry-save-state');
 const sourcePath = document.querySelector('#source-path');
 const inputFile = document.querySelector('#input-file');
 const browsePathButton = document.querySelector('#browse-path-button');
@@ -71,6 +74,10 @@ let currentMobileStep = 1;
 let speakerRegistry = [];
 let speakerRegistryDeletedIds = new Set();
 let speakerRegistryLoaded = false;
+let speakerRegistryDirty = false;
+let libraryRequestController = null;
+let libraryRequestSequence = 0;
+let trainingStatusLoaded = false;
 let browserFilePickerOnly = browsePathButton
   ? browsePathButton.dataset.pickerMode === 'browser'
   : false;
@@ -409,6 +416,13 @@ function fallbackSpeaker(label) {
 }
 
 function showView(view) {
+  const leavingSpeakerManagement = view !== 'speakers'
+    && speakerRegistryCard
+    && !speakerRegistryCard.hidden
+    && speakerRegistryDirty;
+  if (leavingSpeakerManagement && !window.confirm('話者管理に未保存の変更があります。保存せずに移動しますか？')) {
+    return false;
+  }
   const library = view === 'library';
   const create = view === 'new';
   const speakers = view === 'speakers';
@@ -429,11 +443,18 @@ function showView(view) {
   if (library && libraryCard) loadLibrary();
   if (speakers && speakerRegistryCard) loadSpeakerRegistry();
   if (create) renderMobileWizard();
+  return true;
 }
 
 listen(showLibraryButton, 'click', () => showView('library'));
 listen(showNewButton, 'click', () => showView('new'));
 listen(showSpeakersButton, 'click', () => showView('speakers'));
+
+window.addEventListener('beforeunload', event => {
+  if (!speakerRegistryDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 function newLocalSpeakerId() {
   return self.crypto && self.crypto.randomUUID
@@ -478,24 +499,54 @@ function textToAttributes(value) {
   return attributes;
 }
 
-function makeSheetInput(record, key, {type = 'text', wide = false, multiline = false} = {}) {
+function setSpeakerRegistryDirty(dirty = true) {
+  speakerRegistryDirty = dirty;
+  const metric = document.querySelector('#registry-dirty-metric');
+  if (metric) {
+    metric.textContent = dirty ? '未保存' : '保存済み';
+    metric.classList.toggle('unsaved', dirty);
+  }
+  if (speakerRegistrySaveState) {
+    speakerRegistrySaveState.textContent = dirty ? '未保存の変更があります' : '保存済み';
+    speakerRegistrySaveState.classList.toggle('unsaved', dirty);
+  }
+  if (speakerRegistrySaveButton) speakerRegistrySaveButton.disabled = !dirty;
+  if (speakerRegistryCard) speakerRegistryCard.classList.toggle('has-unsaved', dirty);
+}
+
+function makeSheetInput(record, key, {
+  type = 'text', wide = false, multiline = false, label = '', placeholder = '', afterInput = null
+} = {}) {
   const input = document.createElement(multiline ? 'textarea' : 'input');
   if (!multiline) input.type = type;
   if (wide) input.className = 'cell-wide';
+  if (label) input.setAttribute('aria-label', label);
+  if (placeholder) input.placeholder = placeholder;
+  input.dataset.speakerId = record.id;
+  input.dataset.speakerField = key;
   input.value = Array.isArray(record[key]) ? record[key].join(', ') : (record[key] || '');
   input.addEventListener('input', () => {
     record[key] = key === 'tags'
       ? input.value.split(/[,、;]+/).map(item => item.trim()).filter(Boolean)
       : input.value;
+    setSpeakerRegistryDirty();
+    if (afterInput) afterInput(input.value);
   });
   return input;
 }
 
-function makeSheetSelect(record, key, labels) {
+function makeSheetSelect(record, key, labels, {label = '', afterChange = null} = {}) {
   const select = document.createElement('select');
+  if (label) select.setAttribute('aria-label', label);
+  select.dataset.speakerId = record.id;
+  select.dataset.speakerField = key;
   Object.entries(labels).forEach(([value, label]) => select.add(new Option(label, value)));
   select.value = record[key] || Object.keys(labels)[0];
-  select.addEventListener('change', () => { record[key] = select.value; });
+  select.addEventListener('change', () => {
+    record[key] = select.value;
+    setSpeakerRegistryDirty();
+    if (afterChange) afterChange(select.value);
+  });
   return select;
 }
 
@@ -513,10 +564,11 @@ async function loadSpeakerRegistry(force = false) {
   try {
     const response = await fetch('/api/speakers', {cache: 'no-store'});
     const data = await readJsonResponse(response);
-    if (!response.ok) throw new Error(data.error || '話者台帳を取得できませんでした。');
+    if (!response.ok) throw new Error(data.error || '話者管理データを取得できませんでした。');
     speakerRegistry = Array.isArray(data.speakers) ? data.speakers : [];
     speakerRegistryDeletedIds.clear();
     speakerRegistryLoaded = true;
+    setSpeakerRegistryDirty(false);
     renderSpeakerRegistry();
     if (currentJob && !resultCard.hidden) renderSpeakerEditor();
     return speakerRegistry;
@@ -526,65 +578,252 @@ async function loadSpeakerRegistry(force = false) {
   }
 }
 
-function renderSpeakerRegistry() {
-  if (!speakerRegistryBody) return;
+function speakerRecordName(record) {
+  return String(record.pseudonym || record.display_name || record.participant_code || '名前未設定').trim();
+}
+
+function speakerRecordSearchText(record) {
+  return [
+    record.participant_code, record.display_name, record.pseudonym, record.organization,
+    record.department, record.job_title, ...(record.tags || []),
+    ...Object.entries(record.attributes || {}).flat(), record.notes
+  ].join(' ').toLocaleLowerCase();
+}
+
+function visibleSpeakerRegistry() {
   const searchElement = document.querySelector('#speaker-registry-search');
   const roleElement = document.querySelector('#speaker-registry-role-filter');
   const showInactiveElement = document.querySelector('#speaker-registry-show-inactive');
   const query = (searchElement ? searchElement.value : '').trim().toLocaleLowerCase();
   const role = roleElement ? roleElement.value : '';
   const showInactive = !showInactiveElement || showInactiveElement.checked;
-  speakerRegistryBody.replaceChildren();
-  const visible = speakerRegistry.filter(record => {
+  return speakerRegistry.filter(record => {
     if (!showInactive && !record.active) return false;
     if (role && record.default_role !== role) return false;
     if (!query) return true;
-    return JSON.stringify(record).toLocaleLowerCase().includes(query);
+    return speakerRecordSearchText(record).includes(query);
   });
+}
+
+function updateSpeakerRegistryOverview() {
+  const active = speakerRegistry.filter(record => record.active !== false);
+  const consented = active.filter(record => (
+    record.consent_status === 'granted' && record.recording_consent === 'granted'
+  ));
+  const values = {
+    '#registry-total-metric': speakerRegistry.length,
+    '#registry-active-metric': active.length,
+    '#registry-consent-metric': consented.length
+  };
+  Object.entries(values).forEach(([selector, value]) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = String(value);
+  });
+}
+
+function removeSpeakerRecord(record) {
+  if (!window.confirm(`${speakerRecordName(record)} を話者管理から削除しますか？\n「変更を保存」するまで削除は確定しません。`)) return;
+  speakerRegistryDeletedIds.add(record.id);
+  speakerRegistry = speakerRegistry.filter(item => item.id !== record.id);
+  setSpeakerRegistryDirty();
+  renderSpeakerRegistry();
+}
+
+function makeAttributesControl(record, label) {
+  const attributes = document.createElement('textarea');
+  attributes.value = attributesToText(record.attributes);
+  attributes.placeholder = '年齢層=30代; 性別=女性';
+  attributes.setAttribute('aria-label', label);
+  attributes.dataset.speakerId = record.id;
+  attributes.dataset.speakerField = 'attributes';
+  attributes.addEventListener('input', () => {
+    record.attributes = textToAttributes(attributes.value);
+    setSpeakerRegistryDirty();
+  });
+  return attributes;
+}
+
+function renderSpeakerRegistryTable(visible) {
+  speakerRegistryBody.replaceChildren();
+  if (!visible.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 15;
+    cell.className = 'speaker-registry-empty';
+    cell.textContent = '条件に一致する話者はいません。検索条件を変えるか、新しい話者を追加してください。';
+    row.append(cell);
+    speakerRegistryBody.append(row);
+    return;
+  }
 
   visible.forEach(record => {
     const row = document.createElement('tr');
+    row.dataset.speakerId = record.id;
     row.classList.toggle('inactive', !record.active);
     const active = document.createElement('input');
     active.type = 'checkbox';
     active.checked = record.active !== false;
+    active.setAttribute('aria-label', `${speakerRecordName(record)}を有効にする`);
     active.addEventListener('change', () => {
       record.active = active.checked;
+      setSpeakerRegistryDirty();
       row.classList.toggle('inactive', !record.active);
+      updateSpeakerRegistryOverview();
+      const showInactive = document.querySelector('#speaker-registry-show-inactive');
+      if (!active.checked && showInactive && !showInactive.checked) renderSpeakerRegistry();
     });
     appendSheetCell(row, active);
-    appendSheetCell(row, makeSheetInput(record, 'participant_code'));
-    appendSheetCell(row, makeSheetInput(record, 'display_name'));
-    appendSheetCell(row, makeSheetInput(record, 'pseudonym'));
-    appendSheetCell(row, makeSheetSelect(record, 'default_role', speakerRoleLabels));
-    appendSheetCell(row, makeSheetInput(record, 'organization'));
-    appendSheetCell(row, makeSheetInput(record, 'department'));
-    appendSheetCell(row, makeSheetInput(record, 'job_title'));
-    appendSheetCell(row, makeSheetSelect(record, 'consent_status', consentLabels));
-    appendSheetCell(row, makeSheetSelect(record, 'recording_consent', consentLabels));
-    appendSheetCell(row, makeSheetSelect(record, 'confidentiality_status', consentLabels));
-    appendSheetCell(row, makeSheetInput(record, 'tags', {wide: true}));
-    const attributes = document.createElement('textarea');
-    attributes.value = attributesToText(record.attributes);
-    attributes.placeholder = '年齢層=30代; 性別=女性';
-    attributes.addEventListener('input', () => { record.attributes = textToAttributes(attributes.value); });
-    appendSheetCell(row, attributes);
-    appendSheetCell(row, makeSheetInput(record, 'notes', {multiline: true}));
+    appendSheetCell(row, makeSheetInput(record, 'participant_code', {label: `${speakerRecordName(record)}の参加者コード`}));
+    appendSheetCell(row, makeSheetInput(record, 'display_name', {label: `${speakerRecordName(record)}の氏名`}));
+    appendSheetCell(row, makeSheetInput(record, 'pseudonym', {label: `${speakerRecordName(record)}の仮名・表示名`}));
+    appendSheetCell(row, makeSheetSelect(record, 'default_role', speakerRoleLabels, {
+      label: `${speakerRecordName(record)}の既定役割`,
+      afterChange: () => {
+        const roleFilter = document.querySelector('#speaker-registry-role-filter');
+        if (roleFilter && roleFilter.value) renderSpeakerRegistry();
+      }
+    }));
+    appendSheetCell(row, makeSheetInput(record, 'organization', {label: `${speakerRecordName(record)}の組織`}));
+    appendSheetCell(row, makeSheetInput(record, 'department', {label: `${speakerRecordName(record)}の部署`}));
+    appendSheetCell(row, makeSheetInput(record, 'job_title', {label: `${speakerRecordName(record)}の役職`}));
+    appendSheetCell(row, makeSheetSelect(record, 'consent_status', consentLabels, {label: `${speakerRecordName(record)}の研究同意`, afterChange: updateSpeakerRegistryOverview}));
+    appendSheetCell(row, makeSheetSelect(record, 'recording_consent', consentLabels, {label: `${speakerRecordName(record)}の録音同意`, afterChange: updateSpeakerRegistryOverview}));
+    appendSheetCell(row, makeSheetSelect(record, 'confidentiality_status', consentLabels, {label: `${speakerRecordName(record)}の守秘同意`}));
+    appendSheetCell(row, makeSheetInput(record, 'tags', {wide: true, label: `${speakerRecordName(record)}のタグ`}));
+    appendSheetCell(row, makeAttributesControl(record, `${speakerRecordName(record)}の追加属性`));
+    appendSheetCell(row, makeSheetInput(record, 'notes', {multiline: true, label: `${speakerRecordName(record)}の備考`}));
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'sheet-delete';
     remove.textContent = '削除';
-    remove.addEventListener('click', () => {
-      if (!window.confirm(`${record.pseudonym || record.display_name || record.participant_code} を台帳から削除しますか？`)) return;
-      speakerRegistryDeletedIds.add(record.id);
-      speakerRegistry = speakerRegistry.filter(item => item.id !== record.id);
-      renderSpeakerRegistry();
-    });
+    remove.setAttribute('aria-label', `${speakerRecordName(record)}を削除`);
+    remove.addEventListener('click', () => removeSpeakerRecord(record));
     appendSheetCell(row, remove);
     speakerRegistryBody.append(row);
   });
+}
+
+function createSpeakerCardField(labelText, control, wide = false) {
+  const label = document.createElement('label');
+  label.className = `field speaker-card-field${wide ? ' wide' : ''}`;
+  const text = document.createElement('span');
+  text.textContent = labelText;
+  label.append(text, control);
+  return label;
+}
+
+function renderSpeakerRegistryCards(visible) {
+  speakerRegistryList.replaceChildren();
+  if (!visible.length) {
+    const empty = document.createElement('div');
+    empty.className = 'speaker-registry-empty';
+    empty.textContent = '条件に一致する話者はいません。条件をクリアするか、新しい話者を追加してください。';
+    speakerRegistryList.append(empty);
+    return;
+  }
+
+  visible.forEach(record => {
+    const card = document.createElement('article');
+    card.className = 'speaker-management-card';
+    card.dataset.speakerId = record.id;
+    card.classList.toggle('inactive', record.active === false);
+
+    const header = document.createElement('header');
+    const identity = document.createElement('div');
+    const role = document.createElement('span');
+    role.className = 'speaker-card-role';
+    const title = document.createElement('h3');
+    const subtitle = document.createElement('p');
+    identity.append(role, title, subtitle);
+    const activeLabel = document.createElement('label');
+    activeLabel.className = 'speaker-card-active';
+    const active = document.createElement('input');
+    active.type = 'checkbox';
+    active.checked = record.active !== false;
+    const activeText = document.createElement('span');
+    activeText.textContent = '有効';
+    activeLabel.append(active, activeText);
+    header.append(identity, activeLabel);
+
+    const refreshIdentity = () => {
+      role.textContent = speakerRoleLabels[record.default_role] || 'その他';
+      title.textContent = speakerRecordName(record);
+      subtitle.textContent = [record.participant_code, record.organization, record.job_title].filter(Boolean).join(' ・ ') || '基本情報を入力してください';
+      active.setAttribute('aria-label', `${speakerRecordName(record)}を有効にする`);
+    };
+    refreshIdentity();
+    active.addEventListener('change', () => {
+      record.active = active.checked;
+      card.classList.toggle('inactive', !active.checked);
+      setSpeakerRegistryDirty();
+      updateSpeakerRegistryOverview();
+      const showInactive = document.querySelector('#speaker-registry-show-inactive');
+      if (!active.checked && showInactive && !showInactive.checked) renderSpeakerRegistry();
+    });
+
+    const primary = document.createElement('div');
+    primary.className = 'speaker-card-grid primary';
+    primary.append(
+      createSpeakerCardField('参加者コード', makeSheetInput(record, 'participant_code', {label: '参加者コード', afterInput: refreshIdentity})),
+      createSpeakerCardField('氏名', makeSheetInput(record, 'display_name', {label: '氏名', afterInput: refreshIdentity})),
+      createSpeakerCardField('仮名・表示名', makeSheetInput(record, 'pseudonym', {label: '仮名・表示名', afterInput: refreshIdentity})),
+      createSpeakerCardField('既定役割', makeSheetSelect(record, 'default_role', speakerRoleLabels, {
+        label: '既定役割', afterChange: () => {
+          refreshIdentity();
+          const roleFilter = document.querySelector('#speaker-registry-role-filter');
+          if (roleFilter && roleFilter.value) renderSpeakerRegistry();
+        }
+      }))
+    );
+
+    const details = document.createElement('details');
+    details.className = 'speaker-card-details';
+    const summary = document.createElement('summary');
+    summary.textContent = '所属・同意・詳細を編集';
+    const detailGrid = document.createElement('div');
+    detailGrid.className = 'speaker-card-grid details';
+    detailGrid.append(
+      createSpeakerCardField('組織', makeSheetInput(record, 'organization', {label: '組織', afterInput: refreshIdentity})),
+      createSpeakerCardField('部署', makeSheetInput(record, 'department', {label: '部署'})),
+      createSpeakerCardField('役職', makeSheetInput(record, 'job_title', {label: '役職', afterInput: refreshIdentity})),
+      createSpeakerCardField('研究同意', makeSheetSelect(record, 'consent_status', consentLabels, {label: '研究同意', afterChange: updateSpeakerRegistryOverview})),
+      createSpeakerCardField('録音同意', makeSheetSelect(record, 'recording_consent', consentLabels, {label: '録音同意', afterChange: updateSpeakerRegistryOverview})),
+      createSpeakerCardField('守秘同意', makeSheetSelect(record, 'confidentiality_status', consentLabels, {label: '守秘同意'})),
+      createSpeakerCardField('タグ', makeSheetInput(record, 'tags', {label: 'タグ', placeholder: '例：顧客, 管理職'}), true),
+      createSpeakerCardField('追加属性', makeAttributesControl(record, '追加属性'), true),
+      createSpeakerCardField('備考', makeSheetInput(record, 'notes', {multiline: true, label: '備考'}), true)
+    );
+    details.append(summary, detailGrid);
+
+    const footer = document.createElement('footer');
+    const consent = document.createElement('span');
+    consent.className = 'speaker-card-consent';
+    consent.textContent = `研究 ${consentLabels[record.consent_status] || '未確認'} / 録音 ${consentLabels[record.recording_consent] || '未確認'}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'sheet-delete';
+    remove.textContent = 'この話者を削除';
+    remove.addEventListener('click', () => removeSpeakerRecord(record));
+    footer.append(consent, remove);
+
+    card.append(header, primary, details, footer);
+    speakerRegistryList.append(card);
+  });
+}
+
+function renderSpeakerRegistry() {
+  if (!speakerRegistryBody || !speakerRegistryList) return;
+  const visible = visibleSpeakerRegistry();
+  if (mobileWizardMedia.matches) {
+    speakerRegistryBody.replaceChildren();
+    renderSpeakerRegistryCards(visible);
+  } else {
+    speakerRegistryList.replaceChildren();
+    renderSpeakerRegistryTable(visible);
+  }
+  updateSpeakerRegistryOverview();
   const count = document.querySelector('#speaker-registry-count');
-  if (count) count.textContent = `表示 ${visible.length} / 全 ${speakerRegistry.length} 人`;
+  if (count) count.textContent = `${visible.length}人を表示（登録 ${speakerRegistry.length}人）`;
 }
 
 async function saveSpeakerRegistry() {
@@ -597,7 +836,7 @@ async function saveSpeakerRegistry() {
     setAlert(document.querySelector('#speaker-registry-message'), '氏名、仮名、参加者コードのいずれかを入力してください。', true);
     return;
   }
-  const button = document.querySelector('#save-speakers-button');
+  const button = speakerRegistrySaveButton;
   if (button) button.disabled = true;
   try {
     const response = await fetch('/api/speakers', {
@@ -609,31 +848,54 @@ async function saveSpeakerRegistry() {
       })
     });
     const data = await readJsonResponse(response);
-    if (!response.ok) throw new Error(data.error || '話者台帳を保存できませんでした。');
+    if (!response.ok) throw new Error(data.error || '話者管理データを保存できませんでした。');
     speakerRegistry = data.speakers || [];
     speakerRegistryDeletedIds.clear();
+    setSpeakerRegistryDirty(false);
     renderSpeakerRegistry();
-    setAlert(document.querySelector('#speaker-registry-message'), `${speakerRegistry.length}人の話者台帳を保存しました。`);
+    setAlert(document.querySelector('#speaker-registry-message'), `${speakerRegistry.length}人の話者情報を保存しました。`);
     if (currentJob && !resultCard.hidden) renderSpeakerEditor();
   } catch (error) {
     setAlert(document.querySelector('#speaker-registry-message'), error.message, true);
   } finally {
-    if (button) button.disabled = false;
+    if (button) button.disabled = !speakerRegistryDirty;
   }
 }
 
 listen(document.querySelector('#add-speaker-button'), 'click', () => {
-  speakerRegistry.push(blankSpeakerRecord());
+  const record = blankSpeakerRecord();
+  const search = document.querySelector('#speaker-registry-search');
+  const role = document.querySelector('#speaker-registry-role-filter');
+  const showInactive = document.querySelector('#speaker-registry-show-inactive');
+  if (search) search.value = '';
+  if (role) role.value = '';
+  if (showInactive) showInactive.checked = true;
+  speakerRegistry.unshift(record);
+  setSpeakerRegistryDirty();
   renderSpeakerRegistry();
-  if (speakerRegistryBody && speakerRegistryBody.lastElementChild) {
-    speakerRegistryBody.lastElementChild.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-  }
+  window.requestAnimationFrame(() => {
+    const control = document.querySelector(`[data-speaker-id="${record.id}"][data-speaker-field="participant_code"]`);
+    if (control) {
+      control.scrollIntoView({behavior: 'smooth', block: 'center'});
+      control.focus();
+    }
+  });
 });
-listen(document.querySelector('#save-speakers-button'), 'click', saveSpeakerRegistry);
+listen(speakerRegistrySaveButton, 'click', saveSpeakerRegistry);
 listen(document.querySelector('#speaker-registry-search'), 'input', renderSpeakerRegistry);
 listen(document.querySelector('#speaker-registry-role-filter'), 'change', renderSpeakerRegistry);
 listen(document.querySelector('#speaker-registry-show-inactive'), 'change', renderSpeakerRegistry);
+listen(document.querySelector('#speaker-registry-clear-filters'), 'click', () => {
+  const search = document.querySelector('#speaker-registry-search');
+  const role = document.querySelector('#speaker-registry-role-filter');
+  const showInactive = document.querySelector('#speaker-registry-show-inactive');
+  if (search) search.value = '';
+  if (role) role.value = '';
+  if (showInactive) showInactive.checked = true;
+  renderSpeakerRegistry();
+});
 listen(document.querySelector('#import-speakers-button'), 'click', () => {
+  if (speakerRegistryDirty && !window.confirm('未保存の変更があります。CSVを読み込むと現在の編集内容は置き換わります。続けますか？')) return;
   const input = document.querySelector('#speaker-csv-input');
   if (input) input.click();
 });
@@ -649,8 +911,9 @@ listen(document.querySelector('#speaker-csv-input'), 'change', async event => {
     speakerRegistry = data.speakers || [];
     speakerRegistryLoaded = true;
     speakerRegistryDeletedIds.clear();
+    setSpeakerRegistryDirty(false);
     renderSpeakerRegistry();
-    setAlert(document.querySelector('#speaker-registry-message'), `${data.imported_count}行を取り込みました。未知の列は追加属性として保持しています。`);
+    setAlert(document.querySelector('#speaker-registry-message'), `${data.imported_count}行を取り込み、話者管理へ保存しました。未知の列は追加属性として保持しています。`);
   } catch (error) {
     setAlert(document.querySelector('#speaker-registry-message'), error.message, true);
   } finally {
@@ -662,6 +925,11 @@ const roleFilter = document.querySelector('#speaker-registry-role-filter');
 if (roleFilter) {
   Object.entries(speakerRoleLabels).forEach(([value, label]) => roleFilter.add(new Option(label, value)));
 }
+
+mobileWizardMedia.addEventListener('change', () => {
+  if (speakerRegistryLoaded) renderSpeakerRegistry();
+  setLibraryFiltersOpen(false);
+});
 
 listen(sourcePath, 'input', () => {
   setAlert(pathError, '');
@@ -1049,28 +1317,98 @@ function updateFacetSelect(select, values, allLabel) {
   if ([...select.options].some(option => option.value === selected)) select.value = selected;
 }
 
-async function loadLibrary() {
-  const list = document.querySelector('#library-list');
-  const message = document.querySelector('#library-message');
-  setAlert(message, '');
-  const params = new URLSearchParams({
+function libraryFilterState() {
+  return {
     keyword: document.querySelector('#library-keyword').value.trim(),
     speaker: document.querySelector('#library-speaker').value,
     emotion: document.querySelector('#library-emotion').value,
     sort: document.querySelector('#library-sort').value
+  };
+}
+
+function updateLibraryFilterState() {
+  const state = libraryFilterState();
+  const conditions = [];
+  if (state.keyword) conditions.push(`「${state.keyword}」`);
+  if (state.speaker) conditions.push(`話者: ${state.speaker}`);
+  if (state.emotion) conditions.push(`感情: ${state.emotion}`);
+  if (state.sort !== 'updated_desc') {
+    const sort = document.querySelector('#library-sort');
+    conditions.push(`並び: ${sort.options[sort.selectedIndex].text}`);
+  }
+  const summary = document.querySelector('#library-filter-summary');
+  const badge = document.querySelector('#library-filter-badge');
+  const clear = document.querySelector('#library-clear-filters');
+  if (summary) summary.textContent = conditions.length
+    ? `${conditions.join(' / ')} で表示しています`
+    : 'すべてのデータを表示しています';
+  if (badge) badge.textContent = conditions.length ? `${conditions.length}条件` : '条件なし';
+  if (clear) clear.disabled = conditions.length === 0;
+}
+
+function renderLibraryLoading() {
+  const list = document.querySelector('#library-list');
+  list.replaceChildren();
+  for (let index = 0; index < 3; index += 1) {
+    const skeleton = document.createElement('div');
+    skeleton.className = 'library-skeleton';
+    skeleton.setAttribute('aria-hidden', 'true');
+    skeleton.innerHTML = '<i></i><div><b></b><span></span><span></span></div>';
+    list.append(skeleton);
+  }
+}
+
+function renderLibraryOverview(items) {
+  const duration = items.reduce((sum, item) => sum + Number(item.duration || 0), 0);
+  const speakers = new Set(items.flatMap(item => item.speakers || []));
+  const latest = items.reduce((value, item) => {
+    const updated = String(item.updated_at || '');
+    return updated > value ? updated : value;
+  }, '');
+  const values = {
+    '#library-total-metric': String(items.length),
+    '#library-duration-metric': items.length ? formatTime(duration) : '00:00',
+    '#library-speaker-metric': String(speakers.size),
+    '#library-updated-metric': latest ? formatDate(latest) : '—'
+  };
+  Object.entries(values).forEach(([selector, value]) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value;
   });
+}
+
+async function loadLibrary() {
+  const list = document.querySelector('#library-list');
+  const message = document.querySelector('#library-message');
+  setAlert(message, '');
+  updateLibraryFilterState();
+  const state = libraryFilterState();
+  const params = new URLSearchParams(state);
+  if (libraryRequestController) libraryRequestController.abort();
+  libraryRequestController = new AbortController();
+  const requestId = ++libraryRequestSequence;
+  list.setAttribute('aria-busy', 'true');
+  renderLibraryLoading();
   try {
-    const response = await fetch(`/api/library?${params}`);
+    const response = await fetch(`/api/library?${params}`, {signal: libraryRequestController.signal});
     const data = await readJsonResponse(response);
+    if (requestId !== libraryRequestSequence) return;
     if (!response.ok) throw new Error(data.error || 'ライブラリを取得できません。');
     updateFacetSelect(document.querySelector('#library-speaker'), data.facets.speakers || [], 'すべての話者');
     updateFacetSelect(document.querySelector('#library-emotion'), data.facets.emotions || [], 'すべての感情');
-    document.querySelector('#library-count').textContent = `${data.total} 件のデータ`;
-    renderLibraryItems(data.items || []);
-    loadTrainingStatus();
+    const items = data.items || [];
+    document.querySelector('#library-count').textContent = `${data.total}件を表示`;
+    renderLibraryOverview(items);
+    renderLibraryItems(items);
+    updateLibraryFilterState();
+    if (!trainingStatusLoaded) loadTrainingStatus();
   } catch (error) {
+    if (error.name === 'AbortError') return;
+    if (requestId !== libraryRequestSequence) return;
     list.replaceChildren();
     setAlert(message, error.message, true);
+  } finally {
+    if (requestId === libraryRequestSequence) list.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -1080,25 +1418,70 @@ function renderLibraryItems(items) {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'library-empty';
-    empty.textContent = '条件に一致するデータはありません。\n「新しく文字起こし」または「空のデータを追加」から登録できます。';
+    const title = document.createElement('strong');
+    title.textContent = '条件に一致するデータはありません';
+    const description = document.createElement('p');
+    description.textContent = '検索条件を変えるか、新しい文字起こしを始めてください。';
+    const actions = document.createElement('div');
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'secondary-button';
+    clear.textContent = '条件をクリア';
+    clear.addEventListener('click', clearLibraryFilters);
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'primary-button small';
+    create.textContent = '＋ 新しい文字起こし';
+    create.addEventListener('click', () => showView('new'));
+    actions.append(clear, create);
+    empty.append(title, description, actions);
     list.append(empty);
     return;
   }
   items.forEach(item => {
     const card = document.createElement('article');
     card.className = 'library-item';
+    const media = document.createElement('div');
+    media.className = 'library-media';
     const thumbnail = document.createElement('img');
     thumbnail.className = 'library-thumbnail';
     thumbnail.src = item.thumbnail_url;
     thumbnail.alt = `${item.source_name} のワードクラウド`;
     thumbnail.loading = 'lazy';
+    const mediaFallback = document.createElement('span');
+    mediaFallback.className = 'library-media-fallback';
+    mediaFallback.textContent = 'プレビューなし';
+    const mediaBadge = document.createElement('span');
+    mediaBadge.className = 'library-media-badge';
+    mediaBadge.textContent = item.media_url ? (item.media_kind === 'video' ? '動画' : '音声') : 'テキスト';
+    thumbnail.addEventListener('error', () => {
+      media.classList.add('unavailable');
+      thumbnail.remove();
+    });
+    media.append(thumbnail, mediaFallback, mediaBadge);
     const body = document.createElement('div');
+    body.className = 'library-item-body';
+    const heading = document.createElement('div');
+    heading.className = 'library-item-heading';
     const title = document.createElement('h3');
     title.textContent = item.source_name;
+    const updated = document.createElement('time');
+    updated.dateTime = item.updated_at || '';
+    updated.textContent = `更新 ${formatDate(item.updated_at)}`;
+    heading.append(title, updated);
     const meta = document.createElement('div');
     meta.className = 'library-meta';
     const mediaLabel = item.media_url ? (item.media_kind === 'video' ? '動画あり' : '音声あり') : '元メディアなし';
-    meta.textContent = `更新 ${formatDate(item.updated_at)}　発話 ${item.segment_count}件　${formatTime(item.duration)}　${mediaLabel}　修正 ${item.revision_count}回`;
+    [
+      `発話 ${item.segment_count}件`,
+      formatTime(item.duration),
+      mediaLabel,
+      `修正 ${item.revision_count}回`
+    ].forEach(value => {
+      const metric = document.createElement('span');
+      metric.textContent = value;
+      meta.append(metric);
+    });
     const preview = document.createElement('p');
     preview.className = 'library-preview';
     preview.textContent = item.preview || '本文はまだありません。';
@@ -1110,6 +1493,12 @@ function renderLibraryItems(items) {
       chip.textContent = value;
       chips.append(chip);
     });
+    if ((item.speakers || []).length > 5) {
+      const chip = document.createElement('span');
+      chip.className = 'library-chip';
+      chip.textContent = `＋${item.speakers.length - 5}人`;
+      chips.append(chip);
+    }
     (item.emotions || []).forEach(value => {
       const chip = document.createElement('span');
       chip.className = 'library-chip emotion';
@@ -1122,27 +1511,31 @@ function renderLibraryItems(items) {
       chip.textContent = `キーワード一致 ${item.match_count}発話`;
       chips.append(chip);
     }
-    body.append(title, meta, preview, chips);
+    body.append(heading, meta, preview, chips);
     const actions = document.createElement('div');
     actions.className = 'library-actions';
     const open = document.createElement('button');
-    open.className = 'secondary-button';
+    open.className = 'primary-button small library-open-button';
     open.type = 'button';
-    open.textContent = '開く・編集';
+    open.textContent = '開いて編集';
+    open.setAttribute('aria-label', `${item.source_name}を開いて編集`);
     open.addEventListener('click', () => openLibraryItem(item.id));
     const remove = document.createElement('button');
-    remove.className = 'secondary-button danger';
+    remove.className = 'library-delete-button';
     remove.type = 'button';
     remove.textContent = '削除';
+    remove.setAttribute('aria-label', `${item.source_name}を削除`);
     remove.addEventListener('click', () => deleteLibraryItem(item.id, item.source_name));
     actions.append(open, remove);
-    card.append(thumbnail, body, actions);
+    card.append(media, body, actions);
     list.append(card);
   });
 }
 
 async function loadTrainingStatus() {
   const container = document.querySelector('#training-status');
+  if (trainingStatusLoaded) return;
+  trainingStatusLoaded = true;
   try {
     const response = await fetch('/api/training');
     const data = await readJsonResponse(response);
@@ -1165,32 +1558,92 @@ async function loadTrainingStatus() {
       container.append(link);
     }
   } catch (_) {
+    trainingStatusLoaded = false;
     container.textContent = '';
   }
 }
 
 ['#library-speaker', '#library-emotion', '#library-sort'].forEach(selector => {
-  listen(document.querySelector(selector), 'change', loadLibrary);
+  listen(document.querySelector(selector), 'change', () => loadLibrary());
 });
 listen(document.querySelector('#library-keyword'), 'input', () => {
   window.clearTimeout(libraryTimer);
   libraryTimer = window.setTimeout(loadLibrary, 250);
 });
 
-listen(document.querySelector('#add-record-button'), 'click', async () => {
-  const sourceName = window.prompt('追加するデータの名前を入力してください。', '新規文字起こし');
-  if (sourceName === null || !sourceName.trim()) return;
+function clearLibraryFilters() {
+  document.querySelector('#library-keyword').value = '';
+  document.querySelector('#library-speaker').value = '';
+  document.querySelector('#library-emotion').value = '';
+  document.querySelector('#library-sort').value = 'updated_desc';
+  updateLibraryFilterState();
+  loadLibrary();
+}
+
+function setLibraryFiltersOpen(open) {
+  if (!libraryCard) return;
+  libraryCard.classList.toggle('filters-open', open);
+  const toggle = document.querySelector('#library-filter-toggle');
+  if (toggle) toggle.setAttribute('aria-expanded', String(open));
+}
+
+listen(document.querySelector('#library-clear-filters'), 'click', clearLibraryFilters);
+listen(document.querySelector('#library-filter-toggle'), 'click', event => {
+  setLibraryFiltersOpen(event.currentTarget.getAttribute('aria-expanded') !== 'true');
+});
+listen(document.querySelector('#library-refresh-button'), 'click', () => {
+  trainingStatusLoaded = false;
+  loadLibrary();
+});
+listen(document.querySelector('#library-create-new-button'), 'click', () => showView('new'));
+
+const addRecordDialog = document.querySelector('#add-record-dialog');
+const addRecordForm = document.querySelector('#add-record-form');
+const addRecordName = document.querySelector('#add-record-name');
+
+function openAddRecordDialog() {
+  setAlert(document.querySelector('#add-record-error'), '');
+  if (addRecordName) addRecordName.value = '';
+  if (addRecordDialog && typeof addRecordDialog.showModal === 'function') {
+    addRecordDialog.showModal();
+    window.requestAnimationFrame(() => addRecordName && addRecordName.focus());
+    return;
+  }
+  const fallbackName = window.prompt('追加するデータの名前を入力してください。', '新規文字起こし');
+  if (fallbackName && fallbackName.trim()) createEmptyLibraryRecord(fallbackName.trim());
+}
+
+async function createEmptyLibraryRecord(sourceName) {
   try {
     const response = await fetch('/api/library', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({source_name: sourceName.trim()})
+      body: JSON.stringify({source_name: sourceName})
     });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '追加できませんでした。');
+    if (addRecordDialog && addRecordDialog.open) addRecordDialog.close();
     renderResult(data);
   } catch (error) {
-    setAlert(document.querySelector('#library-message'), error.message, true);
+    const target = addRecordDialog && addRecordDialog.open
+      ? document.querySelector('#add-record-error')
+      : document.querySelector('#library-message');
+    setAlert(target, error.message, true);
+  } finally {
+    const button = document.querySelector('#confirm-add-record-button');
+    if (button) button.disabled = false;
   }
+}
+
+listen(document.querySelector('#add-record-button'), 'click', openAddRecordDialog);
+listen(document.querySelector('#cancel-add-record-button'), 'click', () => {
+  if (addRecordDialog) addRecordDialog.close();
+});
+listen(addRecordForm, 'submit', event => {
+  event.preventDefault();
+  if (!addRecordName || !addRecordName.reportValidity()) return;
+  const button = document.querySelector('#confirm-add-record-button');
+  if (button) button.disabled = true;
+  createEmptyLibraryRecord(addRecordName.value.trim());
 });
 
 async function openLibraryItem(itemId) {
@@ -1221,6 +1674,8 @@ async function deleteLibraryItem(itemId, name) {
       currentJob = null;
     }
     showView('library');
+    await loadLibrary();
+    setAlert(document.querySelector('#library-message'), `「${name}」を削除しました。`);
   } catch (error) {
     setAlert(document.querySelector('#library-message'), error.message, true);
   }
@@ -1359,9 +1814,12 @@ function renderResult(job) {
   form.hidden = true;
   progressCard.hidden = true;
   resultCard.hidden = false;
-  showLibraryButton.classList.remove('active');
+  showLibraryButton.classList.add('active');
   showNewButton.classList.remove('active');
   if (showSpeakersButton) showSpeakersButton.classList.remove('active');
+  showLibraryButton.setAttribute('aria-selected', 'true');
+  showNewButton.setAttribute('aria-selected', 'false');
+  if (showSpeakersButton) showSpeakersButton.setAttribute('aria-selected', 'false');
   resultCard.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
@@ -1563,7 +2021,7 @@ function renderSpeakerEditor() {
       globalSelect.add(new Option(detail ? `${name} — ${detail}` : name, record.id));
     });
     if (profile.global_speaker_id && !speakerRegistry.some(record => record.id === profile.global_speaker_id)) {
-      globalSelect.add(new Option('削除済みの台帳話者', profile.global_speaker_id));
+      globalSelect.add(new Option('削除済みの管理対象話者', profile.global_speaker_id));
     }
     globalSelect.value = profile.global_speaker_id || '';
     globalSelect.addEventListener('change', () => {

@@ -79,6 +79,37 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("@media (min-width: 960px)", styles)
         self.assertIn("@media (max-width: 959px)", styles)
 
+    def test_processed_data_and_speaker_management_have_dedicated_responsive_ux(self):
+        response = app.app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertIn(">話者管理</button>", page)
+        self.assertNotIn("話者台帳", page)
+        self.assertIn('class="library-overview"', page)
+        self.assertIn('id="library-filter-panel"', page)
+        self.assertIn('id="library-filter-toggle"', page)
+        self.assertIn('id="add-record-dialog"', page)
+        self.assertIn('class="registry-overview"', page)
+        self.assertIn('id="speaker-registry-list"', page)
+        self.assertIn('id="registry-save-state"', page)
+        self.assertIn('role="tabpanel"', page)
+
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function renderSpeakerRegistryTable(", script)
+        self.assertIn("function renderSpeakerRegistryCards(", script)
+        self.assertIn("function setSpeakerRegistryDirty(", script)
+        self.assertIn("libraryRequestController.abort()", script)
+        self.assertIn("function clearLibraryFilters()", script)
+        self.assertNotIn("話者台帳", script)
+
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".speaker-registry-list { display: none; }", styles)
+        self.assertIn(".speaker-management-card", styles)
+        self.assertIn(".library-workspace", styles)
+        self.assertIn("@media (min-width: 960px)", styles)
+        self.assertIn("@media (max-width: 959px)", styles)
+
 
 if __name__ == "__main__":
     unittest.main()
