@@ -686,10 +686,18 @@ function syncAiFields() {
   });
 }
 
+function selectDefaultAiOptions() {
+  if (!aiProvider) return;
+  if (aiProvider.value !== 'none') {
+    aiOptionInputs.forEach(input => { input.checked = true; });
+  }
+  syncAiFields();
+}
+
 listen(boostQuietSpeech, 'change', syncQuietFields);
 listen(triplePass, 'change', syncQuietFields);
 listen(emotionAnalysis, 'change', syncEmotionFields);
-listen(aiProvider, 'change', syncAiFields);
+listen(aiProvider, 'change', selectDefaultAiOptions);
 syncQuietFields();
 syncEmotionFields();
 syncAiFields();
@@ -962,7 +970,7 @@ async function deleteLibraryItem(itemId, name) {
 function renderDownloads(files) {
   const container = document.querySelector('#download-links');
   container.replaceChildren();
-  (files || []).forEach(file => {
+  (files || []).filter(file => !String(file.name || '').toLowerCase().endsWith('.json')).forEach(file => {
     const link = document.createElement('a');
     link.href = file.url;
     link.textContent = `${file.name.split('.').pop().toUpperCase()} を保存`;

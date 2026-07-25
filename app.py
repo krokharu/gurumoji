@@ -50,7 +50,7 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
@@ -153,7 +153,7 @@ AUDIO_PREPROCESS_PRESETS: dict[str, dict[str, Any]] = {
         ],
     },
     "standard": {
-        "label": "日本語会議",
+        "label": "おすすめ",
         "filters": [
             "highpass=f=70",
             "lowpass=f=7800",
@@ -3223,7 +3223,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         backend = "OpenAI Whisper" if use_openai_whisper else "WhisperX (faster-whisper)"
         if options.triple_pass:
             status(
-                "三重実行を使います。通常結果の3秒以上の空白だけを、軽め・強めの順で切り出して補完します。"
+                "詳細処理を使います。通常結果の3秒以上の空白だけを、軽め・強めの順で切り出して補完します。"
             )
         elif options.boost_quiet_speech:
             status(
@@ -3448,7 +3448,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             if language_code:
                 result["language"] = language_code
             status(
-                "三重実行の統合完了: "
+                "詳細処理の統合完了: "
                 f"通常 {original_count} 区間、"
                 f"2回目 {len(light_gaps)} 空白から +{light_counts.get('長い空白・軽め', 0)}、"
                 f"3回目 {len(strong_gaps)} 空白から +{strong_counts.get('長い空白・強め', 0)} を追加しました。"

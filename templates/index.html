@@ -232,7 +232,7 @@
               <select name="audio_preprocess">
                 <option value="none">加工なし</option>
                 <option value="light">軽め — 音量調整と低域カット</option>
-                <option value="standard" selected>日本語会議 — ノイズ除去・音量調整・明瞭化</option>
+                <option value="standard" selected>おすすめ — ノイズ除去・音量調整・明瞭化</option>
                 <option value="strong">強め — 雑音が多い録音</option>
               </select>
             </label>
@@ -270,7 +270,7 @@
               <label class="check-row">
                 <input name="triple_pass" type="hidden" value="0">
                 <input id="triple-pass" name="triple_pass" type="checkbox" value="1">
-                <span><strong>三重実行で取りこぼし補完</strong><small>通常結果の3秒以上の空白だけを切り出し、軽め/強めで再文字起こしして補完します</small></span>
+                <span><strong>詳細処理</strong><small>複数回処理やエフェクトを加えて精度を上げます。注意：処理時間が増えます</small></span>
               </label>
             </div>
             <div class="quiet-fields">
@@ -292,7 +292,7 @@
           <div class="section-heading">
             <span class="step accent">03</span>
             <div>
-              <h2>AI で仕上げる <em>任意</em></h2>
+              <h2>AI仕上げ <em>任意</em></h2>
               <p>文字ノイズ・誤変換の修正、自己紹介からの名前抽出、議題アウトライン作成</p>
             </div>
           </div>
@@ -356,11 +356,10 @@
         <section class="output-row">
           <div class="section-heading compact">
             <span class="step">05</span>
-            <div><h2>出力形式</h2><p>TXT / JSON は常に作成</p></div>
+            <div><h2>出力形式</h2><p>TXT は常に作成</p></div>
           </div>
           <div class="format-options">
             <label class="mini-check"><input name="write_srt" type="checkbox" checked><span>SRT 字幕</span></label>
-            <label class="mini-check"><input type="checkbox" checked disabled data-always-disabled="true"><span>JSON（常時）</span></label>
             <label class="mini-check"><input name="burn_subtitled_video" type="checkbox"><span>字幕付き動画 <small>動画のみ・話者別カラー</small></span></label>
           </div>
         </section>
