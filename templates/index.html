@@ -52,10 +52,10 @@
     </header>
 
     <main>
-      <nav class="view-tabs" aria-label="表示切り替え">
-        <button id="show-new-button" class="view-tab active" type="button">＋ 新規作成</button>
-        <button id="show-library-button" class="view-tab" type="button">処理済みデータ</button>
-        <button id="show-speakers-button" class="view-tab" type="button">話者台帳</button>
+      <nav class="view-tabs" aria-label="表示切り替え" role="tablist">
+        <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="job-form" aria-selected="true">＋ 新規作成</button>
+        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card" aria-selected="false">処理済みデータ</button>
+        <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者台帳</button>
       </nav>
 
       <section id="library-card" class="library-card" hidden>
@@ -141,12 +141,12 @@
         </div>
       </section>
 
-      <form id="job-form" class="workspace-card">
-        <header class="new-job-header">
+      <form id="job-form" class="workspace-card mobile-step-1">
+        <header class="new-job-header desktop-create-header desktop-only">
           <div>
             <p class="eyebrow">NEW TRANSCRIPTION</p>
             <h2>新しい文字起こし</h2>
-            <p>ファイルを選べば、おすすめ設定のまま開始できます。必要な項目だけ変更してください。</p>
+            <p>全工程を見渡しながら、必要な設定だけ調整できるデスクトップワークスペースです。</p>
           </div>
           <ol class="quick-flow" aria-label="文字起こし開始までの流れ">
             <li class="active"><span>1</span>ファイル</li>
@@ -156,7 +156,51 @@
           </ol>
         </header>
 
-        <section id="setup-source" class="upload-section form-section">
+        <header class="mobile-create-header mobile-only">
+          <div class="mobile-create-brand">
+            <span>GURUMOJI</span>
+            <small>v{{ app_version }}</small>
+          </div>
+          <div class="mobile-wizard-title">
+            <span id="mobile-step-number">STEP 1 / 4</span>
+            <h2 id="mobile-step-title">ファイルを選ぶ</h2>
+            <p id="mobile-step-description">端末の音声・動画を1つ選択します</p>
+          </div>
+          <div class="mobile-step-dots" aria-label="現在のステップ">
+            <i class="active" data-mobile-dot="1"></i>
+            <i data-mobile-dot="2"></i>
+            <i data-mobile-dot="3"></i>
+            <i data-mobile-dot="4"></i>
+          </div>
+          <div class="mobile-device-strip" aria-label="処理装置の利用状態">
+            <span data-hardware="cpu" class="hardware-light checking">CPU 確認中</span>
+            <span data-hardware="gpu" class="hardware-light checking">GPU 確認中</span>
+          </div>
+        </header>
+
+        <div class="create-workbench">
+          <aside class="desktop-create-sidebar desktop-only">
+            <div class="desktop-sidebar-head">
+              <span>CREATE WORKSPACE</span>
+              <strong>文字起こし設定</strong>
+              <p>左から順に確認し、最後に開始してください。</p>
+            </div>
+            <nav class="desktop-step-nav" aria-label="新規作成の設定項目">
+              <a href="#setup-source"><b>01</b><span>入力ファイル<small>音声・動画と保存先</small></span></a>
+              <a href="#setup-recognition"><b>02</b><span>認識設定<small>モデル・言語・処理装置</small></span></a>
+              <a href="#setup-finish"><b>03</b><span>AI仕上げ<small>修正・名前・アウトライン</small></span></a>
+              <a href="#setup-emotion"><b>04</b><span>感情分析<small>AIST音声モデル</small></span></a>
+              <a href="#setup-output"><b>05</b><span>出力と開始<small>字幕・動画書き出し</small></span></a>
+            </nav>
+            <div class="desktop-sidebar-summary">
+              <span>現在の設定</span>
+              <strong data-setup-ready>ファイルを選択してください</strong>
+              <p data-setup-summary>おすすめ設定を自動で準備します</p>
+            </div>
+          </aside>
+
+          <div class="create-form-stage">
+        <section id="setup-source" class="upload-section form-section mobile-active" data-mobile-step="1">
           <div class="section-heading">
             <span class="step">01</span>
             <div>
@@ -168,18 +212,19 @@
               {% endif %}
             </div>
           </div>
-          <div id="file-drop-zone" class="file-drop-zone">
+          <div id="file-drop-zone" class="file-drop-zone" tabindex="0" role="button" aria-label="音声または動画ファイルを選択">
             <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac,audio/*,video/*">
             <div class="drop-zone-icon" aria-hidden="true">＋</div>
             <div class="drop-zone-copy">
               <strong>音声・動画ファイルを選択</strong>
-              <span>ここへドラッグ＆ドロップ、またはボタンから選択</span>
+              <span class="desktop-only">ここへドラッグ＆ドロップ、またはボタンから選択</span>
+              <span class="mobile-only">端末から音声・動画を選択</span>
               <small>MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC</small>
             </div>
             <button id="browse-path-button" class="secondary-button browse-button" type="button" data-picker-mode="{{ 'native' if runtime.native_file_dialog else 'browser' }}">{{ 'ファイルを選択' if runtime.native_file_dialog else '端末からアップロード' }}</button>
           </div>
           <div id="path-detail" class="path-detail file-selection-status" role="status">ファイルが選択されていません</div>
-          <div id="path-error" class="alert error" hidden></div>
+          <div id="path-error" class="alert error" role="alert" hidden></div>
           <div id="source-preview" class="source-preview" hidden>
             <div class="source-preview-frame">
               <img id="source-thumbnail" alt="選択した動画のサムネイル" hidden>
@@ -212,7 +257,7 @@
 
         <div class="divider"></div>
 
-        <section id="setup-recognition" class="form-section">
+        <section id="setup-recognition" class="form-section" data-mobile-step="2">
           <div class="section-heading">
             <span class="step">02</span>
             <div>
@@ -323,7 +368,7 @@
 
         <div class="divider"></div>
 
-        <section id="setup-finish" class="form-section optional-section">
+        <section id="setup-finish" class="form-section optional-section" data-mobile-step="3">
           <div class="section-heading">
             <span class="step accent">03</span>
             <div>
@@ -360,7 +405,7 @@
 
         <div class="divider"></div>
 
-        <section class="form-section optional-section">
+        <section id="setup-emotion" class="form-section optional-section" data-mobile-step="3">
           <div class="section-heading">
             <span class="step accent">04</span>
             <div>
@@ -388,10 +433,27 @@
 
         <div class="divider"></div>
 
-        <section class="output-row form-section">
+        <section id="setup-output" class="output-row form-section" data-mobile-step="4">
           <div class="section-heading compact">
             <span class="step">05</span>
             <div><h2>出力形式</h2><p>TXT は常に作成</p></div>
+          </div>
+          <div class="mobile-review-list mobile-only" aria-label="設定内容の確認">
+            <div>
+              <span>入力ファイル</span>
+              <strong data-mobile-review-source>未選択</strong>
+              <button type="button" data-mobile-edit-step="1">編集</button>
+            </div>
+            <div>
+              <span>認識設定</span>
+              <strong data-mobile-review-recognition>おすすめ設定</strong>
+              <button type="button" data-mobile-edit-step="2">編集</button>
+            </div>
+            <div>
+              <span>仕上げ</span>
+              <strong data-mobile-review-finish>追加処理なし</strong>
+              <button type="button" data-mobile-edit-step="3">編集</button>
+            </div>
           </div>
           <div class="format-options">
             <label class="mini-check"><input name="write_srt" type="checkbox" checked><span>SRT 字幕</span></label>
@@ -399,7 +461,7 @@
           </div>
         </section>
 
-        <div id="form-error" class="alert error" hidden></div>
+        <div id="form-error" class="alert error" role="alert" hidden></div>
         <div class="launch-bar">
           <div class="launch-summary">
             <strong id="setup-ready-state">ファイルを選択してください</strong>
@@ -409,6 +471,17 @@
             <span>文字起こしを開始</span><span aria-hidden="true">→</span>
           </button>
         </div>
+          </div>
+        </div>
+
+        <nav id="mobile-wizard-nav" class="mobile-wizard-nav mobile-only" aria-label="新規作成ステップ操作">
+          <button id="mobile-step-back" class="mobile-nav-button back" type="button" disabled>戻る</button>
+          <div>
+            <strong id="mobile-nav-step">1 / 4</strong>
+            <span id="mobile-nav-label">ファイル</span>
+          </div>
+          <button id="mobile-step-next" class="mobile-nav-button next" type="button">次へ</button>
+        </nav>
       </form>
 
       <section id="progress-card" class="progress-card" hidden aria-live="polite">

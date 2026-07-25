@@ -50,7 +50,7 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 APP_CREATOR = "クロカワ"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent

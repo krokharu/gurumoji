@@ -34,6 +34,16 @@ const burnSubtitledVideo = document.querySelector('[name="burn_subtitled_video"]
 const setupReadyState = document.querySelector('#setup-ready-state');
 const setupSummary = document.querySelector('#setup-summary');
 const quickFlowItems = [...document.querySelectorAll('.quick-flow li')];
+const mobileStepBack = document.querySelector('#mobile-step-back');
+const mobileStepNext = document.querySelector('#mobile-step-next');
+const mobileStepNumber = document.querySelector('#mobile-step-number');
+const mobileStepTitle = document.querySelector('#mobile-step-title');
+const mobileStepDescription = document.querySelector('#mobile-step-description');
+const mobileNavStep = document.querySelector('#mobile-nav-step');
+const mobileNavLabel = document.querySelector('#mobile-nav-label');
+const mobileStepDots = [...document.querySelectorAll('[data-mobile-dot]')];
+const mobileStepSections = [...document.querySelectorAll('[data-mobile-step]')];
+const mobileWizardMedia = window.matchMedia('(max-width: 959px)');
 const cleanTranscript = document.querySelector('#clean-transcript');
 const detectNames = document.querySelector('#detect-names');
 const createOutline = document.querySelector('#create-outline');
@@ -57,6 +67,7 @@ let libraryTimer = null;
 let thumbnailTimer = null;
 let thumbnailRequestId = 0;
 let jobRunning = false;
+let currentMobileStep = 1;
 let speakerRegistry = [];
 let speakerRegistryDeletedIds = new Set();
 let speakerRegistryLoaded = false;
@@ -100,6 +111,13 @@ const speakerThemeColors = [
   '#D1495B', '#00798C', '#6A4C93', '#8F5B34', '#B33C86', '#4D9078',
   '#E4572E', '#577590'
 ];
+
+const mobileStepContent = {
+  1: {title: 'ファイルを選ぶ', description: '端末の音声・動画を1つ選択します', label: 'ファイル'},
+  2: {title: '認識を設定', description: 'おすすめ設定を確認し、必要な項目だけ変更します', label: '認識設定'},
+  3: {title: '仕上げを選ぶ', description: 'AI仕上げと感情分析は必要な場合だけ有効にします', label: '仕上げ'},
+  4: {title: '確認して開始', description: '出力形式と設定内容を確認して開始します', label: '開始'},
+};
 
 loadConfig();
 loadSpeakerRegistry();
@@ -193,6 +211,85 @@ function hasSelectedSource() {
   );
 }
 
+function isMobileWizard() {
+  return mobileWizardMedia.matches;
+}
+
+function updateBrowseButtonLabel() {
+  if (!browsePathButton || browsePathButton.disabled) return;
+  browsePathButton.textContent = isMobileWizard()
+    ? '端末から選択'
+    : (browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択');
+}
+
+function renderMobileWizard() {
+  if (!form) return;
+  const mobile = isMobileWizard();
+  form.classList.toggle('mobile-wizard-ready', mobile);
+  [1, 2, 3, 4].forEach(step => form.classList.toggle(`mobile-step-${step}`, step === currentMobileStep));
+  mobileStepSections.forEach(section => {
+    const active = Number(section.dataset.mobileStep) === currentMobileStep;
+    section.classList.toggle('mobile-active', active);
+    if (mobile) section.toggleAttribute('inert', !active);
+    else section.removeAttribute('inert');
+  });
+
+  const content = mobileStepContent[currentMobileStep];
+  if (mobileStepNumber) mobileStepNumber.textContent = `STEP ${currentMobileStep} / 4`;
+  if (mobileStepTitle) mobileStepTitle.textContent = content.title;
+  if (mobileStepDescription) mobileStepDescription.textContent = content.description;
+  if (mobileNavStep) mobileNavStep.textContent = `${currentMobileStep} / 4`;
+  if (mobileNavLabel) mobileNavLabel.textContent = content.label;
+  mobileStepDots.forEach(dot => {
+    const step = Number(dot.dataset.mobileDot);
+    dot.classList.toggle('active', step === currentMobileStep);
+    dot.classList.toggle('complete', step < currentMobileStep);
+    if (step === currentMobileStep) dot.setAttribute('aria-current', 'step');
+    else dot.removeAttribute('aria-current');
+  });
+
+  if (mobileStepBack) mobileStepBack.disabled = jobRunning || currentMobileStep === 1;
+  if (mobileStepNext) {
+    mobileStepNext.disabled = jobRunning || (currentMobileStep === 1 && !hasSelectedSource());
+    mobileStepNext.textContent = currentMobileStep === 3 ? '確認へ' : '次へ';
+  }
+}
+
+function validateMobileStep(step) {
+  if (step === 1 && !hasSelectedSource()) {
+    setAlert(pathError, '先に音声・動画ファイルを選択してください。', true);
+    if (fileDropZone) fileDropZone.focus();
+    return false;
+  }
+  const section = mobileStepSections.find(item => Number(item.dataset.mobileStep) === step);
+  if (!section) return true;
+  const invalid = [...section.querySelectorAll('input, select, textarea')].find(input => !input.checkValidity());
+  if (invalid) {
+    setAlert(formError, '入力内容を確認してください。', true);
+    invalid.reportValidity();
+    invalid.focus();
+    return false;
+  }
+  return true;
+}
+
+function setMobileStep(nextStep, {focusHeading = true, validateCurrent = false} = {}) {
+  const target = Math.max(1, Math.min(4, Number(nextStep) || 1));
+  if (validateCurrent && target > currentMobileStep && !validateMobileStep(currentMobileStep)) return false;
+  currentMobileStep = target;
+  setAlert(formError, '');
+  renderMobileWizard();
+  if (focusHeading && isMobileWizard()) {
+    const header = document.querySelector('.mobile-create-header');
+    if (header) header.scrollIntoView({behavior: 'smooth', block: 'start'});
+    if (mobileStepTitle) {
+      mobileStepTitle.setAttribute('tabindex', '-1');
+      window.setTimeout(() => mobileStepTitle.focus({preventScroll: true}), 220);
+    }
+  }
+  return true;
+}
+
 function updateCreateSummary() {
   const hasSource = hasSelectedSource();
   if (fileDropZone) fileDropZone.classList.toggle('has-file', hasSource);
@@ -208,29 +305,46 @@ function updateCreateSummary() {
     }
   }
 
-  if (setupReadyState) {
-    setupReadyState.textContent = hasSource
-      ? '準備できました。文字起こしを開始できます'
-      : 'ファイルを選択してください';
-  }
+  const readyMessage = hasSource
+    ? '準備できました。文字起こしを開始できます'
+    : 'ファイルを選択してください';
+  if (setupReadyState) setupReadyState.textContent = readyMessage;
+  document.querySelectorAll('[data-setup-ready]').forEach(element => { element.textContent = readyMessage; });
 
   if (setupSummary) {
     const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
     const language = selectedOptionText(languageSelect) || '自動判定';
     const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
-    const extras = [];
-    if (triplePass && triplePass.checked) extras.push('詳細処理');
+    const finishExtras = [];
+    if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
     const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
     if (aiProvider && aiProvider.value !== 'none' && enabledAiOptions) {
-      extras.push(`${selectedOptionText(aiProvider)} AI仕上げ ${enabledAiOptions}項目`);
+      finishExtras.push(`${selectedOptionText(aiProvider)} AI仕上げ ${enabledAiOptions}項目`);
     }
-    if (emotionAnalysis && emotionAnalysis.checked) extras.push('感情分析');
-    if (writeSrt && writeSrt.checked) extras.push('SRT');
-    if (burnSubtitledVideo && burnSubtitledVideo.checked) extras.push('字幕付き動画');
-    setupSummary.textContent = `${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
+    if (emotionAnalysis && emotionAnalysis.checked) finishExtras.push('感情分析');
+    const outputExtras = [];
+    if (writeSrt && writeSrt.checked) outputExtras.push('SRT');
+    if (burnSubtitledVideo && burnSubtitledVideo.checked) outputExtras.push('字幕付き動画');
+    const extras = [...finishExtras, ...outputExtras];
+    const summaryText = `${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
+    setupSummary.textContent = summaryText;
+    document.querySelectorAll('[data-setup-summary]').forEach(element => { element.textContent = summaryText; });
+    const selectedFile = inputFile && inputFile.files && inputFile.files[0];
+    const directPath = sourcePath ? sourcePath.value.trim() : '';
+    const sourceLabel = selectedFile
+      ? selectedFile.name
+      : (directPath ? directPath.split(/[\\/]/).pop() : '未選択');
+    document.querySelectorAll('[data-mobile-review-source]').forEach(element => { element.textContent = sourceLabel; });
+    document.querySelectorAll('[data-mobile-review-recognition]').forEach(element => {
+      element.textContent = `${model} / ${language} / ${preprocess}`;
+    });
+    document.querySelectorAll('[data-mobile-review-finish]').forEach(element => {
+      element.textContent = finishExtras.length ? finishExtras.join(' / ') : '追加処理なし';
+    });
   }
 
   if (startButton) startButton.disabled = jobRunning || !hasSource;
+  renderMobileWizard();
 }
 
 function isVideoSource(value) {
@@ -309,8 +423,12 @@ function showView(view) {
   if (showLibraryButton) showLibraryButton.classList.toggle('active', library);
   if (showNewButton) showNewButton.classList.toggle('active', create);
   if (showSpeakersButton) showSpeakersButton.classList.toggle('active', speakers);
+  if (showLibraryButton) showLibraryButton.setAttribute('aria-selected', String(library));
+  if (showNewButton) showNewButton.setAttribute('aria-selected', String(create));
+  if (showSpeakersButton) showSpeakersButton.setAttribute('aria-selected', String(speakers));
   if (library && libraryCard) loadLibrary();
   if (speakers && speakerRegistryCard) loadSpeakerRegistry();
+  if (create) renderMobileWizard();
 }
 
 listen(showLibraryButton, 'click', () => showView('library'));
@@ -559,7 +677,7 @@ listen(sourcePath, 'input', () => {
 listen(browsePathButton, 'click', async () => {
   setAlert(pathError, '');
   if (!browsePathButton) return;
-  if (browserFilePickerOnly) {
+  if (browserFilePickerOnly || isMobileWizard()) {
     if (inputFile) inputFile.click();
     return;
   }
@@ -579,8 +697,14 @@ listen(browsePathButton, 'click', async () => {
     setAlert(pathError, error.message || 'ファイル選択に失敗しました。', true);
   } finally {
     browsePathButton.disabled = false;
-    browsePathButton.textContent = browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択';
+    updateBrowseButtonLabel();
   }
+});
+
+listen(fileDropZone, 'keydown', event => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  if (!jobRunning && browsePathButton) browsePathButton.click();
 });
 
 function handleInputFileSelection() {
@@ -722,7 +846,7 @@ async function loadConfig() {
     browserFilePickerOnly = Boolean(runtime.browser_upload);
     if (browsePathButton) {
       browsePathButton.dataset.pickerMode = browserFilePickerOnly ? 'browser' : 'native';
-      browsePathButton.textContent = browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択';
+      updateBrowseButtonLabel();
     }
     if (!response.ok || !data.ok) throw new Error(data.error || '設定を取得できません');
     const recognized = [];
@@ -812,6 +936,28 @@ syncQuietFields();
 syncEmotionFields();
 syncAiFields();
 updateCreateSummary();
+
+listen(mobileStepBack, 'click', () => setMobileStep(currentMobileStep - 1));
+listen(mobileStepNext, 'click', () => setMobileStep(currentMobileStep + 1, {validateCurrent: true}));
+document.querySelectorAll('[data-mobile-edit-step]').forEach(button => {
+  listen(button, 'click', () => setMobileStep(Number(button.dataset.mobileEditStep)));
+});
+mobileWizardMedia.addEventListener('change', () => {
+  updateBrowseButtonLabel();
+  renderMobileWizard();
+});
+
+if (form) {
+  form.addEventListener('invalid', event => {
+    if (!isMobileWizard()) return;
+    event.preventDefault();
+    const section = event.target.closest('[data-mobile-step]');
+    if (section) currentMobileStep = Number(section.dataset.mobileStep) || currentMobileStep;
+    renderMobileWizard();
+    setAlert(formError, '入力内容を確認してください。', true);
+    window.setTimeout(() => event.target.focus(), 80);
+  }, true);
+}
 
 listen(form, 'submit', async event => {
   event.preventDefault();

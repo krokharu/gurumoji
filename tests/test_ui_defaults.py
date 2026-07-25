@@ -1,3 +1,4 @@
+import re
 import unittest
 
 import app
@@ -36,6 +37,23 @@ class UiDefaultsTests(unittest.TestCase):
             r'id="start-button"[^>]*type="submit"[^>]*disabled',
         )
 
+    def test_desktop_and_mobile_creation_interfaces_are_separate(self):
+        response = app.app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertEqual(page.count('id="job-form"'), 1)
+        self.assertIn('class="desktop-create-sidebar desktop-only"', page)
+        self.assertIn('class="mobile-create-header mobile-only"', page)
+        self.assertIn('id="mobile-wizard-nav"', page)
+        self.assertIn('data-mobile-step="1"', page)
+        self.assertIn('data-mobile-step="2"', page)
+        self.assertEqual(page.count('data-mobile-step="3"'), 2)
+        self.assertIn('data-mobile-step="4"', page)
+        self.assertIn('data-mobile-review-source', page)
+        ids = re.findall(r'\bid="([^"]+)"', page)
+        self.assertEqual(len(ids), len(set(ids)))
+
     def test_ai_provider_selection_enables_all_options_and_json_downloads_are_hidden(self):
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
 
@@ -52,9 +70,14 @@ class UiDefaultsTests(unittest.TestCase):
         )
         self.assertIn("function updateCreateSummary()", script)
         self.assertIn("listen(fileDropZone, 'drop'", script)
+        self.assertIn("window.matchMedia('(max-width: 959px)')", script)
+        self.assertIn("browserFilePickerOnly || isMobileWizard()", script)
+        self.assertIn("function setMobileStep(", script)
 
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn("width: min(calc(100% - 24px), 700px);", styles)
+        self.assertIn("@media (min-width: 960px)", styles)
+        self.assertIn("@media (max-width: 959px)", styles)
 
 
 if __name__ == "__main__":
