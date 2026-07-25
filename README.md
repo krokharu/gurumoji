@@ -4,6 +4,8 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/krokharu/gurumoji/blob/main/Gurumoji_Colab.ipynb)
 
+現在のバージョン: **1.1.0**
+
 ## 主な機能
 
 - MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC を文字起こし
