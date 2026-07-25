@@ -7,6 +7,7 @@ const inputFile = document.querySelector('#input-file');
 const browsePathButton = document.querySelector('#browse-path-button');
 const pathDetail = document.querySelector('#path-detail');
 const pathError = document.querySelector('#path-error');
+const fileDropZone = document.querySelector('#file-drop-zone');
 const sourcePreview = document.querySelector('#source-preview');
 const sourceThumbnail = document.querySelector('#source-thumbnail');
 const sourcePreviewMessage = document.querySelector('#source-preview-message');
@@ -25,6 +26,14 @@ const vadOffset = document.querySelector('#vad-offset');
 const emotionAnalysis = document.querySelector('#emotion-analysis');
 const emotionModel = document.querySelector('#emotion-model');
 const aiProvider = document.querySelector('#ai-provider');
+const modelName = document.querySelector('#model-name');
+const languageSelect = document.querySelector('[name="language"]');
+const audioPreprocess = document.querySelector('[name="audio_preprocess"]');
+const writeSrt = document.querySelector('[name="write_srt"]');
+const burnSubtitledVideo = document.querySelector('[name="burn_subtitled_video"]');
+const setupReadyState = document.querySelector('#setup-ready-state');
+const setupSummary = document.querySelector('#setup-summary');
+const quickFlowItems = [...document.querySelectorAll('.quick-flow li')];
 const cleanTranscript = document.querySelector('#clean-transcript');
 const detectNames = document.querySelector('#detect-names');
 const createOutline = document.querySelector('#create-outline');
@@ -47,6 +56,7 @@ let playbackStopAt = null;
 let libraryTimer = null;
 let thumbnailTimer = null;
 let thumbnailRequestId = 0;
+let jobRunning = false;
 let speakerRegistry = [];
 let speakerRegistryDeletedIds = new Set();
 let speakerRegistryLoaded = false;
@@ -168,6 +178,59 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? value || '' : new Intl.DateTimeFormat('ja-JP', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
   }).format(date);
+}
+
+function selectedOptionText(select) {
+  return select && select.selectedOptions && select.selectedOptions[0]
+    ? select.selectedOptions[0].textContent.trim()
+    : '';
+}
+
+function hasSelectedSource() {
+  return Boolean(
+    (sourcePath && sourcePath.value.trim())
+    || (inputFile && inputFile.files && inputFile.files.length)
+  );
+}
+
+function updateCreateSummary() {
+  const hasSource = hasSelectedSource();
+  if (fileDropZone) fileDropZone.classList.toggle('has-file', hasSource);
+  if (pathDetail) pathDetail.classList.toggle('selected', hasSource);
+
+  quickFlowItems.forEach(item => item.classList.remove('active', 'complete'));
+  if (quickFlowItems.length) {
+    if (hasSource) {
+      quickFlowItems[0].classList.add('complete');
+      quickFlowItems[quickFlowItems.length - 1].classList.add('active');
+    } else {
+      quickFlowItems[0].classList.add('active');
+    }
+  }
+
+  if (setupReadyState) {
+    setupReadyState.textContent = hasSource
+      ? '準備できました。文字起こしを開始できます'
+      : 'ファイルを選択してください';
+  }
+
+  if (setupSummary) {
+    const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
+    const language = selectedOptionText(languageSelect) || '自動判定';
+    const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
+    const extras = [];
+    if (triplePass && triplePass.checked) extras.push('詳細処理');
+    const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
+    if (aiProvider && aiProvider.value !== 'none' && enabledAiOptions) {
+      extras.push(`${selectedOptionText(aiProvider)} AI仕上げ ${enabledAiOptions}項目`);
+    }
+    if (emotionAnalysis && emotionAnalysis.checked) extras.push('感情分析');
+    if (writeSrt && writeSrt.checked) extras.push('SRT');
+    if (burnSubtitledVideo && burnSubtitledVideo.checked) extras.push('字幕付き動画');
+    setupSummary.textContent = `${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
+  }
+
+  if (startButton) startButton.disabled = jobRunning || !hasSource;
 }
 
 function isVideoSource(value) {
@@ -488,8 +551,9 @@ listen(sourcePath, 'input', () => {
   if (value && inputFile) inputFile.value = '';
   pathDetail.textContent = value
     ? `${value.split(/[\\/]/).pop()} — このパスを直接処理します`
-    : 'MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC に対応';
+    : 'ファイルが選択されていません';
   scheduleSourceThumbnail(value);
+  updateCreateSummary();
 });
 
 listen(browsePathButton, 'click', async () => {
@@ -510,6 +574,7 @@ listen(browsePathButton, 'click', async () => {
     sourcePath.value = data.path || '';
     pathDetail.textContent = `${data.name || data.path} / ${formatBytes(Number(data.size))} — アップロードせず、このパスを直接処理します`;
     showSourceThumbnail(data.path || '', data.name || '');
+    updateCreateSummary();
   } catch (error) {
     setAlert(pathError, error.message || 'ファイル選択に失敗しました。', true);
   } finally {
@@ -518,15 +583,47 @@ listen(browsePathButton, 'click', async () => {
   }
 });
 
-listen(inputFile, 'change', () => {
+function handleInputFileSelection() {
   setAlert(pathError, '');
   const file = inputFile.files && inputFile.files[0];
+  if (file) {
+    sourcePath.value = '';
+    pathDetail.textContent = browserFilePickerOnly
+      ? `${file.name} / ${formatBytes(file.size)} — Colabへ一時アップロードして処理します`
+      : `${file.name} / ${formatBytes(file.size)} — このPC内だけで一時コピーして処理します`;
+    hideSourcePreview();
+  } else if (!sourcePath.value.trim()) {
+    pathDetail.textContent = 'ファイルが選択されていません';
+  }
+  updateCreateSummary();
+}
+
+listen(inputFile, 'change', handleInputFileSelection);
+
+['dragenter', 'dragover'].forEach(eventName => {
+  listen(fileDropZone, eventName, event => {
+    event.preventDefault();
+    if (!jobRunning) fileDropZone.classList.add('is-dragging');
+  });
+});
+['dragleave', 'drop'].forEach(eventName => {
+  listen(fileDropZone, eventName, event => {
+    event.preventDefault();
+    fileDropZone.classList.remove('is-dragging');
+  });
+});
+listen(fileDropZone, 'drop', event => {
+  if (jobRunning || !inputFile) return;
+  const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
   if (!file) return;
-  sourcePath.value = '';
-  pathDetail.textContent = browserFilePickerOnly
-    ? `${file.name} / ${formatBytes(file.size)} — Colabへ一時アップロードして処理します`
-    : `${file.name} / ${formatBytes(file.size)} — このPC内だけで一時コピーして処理します`;
-  hideSourcePreview();
+  try {
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    inputFile.files = transfer.files;
+    handleInputFileSelection();
+  } catch (error) {
+    setAlert(pathError, 'ドラッグ＆ドロップを利用できません。［ファイルを選択］から指定してください。', true);
+  }
 });
 
 function setHardwareLight(element, available, availableText, unavailableText, title = '') {
@@ -609,6 +706,7 @@ function applyMachineProfile(machine) {
       ? `自動設定: ${recommended.model_name} / 文字起こし ${deviceLabel} / 話者分離 ${diarizationLabel}。${recommended.reason || ''}`
       : '';
   }
+  updateCreateSummary();
 }
 
 async function loadConfig() {
@@ -654,14 +752,15 @@ async function loadConfig() {
 
 function setRunning(running) {
   if (!form) return;
+  jobRunning = running;
   [...form.elements].forEach(element => {
     element.disabled = running || element.dataset.alwaysDisabled === 'true';
   });
-  if (startButton) startButton.disabled = running;
   if (cancelButton) cancelButton.disabled = !running;
   syncQuietFields();
   syncEmotionFields();
   syncAiFields();
+  updateCreateSummary();
 }
 
 function syncQuietFields() {
@@ -692,21 +791,35 @@ function selectDefaultAiOptions() {
     aiOptionInputs.forEach(input => { input.checked = true; });
   }
   syncAiFields();
+  updateCreateSummary();
 }
 
 listen(boostQuietSpeech, 'change', syncQuietFields);
-listen(triplePass, 'change', syncQuietFields);
-listen(emotionAnalysis, 'change', syncEmotionFields);
+listen(triplePass, 'change', () => {
+  syncQuietFields();
+  updateCreateSummary();
+});
+listen(emotionAnalysis, 'change', () => {
+  syncEmotionFields();
+  updateCreateSummary();
+});
 listen(aiProvider, 'change', selectDefaultAiOptions);
+[modelName, languageSelect, audioPreprocess, writeSrt, burnSubtitledVideo].forEach(input => {
+  listen(input, 'change', updateCreateSummary);
+});
+aiOptionInputs.forEach(input => listen(input, 'change', updateCreateSummary));
 syncQuietFields();
 syncEmotionFields();
 syncAiFields();
+updateCreateSummary();
 
 listen(form, 'submit', async event => {
   event.preventDefault();
   setAlert(formError, '');
   if (!sourcePath.value.trim() && !(inputFile && inputFile.files && inputFile.files.length)) {
     setAlert(formError, '処理する音声・動画ファイルを選択してください。', true);
+    const sourceSection = document.querySelector('#setup-source');
+    if (sourceSection) sourceSection.scrollIntoView({behavior: 'smooth', block: 'start'});
     return;
   }
   const provider = aiProvider ? aiProvider.value : 'none';

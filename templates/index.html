@@ -142,7 +142,21 @@
       </section>
 
       <form id="job-form" class="workspace-card">
-        <section class="upload-section">
+        <header class="new-job-header">
+          <div>
+            <p class="eyebrow">NEW TRANSCRIPTION</p>
+            <h2>新しい文字起こし</h2>
+            <p>ファイルを選べば、おすすめ設定のまま開始できます。必要な項目だけ変更してください。</p>
+          </div>
+          <ol class="quick-flow" aria-label="文字起こし開始までの流れ">
+            <li class="active"><span>1</span>ファイル</li>
+            <li><span>2</span>認識設定</li>
+            <li><span>3</span>仕上げ</li>
+            <li><span>4</span>開始</li>
+          </ol>
+        </header>
+
+        <section id="setup-source" class="upload-section form-section">
           <div class="section-heading">
             <span class="step">01</span>
             <div>
@@ -154,15 +168,17 @@
               {% endif %}
             </div>
           </div>
-          <div class="path-picker">
-            <label class="field path-input-field">
-              <span>音声・動画（{% if runtime.colab %}Colab / Drive{% else %}フルパス{% endif %}の貼り付けも可能）</span>
-              <input id="source-path" name="source_path" type="text" placeholder="{% if runtime.colab %}/content/drive/MyDrive/...{% else %}C:\... のパスを直接貼り付ける場合はこちら{% endif %}" autocomplete="off">
-            </label>
+          <div id="file-drop-zone" class="file-drop-zone">
             <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac,audio/*,video/*">
+            <div class="drop-zone-icon" aria-hidden="true">＋</div>
+            <div class="drop-zone-copy">
+              <strong>音声・動画ファイルを選択</strong>
+              <span>ここへドラッグ＆ドロップ、またはボタンから選択</span>
+              <small>MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC</small>
+            </div>
             <button id="browse-path-button" class="secondary-button browse-button" type="button" data-picker-mode="{{ 'native' if runtime.native_file_dialog else 'browser' }}">{{ 'ファイルを選択' if runtime.native_file_dialog else '端末からアップロード' }}</button>
           </div>
-          <div id="path-detail" class="path-detail">MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC に対応</div>
+          <div id="path-detail" class="path-detail file-selection-status" role="status">ファイルが選択されていません</div>
           <div id="path-error" class="alert error" hidden></div>
           <div id="source-preview" class="source-preview" hidden>
             <div class="source-preview-frame">
@@ -173,10 +189,22 @@
               <p id="source-preview-message">サムネイルを作成しています…</p>
             </div>
           </div>
-          <label class="field output-path">
-            <span>保存先フォルダー（{% if runtime.colab %}Colab / Google Drive上のパス{% else %}この PC 上のパス{% endif %}）</span>
-              <input id="output-dir" name="output_dir" type="text" placeholder="既定の output フォルダー（実行ごとにサブフォルダーを作成）">
-          </label>
+          <details class="advanced-settings source-advanced">
+            <summary>
+              <span>パスと保存先を指定</span>
+              <small>通常は変更不要</small>
+            </summary>
+            <div class="advanced-settings-body path-settings-grid">
+              <label class="field path-input-field">
+                <span>音声・動画のフルパス</span>
+                <input id="source-path" name="source_path" type="text" placeholder="{% if runtime.colab %}/content/drive/MyDrive/...{% else %}C:\... のパスを直接貼り付ける場合はこちら{% endif %}" autocomplete="off">
+              </label>
+              <label class="field output-path">
+                <span>保存先フォルダー（{% if runtime.colab %}Colab / Google Drive{% else %}このPC{% endif %}）</span>
+                <input id="output-dir" name="output_dir" type="text" placeholder="既定の output フォルダー">
+              </label>
+            </div>
+          </details>
           {% if runtime.colab %}
           <p class="privacy-note">Colabのランタイムは停止時に消去されます。ノートブックでGoogle Drive保存を有効にすると、出力・話者台帳・編集履歴をDriveへ保持できます。</p>
           {% endif %}
@@ -184,13 +212,14 @@
 
         <div class="divider"></div>
 
-        <section>
+        <section id="setup-recognition" class="form-section">
           <div class="section-heading">
             <span class="step">02</span>
             <div>
               <h2>認識と話者分離</h2>
-              <p>速度と精度のバランスを選択</p>
+              <p>マシンに合わせたおすすめ設定を自動で選択しています</p>
             </div>
+            <span class="recommended-badge">おすすめ設定済み</span>
           </div>
           <div id="machine-status-panel" class="machine-status-panel" aria-live="polite">
             <div class="machine-status-head">
@@ -206,7 +235,7 @@
             <p id="machine-summary">マシン構成を読み込んでいます…</p>
             <p id="machine-recommendation" class="machine-recommendation"></p>
           </div>
-          <div class="settings-grid">
+          <div class="settings-grid basic-settings-grid">
             <label class="field">
               <span>認識モデル</span>
               <select id="model-name" name="model_name">
@@ -236,30 +265,7 @@
                 <option value="strong">強め — 雑音が多い録音</option>
               </select>
             </label>
-            <label class="field">
-              <span>文字起こし装置</span>
-              <select id="transcription-device" name="device">
-                <option value="cuda">GPU (CUDA)</option>
-                <option value="cpu" selected>CPU</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>話者分離装置</span>
-              <select id="diarization-device" name="diarization_device">
-                <option value="cpu" selected>CPU — 安定</option>
-                <option value="cuda">GPU (CUDA)</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>最少話者数（任意）</span>
-              <input name="min_speakers" type="number" min="1" max="20" placeholder="自動">
-            </label>
-            <label class="field">
-              <span>最多話者数（任意）</span>
-              <input name="max_speakers" type="number" min="1" max="20" placeholder="自動">
-            </label>
           </div>
-          <p class="inline-note">4 GB の旧世代 GPU では文字起こしに tiny / base、話者分離に CPU を推奨します。</p>
           <div class="quiet-voice-box">
             <div class="quiet-checks">
               <label class="check-row quiet-main">
@@ -273,7 +279,35 @@
                 <span><strong>詳細処理</strong><small>複数回処理やエフェクトを加えて精度を上げます。注意：処理時間が増えます</small></span>
               </label>
             </div>
-            <div class="quiet-fields">
+          </div>
+          <details class="advanced-settings recognition-advanced">
+            <summary>
+              <span>詳細設定</span>
+              <small>処理装置・話者数・無音判定を手動調整</small>
+            </summary>
+            <div class="advanced-settings-body settings-grid">
+              <label class="field">
+                <span>文字起こし装置</span>
+                <select id="transcription-device" name="device">
+                  <option value="cuda">GPU (CUDA)</option>
+                  <option value="cpu" selected>CPU</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>話者分離装置</span>
+                <select id="diarization-device" name="diarization_device">
+                  <option value="cpu" selected>CPU — 安定</option>
+                  <option value="cuda">GPU (CUDA)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>最少話者数</span>
+                <input name="min_speakers" type="number" min="1" max="20" placeholder="自動">
+              </label>
+              <label class="field">
+                <span>最多話者数</span>
+                <input name="max_speakers" type="number" min="1" max="20" placeholder="自動">
+              </label>
               <label class="field">
                 <span>VAD onset</span>
                 <input id="vad-onset" name="vad_onset" type="number" min="0.05" max="0.95" step="0.01" value="0.35">
@@ -283,12 +317,13 @@
                 <input id="vad-offset" name="vad_offset" type="number" min="0.05" max="0.95" step="0.01" value="0.25">
               </label>
             </div>
-          </div>
+            <p class="advanced-note">自動設定で問題がある場合のみ変更してください。4 GBの旧世代GPUでは tiny / base と話者分離CPUを推奨します。</p>
+          </details>
         </section>
 
         <div class="divider"></div>
 
-        <section>
+        <section id="setup-finish" class="form-section optional-section">
           <div class="section-heading">
             <span class="step accent">03</span>
             <div>
@@ -325,7 +360,7 @@
 
         <div class="divider"></div>
 
-        <section>
+        <section class="form-section optional-section">
           <div class="section-heading">
             <span class="step accent">04</span>
             <div>
@@ -353,7 +388,7 @@
 
         <div class="divider"></div>
 
-        <section class="output-row">
+        <section class="output-row form-section">
           <div class="section-heading compact">
             <span class="step">05</span>
             <div><h2>出力形式</h2><p>TXT は常に作成</p></div>
@@ -365,9 +400,15 @@
         </section>
 
         <div id="form-error" class="alert error" hidden></div>
-        <button id="start-button" class="primary-button" type="submit">
-          <span>文字起こしを開始</span><span aria-hidden="true">→</span>
-        </button>
+        <div class="launch-bar">
+          <div class="launch-summary">
+            <strong id="setup-ready-state">ファイルを選択してください</strong>
+            <span id="setup-summary">おすすめ設定を自動で準備します</span>
+          </div>
+          <button id="start-button" class="primary-button launch-button" type="submit" disabled>
+            <span>文字起こしを開始</span><span aria-hidden="true">→</span>
+          </button>
+        </div>
       </form>
 
       <section id="progress-card" class="progress-card" hidden aria-live="polite">

@@ -19,6 +19,23 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("<p>TXT は常に作成</p>", page)
         self.assertNotIn("JSON（常時）", page)
 
+    def test_new_job_form_exposes_guided_defaults_and_advanced_settings(self):
+        response = app.app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertIn("<h2>新しい文字起こし</h2>", page)
+        self.assertIn('id="file-drop-zone"', page)
+        self.assertIn("ここへドラッグ＆ドロップ", page)
+        self.assertIn("パスと保存先を指定", page)
+        self.assertIn("処理装置・話者数・無音判定を手動調整", page)
+        self.assertIn('id="setup-ready-state"', page)
+        self.assertIn('class="primary-button launch-button"', page)
+        self.assertRegex(
+            page,
+            r'id="start-button"[^>]*type="submit"[^>]*disabled',
+        )
+
     def test_ai_provider_selection_enables_all_options_and_json_downloads_are_hidden(self):
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
 
@@ -33,6 +50,11 @@ class UiDefaultsTests(unittest.TestCase):
             ".filter(file => !String(file.name || '').toLowerCase().endsWith('.json'))",
             script,
         )
+        self.assertIn("function updateCreateSummary()", script)
+        self.assertIn("listen(fileDropZone, 'drop'", script)
+
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn("width: min(calc(100% - 24px), 700px);", styles)
 
 
 if __name__ == "__main__":

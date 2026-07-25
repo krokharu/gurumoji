@@ -4,13 +4,14 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/krokharu/gurumoji/blob/main/Gurumoji_Colab.ipynb)
 
-現在のバージョン: **1.2.0**
+現在のバージョン: **1.3.0**
 
 ## 主な機能
 
 - MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC を文字起こし
 - Windowsローカル実行とGoogle Colab GPU実行に対応
 - Windows のファイル選択画面またはフルパス入力に対応し、選択したパスのファイルを直接処理
+- 新規作成画面はドラッグ＆ドロップ、折りたたみ式詳細設定、設定要約付き開始バーに対応
 - 処理前に選択した動画のサムネイルを表示
 - 発話ごとの話者分離とタイムスタンプ
 - TXT / JSON を常時出力し、SRT を任意で出力
