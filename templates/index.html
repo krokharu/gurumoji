@@ -48,6 +48,7 @@
       <nav class="view-tabs" aria-label="表示切り替え">
         <button id="show-new-button" class="view-tab active" type="button">＋ 新規作成</button>
         <button id="show-library-button" class="view-tab" type="button">処理済みデータ</button>
+        <button id="show-speakers-button" class="view-tab" type="button">話者台帳</button>
       </nav>
 
       <section id="library-card" class="library-card" hidden>
@@ -90,6 +91,47 @@
         </div>
         <div id="library-message" class="alert error" hidden></div>
         <div id="library-list" class="library-list"></div>
+      </section>
+
+      <section id="speaker-registry-card" class="speaker-registry-card" hidden>
+        <div class="registry-header">
+          <div>
+            <p class="eyebrow">GLOBAL SPEAKER REGISTRY</p>
+            <h2>グローバル話者台帳</h2>
+            <p>参加者・司会・観察者・会議メンバーを会話横断で管理します。個人情報はこのPC内に保存されます。</p>
+          </div>
+          <div class="registry-actions">
+            <button id="add-speaker-button" class="secondary-button" type="button">＋ 話者を追加</button>
+            <button id="import-speakers-button" class="secondary-button" type="button">Google Forms CSV</button>
+            <a class="secondary-button registry-export" href="/api/speakers/export.csv" download>CSVを書き出す</a>
+            <button id="save-speakers-button" class="primary-button small" type="button">台帳を保存</button>
+            <input id="speaker-csv-input" class="visually-hidden" type="file" accept=".csv,text/csv">
+          </div>
+        </div>
+        <div class="registry-guide">
+          <strong>Googleフォーム連携</strong>
+          <span>フォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。未知の質問列も追加属性として保持します。</span>
+        </div>
+        <div class="registry-toolbar">
+          <label class="field"><span>台帳を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ"></label>
+          <label class="field"><span>役割</span><select id="speaker-registry-role-filter"><option value="">すべて</option></select></label>
+          <label class="mini-check"><input id="speaker-registry-show-inactive" type="checkbox" checked>無効な話者も表示</label>
+          <p id="speaker-registry-count">読み込んでいます…</p>
+        </div>
+        <div id="speaker-registry-message" class="alert" hidden></div>
+        <div class="spreadsheet-shell">
+          <table class="speaker-sheet">
+            <thead>
+              <tr>
+                <th>有効</th><th>参加者コード</th><th>氏名</th><th>仮名・表示名</th>
+                <th>既定役割</th><th>組織</th><th>部署</th><th>役職</th>
+                <th>研究同意</th><th>録音同意</th><th>守秘同意</th>
+                <th>タグ</th><th>追加属性</th><th>備考</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="speaker-registry-body"></tbody>
+          </table>
+        </div>
       </section>
 
       <form id="job-form" class="workspace-card">
@@ -136,10 +178,24 @@
               <p>速度と精度のバランスを選択</p>
             </div>
           </div>
+          <div id="machine-status-panel" class="machine-status-panel" aria-live="polite">
+            <div class="machine-status-head">
+              <div>
+                <strong>マシン診断</strong>
+                <span>起動時に利用可能な処理装置を確認</span>
+              </div>
+              <div class="hardware-lights">
+                <span id="status-cpu" class="hardware-light checking">CPU 確認中</span>
+                <span id="status-gpu" class="hardware-light checking">GPU 確認中</span>
+              </div>
+            </div>
+            <p id="machine-summary">マシン構成を読み込んでいます…</p>
+            <p id="machine-recommendation" class="machine-recommendation"></p>
+          </div>
           <div class="settings-grid">
             <label class="field">
               <span>認識モデル</span>
-              <select name="model_name">
+              <select id="model-name" name="model_name">
                 <option value="tiny">tiny — 最速</option>
                 <option value="base" selected>base — 標準</option>
                 <option value="small">small — 高精度</option>
@@ -168,14 +224,14 @@
             </label>
             <label class="field">
               <span>文字起こし装置</span>
-              <select name="device">
-                <option value="cuda" selected>GPU (CUDA)</option>
-                <option value="cpu">CPU</option>
+              <select id="transcription-device" name="device">
+                <option value="cuda">GPU (CUDA)</option>
+                <option value="cpu" selected>CPU</option>
               </select>
             </label>
             <label class="field">
               <span>話者分離装置</span>
-              <select name="diarization_device">
+              <select id="diarization-device" name="diarization_device">
                 <option value="cpu" selected>CPU — 安定</option>
                 <option value="cuda">GPU (CUDA)</option>
               </select>
@@ -200,7 +256,7 @@
               <label class="check-row">
                 <input name="triple_pass" type="hidden" value="0">
                 <input id="triple-pass" name="triple_pass" type="checkbox" value="1">
-                <span><strong>三重実行で取りこぼし補完</strong><small>通常モードを主に、小声向けの軽め/強め音声でも文字起こしし、不足区間だけ追加します</small></span>
+                <span><strong>三重実行で取りこぼし補完</strong><small>通常結果の3秒以上の空白だけを切り出し、軽め/強めで再文字起こしして補完します</small></span>
               </label>
             </div>
             <div class="quiet-fields">
@@ -286,11 +342,12 @@
         <section class="output-row">
           <div class="section-heading compact">
             <span class="step">05</span>
-            <div><h2>出力形式</h2><p>TXT は常に作成</p></div>
+            <div><h2>出力形式</h2><p>TXT / JSON は常に作成</p></div>
           </div>
           <div class="format-options">
             <label class="mini-check"><input name="write_srt" type="checkbox" checked><span>SRT 字幕</span></label>
-            <label class="mini-check"><input name="write_json" type="checkbox"><span>JSON</span></label>
+            <label class="mini-check"><input type="checkbox" checked disabled data-always-disabled="true"><span>JSON（常時）</span></label>
+            <label class="mini-check"><input name="burn_subtitled_video" type="checkbox"><span>字幕付き動画 <small>動画のみ・話者別カラー</small></span></label>
           </div>
         </section>
 
@@ -347,13 +404,34 @@
           </div>
           <div id="emotion-content" class="emotion-content"></div>
         </div>
+        <section class="conversation-profile-card">
+          <div class="conversation-profile-head">
+            <div>
+              <p class="eyebrow">SESSION &amp; SPEAKER LINKAGE</p>
+              <h3>会話プロファイルと話者連携</h3>
+              <p>グループインタビュー／会議ごとの役割、条件、同意、フィールドノートを管理します。</p>
+            </div>
+            <a id="conversation-speaker-export" class="secondary-button" href="#" download>会話話者CSV</a>
+          </div>
+          <div class="session-profile-grid">
+            <label class="field"><span>会話種別</span><select id="session-type"><option value="focus_group">グループインタビュー</option><option value="meeting">会議</option><option value="interview">インタビュー</option><option value="workshop">ワークショップ</option><option value="other">その他</option></select></label>
+            <label class="field"><span>実施日</span><input id="session-date" type="date"></label>
+            <label class="field"><span>場所／オンライン</span><input id="session-location" type="text" maxlength="300" placeholder="会議室、Zoomなど"></label>
+            <label class="field session-wide"><span>目的・調査テーマ</span><textarea id="session-objective" rows="2" placeholder="この会話で明らかにしたいこと"></textarea></label>
+            <label class="field session-wide"><span>質問ガイド／議題</span><textarea id="session-guide" rows="3" placeholder="導入、移行、主要質問、締め／会議アジェンダ"></textarea></label>
+            <label class="field"><span>共通条件・選定条件</span><textarea id="session-conditions" rows="3" placeholder="対象者条件、グループ構成、会議前提"></textarea></label>
+            <label class="field"><span>守秘・同意メモ</span><textarea id="session-confidentiality" rows="3" placeholder="録音説明、参加者間の守秘、撤回条件"></textarea></label>
+            <label class="field session-wide"><span>観察・フィールドノート／会議メモ</span><textarea id="session-field-notes" rows="3" placeholder="非言語反応、座席、力関係、決定事項、次の対応"></textarea></label>
+          </div>
+          <div id="speaker-insights" class="speaker-insights"></div>
+          <div id="speaker-editor" class="speaker-editor"></div>
+        </section>
         <div class="editor-toolbar">
           <label class="field"><span>本文キーワード</span><input id="segment-keyword" type="search" placeholder="発話内を検索"></label>
           <label class="field"><span>話者で絞り込み</span><select id="segment-speaker-filter"><option value="">すべて</option></select></label>
           <label class="field"><span>感情で絞り込み</span><select id="segment-emotion-filter"><option value="">すべて</option><option value="ang">怒り</option><option value="hap">喜び</option><option value="sad">悲しみ</option><option value="neu">平常</option><option value="none">未設定</option></select></label>
           <label class="field"><span>並べ替え</span><select id="segment-sort"><option value="time_asc">時刻順</option><option value="time_desc">時刻の逆順</option><option value="speaker">話者別</option><option value="emotion">感情別</option><option value="keyword">キーワード一致順</option></select></label>
         </div>
-        <div id="speaker-editor" class="speaker-editor"></div>
         <div class="segment-list-header"><p id="segment-count"></p><button id="add-segment-button" class="secondary-button" type="button">＋ 発話を追加</button></div>
         <div id="segment-editor" class="segment-editor"></div>
         <div id="save-message" class="alert" hidden></div>
