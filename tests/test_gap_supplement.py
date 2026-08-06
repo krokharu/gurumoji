@@ -34,7 +34,7 @@ class FindLongAsrGapsTests(unittest.TestCase):
 
         self.assertEqual(
             find_long_asr_gaps(segments, 16.0),
-            [(9.0, 12.0)],
+            [(9.0, 12.0), (14.0, 16.0)],
         )
 
     def test_gap_threshold_is_inclusive(self):
@@ -47,7 +47,7 @@ class FindLongAsrGapsTests(unittest.TestCase):
 
 
 class OffsetAsrSegmentsTests(unittest.TestCase):
-    def test_offsets_segment_and_word_timestamps(self):
+    def test_offsets_and_clips_segment_and_word_timestamps_to_gap(self):
         segments = [{
             "start": 0.5,
             "end": 2.0,
@@ -58,9 +58,9 @@ class OffsetAsrSegmentsTests(unittest.TestCase):
         shifted = offset_asr_segments_to_gap(segments, 10.0, 10.75, 13.0)
 
         self.assertEqual(len(shifted), 1)
-        self.assertEqual(shifted[0]["start"], 10.5)
+        self.assertEqual(shifted[0]["start"], 10.75)
         self.assertEqual(shifted[0]["end"], 12.0)
-        self.assertEqual(shifted[0]["words"][0]["start"], 10.6)
+        self.assertEqual(shifted[0]["words"][0]["start"], 10.75)
         self.assertEqual(shifted[0]["words"][0]["end"], 11.1)
 
     def test_drops_speech_found_only_in_context_padding(self):

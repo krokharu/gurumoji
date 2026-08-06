@@ -7,6 +7,21 @@ set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "S3PRL_REPO=%CD%\models\s3prl-v0.4.17"
 set "S3PRL_BOOTSTRAP=%CD%\bootstrap_s3prl.py"
 set "HF_CHECK=%CD%\check_huggingface_access.py"
+set "EMOTION_REQUIREMENTS=%CD%\requirements-emotion.txt"
+set "EMOTION_REQUIREMENTS_HASH="
+if not exist "%EMOTION_REQUIREMENTS%" (
+  echo requirements-emotion.txt was not found: %EMOTION_REQUIREMENTS%
+  goto :error
+)
+for /f "skip=1 tokens=*" %%H in ('certutil -hashfile "%EMOTION_REQUIREMENTS%" SHA256 2^>nul') do (
+  if not defined EMOTION_REQUIREMENTS_HASH set "EMOTION_REQUIREMENTS_HASH=%%H"
+)
+set "EMOTION_REQUIREMENTS_HASH=%EMOTION_REQUIREMENTS_HASH: =%"
+if not defined EMOTION_REQUIREMENTS_HASH (
+  echo Could not calculate the requirements-emotion.txt fingerprint.
+  goto :error
+)
+set "EMOTION_SETUP_MARKER=%VENV_DIR%\.setup_emotion_s3prl0417_%EMOTION_REQUIREMENTS_HASH%"
 set "PIP_DISABLE_PIP_VERSION_CHECK=1"
 set "SETUP_RESULT=0"
 set "HF_CHECK_RAN=0"
@@ -20,7 +35,7 @@ if errorlevel 1 goto :error
 
 if not exist "%PYTHON%" goto :error
 
-%PYTHON% -c "import sys; from pathlib import Path; p=Path(sys.argv[1]); assert (p/'s3prl/version.txt').read_text(encoding='utf-8').strip() == '0.4.17' and (p/'s3prl/run_downstream.py').is_file()" "%S3PRL_REPO%" >nul 2>nul
+"%PYTHON%" -c "import sys; from pathlib import Path; p=Path(sys.argv[1]); assert (p/'s3prl/version.txt').read_text(encoding='utf-8').strip() == '0.4.17' and (p/'s3prl/run_downstream.py').is_file()" "%S3PRL_REPO%" >nul 2>nul
 if not errorlevel 1 (
   echo S3PRL repository already exists: %S3PRL_REPO%
   goto :s3prl_ready
@@ -34,31 +49,35 @@ if not exist "%S3PRL_REPO%" (
   )
 )
 
-%PYTHON% -c "import sys; from pathlib import Path; p=Path(sys.argv[1]); assert (p/'s3prl/version.txt').read_text(encoding='utf-8').strip() == '0.4.17' and (p/'s3prl/run_downstream.py').is_file()" "%S3PRL_REPO%" >nul 2>nul
+"%PYTHON%" -c "import sys; from pathlib import Path; p=Path(sys.argv[1]); assert (p/'s3prl/version.txt').read_text(encoding='utf-8').strip() == '0.4.17' and (p/'s3prl/run_downstream.py').is_file()" "%S3PRL_REPO%" >nul 2>nul
 if not errorlevel 1 goto :s3prl_ready
 
 echo Git is unavailable or cloning did not complete. Using the Python download fallback ...
-%PYTHON% "%S3PRL_BOOTSTRAP%" "%S3PRL_REPO%" || goto :error
+"%PYTHON%" "%S3PRL_BOOTSTRAP%" "%S3PRL_REPO%" || goto :error
 
 :s3prl_ready
 
 echo Installing optional AIST emotion dependencies ...
-%PYTHON% -m pip install --no-cache-dir tensorboardX==2.6.4 || goto :error
+if not exist "%EMOTION_SETUP_MARKER%" (
+  "%PYTHON%" -m pip install --no-cache-dir -r "%EMOTION_REQUIREMENTS%" || goto :error
+)
 
 echo Verifying the S3PRL emotion runtime ...
 set "PYTHONPATH=%S3PRL_REPO%;%PYTHONPATH%"
 cd /d "%S3PRL_REPO%\s3prl"
-%PYTHON% -W ignore -c "import s3prl, torch, torchaudio, yaml; import s3prl.run_downstream" >nul 2>nul || (
+"%PYTHON%" -W ignore -c "import s3prl, soundfile, tensorboardX, torch, torchaudio, yaml; assert 'soundfile' in torchaudio.list_audio_backends(), 'TorchAudio SoundFile backend is unavailable'; import s3prl.run_downstream" >nul 2>nul || (
   echo S3PRL runtime verification failed. Details:
-  %PYTHON% -W ignore -c "import s3prl, torch, torchaudio, yaml; import s3prl.run_downstream"
+  "%PYTHON%" -W ignore -c "import s3prl, soundfile, tensorboardX, torch, torchaudio, yaml; assert 'soundfile' in torchaudio.list_audio_backends(), 'TorchAudio SoundFile backend is unavailable'; import s3prl.run_downstream"
   goto :error
 )
+"%PYTHON%" -m pip check || goto :error
+if not exist "%EMOTION_SETUP_MARKER%" type nul > "%EMOTION_SETUP_MARKER%" || goto :error
 echo S3PRL 0.4.17 emotion runtime verified.
 
 echo.
 echo Checking all Hugging Face tokens and gated-model agreements ...
 set "HF_CHECK_RAN=1"
-%PYTHON% "%HF_CHECK%"
+"%PYTHON%" "%HF_CHECK%"
 if errorlevel 1 (
   set "SETUP_RESULT=1"
   echo.

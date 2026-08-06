@@ -20,6 +20,7 @@ class SpeakerRegistryApiTests(unittest.TestCase):
 
     def test_saves_global_speaker_registry(self):
         response = self.client.put("/api/speakers", json={
+            "registry_revision": 0,
             "speakers": [{
                 "id": "speaker_test_001",
                 "participant_code": "P-001",
@@ -40,6 +41,7 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["registry_revision"], 1)
         record = response.get_json()["speakers"][0]
         self.assertEqual(record["participant_code"], "P-001")
         self.assertEqual(record["attributes"]["年齢層"], "40代")
@@ -53,12 +55,16 @@ class SpeakerRegistryApiTests(unittest.TestCase):
 
         response = self.client.post(
             "/api/speakers/import",
-            data={"csv_file": (io.BytesIO(csv_body), "forms.csv")},
+            data={
+                "registry_revision": "0",
+                "csv_file": (io.BytesIO(csv_body), "forms.csv"),
+            },
             content_type="multipart/form-data",
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["imported_count"], 1)
+        self.assertEqual(response.get_json()["registry_revision"], 1)
         record = response.get_json()["speakers"][0]
         self.assertEqual(record["pseudonym"], "参加者B")
         self.assertEqual(record["recording_consent"], "granted")
@@ -69,6 +75,43 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         exported_text = exported.data.decode("utf-8-sig")
         self.assertIn("年齢層", exported_text)
         self.assertIn("参加者B", exported_text)
+        self.assertNotIn("研究同意", exported_text.splitlines()[0])
+        self.assertNotIn("録音同意", exported_text.splitlines()[0])
+
+    def test_registry_revision_prevents_lost_updates_between_tabs(self):
+        initial = self.client.get("/api/speakers").get_json()
+        self.assertEqual(initial["registry_revision"], 0)
+        payload = {
+            "registry_revision": initial["registry_revision"],
+            "speakers": [{
+                "id": "speaker_revision_001",
+                "participant_code": "P-REV",
+                "display_name": "First tab",
+            }],
+            "delete_ids": [],
+        }
+        first = self.client.put("/api/speakers", json=payload)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()["registry_revision"], 1)
+
+        stale = self.client.put("/api/speakers", json={
+            **payload,
+            "speakers": [{
+                "id": "speaker_revision_001",
+                "participant_code": "P-REV",
+                "display_name": "Stale second tab",
+            }],
+        })
+        self.assertEqual(stale.status_code, 409)
+        self.assertTrue(stale.get_json()["conflict"])
+        self.assertEqual(stale.get_json()["current_revision"], 1)
+
+        current = self.client.get("/api/speakers").get_json()
+        self.assertEqual(current["registry_revision"], 1)
+        self.assertEqual(current["speakers"][0]["display_name"], "First tab")
+
+        missing = self.client.put("/api/speakers", json={"speakers": [], "delete_ids": []})
+        self.assertEqual(missing.status_code, 400)
 
     def test_saves_conversation_profile_and_speaker_linkage(self):
         output_dir = Path(self.temporary.name) / "output"
@@ -91,7 +134,12 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         )
         self.assertIsNotNone(row)
 
+        current_response = self.client.get("/api/library/conversation_test")
+        self.assertEqual(current_response.status_code, 200)
+        current_revision = current_response.get_json()["revision_count"]
+
         response = self.client.put("/api/library/conversation_test", json={
+            "revision_count": current_revision,
             "source_name": "group_interview.wav",
             "segments": app.row_segments(row),
             "speaker_names": {"SPEAKER_00": "司会", "SPEAKER_01": "参加者A"},
@@ -139,6 +187,8 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertIn("会話役割", exported_text)
         self.assertIn("moderator", exported_text)
         self.assertIn("既存利用3年以上", exported_text)
+        self.assertNotIn("研究同意", exported_text.splitlines()[0])
+        self.assertNotIn("録音同意", exported_text.splitlines()[0])
 
 
 if __name__ == "__main__":

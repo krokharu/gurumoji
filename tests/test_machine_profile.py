@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import app
 from app import detect_machine_profile, recommend_machine_settings
@@ -69,6 +70,28 @@ class DetectMachineProfileTests(unittest.TestCase):
         self.assertEqual(page.count('data-hardware="cpu"'), 3)
         self.assertEqual(page.count('data-hardware="gpu"'), 3)
         self.assertIn("PROCESSOR STATUS", page)
+
+    def test_live_system_activity_endpoint_has_resource_and_io_metrics(self):
+        response = app.app.test_client().get("/api/system/activity")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("utilization_percent", payload["cpu"])
+        self.assertIn("utilization_percent", payload["memory"])
+        self.assertIn("utilization_percent", payload["gpu"])
+        self.assertIn("read_active", payload["disk"])
+        self.assertIn("write_active", payload["disk"])
+        self.assertIn("read_mib_per_second", payload["disk"])
+        self.assertIn("write_mib_per_second", payload["disk"])
+
+    def test_cpu_activity_uses_a_thread_independent_sample(self):
+        with patch("psutil.cpu_percent", return_value=37.5) as cpu_percent:
+            snapshot = app.system_activity_snapshot()
+
+        cpu_percent.assert_called_once_with(interval=0.1)
+        self.assertTrue(snapshot["cpu"]["available"])
+        self.assertEqual(snapshot["cpu"]["utilization_percent"], 37.5)
 
 
 if __name__ == "__main__":
