@@ -8,20 +8,21 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="booting">
-  <div id="boot-splash" class="boot-splash" role="status" aria-label="{{ product_name }}を起動しています">
+  <div id="boot-splash" class="boot-splash" role="status" aria-label="Gurumoji is starting and checking for updates">
     <div class="boot-grid" aria-hidden="true"></div>
     <div class="boot-glow" aria-hidden="true"></div>
+    <p class="boot-credit">CREATED BY KUROKAWA</p>
     <div class="boot-content">
       <p class="boot-kicker">LOCAL AI TRANSCRIPTION SYSTEM</p>
       <div class="boot-mark" aria-hidden="true">
         <span></span><span></span><span></span><span></span><span></span>
       </div>
       <h1><span>GURU</span>MOJI</h1>
-      <p class="boot-japanese">{{ product_name }} 起動中</p>
+      <p id="boot-status-text" class="boot-status-text">STARTING · CHECKING FOR UPDATES</p>
       <div class="boot-progress" aria-hidden="true"><i></i></div>
       <div class="boot-meta">
         <span>VERSION {{ app_version }}</span>
-        <span>CREATED BY {{ app_creator }}</span>
+        <span>CREATED BY KUROKAWA</span>
       </div>
     </div>
   </div>
@@ -37,8 +38,8 @@
         <div class="token-panel-title">tokens.json</div>
         <div class="token-statuses">
           <span id="status-hf" class="status-pill loading">Hugging Face</span>
-          <span id="status-openai" class="status-pill loading">OpenAI</span>
-          <span id="status-google" class="status-pill loading">Google</span>
+          <button id="status-openai" class="status-pill loading" type="button" data-model-provider="openai">OpenAI</button>
+          <button id="status-google" class="status-pill loading" type="button" data-model-provider="google">Google</button>
         </div>
         <p id="token-message">設定を確認しています…</p>
         <div class="processor-status" aria-label="CPUとGPUの利用状態">
@@ -54,19 +55,25 @@
     <main>
       <nav class="view-tabs" aria-label="表示切り替え" role="tablist">
         <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="job-form" aria-selected="true">＋ 新規作成</button>
-        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card result-card" aria-selected="false">処理済みデータ</button>
+        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="processed-data-hub result-card" aria-selected="false">処理済みデータ</button>
         <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者管理</button>
-        <button id="show-analysis-button" class="view-tab" type="button" role="tab" aria-controls="analysis-card" aria-selected="false">分析・可視化</button>
       </nav>
 
-      <section id="analysis-card" class="analysis-card" role="tabpanel" aria-labelledby="show-analysis-button analysis-title" hidden>
+      <section id="processed-data-hub" class="processed-data-hub" role="tabpanel" aria-labelledby="show-library-button" hidden>
+        <nav class="processed-data-tabs" aria-label="処理済みデータの表示切り替え" role="tablist">
+          <button id="show-library-list-button" class="processed-data-tab active" type="button" role="tab" aria-controls="library-card" aria-selected="true">データ一覧</button>
+          <button id="show-library-analysis-button" class="processed-data-tab" type="button" role="tab" aria-controls="analysis-card" aria-selected="false">分析・可視化</button>
+        </nav>
+
+      <section id="analysis-card" class="analysis-card" role="tabpanel" aria-labelledby="show-library-analysis-button analysis-title" hidden>
         <div class="analysis-header">
           <div>
             <p class="eyebrow">GROUP INTERVIEW ANALYSIS</p>
-            <h2 id="analysis-title">分析・可視化</h2>
-            <p>自動集計と研究者が設定・確認する分析を分け、発言の偏り、相互作用、テーマを根拠データとともに確認します。</p>
+            <h2 id="analysis-title">会話データの分析結果</h2>
+            <p>誰がどれくらい話したか、よく使われた言葉、会話の流れや統計を、グラフと表で分かりやすく確認できます。</p>
           </div>
           <div class="analysis-header-actions">
+            <a id="analysis-xlsx-export" class="primary-button" href="#" download hidden>Excel（標準出力）</a>
             <a id="analysis-json-export" class="secondary-button" href="#" download hidden>全分析JSON</a>
             <button id="analysis-refresh-button" class="secondary-button compact-button" type="button">↻ 再集計</button>
           </div>
@@ -89,7 +96,7 @@
         <div id="analysis-message" class="alert" role="alert" hidden></div>
         <div id="analysis-loading" class="analysis-loading" aria-live="polite" hidden>
           <i aria-hidden="true"></i>
-          <div><strong>分析データを集計しています</strong><span>発話、話者、無音、相互作用を確認中です…</span></div>
+          <div><strong>研究分析データを集計しています</strong><span>発話、形態素、係り受け、語彙、統計を確認中です…</span></div>
         </div>
         <div id="analysis-empty" class="analysis-empty">
           <strong>分析するデータを選択してください</strong>
@@ -108,7 +115,7 @@
                 <article class="automatic">
                   <span>自動集計</span>
                   <strong>データから計算</strong>
-                  <p>発話量、参加バランス、遷移、無音、特徴語を再現可能な方法で集計します。</p>
+                  <p>発話量、形態素、係り受け、語彙・共起、記述統計を再現可能な方法で集計します。</p>
                 </article>
                 <article class="configured">
                   <span>要設定</span>
@@ -142,9 +149,9 @@
             <div id="analysis-mobile-content" class="analysis-content mobile"></div>
           </div>
         </div>
-      </section>
+      </section><!-- /analysis-card -->
 
-      <section id="library-card" class="library-card" role="tabpanel" aria-labelledby="show-library-button library-title" hidden>
+      <section id="library-card" class="library-card" role="tabpanel" aria-labelledby="show-library-list-button library-title">
         <div class="library-header">
           <div>
             <p class="eyebrow">TRANSCRIPT LIBRARY</p>
@@ -212,7 +219,8 @@
             <div id="library-list" class="library-list" aria-live="polite"></div>
           </div>
         </div>
-      </section>
+      </section><!-- /library-card -->
+      </section><!-- /processed-data-hub -->
 
       <dialog id="add-record-dialog" class="app-dialog" aria-labelledby="add-record-dialog-title">
         <form id="add-record-form" method="dialog">
@@ -233,12 +241,37 @@
         </form>
       </dialog>
 
+      <dialog id="ai-model-dialog" class="app-dialog model-dialog" aria-labelledby="ai-model-dialog-title">
+        <form id="ai-model-form" method="dialog">
+          <div class="app-dialog-header">
+            <p class="eyebrow">AI MODEL SETTINGS</p>
+            <h2 id="ai-model-dialog-title">使用モデルを選択</h2>
+            <p>利用可能なモデルをAPIから取得します。初期選択は tokens.json の現在値です。</p>
+          </div>
+          <div class="model-dialog-current"><span id="ai-model-provider-label">AI</span><strong id="ai-model-current">読込中…</strong></div>
+          <label class="field">
+            <span>モデルを検索</span>
+            <input id="ai-model-search" type="search" placeholder="モデルIDまたは名前で検索">
+          </label>
+          <label class="field">
+            <span>利用可能なモデル</span>
+            <select id="ai-model-select" size="9" required></select>
+          </label>
+          <p id="ai-model-description" class="model-dialog-description"></p>
+          <div id="ai-model-error" class="alert error" role="alert" hidden></div>
+          <div class="app-dialog-actions">
+            <button id="cancel-ai-model-button" class="secondary-button" type="button">キャンセル</button>
+            <button id="save-ai-model-button" class="primary-button small" type="submit">tokens.jsonへ保存</button>
+          </div>
+        </form>
+      </dialog>
+
       <section id="speaker-registry-card" class="speaker-registry-card" role="tabpanel" aria-labelledby="show-speakers-button speaker-management-title" hidden>
         <div class="registry-header">
           <div>
             <p class="eyebrow">SPEAKER MANAGEMENT</p>
             <h2 id="speaker-management-title">話者管理</h2>
-            <p>参加者・司会・観察者・会議メンバーの属性や同意状況を、会話をまたいで一元管理します。</p>
+            <p>参加者情報と事前アンケート回答を一元管理し、回答傾向や会話データとの関係を分析できます。</p>
           </div>
           <div class="registry-actions">
             <button id="import-speakers-button" class="secondary-button" type="button">CSVを読み込む</button>
@@ -251,18 +284,29 @@
         <div class="registry-overview" aria-label="話者管理の概要">
           <div><span>登録話者</span><strong id="registry-total-metric">—</strong><small>人</small></div>
           <div><span>有効</span><strong id="registry-active-metric">—</strong><small>人</small></div>
-          <div><span>同意確認済み</span><strong id="registry-consent-metric">—</strong><small>人</small></div>
+          <div><span>アンケート項目</span><strong id="registry-survey-metric">—</strong><small>問</small></div>
           <div><span>保存状態</span><strong id="registry-dirty-metric">確認中</strong></div>
         </div>
 
         <details class="registry-guide">
           <summary>Googleフォーム・CSVとの連携方法</summary>
-          <p>Googleフォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。未知の質問列も追加属性として保持します。</p>
+          <p>Googleフォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。参加者コードで既存話者と結合し、未知の質問列を事前アンケート回答として保持・分析します。</p>
         </details>
+
+        <section id="speaker-survey-analysis" class="speaker-survey-analysis" aria-labelledby="speaker-survey-analysis-title">
+          <header>
+            <div>
+              <p class="eyebrow">PRE-SURVEY ANALYSIS</p>
+              <h3 id="speaker-survey-analysis-title">事前アンケート分析</h3>
+              <p>質問別の回答分布、回答率、数値要約、2項目クロス集計、該当参加者を確認できます。</p>
+            </div>
+          </header>
+          <div id="speaker-survey-analysis-content" aria-live="polite"></div>
+        </section>
 
         <div class="registry-toolbar-shell">
           <div class="registry-toolbar">
-            <label class="field"><span>話者を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ"></label>
+            <label class="field"><span>話者を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ・アンケート回答"></label>
             <label class="field"><span>役割</span><select id="speaker-registry-role-filter"><option value="">すべての役割</option></select></label>
             <label class="mini-check"><input id="speaker-registry-show-inactive" type="checkbox" checked>無効な話者も表示</label>
             <button id="speaker-registry-clear-filters" class="secondary-button compact-button" type="button">条件をクリア</button>
@@ -277,8 +321,8 @@
               <tr>
                 <th scope="col">有効</th><th scope="col">参加者コード</th><th scope="col">氏名</th><th scope="col">仮名・表示名</th>
                 <th scope="col">既定役割</th><th scope="col">組織</th><th scope="col">部署</th><th scope="col">役職</th>
-                <th scope="col">研究同意</th><th scope="col">録音同意</th><th scope="col">守秘同意</th>
-                <th scope="col">タグ</th><th scope="col">追加属性</th><th scope="col">備考</th><th scope="col">操作</th>
+                <th scope="col">守秘同意</th>
+                <th scope="col">タグ</th><th scope="col">事前アンケート回答</th><th scope="col">備考</th><th scope="col">操作</th>
               </tr>
             </thead>
             <tbody id="speaker-registry-body"></tbody>
@@ -367,7 +411,7 @@
             </div>
           </div>
           <div id="file-drop-zone" class="file-drop-zone" tabindex="0" role="button" aria-label="音声または動画ファイルを選択">
-            <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac,audio/*,video/*">
+            <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac">
             <div class="drop-zone-icon" aria-hidden="true">＋</div>
             <div class="drop-zone-copy">
               <strong>音声・動画ファイルを選択</strong>
@@ -527,7 +571,7 @@
             <span class="step accent">03</span>
             <div>
               <h2>AI仕上げ <em>任意</em></h2>
-              <p>文字ノイズ・誤変換の修正、自己紹介からの名前抽出、議題アウトライン作成</p>
+              <p>文字校正、2段階の話者特定・リンク、議題アウトラインをそれぞれ独立して処理</p>
             </div>
           </div>
           <div class="ai-box">
@@ -546,7 +590,7 @@
               </label>
               <label class="check-row">
                 <input id="detect-names" name="detect_speaker_names" type="checkbox">
-                <span><strong>冒頭の自己紹介から話者名を入力</strong><small>明示的に名乗った場合だけ推定。完了後に手動修正できます</small></span>
+                <span><strong>自己紹介から話者を特定・リンク</strong><small>文字校正とは別に、候補抽出とリンク再確認を2回処理します</small></span>
               </label>
               <label class="check-row">
                 <input id="create-outline" name="create_outline" type="checkbox">
@@ -643,8 +687,66 @@
           <div><p class="eyebrow">PROCESSING</p><h2 id="progress-title">文字起こし中</h2></div>
           <strong id="progress-number">0%</strong>
         </div>
-        <div class="progress-track"><div id="progress-bar"></div></div>
-        <p id="progress-message">準備しています…</p>
+        <div class="progress-overall-heading"><span>全体の進捗</span><small>OVERALL PROGRESS</small></div>
+        <div id="progress-overall-track" class="progress-track" role="progressbar" aria-label="文字起こし全体の進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-bar"></div></div>
+        <div class="current-process-panel">
+          <div class="process-activity" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="current-process-body">
+            <div class="current-process-heading">
+              <div><small id="progress-activity-label">WAITING</small><strong id="progress-stage-label">開始準備</strong></div>
+              <b id="progress-stage-number">0%</b>
+            </div>
+            <div id="progress-stage-track" class="progress-stage-track" role="progressbar" aria-label="現在の処理の進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-stage-bar"></div></div>
+            <p id="progress-message">準備しています…</p>
+          </div>
+        </div>
+        <section id="progress-ai-usage" class="ai-token-usage" aria-label="AIトークン使用量" hidden>
+          <div class="ai-token-heading">
+            <div><span class="ai-token-mark" aria-hidden="true">AI</span><div><small>AI TOKEN USAGE</small><strong data-ai-provider>AI</strong></div></div>
+            <span data-ai-model></span>
+          </div>
+          <div class="ai-token-grid">
+            <div><small>入力トークン</small><strong data-ai-input>0</strong></div>
+            <div><small>出力トークン</small><strong data-ai-output>0</strong></div>
+            <div class="total"><small>合計トークン</small><strong data-ai-total>0</strong></div>
+            <div><small>累計API呼び出し</small><strong data-ai-requests>0回</strong></div>
+          </div>
+          <div class="ai-token-details">
+            <span data-ai-cached hidden>キャッシュ済み <b>0</b></span>
+            <span data-ai-reasoning hidden>推論 <b>0</b></span>
+            <span data-ai-unreported hidden>APIから使用量が返されませんでした</span>
+          </div>
+        </section>
+        <section class="resource-monitor" aria-label="処理中のシステム使用状況">
+          <div class="resource-monitor-heading">
+            <div><span class="resource-live-dot" aria-hidden="true"></span><strong>システム使用状況</strong></div>
+            <small>LIVE SYSTEM MONITOR</small>
+          </div>
+          <div class="resource-monitor-grid">
+            <article class="resource-metric" data-resource="cpu">
+              <div class="resource-metric-top"><span>CPU</span><strong id="monitor-cpu-value">--%</strong></div>
+              <div class="resource-meter" aria-hidden="true"><i id="monitor-cpu-bar"></i></div>
+              <small id="monitor-cpu-detail">使用率を取得中</small>
+            </article>
+            <article class="resource-metric" data-resource="gpu">
+              <div class="resource-metric-top"><span>GPU</span><strong id="monitor-gpu-value">--%</strong></div>
+              <div class="resource-meter" aria-hidden="true"><i id="monitor-gpu-bar"></i></div>
+              <small id="monitor-gpu-detail">GPU使用率を取得中</small>
+            </article>
+            <article class="resource-metric" data-resource="memory">
+              <div class="resource-metric-top"><span>メモリ</span><strong id="monitor-memory-value">--%</strong></div>
+              <div class="resource-meter" aria-hidden="true"><i id="monitor-memory-bar"></i></div>
+              <small id="monitor-memory-detail">使用量を取得中</small>
+            </article>
+            <article class="resource-metric io-metric" data-resource="disk">
+              <div class="resource-metric-top"><span>ディスクI/O</span><strong>ACTIVITY</strong></div>
+              <div class="io-lights">
+                <div class="io-status"><i id="monitor-read-light" class="io-light read" aria-hidden="true"></i><span>読み込み</span><small id="monitor-read-rate">0 KB/s</small></div>
+                <div class="io-status"><i id="monitor-write-light" class="io-light write" aria-hidden="true"></i><span>書き込み</span><small id="monitor-write-rate">0 KB/s</small></div>
+              </div>
+            </article>
+          </div>
+        </section>
         <details>
           <summary>処理ログ</summary>
           <pre id="progress-log"></pre>
@@ -657,7 +759,35 @@
           <div><p class="eyebrow">TRANSCRIPT READY</p><h2 id="result-title">確認・手動編集</h2></div>
           <div id="download-links" class="download-links"></div>
         </div>
+        <nav class="result-context-nav" aria-label="選択中データの関連画面">
+          <div class="result-context-current">
+            <span>選択中の処理済みデータ</span>
+            <strong id="result-context-name">—</strong>
+          </div>
+          <div class="result-context-actions">
+            <button class="secondary-button" type="button" data-result-destination="library">データ一覧</button>
+            <button class="primary-button" type="button" data-result-destination="analysis">分析・可視化</button>
+            <button class="secondary-button" type="button" data-result-destination="speakers">話者管理</button>
+          </div>
+        </nav>
         <p class="result-help">発話を選ぶと、その箇所の前後を含めて元の音声・動画を確認できます。保存した修正差分は、くしなだ学習用データにも蓄積します。</p>
+        <section id="result-ai-usage" class="ai-token-usage" aria-label="AIトークン使用量" hidden>
+          <div class="ai-token-heading">
+            <div><span class="ai-token-mark" aria-hidden="true">AI</span><div><small>AI TOKEN USAGE</small><strong data-ai-provider>AI</strong></div></div>
+            <span data-ai-model></span>
+          </div>
+          <div class="ai-token-grid">
+            <div><small>入力トークン</small><strong data-ai-input>0</strong></div>
+            <div><small>出力トークン</small><strong data-ai-output>0</strong></div>
+            <div class="total"><small>合計トークン</small><strong data-ai-total>0</strong></div>
+            <div><small>累計API呼び出し</small><strong data-ai-requests>0回</strong></div>
+          </div>
+          <div class="ai-token-details">
+            <span data-ai-cached hidden>キャッシュ済み <b>0</b></span>
+            <span data-ai-reasoning hidden>推論 <b>0</b></span>
+            <span data-ai-unreported hidden>APIから使用量が返されませんでした</span>
+          </div>
+        </section>
         <p id="result-output-dir" class="result-output-dir" hidden></p>
         <div id="media-review" class="media-review" hidden>
           <div class="media-review-head">
@@ -671,10 +801,10 @@
             <button id="next-segment-button" class="secondary-button" type="button">次の発話 →</button>
           </div>
         </div>
-        <div id="outline-view" class="outline-view" hidden>
+        <div id="outline-view" class="outline-view">
           <div class="outline-title-row">
             <p class="eyebrow">OUTLINE</p>
-            <h3>議題アウトライン</h3>
+            <h3>AI自動生成アウトライン</h3>
           </div>
           <div id="outline-content" class="outline-content"></div>
         </div>
@@ -692,17 +822,24 @@
               <h3>会話プロファイルと話者連携</h3>
               <p>グループインタビュー／会議ごとの役割、条件、同意、フィールドノートを管理します。</p>
             </div>
-            <a id="conversation-speaker-export" class="secondary-button" href="#" download>会話話者CSV</a>
+            <div class="speaker-identity-actions">
+              <label class="field"><span>話者特定AI</span><select id="speaker-identity-provider"><option value="openai">OpenAI</option><option value="google">Google Gemini</option></select></label>
+              <button id="rerun-speaker-identification" class="secondary-button" type="button">自己紹介から話者名を再特定</button>
+              <a id="conversation-speaker-export" class="secondary-button" href="#" download>会話話者CSV</a>
+              <small id="speaker-identity-status">空欄の話者名だけに反映します。</small>
+            </div>
           </div>
           <div class="session-profile-grid">
             <label class="field"><span>会話種別</span><select id="session-type"><option value="focus_group">グループインタビュー</option><option value="meeting">会議</option><option value="interview">インタビュー</option><option value="workshop">ワークショップ</option><option value="other">その他</option></select></label>
-            <label class="field"><span>実施日</span><input id="session-date" type="date"></label>
+            <label class="field"><span>実施日</span><input id="session-date" type="date"><small id="session-date-note" class="field-note">動画の撮影日時があれば自動入力します。いつでも手動で変更できます。</small></label>
             <label class="field"><span>場所／オンライン</span><input id="session-location" type="text" maxlength="300" placeholder="会議室、Zoomなど"></label>
             <label class="field session-wide"><span>目的・調査テーマ</span><textarea id="session-objective" rows="2" placeholder="この会話で明らかにしたいこと"></textarea></label>
             <label class="field session-wide"><span>質問ガイド／議題</span><textarea id="session-guide" rows="3" placeholder="導入、移行、主要質問、締め／会議アジェンダ"></textarea></label>
             <label class="field"><span>共通条件・選定条件</span><textarea id="session-conditions" rows="3" placeholder="対象者条件、グループ構成、会議前提"></textarea></label>
-            <label class="field"><span>守秘・同意メモ</span><textarea id="session-confidentiality" rows="3" placeholder="録音説明、参加者間の守秘、撤回条件"></textarea></label>
-            <label class="field session-wide"><span>観察・フィールドノート／会議メモ</span><textarea id="session-field-notes" rows="3" placeholder="非言語反応、座席、力関係、決定事項、次の対応"></textarea></label>
+            <details id="session-notes-details" class="session-notes-details session-wide">
+              <summary><span>観察・フィールドノート／会議メモ</span><small id="session-notes-summary">未入力</small></summary>
+              <label class="field"><textarea id="session-field-notes" rows="3" aria-label="観察・フィールドノート／会議メモ" placeholder="非言語反応、座席、力関係、決定事項、次の対応"></textarea></label>
+            </details>
           </div>
           <div id="speaker-insights" class="speaker-insights"></div>
           <div id="speaker-editor" class="speaker-editor"></div>
@@ -718,6 +855,7 @@
         <div id="save-message" class="alert" hidden></div>
         <div class="sticky-actions">
           <button id="save-button" class="primary-button small" type="button">編集内容を保存</button>
+          <button id="result-analysis-button" class="secondary-button analysis-jump-button" type="button">このデータを分析・可視化</button>
           <button id="delete-record-button" class="secondary-button danger" type="button">このデータを削除</button>
           <button id="new-button" class="secondary-button" type="button">一覧へ戻る</button>
         </div>

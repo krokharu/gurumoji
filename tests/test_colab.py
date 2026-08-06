@@ -32,6 +32,30 @@ class ColabRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(response.get_json()["browser_upload_only"])
 
+    def test_colab_page_allows_only_colab_frame_ancestors(self):
+        with patch.dict(os.environ, {"MOJIOKOSI_RUNTIME": "colab"}, clear=False):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("X-Frame-Options", response.headers)
+        policy = response.headers["Content-Security-Policy"]
+        self.assertIn("frame-ancestors https://colab.research.google.com", policy)
+        self.assertIn("https://*.research.google.com", policy)
+
+    def test_colab_loopback_proxy_may_rewrite_host_but_not_bypass_cross_site_guard(self):
+        headers = {"Host": "random-tunnel.example"}
+        environ = {"REMOTE_ADDR": "127.0.0.1"}
+        with patch.dict(os.environ, {"MOJIOKOSI_RUNTIME": "colab"}, clear=False):
+            page = self.client.get("/", headers=headers, environ_overrides=environ)
+            cross_site = self.client.get(
+                "/api/config",
+                headers={**headers, "Sec-Fetch-Site": "cross-site"},
+                environ_overrides=environ,
+            )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(cross_site.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

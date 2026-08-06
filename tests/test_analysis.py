@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 import app
 
@@ -41,6 +42,26 @@ ANALYSIS_DATASETS = {
     "important_quotes": {
         "segment_id", "speaker", "speaker_name", "text", "code_labels", "memo",
     },
+    "segments_all": {
+        "segment_id", "speaker", "text", "token_count", "lexical_diversity",
+    },
+    "morphemes": {
+        "segment_id", "surface", "lemma", "normalized", "upos", "pos_detail",
+    },
+    "dependencies": {
+        "segment_id", "surface", "dependency", "head_token_id", "head_surface",
+    },
+    "pos_frequency": {"upos", "pos_detail", "count", "percent"},
+    "term_frequency": {
+        "term", "term_frequency", "document_frequency", "tf_idf",
+    },
+    "cooccurrence": {"term_a", "term_b", "cooccurrence_count", "jaccard"},
+    "descriptives": {"variable", "n", "mean", "standard_deviation", "median"},
+    "frequencies": {"variable", "value", "count", "percent"},
+    "crosstabs": {"table_id", "row_value", "column_value", "count"},
+    "statistical_tests": {"test", "outcome", "p_value", "effect_size", "status"},
+    "correlations": {"method", "variable_a", "variable_b", "coefficient", "status"},
+    "analysis_methods": {"category", "method", "engine", "status", "source_url"},
 }
 
 
@@ -50,6 +71,19 @@ class AnalysisApiTests(unittest.TestCase):
         self.original_database = app.DATABASE_FILE
         app.DATABASE_FILE = Path(self.temporary.name) / "library.sqlite3"
         app.initialize_library()
+        app.save_speaker_registry_records(
+            [{
+                "id": "speaker_analysis_a",
+                "participant_code": "P-A",
+                "pseudonym": "参加者A",
+                "default_role": "participant",
+                "organization": "登録組織",
+                "tags": ["既存利用者"],
+                "attributes": {"年齢層": "40代", "利用歴": "3年以上"},
+                "active": True,
+            }],
+            expected_revision=0,
+        )
         self.client = app.app.test_client()
         self.item_id = "analysis_fixture"
         app.upsert_library_item(
@@ -128,6 +162,7 @@ class AnalysisApiTests(unittest.TestCase):
                     "organization": "研究所",
                 },
                 "PARTICIPANT_A": {
+                    "global_speaker_id": "speaker_analysis_a",
                     "display_name": "=2+3",
                     "session_role": "participant",
                     "organization": "-危険組織",
@@ -167,6 +202,77 @@ class AnalysisApiTests(unittest.TestCase):
             speaker_profiles=speaker_profiles,
         )
         return item_id
+
+    def test_speaker_identification_can_be_rerun_for_saved_transcript(self):
+        item_id = "speaker_identity_rerun"
+        self.create_analysis_item(
+            item_id,
+            [{
+                "id": "intro",
+                "start": 0.0,
+                "end": 2.0,
+                "speaker": "SPEAKER_00",
+                "text": "田中と申します",
+            }],
+        )
+
+        def fake_detect(*args, usage_callback=None, diagnostics_callback=None, **kwargs):
+            usage_callback({
+                "provider": "openai",
+                "model": "test-model",
+                "request_count": 2,
+                "input_tokens": 20,
+                "output_tokens": 10,
+                "total_tokens": 30,
+                "reported": True,
+            })
+            diagnostics_callback({
+                "candidate_count": 1,
+                "linked_count": 1,
+                "ambiguous_labels": {},
+                "duplicate_names": {},
+            })
+            return {"SPEAKER_00": "田中"}
+
+        with (
+            patch.object(
+                app,
+                "load_token_config",
+                return_value=app.TokenConfig(
+                    openai_api_key="secret", openai_model="test-model"
+                ),
+            ),
+            patch.object(app, "detect_speaker_names_with_ai", side_effect=fake_detect),
+        ):
+            response = self.client.post(
+                f"/api/library/{item_id}/speaker-identification",
+                json={"provider": "openai", "revision_count": 0},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["speaker_names"], {"SPEAKER_00": "田中"})
+        self.assertEqual(payload["speaker_identity"]["applied_count"], 1)
+        self.assertEqual(payload["ai_usage"]["request_count"], 2)
+        save_response = self.client.put(
+            f"/api/library/{item_id}",
+            json={
+                "revision_count": payload["revision_count"],
+                "source_name": payload["source_name"],
+                "segments": payload["segments"],
+                "speaker_names": payload["speaker_names"],
+                "session_profile": payload["session_profile"],
+                "speaker_profiles": payload["speaker_profiles"],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_response.get_json()["ai_usage"]["request_count"], 2)
+        with app.database_connection() as connection:
+            event_count = connection.execute(
+                "SELECT COUNT(*) AS count FROM training_events WHERE payload_json LIKE ?",
+                (f'%"transcript_id": "{item_id}"%',),
+            ).fetchone()["count"]
+        self.assertEqual(event_count, 0)
 
     def put_analysis(self, item_id, *, config=None, annotations=None):
         current = self.client.get(f"/api/library/{item_id}/analysis").get_json()
@@ -245,7 +351,7 @@ class AnalysisApiTests(unittest.TestCase):
             {
                 "schema_version", "algorithm_version", "generated_at", "item",
                 "config", "annotations", "classification", "cautions",
-                "automatic", "manual", "segments", "exports",
+                "automatic", "manual", "segments", "exports", "research",
             },
         )
         self.assertEqual(
@@ -269,6 +375,9 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(metrics["MODERATOR"]["participant_percent"], 0.0)
         self.assertEqual(metrics["PARTICIPANT_A"]["participant_percent"], 60.0)
         self.assertEqual(metrics["PARTICIPANT_B"]["participant_percent"], 40.0)
+        self.assertEqual(metrics["PARTICIPANT_A"]["profile"]["organization"], "-危険組織")
+        self.assertEqual(metrics["PARTICIPANT_A"]["profile"]["attributes"]["年齢層"], "40代")
+        self.assertEqual(metrics["PARTICIPANT_A"]["profile"]["tags"], ["既存利用者"])
 
         balance = data["automatic"]["balance"]
         self.assertEqual(balance["participant_count"], 2)
@@ -312,7 +421,40 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(moderator["participant_to_participant_transitions"], 2)
         self.assertEqual(moderator["cross_speaker_transitions"], 5)
         self.assertIn("json", data["exports"])
-        self.assertEqual(set(ANALYSIS_DATASETS), set(data["exports"]) - {"json"})
+        self.assertIn("xlsx", data["exports"])
+        self.assertEqual(
+            set(ANALYSIS_DATASETS),
+            set(data["exports"]) - {"json", "xlsx"},
+        )
+
+    def test_pre_survey_attribute_can_group_conversation_metrics(self):
+        current = self.client.get(f"/api/library/{self.item_id}/analysis").get_json()
+        response = self.client.put(
+            f"/api/library/{self.item_id}/analysis",
+            json={
+                "source_revision": current["item"]["revision_count"],
+                "analysis_revision": current["item"]["analysis_revision"],
+                "config": {
+                    **current["config"],
+                    "group_by": "attribute:年齢層",
+                },
+                "annotations": current["annotations"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["config"]["group_by"], "attribute:年齢層")
+        groups = {item["group"]: item for item in data["automatic"]["groups"]}
+        self.assertIn("40代", groups, groups)
+        self.assertEqual(groups["40代"]["speaker_count"], 1)
+        self.assertIn("未回答", groups, groups)
+        self.assertEqual(groups["未回答"]["speaker_count"], 2)
+        self.assertEqual(app.normalize_analysis_group_by("attribute:"), "none")
+        self.assertEqual(
+            app.normalize_analysis_group_by("attribute:利用歴"),
+            "attribute:利用歴",
+        )
 
     def test_put_persists_codebook_annotations_and_manual_metrics(self):
         before_item = self.client.get(
@@ -464,6 +606,30 @@ class AnalysisApiTests(unittest.TestCase):
             f"/api/library/{self.item_id}/analysis/export.csv?dataset=unknown"
         )
         self.assertEqual(invalid.status_code, 400)
+
+    def test_xlsx_is_the_standard_multi_sheet_export(self):
+        from openpyxl import load_workbook
+
+        response = self.client.get(
+            f"/api/library/{self.item_id}/analysis/export.xlsx"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data.startswith(b"PK"))
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.headers["Content-Type"],
+        )
+        self.assertIn("attachment", response.headers["Content-Disposition"])
+        workbook = load_workbook(
+            io.BytesIO(response.data),
+            read_only=True,
+            data_only=False,
+        )
+        for sheet_name in (
+            "README", "発話データ", "形態素", "構文・係り受け",
+            "語彙頻度", "共起", "記述統計", "クロス集計", "統計検定",
+        ):
+            self.assertIn(sheet_name, workbook.sheetnames)
 
     def test_empty_analysis_has_no_nan_or_infinity_and_exports_headers(self):
         empty_id = "empty_analysis"
@@ -635,12 +801,29 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(second_ids, first_ids)
 
     def test_nonfinite_and_large_timestamps_stay_finite_and_bounded(self):
+        malformed_segments = [
+            {"id": "nan_time", "start": float("nan"), "end": 10.0,
+             "speaker": "S1", "text": "NaN timestamp"},
+            {"id": "infinite_time", "start": 0.0, "end": float("inf"),
+             "speaker": "S1", "text": "infinite timestamp"},
+            {"id": "too_large_time", "start": 1e100, "end": 1e100,
+             "speaker": "S2", "text": "oversized timestamp"},
+            {"id": "large_valid_time", "start": 2_600_000.0, "end": 2_600_001.0,
+             "speaker": "S2", "text": "large but valid timestamp"},
+        ]
+        with self.assertRaises(ValueError):
+            self.create_analysis_item(
+                "rejected_nonfinite_timestamps",
+                malformed_segments,
+                speaker_names={"S1": "speaker 1", "S2": "speaker 2"},
+            )
+
         item_id = self.create_analysis_item(
             "nonfinite_timestamps",
             [
                 {
                     "id": "nan_time",
-                    "start": float("nan"),
+                    "start": 0.0,
                     "end": 10.0,
                     "speaker": "S1",
                     "text": "NaN時刻",
@@ -648,14 +831,14 @@ class AnalysisApiTests(unittest.TestCase):
                 {
                     "id": "infinite_time",
                     "start": 0.0,
-                    "end": float("inf"),
+                    "end": 0.0,
                     "speaker": "S1",
                     "text": "無限時刻",
                 },
                 {
                     "id": "too_large_time",
-                    "start": 1e100,
-                    "end": 1e100,
+                    "start": 0.0,
+                    "end": 0.0,
                     "speaker": "S2",
                     "text": "巨大時刻",
                 },
@@ -669,6 +852,13 @@ class AnalysisApiTests(unittest.TestCase):
             ],
             speaker_names={"S1": "話者", "S2": "話者"},
         )
+
+        # Keep analysis resilient to legacy/corrupt rows written before validation.
+        with app.database_connection() as connection:
+            connection.execute(
+                "UPDATE library_items SET segments_json = ? WHERE id = ?",
+                (json.dumps(malformed_segments, ensure_ascii=False), item_id),
+            )
 
         response = self.client.get(f"/api/library/{item_id}/analysis")
 
@@ -1036,7 +1226,9 @@ class AnalysisApiTests(unittest.TestCase):
                     "legacy_item", "legacy.wav", str(Path(self.temporary.name)),
                     None, "ja", "[]", "{}", None, None, "[]", 1, 1, 0, 0,
                     "2026-07-26T00:00:00+00:00",
-                    "2026-07-26T00:00:00+00:00", "{}", "{}",
+                    "2026-07-26T00:00:00+00:00",
+                    '{"confidentiality_notes":"削除対象","session_date":"2026-07-26"}',
+                    "{}",
                 ),
             )
             connection.commit()
@@ -1056,6 +1248,7 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertIn("analysis_annotations_json", columns)
                 self.assertIn("analysis_revision", columns)
                 self.assertIn("analysis_updated_at", columns)
+                self.assertIn("ai_usage_json", columns)
                 migrated = connection.execute(
                     """
                     SELECT analysis_config_json, analysis_annotations_json,
@@ -1064,6 +1257,12 @@ class AnalysisApiTests(unittest.TestCase):
                     """
                 ).fetchone()
                 self.assertEqual(migrated, ("{}", "{}", 0, None))
+                session_profile = json.loads(connection.execute(
+                    "SELECT session_profile_json FROM library_items "
+                    "WHERE id = 'legacy_item'"
+                ).fetchone()[0])
+                self.assertEqual(session_profile["session_date"], "2026-07-26")
+                self.assertNotIn("confidentiality_notes", session_profile)
 
             response = self.client.get("/api/library/legacy_item/analysis")
             self.assertEqual(response.status_code, 200)
