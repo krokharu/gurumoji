@@ -1164,7 +1164,8 @@ os._exit(97)
         environment['MOJIOKOSI_OUTPUT_DIR'] = str(child_output)
         completed = subprocess.run(
             [sys.executable, '-c', worker],
-            cwd=Path(app.__file__).resolve().parent,
+            # Start beside the compatibility entry point, not inside the package.
+            cwd=Path(app.__file__).resolve().parents[1],
             env=environment,
             check=False,
             timeout=30,

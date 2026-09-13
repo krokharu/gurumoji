@@ -8,6 +8,14 @@ import app
 
 
 class MediaPathSafetyTests(unittest.TestCase):
+    def test_chat_mode_is_a_supported_session_type(self):
+        profile = app.normalize_session_profile({"session_type": "chat"})
+
+        self.assertEqual(profile["session_type"], "chat")
+        self.assertEqual(app.CONVERSATION_MODES["meeting"], "meeting")
+        self.assertEqual(app.CONVERSATION_MODES["group_interview"], "focus_group")
+        self.assertEqual(app.CONVERSATION_MODES["chat"], "chat")
+
     def test_embedded_video_creation_date_becomes_session_date(self):
         completed = CompletedProcess(
             ["ffprobe"],

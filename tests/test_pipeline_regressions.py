@@ -478,6 +478,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             "clean_transcript": False,
             "detect_speaker_names": False,
             "create_outline": False,
+            "finish_in_obsidian": False,
             "emotion_analysis": False,
             "emotion_model": "kushinada",
             "ai_api_key": "key",
@@ -488,6 +489,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
 
     @contextmanager
     def fake_pipeline(self):
+        transcribe_calls = []
         torch_module = types.ModuleType("torch")
         torch_module.cuda = types.SimpleNamespace(
             is_available=lambda: False,
@@ -496,6 +498,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
 
         class FakeWhisperModel:
             def transcribe(self, _audio, **_kwargs):
+                transcribe_calls.append(dict(_kwargs))
                 return {
                     "language": None,
                     "segments": [{
@@ -540,6 +543,9 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             stack.enter_context(patch.object(app.shutil, "which", return_value="ffmpeg"))
             stack.enter_context(patch.object(app, "configure_huggingface_hub_compatibility"))
             stack.enter_context(patch.object(app, "configure_speechbrain_lazy_import_compatibility"))
+            outline = stack.enter_context(patch.object(app, "create_outline_with_ai", return_value={
+                "sections": [{"title": "検討", "bullets": ["元の文字起こし"]}],
+            }))
             write_outputs = stack.enter_context(patch.object(app, "write_outputs", return_value=[]))
             stage_media = stack.enter_context(
                 patch.object(
@@ -565,11 +571,30 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                 "stage_media": stage_media,
                 "commit_media": commit_media,
                 "upsert": upsert,
+                "outline": outline,
+                "transcribe_calls": transcribe_calls,
             }
 
     @staticmethod
     def job(root: Path):
         return app.JobRecord("job-id", "input.wav", root / "output", True, True)
+
+    def test_registered_vocabulary_is_passed_to_whisper(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-job-") as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            options = self.options(
+                root,
+                custom_vocabulary=("グルモジ", "WhisperX"),
+            )
+            with self.fake_pipeline() as calls:
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            self.assertEqual(
+                calls["transcribe_calls"][0].get("initial_prompt"),
+                "用語・固有名詞: グルモジ、WhisperX。",
+            )
 
     def test_optional_ai_failures_warn_but_core_result_completes(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-job-") as temporary:
@@ -605,7 +630,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             )
             identity_inputs = []
 
-            def clean(segments, *_args):
+            def clean(segments, *_args, **_kwargs):
                 return [{**segment, "text": "校正後の文"} for segment in segments]
 
             def identify(segments, *_args):
@@ -626,7 +651,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             job = self.job(root)
             options = self.options(root, clean_transcript=True)
 
-            def clean_with_usage(segments, *_args):
+            def clean_with_usage(segments, *_args, **_kwargs):
                 usage_callback = _args[-1]
                 usage_callback({
                     "provider": "openai", "model": "model", "request_count": 1,
@@ -653,6 +678,83 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             self.assertEqual(job.ai_usage["cached_tokens"], 10)
             self.assertEqual(job.ai_usage["reasoning_tokens"], 7)
             self.assertEqual(calls["upsert"].call_args.kwargs["ai_usage"]["total_tokens"], 215)
+
+    def test_outline_precedes_contextual_cleanup_and_final_outline_uses_revised_text(self):
+        for output_outline in (False, True):
+            with self.subTest(output_outline=output_outline), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                events = []
+                context = {"sections": [{"title": "仮の議題", "bullets": ["原文の要点"]}]}
+                def outline(segments, *_args, **_kwargs):
+                    events.append(("outline", segments[0]["text"]))
+                    return context
+                def clean(segments, *_args, **kwargs):
+                    events.append(("cleanup", segments[0]["text"]))
+                    self.assertIs(kwargs["outline"], context)
+                    return [{**s, "text": "文脈で修正した本文"} for s in segments]
+                job = self.job(root)
+                with self.fake_pipeline() as calls, \
+                        patch.object(app, "create_outline_with_ai", side_effect=outline), \
+                        patch.object(app, "clean_segments_with_ai", side_effect=clean):
+                    app.run_transcription_job(job, self.options(
+                        root, clean_transcript=True, create_outline=output_outline))
+                expected = [("outline", "元の文字起こし"), ("cleanup", "元の文字起こし")]
+                if output_outline:
+                    expected.append(("outline", "文脈で修正した本文"))
+                self.assertEqual(events, expected)
+                self.assertEqual(job.status, "completed")
+                self.assertEqual(calls["write_outputs"].call_args.args[2][0]["text"], "文脈で修正した本文")
+                if not output_outline:
+                    self.assertIsNone(calls["write_outputs"].call_args.args[7])
+
+    def test_missing_context_outline_skips_cleanup_and_preserves_original(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            with self.fake_pipeline() as calls, \
+                    patch.object(app, "create_outline_with_ai", return_value={"sections": []}), \
+                    patch.object(app, "clean_segments_with_ai") as clean:
+                app.run_transcription_job(job, self.options(root, clean_transcript=True))
+            clean.assert_not_called()
+            self.assertEqual(job.status, "completed")
+            self.assertIn("全体アウトライン", job.output_warning)
+            self.assertEqual(calls["write_outputs"].call_args.args[2][0]["text"], "元の文字起こし")
+
+    def test_obsidian_mode_saves_whisper_before_outputs_and_defers_all_ai(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            with self.fake_pipeline() as calls, patch.object(app, 'DATABASE_FILE', root / 'library.sqlite3'), \
+                    patch.object(app, 'clean_segments_with_ai') as clean, \
+                    patch.object(app, 'detect_speaker_names_with_ai') as identify:
+                calls['upsert'].return_value = {'revision_count': 0}
+                def output(*_args, **_kwargs):
+                    state = app.obsidian_workbench().load(job.id)
+                    self.assertIsNotNone(state)
+                    self.assertFalse(state['ready'])
+                    self.assertEqual(state['segments'][0]['text'], '元の文字起こし')
+                    return []
+                calls['write_outputs'].side_effect = output
+                app.run_transcription_job(job, self.options(root, finish_in_obsidian=True,
+                    clean_transcript=True, detect_speaker_names=True, create_outline=True))
+                state = app.obsidian_workbench().load(job.id)
+                self.assertTrue(state['ready'])
+                self.assertTrue(app.obsidian_workbench().note_path(state['original_note']).exists())
+                clean.assert_not_called()
+                identify.assert_not_called()
+                calls['outline'].assert_not_called()
+            self.assertEqual(job.status, 'completed')
+
+    def test_obsidian_mode_also_publishes_meeting_minutes_after_persistence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            with self.fake_pipeline() as calls, patch.object(app, 'DATABASE_FILE', root / 'library.sqlite3'), \
+                    patch.object(app, 'publish_meeting_minutes_to_obsidian') as publish:
+                calls['upsert'].return_value = {'revision_count': 0}
+                app.run_transcription_job(job, self.options(root, finish_in_obsidian=True))
+            self.assertEqual(job.status, 'completed')
+            publish.assert_called_once_with(calls['upsert'].return_value)
 
     def test_emotion_interruption_cancels_job_before_outputs(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-job-") as temporary:
@@ -700,7 +802,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             job = self.job(root)
             options = self.options(root)
 
-            def cancel_during_output(*args):
+            def cancel_during_output(*args, **_kwargs):
                 job.cancel_event.set()
                 args[-1]()
 

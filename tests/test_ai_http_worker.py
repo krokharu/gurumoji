@@ -142,6 +142,27 @@ class AiHttpWorkerTests(unittest.TestCase):
         self.assertNotIn(secret, completed.stdout)
         self.assertNotIn(secret, completed.stderr)
 
+    def test_worker_allows_only_loopback_for_lmstudio_requests(self):
+        worker_path = Path(app.__file__).with_name("ai_http_worker.py")
+        probe = (
+            "import runpy,sys; worker=runpy.run_path(sys.argv[1]); "
+            "print(worker['validate_url']('http://127.0.0.1:1234/v1/chat/completions')); "
+            "\ntry: worker['validate_url']('http://192.168.1.10:1234/v1/chat/completions') "
+            "\nexcept ValueError: print('rejected')"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", probe, str(worker_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("http://127.0.0.1:1234/v1/chat/completions", completed.stdout)
+        self.assertIn("rejected", completed.stdout)
+
     def test_worker_uses_utf8_stdio_in_isolated_real_process(self):
         worker_path = Path(app.__file__).with_name("ai_http_worker.py")
         probe = (

@@ -1,0 +1,893 @@
+/* Content exploration shares the existing analysis workspace and saved revisions. */
+const contentAnalysisStates = new Map();
+let contentAnalysisPollTimer = null;
+let contentAnalysisPollSequence = 0;
+let transformerAnalysisPollTimer = null;
+let transformerAnalysisPollSequence = 0;
+let analysisEvidenceReturn = null;
+const insightCategoryLabels = {
+  overview: '総合的な見解', themes: '主要テーマ', shared: '共通する意見',
+  differences: '異なる意見・少数意見', questions: '追加で確認する点'
+};
+
+function contentAnalysisState() {
+  const id = analysisState.itemId;
+  if (!contentAnalysisStates.has(id)) {
+    contentAnalysisStates.set(id, {
+      query: '', mode: 'literal', speaker: '', offset: 0, result: null,
+      loading: false, error: '', sequence: 0, controller: null,
+      provider: 'openai', run: null, aiError: '', pollError: '', starting: false, fingerprint: '',
+      transformerRun: null, transformerStarting: false, transformerError: '', transformerPollError: '',
+      maxTopics: 8, minTopicSize: 2, topicCount: 0, semanticQuery: '', semanticHits: null,
+      semanticLoading: false, semanticError: ''
+    });
+  }
+  return contentAnalysisStates.get(id);
+}
+
+function contentButton(label, action, className = 'secondary-button compact-button') {
+  const button = analysisElement('button', className, label);
+  button.type = 'button';
+  button.addEventListener('click', action);
+  return button;
+}
+
+function currentAnalysisContent() {
+  return window.matchMedia('(max-width: 959px)').matches ? analysisMobileContent : analysisDesktopContent;
+}
+
+function jumpToContentSearch() {
+  currentAnalysisContent()?.querySelector('[data-analysis-anchor="content"]')?.scrollIntoView({block: 'start'});
+}
+
+function evidenceDetails(ids, {snapshot = null, stale = false} = {}) {
+  const lookup = snapshot || Object.fromEntries((analysisState.data?.segments || [])
+    .filter(s => !s.excluded).map(s => [s.id, s]));
+  const details = analysisElement('details', 'content-evidence');
+  details.append(analysisElement('summary', '', `根拠の発話を確認（${ids.length}件）`));
+  const body = analysisElement('div', 'content-evidence-list');
+  let count = 0;
+  const more = contentButton('さらに10件を表示', appendNext);
+  function appendNext() {
+    const next = ids.slice(count, count + 10);
+    count += next.length;
+    next.forEach(id => {
+      const segment = lookup[id];
+      if (!segment) return;
+      const article = analysisElement('blockquote', 'analysis-important-quote');
+      article.append(analysisElement('p', '', segment.text || '（本文なし）'));
+      const footer = analysisElement('footer', '',
+        `${segment.speaker_name || segment.speaker} / ${formatTime(segment.start || 0)}–${formatTime(segment.end || 0)}`);
+      if (stale) footer.append(analysisElement('span', '', ' / 生成時点の引用'));
+      else footer.append(contentButton('音声で確認', () => openInsightMedia(segment)));
+      article.append(footer);
+      body.insertBefore(article, more);
+    });
+    more.hidden = count >= ids.length;
+  }
+  body.append(more);
+  details.append(body);
+  details.addEventListener('toggle', () => { if (details.open && !count) appendNext(); });
+  return details;
+}
+
+async function openInsightMedia(segment) {
+  const itemId = analysisState.itemId;
+  analysisEvidenceReturn = {itemId, scroll: window.scrollY, mode: analysisState.mode,
+    scope: analysisState.automaticScope, selectedSpeaker: analysisState.selectedSpeaker,
+    catalog: analysisCatalog.slice()};
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}`);
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '元データを取得できませんでした。');
+    if (analysisState.itemId !== itemId) return;
+    const current = (data.segments || []).find(s => s.id === segment.id);
+    if (!current || String(current.text || '').trim() !== segment.text
+      || Math.abs(Number(current.start) - Number(segment.start)) > .001
+      || Math.abs(Number(current.end) - Number(segment.end)) > .001) {
+      throw new Error('この発話は更新されています。分析を再集計してから確認してください。');
+    }
+    renderResult(data);
+    const back = document.querySelector('#return-to-analysis-evidence');
+    if (back) back.hidden = false;
+    selectedSegmentId = segment.id;
+    document.querySelector('#segment-keyword').value = '';
+    document.querySelector('#segment-speaker-filter').value = '';
+    document.querySelector('#segment-emotion-filter').value = '';
+    renderSegments();
+    if (mediaPlayer) playSegment(segment.id);
+    else {
+      const row = [...document.querySelectorAll('.segment')].find(el => el.dataset.segmentId === segment.id);
+      row?.scrollIntoView({block: 'center'});
+      setAlert(document.querySelector('#save-message'), '元の音声・動画が利用できないため、発話本文を表示しています。');
+    }
+  } catch (error) {
+    setAlert(document.querySelector('#analysis-message'), error.message, true);
+  }
+}
+
+function restoreAnalysisEvidencePosition() {
+  const saved = analysisEvidenceReturn;
+  if (!saved || saved.itemId !== analysisState.itemId || analysisCard.hidden) return;
+  const changed = analysisState.mode !== saved.mode || analysisState.automaticScope !== saved.scope
+    || analysisState.selectedSpeaker !== saved.selectedSpeaker;
+  analysisState.mode = saved.mode;
+  analysisState.automaticScope = saved.scope;
+  analysisState.selectedSpeaker = saved.selectedSpeaker;
+  analysisEvidenceReturn = null;
+  if (changed) renderAnalysisWorkspace();
+  requestAnimationFrame(() => window.scrollTo({top: saved.scroll, behavior: 'instant'}));
+}
+
+function returnToAnalysisEvidence() {
+  if (analysisEvidenceReturn) openAnalysisForItem(analysisEvidenceReturn.itemId);
+}
+
+function contentTermButton(term, speaker = '') {
+  const button = contentButton(term, () => {
+    const state = contentAnalysisState();
+    Object.assign(state, {query: term, mode: 'normalized', speaker, offset: 0});
+    analysisState.mode = 'automatic';
+    analysisState.automaticScope = 'overall';
+    renderAnalysisWorkspace();
+    searchContentKwic();
+    jumpToContentSearch();
+  }, 'content-term-button');
+  button.setAttribute('aria-label', `「${term}」を文脈検索`);
+  return button;
+}
+
+function appendSearchableTermBar(container, term, value, detail, color = '#1C6B50', speaker = '') {
+  appendAnalysisBar(container, term, value, detail, color);
+  const label = container.lastElementChild?.querySelector('strong');
+  if (label) label.replaceWith(contentTermButton(term, speaker));
+}
+
+function buildInsightSummary() {
+  const panel = analysisCardPanel('分析結果の見解', 'automatic', 'insights', true);
+  panel.panel.classList.add('content-insight-summary');
+  const local = analysisState.data?.insights?.local || [];
+  panel.body.append(analysisElement('p', 'analysis-caption',
+    '保存済みデータから読み取れる傾向です。根拠を開き、発話の文脈を確認できます。'));
+  if (analysisState.data?.research?.linguistics?.engine?.status === 'fallback') {
+    panel.body.append(analysisElement('p', 'content-inline-notice', '簡易分割による参考表示です。ひらがなだけの断片は見解・特徴語の対象外です。語の区切りは原文で確認してください。'));
+  }
+  if (!local.length) panel.body.append(analysisElement('p', 'analysis-no-data', '見解をまとめられる内容語や保存済みコード・重要引用がありません。文脈検索から原文を確認できます。'));
+  local.slice(0, 5).forEach(finding => {
+    const article = analysisElement('article', 'content-finding');
+    article.append(analysisElement('h3', '', finding.title), analysisElement('p', '', finding.text));
+    const names = (finding.speakers || []).map(id => (analysisState.data.segments || []).find(s => s.speaker === id)?.speaker_name || id);
+    article.append(analysisElement('small', 'content-finding-meta', `${finding.count}発話 / ${names.join('、')}`));
+    if (finding.term) article.append(contentTermButton(finding.term, finding.speaker || ''));
+    article.append(evidenceDetails(finding.segment_ids || []));
+    panel.body.append(article);
+  });
+  const ai = analysisElement('section', 'content-ai-section');
+  ai.append(analysisElement('h3', '', 'AIで内容・意見を整理'));
+  const toolbar = analysisElement('div', 'content-ai-toolbar');
+  const label = analysisElement('label', 'field');
+  label.append(analysisElement('span', '', '見解を生成するAI'));
+  const select = analysisElement('select');
+  select.dataset.insightProvider = 'true';
+  select.add(new Option('OpenAI', 'openai'));
+  select.add(new Option('Google Gemini', 'google'));
+  select.add(new Option('LM Studio（ローカル）', 'lmstudio'));
+  select.value = contentAnalysisState().provider;
+  select.addEventListener('change', () => {
+    contentAnalysisState().provider = select.value;
+    document.querySelectorAll('[data-insight-provider]').forEach(peer => { peer.value = select.value; });
+  });
+  label.append(select);
+  const generate = contentButton('AIで見解を作成', startContentInsights, 'primary-button small');
+  generate.dataset.insightGenerate = 'true';
+  const cancel = contentButton('生成を中止', cancelContentInsights);
+  cancel.dataset.insightCancel = 'true';
+  toolbar.append(label, generate, cancel);
+  const status = analysisElement('p', 'content-ai-status');
+  status.dataset.insightStatus = 'true';
+  status.setAttribute('role', 'status');
+  const output = analysisElement('div', 'content-ai-output');
+  output.dataset.insightOutput = 'true';
+  ai.append(toolbar, analysisElement('p', 'analysis-caption', '保存済みの発話・話者名・研究質問を選択したAIへ送信します。LM Studioを選ぶとこのPCのローカルLLMだけで処理します。生成した見解は下書きとして保存します。'), status, output);
+  panel.body.append(ai);
+  // Render after the panel is attached by renderAnalysisWorkspace.
+  return panel.panel;
+}
+
+function buildContentExplorer() {
+  const container = analysisElement('section', 'content-explorer');
+  container.dataset.analysisAnchor = 'content';
+  const panel = analysisCardPanel('言葉を前後の文脈で読む', 'automatic', '', true);
+  const state = contentAnalysisState();
+  const form = analysisElement('form', 'content-kwic-form');
+  const queryLabel = analysisElement('label', 'field');
+  queryLabel.append(analysisElement('span', '', '気になる語・表現'));
+  const query = analysisElement('input');
+  query.type = 'search'; query.maxLength = 200; query.value = state.query;
+  query.placeholder = '例：改善、使いにくい'; query.dataset.kwicQuery = 'true';
+  query.addEventListener('input', () => {
+    state.query = query.value; state.mode = 'literal';
+    document.querySelectorAll('[data-kwic-query]').forEach(peer => { peer.value = query.value; });
+  });
+  queryLabel.append(query);
+  const speakerLabel = analysisElement('label', 'field');
+  speakerLabel.append(analysisElement('span', '', '話者で絞り込む'));
+  const speaker = analysisElement('select');
+  speaker.dataset.kwicSpeaker = 'true'; speaker.add(new Option('すべての話者', ''));
+  const speakers = new Map((analysisState.data?.segments || []).filter(s => !s.excluded).map(s => [s.speaker, s.speaker_name || s.speaker]));
+  speakers.forEach((name, id) => speaker.add(new Option(name, id)));
+  speaker.value = state.speaker;
+  speaker.addEventListener('change', () => {
+    state.speaker = speaker.value;
+    document.querySelectorAll('[data-kwic-speaker]').forEach(peer => { peer.value = speaker.value; });
+  });
+  speakerLabel.append(speaker);
+  const submit = analysisElement('button', 'primary-button small', '文脈を検索');
+  submit.type = 'submit';
+  form.append(queryLabel, speakerLabel, submit);
+  form.addEventListener('submit', event => { event.preventDefault(); state.offset = 0; searchContentKwic(); });
+  const results = analysisElement('div', 'content-kwic-results');
+  results.dataset.kwicResults = 'true';
+  panel.body.append(form, results);
+  container.append(panel.panel);
+
+  const comparison = analysisCardPanel('話者別の特徴語比較', 'automatic', 'characteristic_terms', true);
+  comparison.body.append(analysisElement('p', 'analysis-caption', 'その話者と他の話者の「語を含む発話の割合」の差を比較します。分母は本文のある対象発話です。少数の発話では差が大きく出るため、件数と原文も確認してください。'));
+  const rows = analysisState.data?.research?.content?.characteristic_terms || [];
+  if (!rows.length) comparison.body.append(analysisElement('p', 'analysis-no-data', '比較できる話者や、出現率に差のある語がありません。'));
+  const groups = new Map();
+  rows.forEach(row => {
+    if (!groups.has(row.speaker)) groups.set(row.speaker, []);
+    groups.get(row.speaker).push(row);
+  });
+  groups.forEach(values => {
+    const details = analysisElement('details', 'content-speaker-terms');
+    details.open = groups.size === 1;
+    details.append(analysisElement('summary', '', `${values[0].speaker_name} / ${values[0].total}発話`));
+    values.forEach(row => {
+      const line = analysisElement('div', 'content-comparison-row');
+      line.append(contentTermButton(row.term, row.speaker),
+        analysisElement('span', '', `本人 ${row.count}/${row.total}（${Number(row.percent).toFixed(1)}%） / 他 ${row.other_count}/${row.other_total}（${Number(row.other_percent).toFixed(1)}%）`),
+        analysisElement('strong', '', `+${Number(row.difference_pp).toFixed(1)}ポイント`));
+      details.append(line);
+    });
+    comparison.body.append(details);
+  });
+  container.append(comparison.panel);
+  return container;
+}
+
+function transformerRunActive(run) {
+  return run && ['queued', 'running', 'cancelling'].includes(run.status);
+}
+
+function transformerPendingKey(itemId) { return `gurumoji.transformerRequest.${itemId}`; }
+
+function transformerExportLinks() {
+  const wrap = analysisElement('div', 'analysis-inline-exports');
+  [
+    ['transformer_topics', 'テーマCSV'],
+    ['transformer_assignments', '発話分類CSV'],
+    ['transformer_speakers', '話者比較CSV'],
+    ['transformer_timeline', '時間推移CSV'],
+    ['transformer_outliers', '例外候補CSV'],
+    ['transformer_backchannels', '相づち対応CSV'],
+    ['transformer_backchannel_speakers', '相づち集計CSV'],
+    ['transformer_backchannel_rates', '相づち応答率CSV'],
+    ['transformer_backchannel_tests', '相づち統計検定CSV'],
+    ['transformer_speaker_results', '話者別リザルトCSV']
+  ].forEach(([dataset, label]) => {
+    const link = analysisExportLink(label, dataset, 'analysis-inline-export');
+    if (link) wrap.append(link);
+  });
+  return wrap;
+}
+
+function buildTransformerAnalysisPanel() {
+  const panel = analysisCardPanel('Transformerテーマ分析', 'configured', 'transformer_topics', true);
+  panel.panel.classList.add('transformer-analysis-panel');
+  const state = contentAnalysisState();
+  const transformer = analysisState.data?.transformer || {};
+  const result = transformer.result;
+  panel.body.append(analysisElement('p', 'analysis-caption',
+    '短い相づちを除き、前後の文脈と話者量の偏りを補正して、多言語E5でテーマ候補をまとめます。初回はモデルをダウンロードします。意味の近さは賛否・合意・重要性を示しません。'));
+
+  const toolbar = analysisElement('div', 'transformer-toolbar');
+  const countLabel = analysisElement('label', 'field');
+  countLabel.append(analysisElement('span', '', 'テーマ数'));
+  const countSelect = analysisElement('select');
+  [[0, '自動'], [2, '2件'], [3, '3件'], [4, '4件'], [5, '5件'], [6, '6件'],
+    [8, '8件'], [10, '10件'], [12, '12件']].forEach(([value, label]) => countSelect.add(new Option(label, String(value))));
+  countSelect.value = String(state.topicCount);
+  countSelect.dataset.transformerTopicCount = 'true';
+  countSelect.addEventListener('change', () => {
+    state.topicCount = Number(countSelect.value);
+    document.querySelectorAll('[data-transformer-topic-count]').forEach(peer => { peer.value = countSelect.value; });
+    refreshTransformerControls();
+  });
+  countLabel.append(countSelect);
+  const maxLabel = analysisElement('label', 'field');
+  maxLabel.append(analysisElement('span', '', '自動選択時の上限'));
+  const maxSelect = analysisElement('select');
+  [4, 6, 8, 10, 12].forEach(value => maxSelect.add(new Option(`${value}件`, String(value))));
+  maxSelect.value = String(state.maxTopics);
+  maxSelect.dataset.transformerMaxTopics = 'true';
+  maxSelect.addEventListener('change', () => {
+    state.maxTopics = Number(maxSelect.value);
+    document.querySelectorAll('[data-transformer-max-topics]').forEach(peer => { peer.value = maxSelect.value; });
+  });
+  maxLabel.append(maxSelect);
+  const minLabel = analysisElement('label', 'field');
+  minLabel.append(analysisElement('span', '', 'テーマの最小発話数'));
+  const minSelect = analysisElement('select');
+  [2, 3, 4, 5, 8, 10].forEach(value => minSelect.add(new Option(`${value}発話`, String(value))));
+  minSelect.value = String(state.minTopicSize);
+  minSelect.dataset.transformerMinTopicSize = 'true';
+  minSelect.addEventListener('change', () => {
+    state.minTopicSize = Number(minSelect.value);
+    document.querySelectorAll('[data-transformer-min-topic-size]').forEach(peer => { peer.value = minSelect.value; });
+  });
+  minLabel.append(minSelect);
+  const run = contentButton(result ? 'テーマ分析を再実行' : 'テーマ分析を実行', startTransformerAnalysis, 'primary-button small');
+  run.dataset.transformerRun = 'true';
+  const cancel = contentButton('分析を中止', cancelTransformerAnalysis);
+  cancel.dataset.transformerCancel = 'true';
+  toolbar.append(countLabel, maxLabel, minLabel, run, cancel);
+  panel.body.append(toolbar);
+  const status = analysisElement('p', 'content-ai-status');
+  status.dataset.transformerStatus = 'true';
+  status.setAttribute('role', 'status');
+  panel.body.append(status);
+
+  const output = analysisElement('div', 'transformer-output');
+  output.dataset.transformerOutput = 'true';
+  if (result) {
+    if (transformer.stale) output.append(analysisElement('p', 'content-inline-notice',
+      '更新が必要：本文・話者・除外設定が変わっています。以下は実行時点の結果です。'));
+    const engine = result.engine || {};
+    const coverage = result.coverage || {};
+    const quality = result.quality || {};
+    const analyzedCount = coverage.segment_count || 0;
+    const sourceCount = coverage.source_segment_count || analyzedCount;
+    output.append(analysisElement('p', 'content-ai-meta',
+      `${engine.name || 'Transformer'} / ${engine.device || '実行装置不明'} / ${analyzedCount}/${sourceCount}発話を分析 / ${coverage.topic_count || 0}テーマ候補${quality.silhouette_cosine == null ? '' : ` / silhouette ${Number(quality.silhouette_cosine).toFixed(3)}`}`));
+    if (coverage.ignored_noise_segment_count) output.append(analysisElement('p', 'analysis-caption',
+      `記号・短い認識断片 ${coverage.ignored_noise_segment_count}件をテーマ分類と意味検索から除外しました。`));
+    if (coverage.backchannel_segment_count) output.append(analysisElement('p', 'analysis-caption',
+      `相づち ${coverage.backchannel_segment_count}件を別集計し、${coverage.linked_backchannel_segment_count || 0}件を応答対象のテーマへ紐付けました。`));
+    if (coverage.speaker_result_count) output.append(analysisElement('p', 'analysis-caption',
+      `話者別リザルトは${coverage.speaker_result_count}話者分を作成し、うち${coverage.explicit_speaker_result_count || 0}話者で明示的な変化・気づき・選好を検出しました。`));
+    if (quality.silhouette_cosine != null && Number(quality.silhouette_cosine) < 0.25) {
+      output.append(analysisElement('p', 'content-inline-notice',
+        'テーマ間の分離は弱めです。固定テーマ数も試し、代表発言を確認して解釈してください。'));
+    }
+    if (quality.dominant_speaker && Number(quality.dominant_speaker_percent) >= 35) {
+      output.append(analysisElement('p', 'analysis-caption',
+        `発話時間が多い話者（${Number(quality.dominant_speaker_percent).toFixed(1)}%）を検出し、話者バランス補正を適用しました。`));
+    }
+    const overallBackchannelRates = (Array.isArray(result.backchannel_rates) ? result.backchannel_rates : [])
+      .filter(row => row.scope === 'overall' && row.speaker_group === 'participant')
+      .sort((left, right) => Number(right.response_rate_percent || 0) - Number(left.response_rate_percent || 0));
+    const backchannelTests = Array.isArray(result.backchannel_tests) ? result.backchannel_tests : [];
+    if (overallBackchannelRates.length) {
+      const section = analysisElement('section', 'transformer-speaker-results');
+      section.append(analysisElement('h3', '', '相づちの統計分析'),
+        analysisElement('p', 'analysis-caption',
+          '分母は、本人以外の有意味発話を「反応機会」とした代理値です。応答率は相づちを返した異なる対象発話数÷反応機会数で、参加時間や聞いていた事実を直接測定した値ではありません。'));
+      const wrap = analysisElement('div', 'analysis-table-wrap');
+      const table = analysisElement('table', 'analysis-table');
+      const head = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['話者', '反応機会', '応答した発話', '応答率', '相づち総数', '100機会あたり'].forEach(label => {
+        headRow.append(analysisElement('th', '', label));
+      });
+      head.append(headRow); table.append(head);
+      const body = document.createElement('tbody');
+      overallBackchannelRates.forEach(row => {
+        const line = document.createElement('tr');
+        [row.speaker_name, row.opportunity_count, row.responded_target_count,
+          row.response_rate_percent == null ? '—' : `${Number(row.response_rate_percent).toFixed(2)}%`,
+          row.backchannel_count,
+          row.backchannels_per_100_opportunities == null ? '—' : Number(row.backchannels_per_100_opportunities).toFixed(2)
+        ].forEach(value => line.append(analysisElement('td', '', String(value))));
+        body.append(line);
+      });
+      table.append(body); wrap.append(table); section.append(wrap);
+      if (backchannelTests.length) {
+        const tests = analysisElement('details', 'transformer-outliers');
+        tests.append(analysisElement('summary', '', `探索的な統計検定 ${backchannelTests.length}件`));
+        backchannelTests.forEach(row => {
+          const sparse = row.status === 'computed_sparse' ? ' / 期待度数が小さいためp値から差を判定しない' : '';
+          const resultText = row.p_value == null
+            ? row.interpretation
+            : `χ²=${Number(row.statistic).toFixed(3)}, df=${row.df}, p=${Number(row.p_value).toFixed(4)}, Cramér\'s V=${Number(row.effect_size).toFixed(3)}${sparse}`;
+          const item = analysisElement('article');
+          item.append(analysisElement('strong', '', row.test), analysisElement('p', '', resultText),
+            analysisElement('p', 'analysis-caption', row.assumption_note || ''));
+          tests.append(item);
+        });
+        section.append(tests);
+      }
+      output.append(section);
+    }
+    const speakerResults = Array.isArray(result.speaker_results) ? result.speaker_results : [];
+    if (speakerResults.length) {
+      const section = analysisElement('section', 'transformer-speaker-results');
+      section.append(analysisElement('h3', '', '話者別の会議リザルト'),
+        analysisElement('p', 'analysis-caption',
+          '本人の発話に明示された「意見の変化・維持」「新しい気づき」「支持・選好」を抽出します。会議前調査との比較ではなく、明示表現がない話者は未判定です。'));
+      const resultGroups = new Map();
+      speakerResults.forEach(row => {
+        if (!resultGroups.has(row.speaker)) resultGroups.set(row.speaker, []);
+        resultGroups.get(row.speaker).push(row);
+      });
+      resultGroups.forEach(rows => {
+        const details = analysisElement('details', 'transformer-outliers');
+        const labels = [...new Set(rows.map(row => row.result_label || '未判定'))];
+        details.open = resultGroups.size <= 4;
+        details.append(analysisElement('summary', '', `${rows[0].speaker_name} / ${labels.join('・')}`));
+        rows.forEach(row => {
+          const item = analysisElement('article');
+          const topicPrefix = row.confidence === 'explicit' ? '対象話題' : '主な話題';
+          item.append(analysisElement('strong', '', row.result_label || '未判定'),
+            analysisElement('p', 'transformer-topic-meta',
+              `${topicPrefix}: ${row.topic_label || '紐付けなし'}${row.confidence === 'explicit' ? ' / 本人の明示表現あり' : ''}`),
+            analysisElement('p', '', row.basis || ''),
+            evidenceDetails(row.evidence_segment_ids || [], {
+              snapshot: result.evidence || null, stale: Boolean(transformer.stale)
+            }));
+          details.append(item);
+        });
+        section.append(details);
+      });
+      output.append(section);
+    }
+    const topics = Array.isArray(result.topics) ? result.topics : [];
+    if (!topics.length) output.append(analysisElement('p', 'analysis-no-data', 'まとまりとして表示できるテーマ候補がありません。'));
+    topics.forEach(topic => {
+      const article = analysisElement('article', 'transformer-topic');
+      const heading = analysisElement('header');
+      heading.append(analysisElement('span', 'transformer-topic-id', topic.topic_id),
+        analysisElement('h3', '', topic.label || topic.topic_id));
+      const roleBreakdown = topic.facilitator_segment_count == null ? ''
+        : ` / 参加者 ${topic.participant_segment_count || 0}・進行役 ${topic.facilitator_segment_count || 0}`;
+      const backchannelBreakdown = topic.backchannel_count == null ? '' : ` / 相づち ${topic.backchannel_count || 0}`;
+      article.append(heading, analysisElement('p', 'transformer-topic-meta',
+        `${topic.segment_count}発話${roleBreakdown}${backchannelBreakdown} / ${topic.speaker_count}人 / ${formatTime(topic.speaking_seconds || 0)} / 中心類似度 ${Number(topic.average_similarity || 0).toFixed(3)}`));
+      const speakerRows = (result.speaker_topics || []).filter(row => row.topic_id === topic.topic_id);
+      if (speakerRows.length) {
+        const distribution = analysisElement('div', 'transformer-speaker-distribution');
+        speakerRows.forEach(row => distribution.append(analysisElement('span', '',
+          `${row.speaker_name} ${row.segment_count}件（${Number(row.topic_percent).toFixed(1)}%）`)));
+        article.append(distribution);
+      }
+      const backchannelRows = (result.speaker_backchannels || []).filter(row => row.topic_id === topic.topic_id);
+      if (backchannelRows.length) {
+        const distribution = analysisElement('div', 'transformer-speaker-distribution');
+        distribution.append(analysisElement('strong', '', 'この話題への相づち'));
+        backchannelRows.forEach(row => distribution.append(analysisElement('span', '',
+          `${row.speaker_name} ${row.backchannel_count}件`)));
+        article.append(distribution);
+      }
+      article.append(evidenceDetails(topic.representative_segment_ids || [], {
+        snapshot: result.evidence || null, stale: Boolean(transformer.stale)
+      }));
+      output.append(article);
+    });
+    const outliers = Array.isArray(result.outliers) ? result.outliers : [];
+    if (outliers.length) {
+      const details = analysisElement('details', 'transformer-outliers');
+      details.append(analysisElement('summary', '', `他の発話と意味が離れた例外候補 ${outliers.length}件`),
+        analysisElement('p', 'analysis-caption', '少数意見とは限りません。原文と前後関係を確認してください。'));
+      outliers.forEach(row => {
+        const item = analysisElement('article');
+        item.append(analysisElement('strong', '', `${row.speaker_name} / 類似度 ${Number(row.nearest_similarity).toFixed(3)}`),
+          analysisElement('p', '', row.text), evidenceDetails([row.segment_id], {
+            snapshot: result.evidence || null, stale: Boolean(transformer.stale)
+          }));
+        details.append(item);
+      });
+      output.append(details);
+    }
+    const backchannels = Array.isArray(result.backchannels) ? result.backchannels : [];
+    if (backchannels.length) {
+      const kindLabels = {agreement: '同意的応答', continuer: '継続促進', courtesy: '謝意',
+        confirmation: '確認', acknowledgement: '応答'};
+      const details = analysisElement('details', 'transformer-outliers');
+      details.append(analysisElement('summary', '', `相づちの対応関係 ${backchannels.length}件`),
+        analysisElement('p', 'analysis-caption',
+          '直前の別話者の発話を優先して対象テーマを推定しています。相づちは賛成を意味するとは限りません。'));
+      backchannels.forEach(row => {
+        const item = analysisElement('article');
+        item.append(analysisElement('strong', '',
+          `${row.speaker_name} / ${kindLabels[row.kind] || '応答'} / ${row.topic_label || '紐付けなし'}`),
+          analysisElement('p', '', row.text), evidenceDetails(
+            [row.segment_id, row.responds_to_segment_id].filter(Boolean), {
+              snapshot: result.evidence || null, stale: Boolean(transformer.stale)
+            }));
+        details.append(item);
+      });
+      output.append(details);
+    }
+    output.append(transformerExportLinks());
+
+    const search = analysisElement('form', 'transformer-semantic-form');
+    const queryLabel = analysisElement('label', 'field');
+    queryLabel.append(analysisElement('span', '', '意味で発話を検索'));
+    const query = analysisElement('input');
+    query.type = 'search'; query.maxLength = 500; query.value = state.semanticQuery;
+    query.placeholder = '例：価格への不満、導入をためらう理由'; query.dataset.semanticQuery = 'true';
+    query.addEventListener('input', () => {
+      state.semanticQuery = query.value;
+      document.querySelectorAll('[data-semantic-query]').forEach(peer => { peer.value = query.value; });
+    });
+    queryLabel.append(query);
+    const submit = analysisElement('button', 'secondary-button small', '意味検索'); submit.type = 'submit';
+    search.append(queryLabel, submit);
+    search.addEventListener('submit', event => { event.preventDefault(); searchTransformerSemantics(); });
+    const searchResults = analysisElement('div', 'transformer-search-results');
+    searchResults.dataset.semanticResults = 'true';
+    output.append(search, searchResults);
+  }
+  panel.body.append(output);
+  requestAnimationFrame(() => { refreshTransformerControls(); renderTransformerSearchResults(); });
+  return panel.panel;
+}
+
+function refreshTransformerControls() {
+  if (!analysisState.data) return;
+  const state = contentAnalysisState();
+  const busy = state.transformerStarting || transformerRunActive(state.transformerRun);
+  document.querySelectorAll('[data-transformer-run]').forEach(button => {
+    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress);
+    button.textContent = state.transformerStarting ? '開始しています…'
+      : analysisState.data.transformer?.result ? 'テーマ分析を再実行' : 'テーマ分析を実行';
+  });
+  document.querySelectorAll('[data-transformer-cancel]').forEach(button => {
+    button.hidden = !transformerRunActive(state.transformerRun);
+    button.disabled = state.transformerRun?.status === 'cancelling';
+  });
+  document.querySelectorAll('[data-transformer-topic-count], [data-transformer-min-topic-size]').forEach(select => {
+    select.disabled = Boolean(busy);
+  });
+  document.querySelectorAll('[data-transformer-max-topics]').forEach(select => {
+    select.disabled = Boolean(busy || state.topicCount);
+  });
+  document.querySelectorAll('[data-transformer-status]').forEach(host => {
+    host.textContent = analysisState.dirty ? '未保存の変更があります。保存してから実行してください。'
+      : state.transformerError || state.transformerPollError
+        || (state.transformerRun ? `${state.transformerRun.message} ${state.transformerRun.progress}%`
+          : 'ボタンを押したときだけローカルで実行します。会話本文を外部AI APIへ送信しません。');
+  });
+}
+
+async function startTransformerAnalysis() {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (state.transformerStarting || transformerRunActive(state.transformerRun) || analysisState.dirty) return;
+  const item = analysisState.data.item;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(transformerPendingKey(itemId)) || 'null'); } catch (_) { /* unavailable */ }
+  if (!pending || pending.source_revision !== item.revision_count || pending.analysis_revision !== item.analysis_revision
+    || pending.max_topics !== state.maxTopics || pending.min_topic_size !== state.minTopicSize
+    || pending.topic_count !== state.topicCount) {
+    pending = {request_id: crypto.randomUUID(), source_revision: item.revision_count,
+      analysis_revision: item.analysis_revision, max_topics: state.maxTopics,
+      min_topic_size: state.minTopicSize, topic_count: state.topicCount};
+  }
+  try { sessionStorage.setItem(transformerPendingKey(itemId), JSON.stringify(pending)); } catch (_) { /* in memory only */ }
+  state.transformerStarting = true; state.transformerError = ''; refreshTransformerControls();
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/transformer`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pending)
+    });
+    const data = await readJsonResponse(response);
+    if (data.run) state.transformerRun = data.run;
+    if (!response.ok && !data.run) throw new Error(data.error || 'Transformer分析を開始できませんでした。');
+    try { sessionStorage.removeItem(transformerPendingKey(itemId)); } catch (_) { /* unavailable */ }
+  } catch (error) {
+    state.transformerError = `${error.message} 必要な場合はもう一度実行してください。`;
+  } finally {
+    state.transformerStarting = false;
+    if (itemId === analysisState.itemId) { refreshTransformerControls(); pollTransformerAnalysis(); }
+  }
+}
+
+async function cancelTransformerAnalysis() {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (!state.transformerRun) return;
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/transformer/cancel`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({request_id: state.transformerRun.request_id})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '中止できませんでした。');
+    pollTransformerAnalysis();
+  } catch (error) { state.transformerError = error.message; refreshTransformerControls(); }
+}
+
+async function pollTransformerAnalysis() {
+  clearTimeout(transformerAnalysisPollTimer);
+  if (!analysisState.data) return;
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  const sequence = ++transformerAnalysisPollSequence;
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/transformer`, {cache: 'no-store'});
+    const data = await readJsonResponse(response);
+    if (sequence !== transformerAnalysisPollSequence || itemId !== analysisState.itemId || !analysisState.data) return;
+    if (!response.ok) throw new Error(data.error || 'Transformer分析の状態を取得できませんでした。');
+    const previousRequest = analysisState.data.transformer?.result?.request_id;
+    state.transformerPollError = ''; state.transformerRun = data.run;
+    analysisState.data.transformer = data.transformer || {result: null, stale: false};
+    refreshTransformerControls();
+    const currentRequest = analysisState.data.transformer?.result?.request_id;
+    if (currentRequest && currentRequest !== previousRequest) {
+      state.semanticHits = null; renderAnalysisWorkspace(); loadAnalysisStorage();
+    }
+    if (transformerRunActive(state.transformerRun)) {
+      transformerAnalysisPollTimer = setTimeout(pollTransformerAnalysis, 1800);
+    }
+  } catch (error) {
+    if (sequence !== transformerAnalysisPollSequence || itemId !== analysisState.itemId) return;
+    state.transformerPollError = error.message; refreshTransformerControls();
+    if (transformerRunActive(state.transformerRun)) transformerAnalysisPollTimer = setTimeout(pollTransformerAnalysis, 5000);
+  }
+}
+
+function renderTransformerSearchResults() {
+  const state = contentAnalysisState();
+  document.querySelectorAll('[data-semantic-results]').forEach(host => {
+    host.replaceChildren();
+    if (state.semanticLoading) host.append(analysisElement('p', 'analysis-caption', '意味検索を実行しています…'));
+    if (state.semanticError) host.append(analysisElement('p', 'content-inline-notice', state.semanticError));
+    if (!state.semanticHits) return;
+    if (!state.semanticHits.length) host.append(analysisElement('p', 'analysis-no-data', '関連する発話を表示できませんでした。'));
+    state.semanticHits.forEach(hit => {
+      const article = analysisElement('article', 'transformer-search-hit');
+      article.append(analysisElement('strong', '', `${hit.speaker_name} / 類似度 ${Number(hit.score).toFixed(3)}`),
+        analysisElement('small', '', `${formatTime(hit.start)}–${formatTime(hit.end)} / ${hit.topic_label || 'テーマ未割当'}`),
+        analysisElement('p', '', hit.text), evidenceDetails([hit.segment_id]));
+      host.append(article);
+    });
+  });
+}
+
+async function searchTransformerSemantics() {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (!state.semanticQuery.trim() || state.semanticLoading) return;
+  state.semanticLoading = true; state.semanticError = ''; state.semanticHits = null;
+  renderTransformerSearchResults();
+  try {
+    const params = new URLSearchParams({q: state.semanticQuery, limit: '20'});
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/semantic-search?${params}`);
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '意味検索を実行できませんでした。');
+    if (itemId !== analysisState.itemId) return;
+    state.semanticHits = data.hits || [];
+  } catch (error) { state.semanticError = error.message; }
+  finally { state.semanticLoading = false; if (itemId === analysisState.itemId) renderTransformerSearchResults(); }
+}
+
+function renderKwicResults() {
+  if (!analysisState.data) return;
+  const state = contentAnalysisState();
+  document.querySelectorAll('[data-kwic-results]').forEach(host => {
+    host.replaceChildren();
+    if (state.loading) host.append(analysisElement('p', 'analysis-caption', '文脈を検索しています…'));
+    if (state.error) host.append(analysisElement('p', 'content-inline-notice', state.error));
+    const result = state.result;
+    if (!result) {
+      if (!state.loading && !state.error) host.append(analysisElement('p', 'analysis-caption', '語を入力するか、見解・頻出語・特徴語から選んでください。'));
+      return;
+    }
+    const header = analysisElement('div', 'content-kwic-heading');
+    header.append(analysisElement('p', '', `「${result.query}」${result.mode === 'normalized' ? '（正規化語）' : '（文字列）'}：${result.total}件 / ${result.total ? result.offset + 1 : 0}–${result.offset + result.hits.length}件を表示`));
+    const link = analysisElement('a', 'analysis-export-link', '検索結果すべてをCSV出力');
+    const params = new URLSearchParams({q: result.query, mode: result.mode, speaker: result.speaker, format: 'csv'});
+    link.href = `/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/kwic?${params}`;
+    link.download = '';
+    const save = contentButton('この検索をObsidianに保存', () => saveAnalysisPackage({q: result.query, mode: result.mode, speaker: result.speaker}));
+    save.dataset.archiveKwic = 'true';
+    save.disabled = Boolean(analysisState.dirty || analysisStorageState().busy);
+    header.append(link, save); host.append(header);
+    result.hits.forEach(hit => {
+      const article = analysisElement('article', 'content-kwic-hit');
+      article.append(analysisElement('small', '', `${hit.speaker_name} / ${formatTime(hit.start)}–${formatTime(hit.end)}`));
+      const text = analysisElement('p', 'content-kwic-line');
+      text.append(analysisElement('span', 'content-kwic-left', hit.left), analysisElement('mark', '', hit.match), analysisElement('span', '', hit.right));
+      article.append(text, evidenceDetails(hit.context_ids || [hit.segment_id]));
+      host.append(article);
+    });
+    const pager = analysisElement('div', 'content-kwic-pager');
+    const previous = contentButton('前の50件', () => { state.offset = Math.max(0, result.offset - 50); searchContentKwic(true); });
+    previous.disabled = state.loading || result.offset === 0;
+    const next = contentButton('次の50件', () => { state.offset = result.offset + 50; searchContentKwic(true); });
+    next.disabled = state.loading || result.offset + result.hits.length >= result.total;
+    pager.append(previous, next); host.append(pager);
+  });
+}
+
+async function searchContentKwic(page = false) {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (page && state.result) {
+    state.query = state.result.query; state.mode = state.result.mode; state.speaker = state.result.speaker;
+    document.querySelectorAll('[data-kwic-query]').forEach(input => { input.value = state.query; });
+    document.querySelectorAll('[data-kwic-speaker]').forEach(select => { select.value = state.speaker; });
+  }
+  state.controller?.abort();
+  const controller = new AbortController(); state.controller = controller;
+  const sequence = ++state.sequence;
+  state.loading = true; state.error = ''; state.result = null;
+  renderKwicResults();
+  try {
+    const params = new URLSearchParams({q: state.query, mode: state.mode, speaker: state.speaker, offset: String(state.offset), limit: '50'});
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/kwic?${params}`, {signal: controller.signal});
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '文脈検索に失敗しました。');
+    if (sequence !== state.sequence || itemId !== analysisState.itemId) return;
+    if (data.fingerprint !== analysisState.data?.insights?.fingerprint) throw new Error('分析対象が更新されています。「再集計」を押してから検索してください。');
+    state.result = data;
+  } catch (error) {
+    if (error.name !== 'AbortError' && sequence === state.sequence) state.error = error.message;
+  } finally {
+    if (sequence === state.sequence) state.loading = false;
+    if (itemId === analysisState.itemId) renderKwicResults();
+  }
+}
+
+function insightRunActive(run) {
+  return run && ['queued', 'running', 'cancelling'].includes(run.status);
+}
+
+function refreshInsightControls() {
+  if (!analysisState.data) return;
+  const state = contentAnalysisState();
+  const busy = state.starting || insightRunActive(state.run);
+  document.querySelectorAll('[data-insight-generate]').forEach(button => {
+    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress);
+    button.textContent = state.starting ? '開始しています…' : analysisState.data.insights?.ai ? 'AI見解を再生成' : 'AIで見解を作成';
+  });
+  document.querySelectorAll('[data-insight-cancel]').forEach(button => {
+    button.hidden = !insightRunActive(state.run);
+    button.disabled = state.run?.status === 'cancelling';
+  });
+  document.querySelectorAll('[data-insight-provider]').forEach(select => { select.disabled = Boolean(busy); });
+  document.querySelectorAll('[data-insight-status]').forEach(host => {
+    const usage = state.run?.usage;
+    const tokenText = usage?.request_count ? ` / ${usage.request_count}回・${Number(usage.total_tokens || 0).toLocaleString()}トークン` : '';
+    host.textContent = analysisState.dirty ? '未保存の変更があります。設定・コードを保存してから生成してください。'
+      : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解はボタンを押したときだけ生成します。');
+  });
+  document.querySelectorAll('[data-insight-output]').forEach(host => {
+    const insights = analysisState.data.insights || {};
+    const ai = insights.ai;
+    const key = `${analysisState.itemId}:${ai?.request_id || ''}:${Boolean(insights.stale)}`;
+    if (host.dataset.renderKey === key) return;
+    host.dataset.renderKey = key; host.replaceChildren();
+    if (!ai) return;
+    const providerLabel = {
+      openai: 'OpenAI', google: 'Google Gemini', lmstudio: 'LM Studio（ローカル）'
+    }[ai.provider] || 'AI';
+    host.append(analysisElement('p', 'content-ai-meta', `AI見解・下書き / ${providerLabel} / ${ai.model} / ${formatDate(ai.generated_at)}`));
+    if (insights.stale) host.append(analysisElement('p', 'content-inline-notice', '更新が必要：元データまたは分析条件が変わっています。以下は生成時点の見解です。'));
+    if (!(ai.findings || []).length) host.append(analysisElement('p', 'analysis-no-data', '根拠付きでまとめられる見解は見つかりませんでした。'));
+    (ai.findings || []).forEach(finding => {
+      const article = analysisElement('article', 'content-finding ai');
+      article.append(analysisElement('small', 'content-finding-meta', insightCategoryLabels[finding.category] || ''),
+        analysisElement('h4', '', finding.title), analysisElement('p', '', finding.text),
+        evidenceDetails(finding.segment_ids || [], {snapshot: ai.evidence, stale: insights.stale}));
+      host.append(article);
+    });
+  });
+}
+
+function insightPendingKey(itemId) { return `gurumoji.insightRequest.${itemId}`; }
+
+async function startContentInsights() {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (state.starting || insightRunActive(state.run) || analysisState.dirty) return;
+  const item = analysisState.data.item;
+  let pending = state.pending || null;
+  try { pending = JSON.parse(sessionStorage.getItem(insightPendingKey(itemId)) || 'null') || pending; } catch (_) { /* storage unavailable */ }
+  if (!pending || pending.provider !== state.provider || pending.source_revision !== item.revision_count
+    || pending.analysis_revision !== item.analysis_revision) {
+    pending = {provider: state.provider, source_revision: item.revision_count,
+      analysis_revision: item.analysis_revision, request_id: crypto.randomUUID(),
+      ai_efforts: typeof readAiEfforts === 'function' ? readAiEfforts() : undefined};
+  }
+  state.pending = pending;
+  try { sessionStorage.setItem(insightPendingKey(itemId), JSON.stringify(pending)); } catch (_) { /* request stays in memory */ }
+  state.starting = true; state.aiError = ''; refreshInsightControls();
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/insights`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pending)
+    });
+    const data = await readJsonResponse(response);
+    if (data.run) state.run = data.run;
+    if (!response.ok && !data.run) {
+      try { sessionStorage.removeItem(insightPendingKey(itemId)); } catch (_) { /* storage unavailable */ }
+      state.pending = null;
+      throw new Error(data.error || 'AI見解の生成を開始できませんでした。');
+    }
+    try { sessionStorage.removeItem(insightPendingKey(itemId)); } catch (_) { /* storage unavailable */ }
+    state.pending = null;
+  } catch (error) {
+    state.aiError = `${error.message} 必要な場合はもう一度生成ボタンを押してください。`;
+  } finally {
+    state.starting = false;
+    if (itemId === analysisState.itemId) {
+      refreshInsightControls(); pollContentInsights();
+    }
+  }
+}
+
+async function cancelContentInsights() {
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  if (!state.run) return;
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/insights/cancel`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({request_id: state.run.request_id})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '中止できませんでした。');
+    state.aiError = '';
+    if (itemId === analysisState.itemId) pollContentInsights();
+  } catch (error) { state.aiError = error.message; refreshInsightControls(); }
+}
+
+async function pollContentInsights() {
+  clearTimeout(contentAnalysisPollTimer);
+  if (!analysisState.data) return;
+  const itemId = analysisState.itemId;
+  const state = contentAnalysisState();
+  const sequence = ++contentAnalysisPollSequence;
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/insights`, {cache: 'no-store'});
+    const data = await readJsonResponse(response);
+    if (sequence !== contentAnalysisPollSequence || itemId !== analysisState.itemId || !analysisState.data) return;
+    if (!response.ok) throw new Error(data.error || '生成状態を取得できませんでした。');
+    state.pollError = '';
+    const previousArchive = analysisState.data.insights?.ai?.archive_id;
+    state.run = data.run;
+    // A poll must never mix freshly generated text with a different transcript.
+    const current = analysisState.data.insights || {};
+    if (data.insights?.fingerprint === current.fingerprint) analysisState.data.insights = data.insights;
+    else if (current.ai) current.stale = true;
+    if (state.pending?.request_id === data.run?.request_id) {
+      state.pending = null; state.aiError = '';
+      try { sessionStorage.removeItem(insightPendingKey(itemId)); } catch (_) { /* storage unavailable */ }
+    }
+    refreshInsightControls();
+    if (analysisState.data.insights?.ai?.archive_id !== previousArchive) loadAnalysisStorage();
+    if (insightRunActive(state.run)) contentAnalysisPollTimer = setTimeout(pollContentInsights, 1800);
+  } catch (error) {
+    if (sequence !== contentAnalysisPollSequence || itemId !== analysisState.itemId) return;
+    state.pollError = error.message; refreshInsightControls();
+    if (insightRunActive(state.run)) contentAnalysisPollTimer = setTimeout(pollContentInsights, 5000);
+  }
+}
+
+function onContentAnalysisLoaded() {
+  loadAnalysisStorage();
+  openLinkedAnalysisEvidence();
+  const state = contentAnalysisState();
+  if (!state.pending) {
+    try { state.pending = JSON.parse(sessionStorage.getItem(insightPendingKey(analysisState.itemId)) || 'null'); } catch (_) { /* storage unavailable */ }
+  }
+  const fingerprint = analysisState.data?.insights?.fingerprint || '';
+  if (state.fingerprint !== fingerprint) {
+    state.controller?.abort(); state.sequence++;
+    state.loading = false; state.result = null; state.error = ''; state.offset = 0;
+    state.fingerprint = fingerprint;
+  }
+  if (state.query.trim() && !state.result) searchContentKwic();
+  pollContentInsights();
+  pollTransformerAnalysis();
+}

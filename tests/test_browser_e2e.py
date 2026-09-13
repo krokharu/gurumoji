@@ -162,6 +162,88 @@ class BrowserJobRecoveryTests(unittest.TestCase):
         self.assertIsNotNone(progress_tag)
         self.assertNotRegex(progress_tag.group(0), r'\shidden(?:\s|=|>)')
 
+    def test_ai_review_displays_reason_safely_and_restores_original_text(self):
+        browser = browser_executable()
+        if browser is None:
+            self.skipTest("Chrome, Edge, or Chromium is required")
+        driver = r"""
+window.addEventListener('DOMContentLoaded', () => {
+  try {
+    setRunning(false);
+    const provider = document.querySelector('#ai-provider');
+    provider.value = 'openai';
+    provider.dispatchEvent(new Event('change'));
+    const effort = document.querySelector('input[name="ai_effort_choice_cleanup"][value="high"]');
+    effort.click();
+    if (readAiEfforts().cleanup !== 'high' || readAiEfforts().outline !== 'medium') throw new Error('efforts are not independent: ' + JSON.stringify(readAiEfforts()) + ' disabled=' + effort.matches(':disabled'));
+    if (effort.closest('fieldset').dataset.effort !== 'high') throw new Error('effort visual did not update');
+    const off = document.querySelector('input[name="ai_thinking_mode_cleanup"][value="off"]');
+    off.click();
+    if (readAiEfforts().cleanup !== 'off' || !effort.matches(':disabled')) throw new Error('thinking mode OFF did not disable effort');
+    renderAiFinishingActivity({status: 'running', stage: 'finishing', message: 'test activity'});
+    if (document.querySelector('#ai-finishing-activity').hidden) throw new Error('missing animation');
+    renderAiFinishingActivity({status: 'failed', stage: 'finishing'});
+    if (!document.querySelector('#ai-finishing-activity').hidden) throw new Error('animation did not stop');
+    const mode = document.querySelector('#finish-in-obsidian');
+    const direct = document.querySelector('[data-app-finishing-only]');
+    if (!mode.checked || !direct.hidden) throw new Error('Obsidian mode is not the default');
+    mode.checked = false;
+    mode.dispatchEvent(new Event('change'));
+    if (direct.hidden) throw new Error('direct finishing mode did not become available');
+    mode.checked = true;
+    mode.dispatchEvent(new Event('change'));
+    currentJob = {speaker_names: {}, speaker_profiles: {}, segments: [{
+      id: 'review-test', speaker: 'A', start: 0, end: 1, text: '校正後の本文',
+      ai_review: {original_text: '元の本文', noise_candidate: true, fragments: [
+        {reason: '候補理由 <img src=x onerror=window.reviewInjected=1>'}
+      ]}
+    }]};
+    setCurrentJobDirty(false);
+    renderSegments();
+    const panel = segmentEditor.querySelector('.segment-ai-review');
+    if (!panel || !panel.textContent.includes('ノイズ候補') || !panel.textContent.includes('候補理由'))
+      throw new Error('review or reason missing');
+    if (panel.querySelector('img') || window.reviewInjected) throw new Error('unsafe reason rendering');
+    panel.querySelector('button').click();
+    if (currentJob.segments[0].text !== '元の本文' || segmentEditor.querySelector('textarea').value !== '元の本文')
+      throw new Error('restore failed');
+    if (!currentJobDirty || currentJob.segments.length !== 1) throw new Error('state not preserved');
+    document.body.dataset.aiReviewTest = 'passed';
+  } catch (error) { document.body.dataset.aiReviewTest = 'failed: ' + error.message; }
+});
+"""
+        original_render = app.render_template
+        original_static = app.app.send_static_file
+        def render(*args, **kwargs):
+            return original_render(*args, **kwargs).replace('</body>',
+                '<script src="/static/ai-review-test.js" defer></script></body>')
+        def static(filename):
+            if filename == 'ai-review-test.js':
+                return app.app.response_class(driver, mimetype='text/javascript')
+            return original_static(filename)
+        server = make_server('127.0.0.1', 0, app.app, threaded=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.object(app, 'render_template', side_effect=render), \
+                    patch.object(app.app, 'send_static_file', side_effect=static), \
+                    patch.object(app, 'get_machine_profile', return_value={}), \
+                    patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
+                result = subprocess.run([
+                    browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
+                    '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
+                    f'--user-data-dir={self.root / "review-profile"}', '--virtual-time-budget=2000',
+                    '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
+                ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        status = re.search(r'data-ai-review-test="([^"]+)"', result.stdout)
+        self.assertIsNotNone(status, result.stderr[-2000:])
+        self.assertEqual(status.group(1), 'passed')
+
     def test_real_browser_renders_pre_survey_dashboard(self):
         browser = browser_executable()
         if browser is None:

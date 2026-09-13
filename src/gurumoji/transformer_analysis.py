@@ -1,0 +1,1123 @@
+"""Local Transformer embeddings for evidence-linked focus-group exploration.
+
+The model is loaded lazily so transcription and the existing analysis UI remain
+available when the optional model has not been downloaded yet.  Embeddings are
+used for similarity only: this module deliberately does not infer agreement,
+sentiment, importance, or causality.
+"""
+
+from __future__ import annotations
+
+import base64
+import math
+import os
+import re
+import threading
+from collections import Counter, defaultdict
+from importlib import metadata
+from typing import Any, Callable
+
+
+TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-7"
+DEFAULT_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_MAX_TOPICS = 8
+DEFAULT_MIN_TOPIC_SIZE = 2
+MAX_SEGMENTS = 5000
+MAX_TEXT_CHARACTERS = 6000
+
+TRANSFORMER_CSV_FIELDS = {
+    "transformer_topics": [
+        "topic_id", "label", "keywords", "segment_count", "speaker_count",
+        "participant_segment_count", "facilitator_segment_count",
+        "backchannel_count", "speaking_seconds", "average_similarity", "representative_segment_ids",
+    ],
+    "transformer_assignments": [
+        "segment_id", "topic_id", "topic_label", "speaker", "speaker_name",
+        "speaker_group", "start", "end", "duration", "similarity", "outlier_score", "text",
+    ],
+    "transformer_speakers": [
+        "topic_id", "topic_label", "speaker", "speaker_name", "segment_count",
+        "speaker_group", "topic_percent", "speaking_seconds",
+    ],
+    "transformer_timeline": [
+        "bin_index", "start", "end", "topic_id", "topic_label",
+        "segment_count", "backchannel_count", "speaking_seconds",
+    ],
+    "transformer_outliers": [
+        "rank", "segment_id", "speaker", "speaker_name", "start", "end",
+        "outlier_score", "nearest_similarity", "text",
+    ],
+    "transformer_backchannels": [
+        "segment_id", "speaker", "speaker_name", "speaker_group", "kind",
+        "start", "end", "text", "topic_id", "topic_label",
+        "responds_to_segment_id", "responds_to_speaker", "responds_to_speaker_name",
+        "time_gap", "link_method",
+    ],
+    "transformer_backchannel_speakers": [
+        "speaker", "speaker_name", "speaker_group", "topic_id", "topic_label",
+        "backchannel_count", "speaker_backchannel_percent",
+    ],
+    "transformer_backchannel_rates": [
+        "scope", "speaker", "speaker_name", "speaker_group", "topic_id", "topic_label",
+        "opportunity_count", "responded_target_count", "response_rate_percent",
+        "backchannel_count", "backchannels_per_100_opportunities", "linked_count",
+        "unlinked_count", "agreement_count", "continuer_count", "confirmation_count",
+        "courtesy_count",
+    ],
+    "transformer_backchannel_tests": [
+        "test_id", "test", "dimension", "n", "row_count", "column_count",
+        "statistic", "df", "p_value", "effect_name", "effect_size",
+        "low_expected_cells", "expected_cell_count", "status", "interpretation",
+        "assumption_note",
+    ],
+    "transformer_speaker_results": [
+        "speaker", "speaker_name", "speaker_group", "result_code", "result_label",
+        "topic_id", "topic_label", "confidence", "basis", "matched_cues",
+        "evidence_segment_ids", "evidence_texts", "first_segment_id", "last_segment_id",
+    ],
+}
+
+_MODEL_LOCK = threading.RLock()
+_MODEL_CACHE: dict[tuple[str, str], tuple[Any, Any, str]] = {}
+
+_CONTENT_CHARACTER_RE = re.compile(r"[0-9A-Za-z\u3040-\u30ff\u3400-\u9fff]")
+_REPEATED_FILLER_RE = re.compile(r"^(?:[あいうえおぁぃぅぇぉー]+|[はへ]+|[?？!！。．、,]+)$")
+_SHORT_FILLERS = {
+    "あ", "ああ", "え", "ええ", "うん", "うーん", "はい", "へえ", "ほう",
+    "そう", "そうです", "そうですね", "そうなんです", "なるほど", "たしかに",
+    "わかりました", "分かりました", "ありがとう", "ありがとうございます",
+    "お願いします", "よろしくお願いします", "以上です", "すみません", "ごめんなさい",
+    "です", "でした", "ます", "ました", "します", "しました", "した", "で", "な",
+    "ちょっと", "ところです", "という感じ", "みたいな",
+}
+_LABEL_STOP_TERMS = {
+    "一寸", "ちょっと", "御座る", "ござる", "有る", "ある", "居る", "いる",
+    "する", "成る", "なる", "思う", "言う", "感じ", "最後", "以上", "今回",
+    "今日", "皆", "皆さん", "皆様", "自分", "私", "僕", "俺", "方", "人", "時", "所",
+    "もの", "こと", "そう", "うー", "えー", "はい", "ありがとう", "お願い",
+    "矢張り", "やはり", "余り", "あまり", "お疲れ様", "えーと", "しょう", "すか",
+}
+_SHORT_SEMANTIC_TERMS = {
+    "好き", "嫌い", "高い", "安い", "辛い", "甘い", "苦い", "良い", "悪い",
+    "おいしい", "まずい", "欲しい", "必要", "不要", "賛成", "反対",
+}
+_BACKCHANNELS = {
+    "はい": "agreement", "そう": "agreement", "そうです": "agreement",
+    "そうですね": "agreement", "そうなんです": "agreement", "たしかに": "agreement",
+    "確かに": "agreement", "その通り": "agreement", "同じです": "agreement",
+    "うん": "continuer", "うーん": "continuer", "ああ": "continuer",
+    "ええ": "continuer", "へえ": "continuer", "へー": "continuer",
+    "ほう": "continuer", "なるほど": "continuer", "なるほどね": "continuer",
+    "そうか": "confirmation", "そうなんですね": "confirmation",
+    "ですよね": "agreement", "わかる": "agreement", "分かる": "agreement",
+    "オッケー": "confirmation", "OK": "confirmation",
+    "ありがとう": "courtesy", "ありがとうございます": "courtesy",
+    "ありがとうございました": "courtesy",
+    "わかりました": "confirmation", "分かりました": "confirmation",
+}
+
+_SPEAKER_RESULT_DEFINITIONS = (
+    (
+        "opinion_changed", "意見・認識が変わった", "explicit",
+        (
+            re.compile(r"(?:意見|考え|印象|見方|認識|気持ち)(?:が|は|も)?(?:かなり|大きく|少し)?変わ(?!らな|りません|っていな)"),
+            re.compile(r"(?:考え直|見直)(?:した|しました|す|すこと|すよう)"),
+            re.compile(r"(?:話|説明|意見).{0,24}(?:聞いて|聴いて).{0,24}(?:思う|考える|感じる)ようにな"),
+            re.compile(r"(?:最初|初め|以前|もともと|元々).{0,32}(?:でしたが|だったが|だけど|でしたけど|ものの|一方で).{0,32}(?:今|現在|最終的|むしろ|こちら|こっち)"),
+            re.compile(r"(?:イメージ|印象|考え)(?:が|は)?(?:あった|ありました|持っていた|持っていました).{0,32}(?:けど|が).{0,40}(?:話を聞|実際|違う|むしろ|一方)"),
+        ),
+    ),
+    (
+        "opinion_maintained", "意見・認識が変わらなかった", "explicit",
+        (
+            re.compile(r"(?:意見|考え|印象|見方|認識|気持ち).{0,12}(?:変わらない|変わりません|変わっていない|変わっていません)"),
+            re.compile(r"(?:意見|考え|認識)(?:は|も)?(?:同じ|そのまま)"),
+            re.compile(r"(?:やはり|やっぱり|改めて).{0,32}(?:と思う|と感じる|がいい|が良い|を選ぶ|に賛成|必要|不要)"),
+        ),
+    ),
+    (
+        "new_insight", "新しい見解・気づきを得た", "explicit",
+        (
+            re.compile(r"(?:新しい|新たな|別の)(?:見方|見解|視点|考え|気づき|発見)"),
+            re.compile(r"(?:気づいた|気付きました|気付いた|発見した|発見しました)"),
+            re.compile(r"(?:初めて知った|初めて分かった|初めてわかった|知らなかった|考えたことがなかった)"),
+            re.compile(r"(?:勉強|参考|学び)(?:に)?な(?:った|りました)"),
+            re.compile(r"(?:そういう|そのような)(?:考え|見方|視点).{0,16}(?:なかった|ある|知った|分かった|わかった)"),
+            re.compile(r"(?:話|意見|説明)を(?:聞いて|聴いて).{0,48}(?:分か|わか|知|気づ|気付|イメージ|印象|感じ|見方|考え)"),
+            re.compile(r"(?:だ|と)と思ったんですけど.{0,40}(?:違う|分か|わか|知)"),
+            re.compile(r"(?:違う|そういう).{0,16}(?:んだな|ことなんだ).{0,16}(?:思|感じ)"),
+        ),
+    ),
+    (
+        "preference_formed", "支持・選好が明確になった", "explicit",
+        (
+            re.compile(r"(?:これ|こちら|こっち|それ|そちら|この案|その案)(?:の方)?(?:が|を).{0,12}(?:いい|良い|よい)(?:と思|と感じ|です|かな)"),
+            re.compile(r"[0-9A-Za-zぁ-んァ-ヶ一-龯ー]{1,20}(?:の方)?が(?:いい|良い|よい)と思"),
+            re.compile(r"(?:一番|最も).{0,16}(?:いい|良い|よい|魅力|気に入)"),
+            re.compile(r"(?:選びたい|採用したい|導入したい|使いたい|試したい|気に入った|魅力を感じ)"),
+            re.compile(r"(?:この案|その案|提案|意見|方針)(?:に)?賛成"),
+        ),
+    ),
+)
+
+
+def _content_text(value: Any) -> str:
+    return "".join(_CONTENT_CHARACTER_RE.findall(str(value or "")))
+
+
+def _backchannel_kind(value: Any) -> str | None:
+    content = _content_text(value)
+    kind = _BACKCHANNELS.get(content)
+    if kind:
+        return kind
+    if re.fullmatch(r"(?:そう){2,4}", content):
+        return "agreement"
+    if (len(content) <= 16
+            and content.endswith(("ありがとうございます", "ありがとうございました"))):
+        return "courtesy"
+    return None
+
+
+def _is_meaningful_text(value: Any) -> bool:
+    """Reject punctuation, backchannels, and transcription-only filler."""
+    text = re.sub(r"\s+", "", str(value or "").strip())
+    content = _content_text(text)
+    if _backchannel_kind(text) or len(content) < 2 or content in _SHORT_FILLERS:
+        return False
+    if _REPEATED_FILLER_RE.fullmatch(text) and len(set(content.replace("ー", ""))) <= 2:
+        return False
+    if (len(content) <= 4 and not re.search(r"[0-9A-Za-z\u3400-\u9fff]", content)
+            and content not in _SHORT_SEMANTIC_TERMS):
+        return False
+    if (len(content) <= 16 and content.endswith(
+            ("ありがとうございます", "ありがとうございました", "お疲れ様", "ございました"))):
+        return False
+    return True
+
+
+def _contextual_texts(source_segments: list[dict], source_indices: list[int]) -> tuple[list[str], int]:
+    """Add nearby same-speaker text only when the target utterance is fragmentary."""
+    values: list[str] = []
+    expanded = 0
+    for source_index in source_indices:
+        segment = source_segments[source_index]
+        current = str(segment.get("text") or "").strip()
+        pieces: list[tuple[int, str]] = [(source_index, current)]
+        if len(_content_text(current)) < 24:
+            speaker = str(segment.get("speaker") or "UNKNOWN")
+            for neighbour_index in (source_index - 1, source_index + 1):
+                if not 0 <= neighbour_index < len(source_segments):
+                    continue
+                neighbour = source_segments[neighbour_index]
+                if str(neighbour.get("speaker") or "UNKNOWN") != speaker:
+                    continue
+                gap = (float(segment.get("start") or 0) - float(neighbour.get("end") or 0)
+                       if neighbour_index < source_index else
+                       float(neighbour.get("start") or 0) - float(segment.get("end") or 0))
+                neighbour_text = str(neighbour.get("text") or "").strip()
+                if gap <= 3.0 and _is_meaningful_text(neighbour_text):
+                    pieces.append((neighbour_index, neighbour_text))
+            pieces.sort(key=lambda row: row[0])
+        value = " ".join(text for _, text in pieces)
+        if len(pieces) > 1:
+            expanded += 1
+        values.append(value)
+    return values, expanded
+
+
+def _speaker_weights(segments: list[dict]) -> Any:
+    """Reduce domination by a facilitator or fragmented diarization speaker."""
+    import numpy as np
+
+    counts = Counter(str(row.get("speaker") or "UNKNOWN") for row in segments)
+    weights = np.asarray([1.0 / math.sqrt(counts[str(row.get("speaker") or "UNKNOWN")])
+                          for row in segments], dtype="float64")
+    return weights / max(float(weights.mean()), 1e-9)
+
+
+def _dominant_speaker(segments: list[dict]) -> tuple[str | None, float]:
+    seconds = Counter()
+    for row in segments:
+        seconds[str(row.get("speaker") or "UNKNOWN")] += max(
+            0.0, float(row.get("end") or 0) - float(row.get("start") or 0),
+        )
+    total = sum(seconds.values())
+    if len(seconds) < 3 or total <= 0:
+        return None, 0.0
+    speaker, value = seconds.most_common(1)[0]
+    share = value / total
+    return (speaker if share >= 0.35 else None), share
+
+
+def _speaker_group(segment: dict, dominant_speaker: str | None) -> str:
+    role = str(segment.get("role") or "").strip().lower()
+    if role in {"moderator", "facilitator", "interviewer", "host", "司会", "進行"}:
+        return "facilitator"
+    speaker = str(segment.get("speaker") or "UNKNOWN")
+    if dominant_speaker and speaker == dominant_speaker:
+        return "facilitator_candidate"
+    if role in {"participant", "interviewee", "guest", "参加者", "回答者"}:
+        return "participant"
+    return "participant"
+
+
+def _link_backchannels(
+    backchannel_segments: list[dict], source_segments: list[dict], assignments: list[dict],
+    dominant_speaker: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Link listener responses to a nearby substantive utterance without claiming agreement."""
+    assignment_by_id = {str(row["segment_id"]): row for row in assignments}
+    source_position = {str(row["id"]): index for index, row in enumerate(source_segments)}
+    rows: list[dict[str, Any]] = []
+    for segment in backchannel_segments:
+        segment_id = str(segment["id"])
+        position = source_position[segment_id]
+        speaker = str(segment.get("speaker") or "UNKNOWN")
+        start = float(segment.get("start") or 0)
+        target = None
+        link_method = "unassigned"
+        gap = None
+        for candidate in reversed(source_segments[:position]):
+            candidate_row = assignment_by_id.get(str(candidate["id"]))
+            if not candidate_row or candidate_row["speaker"] == speaker:
+                continue
+            candidate_gap = max(0.0, start - float(candidate.get("end") or 0))
+            if candidate_gap > 12.0:
+                break
+            target, link_method, gap = candidate_row, "previous_other_speaker", candidate_gap
+            break
+        if target is None:
+            end = float(segment.get("end") or start)
+            for candidate in source_segments[position + 1:]:
+                candidate_row = assignment_by_id.get(str(candidate["id"]))
+                if not candidate_row or candidate_row["speaker"] == speaker:
+                    continue
+                candidate_gap = max(0.0, float(candidate.get("start") or 0) - end)
+                if candidate_gap > 3.0:
+                    break
+                target, link_method, gap = candidate_row, "next_other_speaker", candidate_gap
+                break
+        rows.append({
+            "segment_id": segment_id, "speaker": speaker,
+            "speaker_name": str(segment.get("speaker_name") or speaker),
+            "speaker_group": _speaker_group(segment, dominant_speaker),
+            "kind": _backchannel_kind(segment.get("text")) or "acknowledgement",
+            "start": round(start, 3), "end": round(float(segment.get("end") or start), 3),
+            "text": str(segment.get("text") or ""),
+            "topic_id": target["topic_id"] if target else "",
+            "topic_label": target["topic_label"] if target else "紐付けなし",
+            "responds_to_segment_id": target["segment_id"] if target else "",
+            "responds_to_speaker": target["speaker"] if target else "",
+            "responds_to_speaker_name": target["speaker_name"] if target else "",
+            "time_gap": round(float(gap), 3) if gap is not None else None,
+            "link_method": link_method,
+        })
+    totals = Counter(row["speaker"] for row in rows)
+    grouped = Counter((row["speaker"], row["topic_id"]) for row in rows)
+    samples = {(row["speaker"], row["topic_id"]): row for row in rows}
+    speaker_rows = []
+    for (speaker, topic_id), count in sorted(grouped.items(), key=lambda item: (-item[1], item[0])):
+        sample = samples[(speaker, topic_id)]
+        speaker_rows.append({
+            "speaker": speaker, "speaker_name": sample["speaker_name"],
+            "speaker_group": sample["speaker_group"], "topic_id": topic_id,
+            "topic_label": sample["topic_label"], "backchannel_count": count,
+            "speaker_backchannel_percent": round(100 * count / totals[speaker], 3),
+        })
+    return rows, speaker_rows
+
+
+def _backchannel_test(
+    test_id: str, title: str, dimension: str, matrix: list[list[int]],
+    row_labels: list[str], column_labels: list[str],
+) -> dict[str, Any]:
+    """Run an exploratory chi-square test and retain sparse-cell diagnostics."""
+    result = {
+        "test_id": test_id, "test": title, "dimension": dimension,
+        "n": int(sum(sum(row) for row in matrix)), "row_count": len(row_labels),
+        "column_count": len(column_labels), "statistic": None, "df": None,
+        "p_value": None, "effect_name": "cramers_v", "effect_size": None,
+        "low_expected_cells": None, "expected_cell_count": None,
+        "status": "not_computable", "interpretation": "比較に必要な件数または分類数が不足しています。",
+        "assumption_note": (
+            "同じ話者の反復相づちは独立観測とは限りません。期待度数5未満のセルが多い場合、"
+            "カイ二乗検定のp値は参考値として扱ってください。非応答は音声上の相づちがないことから"
+            "推定した値で、多重比較補正は行っていません。"
+        ),
+    }
+    nonzero_rows = [(label, row) for label, row in zip(row_labels, matrix) if sum(row) > 0]
+    nonzero_columns = [
+        index for index in range(len(column_labels))
+        if sum(row[index] for _, row in nonzero_rows) > 0
+    ]
+    cleaned = [[row[index] for index in nonzero_columns] for _, row in nonzero_rows]
+    result["row_count"] = len(cleaned)
+    result["column_count"] = len(nonzero_columns)
+    result["n"] = int(sum(sum(row) for row in cleaned))
+    if len(cleaned) < 2 or len(nonzero_columns) < 2 or result["n"] <= 0:
+        return result
+    try:
+        from scipy import stats
+    except Exception:
+        result.update({
+            "status": "unavailable", "interpretation": "SciPyを読み込めないため検定できません。",
+        })
+        return result
+    try:
+        statistic, p_value, dof, expected = stats.chi2_contingency(cleaned, correction=False)
+        minimum_dimension = min(len(cleaned) - 1, len(nonzero_columns) - 1)
+        effect_size = (math.sqrt(float(statistic) / (result["n"] * minimum_dimension))
+                       if result["n"] > 0 and minimum_dimension > 0 else 0.0)
+        expected_values = [float(value) for row in expected for value in row]
+        low_expected = sum(value < 5 for value in expected_values)
+        sparse = low_expected / max(1, len(expected_values)) > 0.2
+        result.update({
+            "statistic": round(float(statistic), 6), "df": int(dof),
+            "p_value": round(float(p_value), 8), "effect_size": round(effect_size, 6),
+            "low_expected_cells": low_expected, "expected_cell_count": len(expected_values),
+            "status": "computed_sparse" if sparse else "computed",
+            "interpretation": (
+                "期待度数条件を満たさないため、p値から差を判定しません。記述統計と効果量を確認してください。"
+                if sparse else (
+                    "分布差の可能性があります。効果量と原文を確認してください。"
+                    if float(p_value) < 0.05 else
+                    "このデータでは統計的な分布差を確認できませんでした。"
+                )
+            ),
+        })
+    except Exception as error:
+        result.update({
+            "status": "error", "interpretation": "検定計算に失敗しました。",
+            "assumption_note": result["assumption_note"] + " " + str(error)[:200],
+        })
+    return result
+
+
+def _backchannel_statistics(
+    source_segments: list[dict], assignments: list[dict], backchannels: list[dict],
+    dominant_speaker: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Normalize listener responses by observable other-speaker utterance opportunities."""
+    samples: dict[str, dict] = {}
+    speaker_order: list[str] = []
+    for row in sorted(source_segments, key=lambda value: float(value.get("start") or 0)):
+        speaker = str(row.get("speaker") or "UNKNOWN")
+        if speaker not in samples:
+            samples[speaker] = row
+            speaker_order.append(speaker)
+    topic_labels = {str(row.get("topic_id") or ""): str(row.get("topic_label") or "")
+                    for row in assignments if row.get("topic_id")}
+    topic_ids = sorted(topic_labels)
+    rate_rows: list[dict[str, Any]] = []
+    for speaker in speaker_order:
+        sample = samples[speaker]
+        speaker_name = str(sample.get("speaker_name") or speaker)
+        speaker_group = _speaker_group(sample, dominant_speaker)
+        for topic_id in ["", *topic_ids]:
+            scoped_assignments = [
+                row for row in assignments
+                if str(row.get("speaker") or "UNKNOWN") != speaker
+                and (not topic_id or str(row.get("topic_id") or "") == topic_id)
+            ]
+            scoped_backchannels = [
+                row for row in backchannels
+                if row["speaker"] == speaker
+                and (not topic_id or row["topic_id"] == topic_id)
+            ]
+            responded_targets = {
+                str(row["responds_to_segment_id"]) for row in scoped_backchannels
+                if row.get("responds_to_segment_id")
+            }
+            opportunity_count = len(scoped_assignments)
+            backchannel_count = len(scoped_backchannels)
+            kind_counts = Counter(row["kind"] for row in scoped_backchannels)
+            rate_rows.append({
+                "scope": "overall" if not topic_id else "topic",
+                "speaker": speaker, "speaker_name": speaker_name,
+                "speaker_group": speaker_group, "topic_id": topic_id or "ALL",
+                "topic_label": topic_labels.get(topic_id, "全話題"),
+                "opportunity_count": opportunity_count,
+                "responded_target_count": len(responded_targets),
+                "response_rate_percent": round(100 * len(responded_targets) / opportunity_count, 3)
+                                         if opportunity_count else None,
+                "backchannel_count": backchannel_count,
+                "backchannels_per_100_opportunities": round(100 * backchannel_count / opportunity_count, 3)
+                                                     if opportunity_count else None,
+                "linked_count": sum(bool(row.get("responds_to_segment_id")) for row in scoped_backchannels),
+                "unlinked_count": sum(not row.get("responds_to_segment_id") for row in scoped_backchannels),
+                "agreement_count": kind_counts["agreement"],
+                "continuer_count": kind_counts["continuer"],
+                "confirmation_count": kind_counts["confirmation"],
+                "courtesy_count": kind_counts["courtesy"],
+            })
+
+    participant_totals = [
+        row for row in rate_rows
+        if row["scope"] == "overall" and row["speaker_group"] == "participant"
+        and row["speaker"] != "UNKNOWN" and row["opportunity_count"] > 0
+    ]
+    response_matrix = [[
+        row["responded_target_count"],
+        max(0, row["opportunity_count"] - row["responded_target_count"]),
+    ] for row in participant_totals]
+    tests = [_backchannel_test(
+        "response_by_speaker", "話者別の相づち応答率", "話者 × 応答有無",
+        response_matrix, [row["speaker_name"] for row in participant_totals], ["応答あり", "応答なし"],
+    )]
+
+    kinds = ["agreement", "continuer", "confirmation", "courtesy"]
+    kind_matrix = [[row[f"{kind}_count"] for kind in kinds] for row in participant_totals]
+    tests.append(_backchannel_test(
+        "kind_by_speaker", "話者別の相づち種類分布", "話者 × 相づち種類",
+        kind_matrix, [row["speaker_name"] for row in participant_totals], kinds,
+    ))
+    participant_backchannels = [
+        row for row in backchannels
+        if row["speaker"] != "UNKNOWN"
+        and _speaker_group(samples.get(row["speaker"], row), dominant_speaker) == "participant"
+        and row.get("topic_id")
+    ]
+    topic_kind_matrix = [[
+        sum(1 for row in participant_backchannels
+            if row["topic_id"] == topic_id and row["kind"] == kind)
+        for kind in kinds
+    ] for topic_id in topic_ids]
+    tests.append(_backchannel_test(
+        "kind_by_topic", "話題別の相づち種類分布", "話題 × 相づち種類",
+        topic_kind_matrix, [topic_labels[topic_id] for topic_id in topic_ids], kinds,
+    ))
+    return rate_rows, tests
+
+
+def _detect_speaker_results(value: Any) -> list[dict[str, str]]:
+    """Find only explicit self-reported changes, learning, and preferences."""
+    text = re.sub(r"\s+", "", str(value or ""))
+    if text.rstrip().endswith(("?", "？")):
+        return []
+    detected: list[dict[str, str]] = []
+    for code, label, confidence, patterns in _SPEAKER_RESULT_DEFINITIONS:
+        matches = []
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                matches.append(match.group(0))
+        if matches:
+            detected.append({
+                "result_code": code, "result_label": label, "confidence": confidence,
+                "matched_cue": matches[0],
+            })
+    return detected
+
+
+def _speaker_results(
+    source_segments: list[dict], assignments: list[dict], dominant_speaker: str | None,
+) -> list[dict[str, Any]]:
+    """Build one or more evidence-linked meeting outcomes for every speaker."""
+    ordered_source = sorted(source_segments, key=lambda row: (
+        float(row.get("start") or 0), float(row.get("end") or 0), str(row.get("id") or ""),
+    ))
+    sources_by_speaker: dict[str, list[dict]] = defaultdict(list)
+    for row in ordered_source:
+        sources_by_speaker[str(row.get("speaker") or "UNKNOWN")].append(row)
+    assignments_by_speaker: dict[str, list[dict]] = defaultdict(list)
+    for row in sorted(assignments, key=lambda value: (
+        float(value.get("start") or 0), float(value.get("end") or 0), str(value.get("segment_id") or ""),
+    )):
+        assignments_by_speaker[str(row.get("speaker") or "UNKNOWN")].append(row)
+
+    results: list[dict[str, Any]] = []
+    for speaker, source_rows in sources_by_speaker.items():
+        speaker_assignments = assignments_by_speaker.get(speaker, [])
+        sample = speaker_assignments[0] if speaker_assignments else source_rows[0]
+        speaker_group = str(sample.get("speaker_group") or _speaker_group(sample, dominant_speaker))
+        first_segment_id = str(source_rows[0].get("id") or source_rows[0].get("segment_id") or "")
+        last_segment_id = str(source_rows[-1].get("id") or source_rows[-1].get("segment_id") or "")
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for assignment in speaker_assignments if speaker_group == "participant" else []:
+            for detected in _detect_speaker_results(assignment.get("text")):
+                key = (detected["result_code"], str(assignment.get("topic_id") or ""))
+                target = grouped.setdefault(key, {
+                    "speaker": speaker,
+                    "speaker_name": str(sample.get("speaker_name") or speaker),
+                    "speaker_group": speaker_group,
+                    "result_code": detected["result_code"],
+                    "result_label": detected["result_label"],
+                    "topic_id": str(assignment.get("topic_id") or ""),
+                    "topic_label": str(assignment.get("topic_label") or "紐付けなし"),
+                    "confidence": detected["confidence"],
+                    "basis": "本人の発話に結果を示す明示表現があります。",
+                    "matched_cues": [], "evidence_segment_ids": [], "evidence_texts": [],
+                    "first_segment_id": first_segment_id, "last_segment_id": last_segment_id,
+                })
+                segment_id = str(assignment.get("segment_id") or "")
+                if segment_id and segment_id not in target["evidence_segment_ids"]:
+                    target["evidence_segment_ids"].append(segment_id)
+                    target["evidence_texts"].append(str(assignment.get("text") or ""))
+                cue = detected["matched_cue"]
+                if cue not in target["matched_cues"]:
+                    target["matched_cues"].append(cue)
+        if grouped:
+            results.extend(grouped.values())
+            continue
+
+        topic_counts = Counter(str(row.get("topic_id") or "") for row in speaker_assignments)
+        main_topic_id = topic_counts.most_common(1)[0][0] if topic_counts else ""
+        topic_sample = next((row for row in reversed(speaker_assignments)
+                             if str(row.get("topic_id") or "") == main_topic_id), None)
+        evidence_row = speaker_assignments[-1] if speaker_assignments else None
+        not_applicable = speaker_group in {"facilitator", "facilitator_candidate"}
+        results.append({
+            "speaker": speaker,
+            "speaker_name": str(sample.get("speaker_name") or speaker),
+            "speaker_group": speaker_group,
+            "result_code": "not_applicable" if not_applicable else "undetermined",
+            "result_label": "進行役のため参加者リザルト対象外" if not_applicable else "明示的な結果は未判定",
+            "topic_id": main_topic_id,
+            "topic_label": str((topic_sample or {}).get("topic_label") or "紐付けなし"),
+            "confidence": "not_applicable" if not_applicable else "insufficient_evidence",
+            "basis": ("進行役・司会者候補のため、参加者の態度変化としては判定しません。"
+                      if not_applicable else
+                      "意見の変化・維持、新しい気づき、支持・選好を示す明示表現を検出できませんでした。"),
+            "matched_cues": [],
+            "evidence_segment_ids": ([str(evidence_row.get("segment_id"))] if evidence_row else []),
+            "evidence_texts": ([str(evidence_row.get("text") or "")] if evidence_row else []),
+            "first_segment_id": first_segment_id, "last_segment_id": last_segment_id,
+        })
+    return results
+
+
+def transformer_input_fingerprint(analysis: dict, *, model: str = DEFAULT_MODEL) -> str:
+    """Hash only inputs that affect semantic analysis."""
+    import hashlib
+    import json
+
+    segments = [
+        {key: row.get(key) for key in ("id", "speaker", "speaker_name", "role", "start", "end", "text", "excluded")}
+        for row in analysis.get("segments", [])
+    ]
+    payload = {
+        "algorithm": TRANSFORMER_ANALYSIS_VERSION,
+        "model": model,
+        "segments": segments,
+    }
+    return hashlib.sha256(json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def _package_version(name: str) -> str:
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return ""
+
+
+def _load_model(model_name: str, revision: str = "") -> tuple[Any, Any, str]:
+    key = (model_name, revision)
+    with _MODEL_LOCK:
+        cached = _MODEL_CACHE.get(key)
+        if cached is not None:
+            return cached
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except Exception as error:
+            raise RuntimeError(
+                "Transformer本文分析の実行環境がありません。run.batを再実行して依存関係を更新してください。"
+            ) from error
+        kwargs = {"revision": revision} if revision else {}
+        tokenizer = AutoTokenizer.from_pretrained(model_name, **kwargs)
+        model = AutoModel.from_pretrained(model_name, **kwargs)
+        requested_device = os.environ.get("MOJIOKOSI_TRANSFORMER_DEVICE", "cpu").strip().lower()
+        if requested_device not in {"cpu", "cuda", "auto"}:
+            raise RuntimeError("MOJIOKOSI_TRANSFORMER_DEVICEはcpu、cuda、autoのいずれかで指定してください。")
+        device = "cuda" if requested_device in {"cuda", "auto"} and torch.cuda.is_available() else "cpu"
+        if requested_device == "cuda" and device != "cuda":
+            raise RuntimeError("Transformer本文分析にCUDAが指定されていますが利用できません。")
+        model.to(device)
+        model.eval()
+        cached = (tokenizer, model, device)
+        _MODEL_CACHE[key] = cached
+        resolved_revision = str(getattr(getattr(model, "config", None), "_commit_hash", "") or "")
+        if resolved_revision:
+            _MODEL_CACHE[(model_name, resolved_revision)] = cached
+        return cached
+
+
+def encode_texts(
+    texts: list[str], *, model_name: str = DEFAULT_MODEL, revision: str = "",
+    kind: str = "passage", progress: Callable[[int, str], None] | None = None,
+    check_cancelled: Callable[[], None] | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    """Encode and L2-normalize texts using E5 mean pooling."""
+    import numpy as np
+    import torch
+
+    tokenizer, model, device = _load_model(model_name, revision)
+    batch_size = 24 if device == "cuda" else 8
+    vectors = []
+    prefix = "query: " if kind == "query" else "passage: "
+    for offset in range(0, len(texts), batch_size):
+        if check_cancelled:
+            check_cancelled()
+        batch = [prefix + value[:MAX_TEXT_CHARACTERS] for value in texts[offset:offset + batch_size]]
+        inputs = tokenizer(batch, max_length=512, padding=True, truncation=True, return_tensors="pt")
+        inputs = {key: value.to(device) for key, value in inputs.items()}
+        with torch.inference_mode():
+            hidden = model(**inputs).last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+            pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+        vectors.append(pooled.detach().cpu().numpy().astype("float32"))
+        if progress:
+            done = min(len(texts), offset + len(batch))
+            progress(10 + int(50 * done / max(1, len(texts))), f"発話を意味ベクトル化しています（{done}/{len(texts)}）")
+    matrix = np.concatenate(vectors, axis=0) if vectors else np.empty((0, 0), dtype="float32")
+    commit = str(getattr(getattr(model, "config", None), "_commit_hash", "") or revision)
+    return matrix, {
+        "name": model_name,
+        "revision": commit,
+        "framework": "Transformers",
+        "framework_version": _package_version("transformers"),
+        "device": device,
+        "dimensions": int(matrix.shape[1]) if matrix.ndim == 2 and matrix.size else 0,
+    }
+
+
+def _choose_labels(
+    vectors: Any, max_topics: int, min_topic_size: int, *, topic_count: int | None = None,
+    sample_weights: Any | None = None,
+) -> tuple[Any, float | None, list[dict[str, Any]]]:
+    import numpy as np
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import silhouette_score
+
+    count = len(vectors)
+    if count < max(4, min_topic_size * 2):
+        return np.zeros(count, dtype=int), None, []
+    maximum = min(max_topics, count // min_topic_size, count - 1)
+    if maximum < 2:
+        return np.zeros(count, dtype=int), None, []
+    candidates = [topic_count] if topic_count is not None else list(range(2, maximum + 1))
+    best_labels, best_score = None, -2.0
+    scores: list[dict[str, Any]] = []
+    for clusters in candidates:
+        if clusters is None or not 2 <= clusters < count:
+            continue
+        estimator = KMeans(n_clusters=clusters, random_state=42, n_init=10)
+        estimator.fit(vectors, sample_weight=sample_weights)
+        labels = estimator.labels_
+        if len(set(int(value) for value in labels)) < 2:
+            continue
+        score = float(silhouette_score(
+            vectors, labels, metric="cosine", sample_size=min(1000, count), random_state=42,
+        ))
+        scores.append({"topic_count": int(clusters), "silhouette_cosine": round(score, 6)})
+        # Prefer the simpler solution when scores are effectively equal.
+        if score > best_score + 0.005:
+            best_labels, best_score = labels, score
+    return (best_labels if best_labels is not None else np.zeros(count, dtype=int),
+            best_score if best_labels is not None else None, scores)
+
+
+def _topic_terms(segment_ids: set[str], morphemes: list[dict], total_segments: int) -> list[str]:
+    by_term: dict[str, set[str]] = defaultdict(set)
+    global_by_term: dict[str, set[str]] = defaultdict(set)
+    for token in morphemes:
+        if token.get("excluded") or not token.get("is_content") or token.get("is_stop"):
+            continue
+        term = str(token.get("normalized") or token.get("lemma") or token.get("surface") or "").strip()
+        segment_id = str(token.get("segment_id") or "")
+        if not term or not segment_id or term in _LABEL_STOP_TERMS or _REPEATED_FILLER_RE.fullmatch(term):
+            continue
+        global_by_term[term].add(segment_id)
+        if segment_id in segment_ids:
+            by_term[term].add(segment_id)
+    scored = []
+    for term, ids in by_term.items():
+        if len(global_by_term[term]) / max(1, total_segments) >= 0.35:
+            continue
+        score = len(ids) * (math.log((total_segments + 1) / (len(global_by_term[term]) + 1)) + 1)
+        scored.append((score, len(ids), term))
+    scored.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    return [row[2] for row in scored[:5]]
+
+
+def _representative_indices(
+    indices: Any, similarities: dict[int, float], segments: list[dict], dominant_speaker: str | None,
+) -> list[int]:
+    """Prefer substantive evidence and distinct participant voices."""
+    candidates = []
+    for raw_index in indices:
+        index = int(raw_index)
+        segment = segments[index]
+        speaker = str(segment.get("speaker") or "UNKNOWN")
+        text = str(segment.get("text") or "")
+        content_length = len(_content_text(text))
+        if content_length < 12 or re.search(r"(.)\1{5,}", text):
+            continue
+        length_bonus = min(content_length, 120) / 2000
+        role = str(segment.get("role") or "").lower()
+        participant_bonus = 0.025 if role in {"participant", "interviewee", "guest"} else 0.0
+        dominant_penalty = 0.04 if dominant_speaker and speaker == dominant_speaker else 0.0
+        candidates.append((similarities[index] + length_bonus + participant_bonus - dominant_penalty,
+                           similarities[index], index, speaker))
+    candidates.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    if not candidates:
+        candidates = [(similarities[int(index)], similarities[int(index)], int(index),
+                       str(segments[int(index)].get("speaker") or "UNKNOWN"))
+                      for index in indices if _is_meaningful_text(segments[int(index)].get("text"))]
+        candidates.sort(key=lambda row: (-row[0], row[2]))
+    chosen: list[int] = []
+    speakers: set[str] = set()
+    for _, _, index, speaker in candidates:
+        if speaker in speakers:
+            continue
+        chosen.append(index)
+        speakers.add(speaker)
+        if len(chosen) == 3:
+            return chosen
+    for _, _, index, _ in candidates:
+        if index not in chosen:
+            chosen.append(index)
+        if len(chosen) == 3:
+            break
+    return chosen
+
+
+def _pack_vectors(vectors: Any, segment_ids: list[str]) -> dict[str, Any]:
+    import numpy as np
+
+    quantized = np.clip(np.rint(vectors * 127), -127, 127).astype(np.int8)
+    return {
+        "encoding": "base64-int8", "scale": 127, "dimensions": int(quantized.shape[1]),
+        "segment_ids": segment_ids,
+        "data": base64.b64encode(quantized.tobytes()).decode("ascii"),
+    }
+
+
+def _unpack_vectors(payload: dict) -> Any:
+    import numpy as np
+
+    dimensions = int(payload.get("dimensions") or 0)
+    segment_ids = list(payload.get("segment_ids") or [])
+    if payload.get("encoding") != "base64-int8" or dimensions <= 0:
+        raise ValueError("保存済み意味ベクトルの形式が正しくありません。")
+    raw = base64.b64decode(str(payload.get("data") or ""), validate=True)
+    values = np.frombuffer(raw, dtype=np.int8)
+    if values.size != len(segment_ids) * dimensions:
+        raise ValueError("保存済み意味ベクトルの件数が一致しません。")
+    vectors = values.reshape(len(segment_ids), dimensions).astype("float32") / float(payload.get("scale") or 127)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return vectors / np.maximum(norms, 1e-9)
+
+
+def analyze_transformer_topics(
+    analysis: dict, morphemes: list[dict], *, model_name: str = DEFAULT_MODEL,
+    revision: str = "", max_topics: int = DEFAULT_MAX_TOPICS,
+    min_topic_size: int = DEFAULT_MIN_TOPIC_SIZE, topic_count: int | None = None,
+    embeddings: Any | None = None,
+    engine: dict[str, Any] | None = None,
+    progress: Callable[[int, str], None] | None = None,
+    check_cancelled: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Cluster utterance embeddings and retain traceable evidence."""
+    import numpy as np
+
+    max_topics = min(12, max(2, int(max_topics)))
+    min_topic_size = min(20, max(2, int(min_topic_size)))
+    if topic_count is not None:
+        topic_count = int(topic_count)
+        if not 2 <= topic_count <= 12:
+            raise ValueError("固定するテーマ数は2〜12で指定してください。")
+    source_segments = [row for row in analysis.get("segments", [])
+                       if not row.get("excluded") and str(row.get("text") or "").strip()]
+    if not source_segments:
+        raise ValueError("Transformer分析に利用できる発話がありません。")
+    if len(source_segments) > MAX_SEGMENTS:
+        raise ValueError(f"Transformer分析は1回{MAX_SEGMENTS}発話までです。対象を分割してください。")
+    source_indices = [index for index, row in enumerate(source_segments)
+                      if _is_meaningful_text(row.get("text"))]
+    analyzed_index_set = set(source_indices)
+    backchannel_segments = [row for index, row in enumerate(source_segments)
+                            if index not in analyzed_index_set
+                            and _backchannel_kind(row.get("text"))]
+    backchannel_ids = {str(row["id"]) for row in backchannel_segments}
+    ignored_segments = [row for index, row in enumerate(source_segments)
+                        if index not in analyzed_index_set and str(row["id"]) not in backchannel_ids]
+    segments = [source_segments[index] for index in source_indices]
+    if len(segments) < 2:
+        raise ValueError("相づちや空文字を除くと、Transformer分析に利用できる発話が不足しています。")
+    if topic_count is not None and topic_count >= len(segments):
+        raise ValueError("固定するテーマ数は分析対象発話数より少なくしてください。")
+    texts, context_expanded_count = _contextual_texts(source_segments, source_indices)
+    if embeddings is None:
+        embeddings, engine = encode_texts(
+            texts, model_name=model_name, revision=revision, kind="passage",
+            progress=progress, check_cancelled=check_cancelled,
+        )
+    vectors = np.asarray(embeddings, dtype="float32")
+    if (vectors.ndim == 2 and vectors.shape[0] == len(source_segments)
+            and len(segments) != len(source_segments)):
+        vectors = vectors[source_indices]
+    if vectors.ndim != 2 or vectors.shape[0] != len(segments) or vectors.shape[1] < 2:
+        raise ValueError("発話数と意味ベクトルの件数が一致しません。")
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    if np.any(norms <= 1e-9) or not np.all(np.isfinite(vectors)):
+        raise ValueError("意味ベクトルに解析できない値があります。")
+    vectors = vectors / norms
+    if progress:
+        progress(65, "テーマ候補をクラスタリングしています。")
+    sample_weights = _speaker_weights(segments)
+    labels, silhouette, cluster_candidates = _choose_labels(
+        vectors, max_topics, min_topic_size, topic_count=topic_count,
+        sample_weights=sample_weights,
+    )
+    counts = Counter(int(value) for value in labels)
+    retained = (set(counts) if topic_count is not None
+                else {label for label, count in counts.items() if count >= min_topic_size})
+    if not retained:
+        retained = {counts.most_common(1)[0][0]}
+    cluster_order = sorted(retained, key=lambda label: (-counts[label], label))
+    topic_ids = {label: f"T{index:02d}" for index, label in enumerate(cluster_order, 1)}
+    dominant_speaker, dominant_share = _dominant_speaker(segments)
+    topic_data: dict[int, dict[str, Any]] = {}
+    for label in cluster_order:
+        indices = np.where(labels == label)[0]
+        centroid = vectors[indices].mean(axis=0)
+        centroid /= max(float(np.linalg.norm(centroid)), 1e-9)
+        similarities = vectors[indices] @ centroid
+        segment_ids = {str(segments[index]["id"]) for index in indices}
+        participant_segment_ids = {
+            str(segments[index]["id"]) for index in indices
+            if not dominant_speaker
+            or str(segments[index].get("speaker") or "UNKNOWN") != dominant_speaker
+        }
+        keyword_segment_ids = (participant_segment_ids
+                               if len(participant_segment_ids) >= min(3, len(segment_ids))
+                               else segment_ids)
+        keywords = _topic_terms(keyword_segment_ids, morphemes, len(segments))
+        similarity_map = {int(index): float(score) for index, score in zip(indices, similarities)}
+        topic_data[label] = {
+            "id": topic_ids[label], "indices": indices, "centroid": centroid,
+            "similarities": similarity_map,
+            "representatives": _representative_indices(indices, similarity_map, segments, dominant_speaker),
+            "keywords": keywords,
+            "label": "・".join(keywords[:3]) if keywords else f"テーマ候補 {topic_ids[label][1:]}",
+        }
+
+    assignments = []
+    evidence = {}
+    topic_rows = []
+    speaker_rows = []
+    for label in cluster_order:
+        data = topic_data[label]
+        indices = data["indices"]
+        speaker_counts = Counter(str(segments[index].get("speaker") or "UNKNOWN") for index in indices)
+        group_counts = Counter(_speaker_group(segments[index], dominant_speaker) for index in indices)
+        topic_seconds = sum(max(0.0, float(segments[index].get("end") or 0) - float(segments[index].get("start") or 0)) for index in indices)
+        topic_rows.append({
+            "topic_id": data["id"], "label": data["label"], "keywords": data["keywords"],
+            "segment_count": len(indices), "speaker_count": len(speaker_counts),
+            "participant_segment_count": group_counts["participant"],
+            "facilitator_segment_count": (group_counts["facilitator"]
+                                           + group_counts["facilitator_candidate"]),
+            "speaking_seconds": round(topic_seconds, 3),
+            "average_similarity": round(float(np.mean([data["similarities"][int(index)] for index in indices])), 6),
+            "representative_segment_ids": [str(segments[index]["id"]) for index in data["representatives"]],
+        })
+        for speaker, count in speaker_counts.most_common():
+            speaker_indices = [int(index) for index in indices if str(segments[index].get("speaker") or "UNKNOWN") == speaker]
+            sample = segments[speaker_indices[0]]
+            seconds = sum(max(0.0, float(segments[index].get("end") or 0) - float(segments[index].get("start") or 0)) for index in speaker_indices)
+            speaker_rows.append({
+                "topic_id": data["id"], "topic_label": data["label"], "speaker": speaker,
+                "speaker_name": sample.get("speaker_name") or speaker, "segment_count": count,
+                "speaker_group": _speaker_group(sample, dominant_speaker),
+                "topic_percent": round(100 * count / len(indices), 3), "speaking_seconds": round(seconds, 3),
+            })
+
+    similarities = vectors @ vectors.T
+    np.fill_diagonal(similarities, -1.0)
+    nearest = similarities.max(axis=1) if len(segments) > 1 else np.zeros(1, dtype="float32")
+    outlier_scores = 1 - nearest
+    outlier_limit = min(10, max(1, math.ceil(len(segments) * 0.1)))
+    outlier_indices = [int(value) for value in np.argsort(-outlier_scores)[:outlier_limit]]
+    outlier_rows = []
+    for rank, index in enumerate(outlier_indices, 1):
+        segment = segments[index]
+        outlier_rows.append({
+            "rank": rank, "segment_id": str(segment["id"]),
+            "speaker": str(segment.get("speaker") or "UNKNOWN"),
+            "speaker_name": str(segment.get("speaker_name") or segment.get("speaker") or "UNKNOWN"),
+            "start": segment.get("start", 0), "end": segment.get("end", 0),
+            "outlier_score": round(float(outlier_scores[index]), 6),
+            "nearest_similarity": round(float(nearest[index]), 6), "text": str(segment.get("text") or ""),
+        })
+
+    for index, segment in enumerate(segments):
+        label = int(labels[index])
+        topic = topic_data.get(label)
+        start, end = float(segment.get("start") or 0), float(segment.get("end") or 0)
+        assignment = {
+            "segment_id": str(segment["id"]), "topic_id": topic["id"] if topic else "",
+            "topic_label": topic["label"] if topic else "小規模クラスタ候補",
+            "speaker": str(segment.get("speaker") or "UNKNOWN"),
+            "speaker_name": str(segment.get("speaker_name") or segment.get("speaker") or "UNKNOWN"),
+            "speaker_group": _speaker_group(segment, dominant_speaker),
+            "start": round(start, 3), "end": round(end, 3), "duration": round(max(0, end - start), 3),
+            "similarity": round(topic["similarities"][index], 6) if topic else None,
+            "outlier_score": round(float(outlier_scores[index]), 6), "text": str(segment.get("text") or ""),
+        }
+        assignments.append(assignment)
+        evidence[assignment["segment_id"]] = {key: segment.get(key) for key in
+            ("id", "speaker", "speaker_name", "role", "start", "end", "text")}
+
+    for segment in ignored_segments:
+        segment_id = str(segment["id"])
+        evidence[segment_id] = {key: segment.get(key) for key in
+            ("id", "speaker", "speaker_name", "role", "start", "end", "text")}
+
+    for segment in backchannel_segments:
+        segment_id = str(segment["id"])
+        evidence[segment_id] = {key: segment.get(key) for key in
+            ("id", "speaker", "speaker_name", "role", "start", "end", "text")}
+    backchannels, speaker_backchannels = _link_backchannels(
+        backchannel_segments, source_segments, assignments, dominant_speaker,
+    )
+    backchannel_rates, backchannel_tests = _backchannel_statistics(
+        source_segments, assignments, backchannels, dominant_speaker,
+    )
+    speaker_results = _speaker_results(source_segments, assignments, dominant_speaker)
+    backchannel_counts = Counter(row["topic_id"] for row in backchannels if row["topic_id"])
+    for topic in topic_rows:
+        topic["backchannel_count"] = backchannel_counts[topic["topic_id"]]
+
+    duration = max((float(row.get("end") or 0) for row in segments), default=0)
+    bin_seconds = max(60, int(analysis.get("config", {}).get("time_bin_seconds") or 300))
+    bins: dict[tuple[int, str], dict[str, Any]] = {}
+    topic_label_by_id = {row["topic_id"]: row["label"] for row in topic_rows}
+    for row in assignments:
+        if not row["topic_id"]:
+            continue
+        index = int(float(row["start"]) // bin_seconds)
+        key = (index, row["topic_id"])
+        target = bins.setdefault(key, {
+            "bin_index": index, "start": index * bin_seconds,
+            "end": min((index + 1) * bin_seconds, duration), "topic_id": row["topic_id"],
+            "topic_label": topic_label_by_id[row["topic_id"]], "segment_count": 0,
+            "backchannel_count": 0, "speaking_seconds": 0.0,
+        })
+        target["segment_count"] += 1
+        target["speaking_seconds"] += float(row["duration"])
+    for row in backchannels:
+        if not row["topic_id"]:
+            continue
+        index = int(float(row["start"]) // bin_seconds)
+        key = (index, row["topic_id"])
+        target = bins.setdefault(key, {
+            "bin_index": index, "start": index * bin_seconds,
+            "end": min((index + 1) * bin_seconds, duration), "topic_id": row["topic_id"],
+            "topic_label": topic_label_by_id[row["topic_id"]], "segment_count": 0,
+            "backchannel_count": 0, "speaking_seconds": 0.0,
+        })
+        target["backchannel_count"] += 1
+    timeline = [{**row, "speaking_seconds": round(row["speaking_seconds"], 3)}
+                for row in sorted(bins.values(), key=lambda value: (value["bin_index"], value["topic_id"]))]
+    if progress:
+        progress(90, "テーマ候補と根拠発話を整理しています。")
+    return {
+        "schema_version": 5, "algorithm_version": TRANSFORMER_ANALYSIS_VERSION,
+        "analysis_unit": "文脈付き発話", "fingerprint": transformer_input_fingerprint(analysis, model=model_name),
+        "engine": engine or {"name": model_name, "framework": "test", "dimensions": int(vectors.shape[1])},
+        "parameters": {"max_topics": max_topics, "min_topic_size": min_topic_size,
+                       "topic_count": topic_count, "time_bin_seconds": bin_seconds,
+                       "speaker_balancing": True},
+        "coverage": {"segment_count": len(segments), "source_segment_count": len(source_segments),
+                     "ignored_noise_segment_count": len(ignored_segments),
+                     "backchannel_segment_count": len(backchannel_segments),
+                     "linked_backchannel_segment_count": sum(1 for row in backchannels if row["topic_id"]),
+                     "speaker_result_count": len({row["speaker"] for row in speaker_results}),
+                     "explicit_speaker_result_count": len({row["speaker"] for row in speaker_results
+                                                            if row["confidence"] == "explicit"}),
+                     "context_expanded_segment_count": context_expanded_count,
+                     "topic_count": len(topic_rows),
+                     "truncated_segment_count": sum(len(value) > MAX_TEXT_CHARACTERS for value in texts),
+                     "small_cluster_segment_count": sum(1 for row in assignments if not row["topic_id"])},
+        "quality": {"silhouette_cosine": round(float(silhouette), 6) if silhouette is not None else None,
+                    "cluster_candidates": cluster_candidates,
+                    "dominant_speaker": dominant_speaker,
+                    "dominant_speaker_percent": round(100 * dominant_share, 3)},
+        "topics": topic_rows, "assignments": assignments, "speaker_topics": speaker_rows,
+        "backchannels": backchannels, "speaker_backchannels": speaker_backchannels,
+        "backchannel_rates": backchannel_rates, "backchannel_tests": backchannel_tests,
+        "speaker_results": speaker_results,
+        "timeline": timeline, "outliers": outlier_rows, "evidence": evidence,
+        "vectors": _pack_vectors(vectors, [str(row["id"]) for row in segments]),
+        "limitations": [
+            "テーマ名はクラスタ内の特徴語から付けた候補であり、研究者が原文と照合して確定します。",
+            "短い相づちはテーマ分類と意味検索から外し、話者・対象テーマ別に別集計します。",
+            "相づちの対象テーマは時系列上で近い別話者の発話から推定し、賛同とは断定しません。",
+            "相づち応答率の分母は他者の有意味発話数であり、実際に聞いていた機会を完全には表しません。",
+            "相づちの検定は同一話者内の反復と期待度数の小ささを伴うため探索的に扱います。",
+            "話者別リザルトは本人が明示した変化・維持・気づき・支持表現だけを抽出し、表現がない場合は未判定とします。",
+            "話者別リザルトは会議前調査との比較ではなく、会議中の発話に基づく観察結果です。",
+            "話者ごとの発話量を重み付けして、司会者など一人の発話量による偏りを抑えます。",
+            "意味的な近さは賛成・反対、合意、因果関係、重要性を意味しません。",
+            "例外候補は他の発話との埋め込み類似度が低い発話であり、少数意見とは限りません。",
+            f"1発話が{MAX_TEXT_CHARACTERS}文字を超える場合、埋め込み入力は先頭部分に制限します。",
+        ],
+    }
+
+
+def semantic_search(
+    saved: dict, query: str, *, limit: int = 20,
+    query_embedding: Any | None = None,
+    check_cancelled: Callable[[], None] | None = None,
+) -> list[dict[str, Any]]:
+    import numpy as np
+
+    query = str(query or "").strip()
+    if not query or len(query) > 500:
+        raise ValueError("意味検索語は1〜500文字で入力してください。")
+    limit = min(100, max(1, int(limit)))
+    vectors_payload = saved.get("vectors") if isinstance(saved.get("vectors"), dict) else {}
+    vectors = _unpack_vectors(vectors_payload)
+    if query_embedding is None:
+        model = str(saved.get("engine", {}).get("name") or DEFAULT_MODEL)
+        revision = str(saved.get("engine", {}).get("revision") or "")
+        query_vectors, _ = encode_texts([query], model_name=model, revision=revision,
+                                        kind="query", check_cancelled=check_cancelled)
+        query_vector = query_vectors[0]
+    else:
+        query_vector = np.asarray(query_embedding, dtype="float32").reshape(-1)
+        query_vector /= max(float(np.linalg.norm(query_vector)), 1e-9)
+    if query_vector.shape[0] != vectors.shape[1]:
+        raise ValueError("検索語と保存済みベクトルの次元が一致しません。")
+    scores = vectors @ query_vector
+    assignments = {str(row["segment_id"]): row for row in saved.get("assignments", [])}
+    hits = []
+    for index in np.argsort(-scores):
+        segment_id = str(vectors_payload["segment_ids"][int(index)])
+        row = assignments.get(segment_id)
+        if row and _is_meaningful_text(row.get("text")):
+            hits.append({**row, "score": round(float(scores[int(index)]), 6)})
+            if len(hits) >= limit:
+                break
+    return hits
+
+
+def transformer_csv_sources(saved: dict | None) -> dict[str, list[dict[str, Any]]]:
+    value = saved if isinstance(saved, dict) else {}
+    return {
+        "transformer_topics": list(value.get("topics") or []),
+        "transformer_assignments": list(value.get("assignments") or []),
+        "transformer_speakers": list(value.get("speaker_topics") or []),
+        "transformer_timeline": list(value.get("timeline") or []),
+        "transformer_outliers": list(value.get("outliers") or []),
+        "transformer_backchannels": list(value.get("backchannels") or []),
+        "transformer_backchannel_speakers": list(value.get("speaker_backchannels") or []),
+        "transformer_backchannel_rates": list(value.get("backchannel_rates") or []),
+        "transformer_backchannel_tests": list(value.get("backchannel_tests") or []),
+        "transformer_speaker_results": list(value.get("speaker_results") or []),
+    }

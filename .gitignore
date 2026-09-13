@@ -4,24 +4,18 @@ __pycache__/
 .pytest_cache/
 
 # Local credentials and environment overrides
-tokens.json
+config/tokens.json
 .env
 .env.*
 !.env.example
 
-# User uploads, generated outputs, and local application state
-uploads/
-output/
-data/
-output.zip
-/0
-
-# Downloaded model/runtime files
-models/
+# User uploads, generated outputs, models, and local application state
+runtime/
 
 # Local logs and OS/editor artifacts
 *.log
 .DS_Store
 Thumbs.db
+*.lnk
 .idea/
 .vscode/

@@ -32,10 +32,55 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("処理装置・話者数・無音判定を手動調整", page)
         self.assertIn('id="setup-ready-state"', page)
         self.assertIn('class="primary-button launch-button"', page)
+        self.assertRegex(page, r'id="finish-in-obsidian"[^>]*checked')
+        self.assertIn('id="obsidian-finishing-button"', page)
         self.assertRegex(
             page,
             r'id="start-button"[^>]*type="submit"[^>]*disabled',
         )
+
+    def test_conversation_modes_are_visible_and_apply_presets(self):
+        response = app.app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertIn('id="setup-mode"', page)
+        self.assertIn('name="conversation_mode" type="radio" value="meeting" checked', page)
+        self.assertIn('name="conversation_mode" type="radio" value="group_interview"', page)
+        self.assertIn('name="conversation_mode" type="radio" value="chat"', page)
+        self.assertIn('id="conversation-mode-hint"', page)
+        self.assertIn('<option value="chat">雑談</option>', page)
+
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("const conversationModePresets", script)
+        self.assertIn("function applyConversationMode", script)
+        self.assertIn("group_interview", script)
+        self.assertIn("minSpeakers: 3", script)
+        self.assertIn("maxSpeakers: 12", script)
+
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".conversation-mode-options", styles)
+        self.assertIn(".conversation-mode-option input:checked", styles)
+
+    def test_meeting_mode_has_visual_minutes_and_handoff_actions(self):
+        response = app.app.test_client().get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode("utf-8")
+        self.assertIn('id="meeting-minutes-view"', page)
+        self.assertIn('id="meeting-minutes-download"', page)
+        self.assertIn('id="meeting-tasks-download"', page)
+        self.assertIn('id="meeting-json-download"', page)
+        self.assertIn('id="meeting-priority-chart"', page)
+        self.assertIn('id="meeting-obsidian-save"', page)
+        self.assertIn('id="meeting-obsidian-open"', page)
+        self.assertIn('id="meeting-obsidian-status"', page)
+
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function renderMeetingMinutes", script)
+        self.assertIn("meeting-tasks.csv", script)
+        self.assertIn("gurumoji.meeting.v1", script)
+        self.assertIn("function loadMeetingObsidianStatus", script)
+        self.assertIn("/meeting-obsidian`, {method: 'POST'}", script)
 
     def test_desktop_and_mobile_creation_interfaces_are_separate(self):
         response = app.app.test_client().get("/")
@@ -64,6 +109,9 @@ class UiDefaultsTests(unittest.TestCase):
         )
         self.assertIn("aiOptionInputs.forEach(input => { input.checked = true; });", script)
         self.assertIn("if (aiProvider.value === 'none') input.checked = false;", script)
+        self.assertIn("function applyLmStudioDefaults(config)", script)
+        self.assertIn("config.lmstudio || !String(config.lmstudio_model || '').trim()", script)
+        self.assertIn("applyLmStudioDefaults(data);", script)
         self.assertIn(
             ".filter(file => !String(file.name || '').toLowerCase().endsWith('.json'))",
             script,
@@ -342,23 +390,18 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertEqual(script.count("window.fetch("), 2)
 
     def test_windows_launchers_quote_python_and_fingerprint_requirements(self):
-        run_script = (app.APP_DIRECTORY / "run.bat").read_text(encoding="utf-8")
-        emotion_script = (app.APP_DIRECTORY / "setup_emotion.bat").read_text(encoding="utf-8")
+        run_script = (app.PROJECT_DIRECTORY / "run.bat").read_text(encoding="utf-8")
+        launcher_script = (app.PROJECT_DIRECTORY / "scripts" / "run_launcher.ps1").read_text(encoding="utf-8")
+        emotion_script = (app.PROJECT_DIRECTORY / "scripts" / "setup_emotion.bat").read_text(encoding="utf-8")
 
         self.assertNotRegex(run_script, r"(?m)^\s*%PYTHON%")
         self.assertNotRegex(emotion_script, r"(?m)^\s*%PYTHON%")
-        self.assertIn('"%PYTHON%" app.py', run_script)
+        self.assertRegex(run_script, r'"%PYTHON%" -u -m gurumoji\.app')
         self.assertIn("REQUIREMENTS_HASH", run_script)
         self.assertIn("certutil -hashfile", run_script)
         self.assertIn('"%PYTHON%" -m pip check', run_script)
-        self.assertIn("CREATED BY KUROKAWA", run_script)
-        self.assertIn("Start-Sleep -Milliseconds 200", run_script)
-        self.assertIn("STARTING GURUMOJI...", run_script)
-        self.assertIn("CHECKING FOR UPDATES...", run_script)
-        self.assertIn("call :check_for_updates", run_script)
-        self.assertIn("git fetch --quiet --prune origin", run_script)
-        self.assertIn("git pull --ff-only --quiet", run_script)
-        self.assertIn("MOJIOKOSI_SKIP_UPDATE_CHECK", run_script)
+        self.assertIn('-File "%~dp0scripts\\run_launcher.ps1"', run_script)
+        self.assertIn("MOJIOKOSI_SKIP_UPDATE_CHECK", launcher_script)
         self.assertIn("MOJIOKOSI_SKIP_LIBRARY_UPDATE", run_script)
         self.assertIn("--upgrade-strategy only-if-needed", run_script)
         self.assertIn("EMOTION_REQUIREMENTS_HASH", emotion_script)
@@ -414,7 +457,7 @@ class UiDefaultsTests(unittest.TestCase):
         job = app.JobRecord(
             id="stage-progress-test",
             source_name="sample.wav",
-            output_dir=app.APP_DIRECTORY / "output",
+            output_dir=app.RUNTIME_DIRECTORY / "output",
             write_srt=False,
             write_json=True,
         )

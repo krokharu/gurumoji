@@ -1,0 +1,378 @@
+"""Shared interview paths and native Obsidian navigation, without AI calls."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import re
+import threading
+import time
+from pathlib import Path
+
+import yaml
+
+from .analysis_store import safe_path, write_atomic, markdown
+from .analysis_method_registry import METHOD_GROUPS, method_status_label
+
+LAYOUT_LOCK = threading.RLock()
+HOME = "00-ホーム.md"
+ANALYSIS_INDEX = "01-分析結果.md"
+GUIDE = "90-運用/使い方.md"
+INDEX = "10-インタビュー/インタビュー一覧.md"
+GLOBAL_QUERY = "tag:#graph/overview -tag:#graph/history -tag:#graph/support"
+
+
+def unpack(text: str) -> tuple[dict, str]:
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n")
+    if not text.startswith("---\n"):
+        return {}, text
+    match = re.match(r"\A---\n(.*?)\n---(?:\n|$)", text, re.S)
+    if not match:
+        raise ValueError("ノートのプロパティ区切りが不正です。")
+    props = yaml.safe_load(match[1]) or {}
+    if not isinstance(props, dict):
+        raise ValueError("ノートのプロパティが不正です。")
+    return props, text[match.end():]
+
+
+def pack(props: dict, body: str) -> str:
+    return "---\n" + yaml.safe_dump(props, allow_unicode=True, sort_keys=False).rstrip() + "\n---\n\n" + body.lstrip("\n")
+
+
+def link(path: str, label: str = "") -> str:
+    return "[[" + path.removesuffix(".md") + ("|" + markdown(label) if label else "") + "]]"
+
+
+def interview_query(record: dict) -> str:
+    return f"tag:#interview/{record['code'].lower()} (tag:#graph/overview OR tag:#graph/detail) -tag:#graph/history -tag:#graph/support"
+
+
+def display_title(title: str) -> str:
+    match = re.match(r"GMT(\d{4})(\d{2})(\d{2})-\d{6}_Recording", title)
+    return f"{match[1]}-{match[2]}-{match[3]} の録音" if match else Path(title).stem
+
+
+def method_group_path(group_id: str) -> str:
+    return f"40-研究/分析手法/{group_id}.md"
+
+
+def method_table(methods: list[dict]) -> str:
+    text = "| 分析手法・結果 | 状態 | 保存日時（UTC） |\n| --- | --- | --- |\n"
+    for method in methods:
+        date = str(method.get("created_at", ""))[:19].replace("T", " ")
+        text += "| " + link(method["path"], method["title"]) + " | " + markdown(method_status_label(method)) + " | " + markdown(date) + " |\n"
+    return text
+
+
+def graph_options(query: str = GLOBAL_QUERY) -> dict:
+    return {"search": query, "showTags": False, "showAttachments": False,
+            "hideUnresolved": True, "showOrphans": True, "showArrow": False,
+            "colorGroups": [{"query": f"[graph_kind:{kind}]", "color": {"a": 1, "rgb": color}}
+                            for kind, color in (("interview", 0x4985D6), ("theme", 0x45A777),
+                                                ("analysis", 0xDF9842), ("analysis_type", 0xC97B17),
+                                                ("analysis_result", 0xE9B44C), ("memo", 0xA273CD),
+                                                ("transcript", 0x8C97A3), ("outline", 0x51A9BA),
+                                                ("meeting", 0xE26D5A))],
+            "textFadeMultiplier": 0, "nodeSizeMultiplier": 1.1, "lineSizeMultiplier": 0.8,
+            "centerStrength": 0.3, "repelStrength": 10, "linkStrength": 1,
+            "linkDistance": 180, "scale": 0.65, "close": True,
+            "collapse-filter": True, "collapse-color-groups": True,
+            "collapse-display": True, "collapse-forces": True}
+
+
+class ObsidianLayout:
+    def __init__(self, database_file: Path):
+        self.data = Path(database_file).parent
+        self.vault = self.data / "obsidian" / "ResearchVault"
+        self.registry = self.data / "obsidian_layout" / "interviews.json"
+
+    def load(self) -> dict:
+        if self.registry.exists():
+            return json.loads(self.registry.read_text(encoding="utf-8"))
+        return {"version": 1, "interviews": {}, "managed": {}}
+
+    def save(self, data: dict) -> None:
+        write_atomic(self.registry, json.dumps(data, ensure_ascii=False, indent=2).encode())
+
+    def register(self, item_id: str, title: str) -> dict:
+        with LAYOUT_LOCK:
+            data = self.load()
+            if item_id not in data["interviews"]:
+                code = f"I{len(data['interviews']) + 1:03d}"
+                name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')[:48] or "インタビュー"
+                folder = f"10-インタビュー/{code}-{name}"
+                data["interviews"][item_id] = {"item_id": item_id, "code": code, "title": title,
+                    "folder": folder, "hub": f"{folder}/{code}-概要.md", "links": {}, "status": "保存済み"}
+                self.save(data)
+            return copy.deepcopy(data["interviews"][item_id])
+
+    def note_path(self, item_id: str, title: str, name: str) -> str:
+        record = self.register(item_id, title)
+        return f"{record['folder']}/{record['code']}-{name}.md"
+
+    def analysis_dir(self, item_id: str, title: str, run_id: str) -> str:
+        return self.register(item_id, title)["folder"] + f"/履歴/分析/{run_id}"
+
+    def source_dir(self, item_id: str, title: str, snapshot: str) -> str:
+        return self.register(item_id, title)["folder"] + f"/履歴/引用/{snapshot}"
+
+    def decorate(self, text: str, item_id: str, kind: str, scope: str) -> str:
+        props, body = unpack(text)
+        record = self.register(item_id, str(props.get("title") or item_id))
+        tags = props.get("tags") or []
+        if isinstance(tags, str): tags = tags.split()
+        tags = [t for t in tags if not t.startswith("graph/") and not t.startswith("interview/")]
+        props.update(tags=tags + ["graph/" + scope, "interview/" + record["code"].lower()],
+                     graph_kind=kind, interview_code=record["code"])
+        classes = props.get("cssclasses") or []
+        if isinstance(classes, str): classes = classes.split()
+        classes = [c for c in classes if c not in {"gurumoji-reading", "gurumoji-control"}]
+        props["cssclasses"] = classes + ["gurumoji-control" if kind == "control" else "gurumoji-reading"]
+        if kind != "interview": props["interview"] = link(record["hub"])
+        return pack(props, body)
+
+    def managed_note(self, relative: str, text: str) -> bool:
+        """Update only our own unchanged generated note. Preserve all human edits."""
+        with LAYOUT_LOCK:
+            data = self.load()
+            path = safe_path(self.vault, relative)
+            if path.exists():
+                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual != data["managed"].get(relative):
+                    return False
+            encoded = text.encode()
+            if not path.exists() or path.read_bytes() != encoded:
+                write_atomic(path, encoded)
+            data["managed"][relative] = hashlib.sha256(encoded).hexdigest()
+            self.save(data)
+            return True
+
+    def update(self, item_id: str, title: str, links: dict, status: str | None = None,
+               *, analysis_methods: list[dict] | None = None) -> None:
+        with LAYOUT_LOCK:
+            self.register(item_id, title)
+            data = self.load()
+            record = data["interviews"][item_id]
+            record["links"].update({k: v for k, v in links.items() if v})
+            if analysis_methods is not None: record["analysis_methods"] = analysis_methods
+            if status is not None: record["status"] = status
+            self.save(data)
+            memo = self.note_path(item_id, title, "研究メモ")
+            if not safe_path(self.vault, memo).exists():
+                self.managed_note(memo, self.decorate(pack({"note_type": "research-memo"},
+                    "# 研究メモ\n\n自由に記録してください。関連テーマは `[[20-テーマ/テーマ名]]` でリンクできます。\n"),
+                    item_id, "memo", "detail"))
+            data = self.load()
+            record = data["interviews"][item_id]
+            body = f"# {record['code']} {markdown(display_title(title))}\n\n状態：{markdown(record['status'])}\n\n"
+            body += "> [!info]- 元の録音ファイル名\n> " + markdown(title) + "\n\n"
+            body += "## 分析結果\n\n"
+            analysis = record["links"].get("analysis")
+            if analysis and safe_path(self.vault, analysis).is_file():
+                body += "> [!summary] 分析結果を読む\n> " + link(analysis, "分析まとめを開く") + "\n> 見解・根拠・分析条件・保存履歴を確認できます。\n\n"
+            else:
+                body += "このインタビューの分析結果はまだ保存されていません。アプリの「分析結果をObsidianに保存」で追加できます。\n\n"
+            body += link(ANALYSIS_INDEX, "全インタビューの分析結果一覧") + "\n\n## 本文・仕上げ\n\n"
+            labels = {"work": "会話全文", "outline": "全体アウトライン", "analysis": "分析まとめ",
+                      "control": "AI仕上げの操作", "status_note": "仕上げの状態", "original_note": "保存原文",
+                      "result_note": "確認する仕上げ結果", "final_outline_note": "仕上げ後アウトライン",
+                      "meeting_minutes": "会議議事録・タスク"}
+            body += "\n".join("- " + link(p, labels.get(k, k)) for k, p in record["links"].items() if k != "analysis")
+            body += "\n- " + link(memo, "研究メモ") + "\n\n"
+            body += "## 表示の切り替え\n\nブックマークの「Gurumoji」→「インタビュー別」から、このインタビューのグラフを開けます。\n\n"
+            body += "> [!tip]- 検索条件を手動で指定する場合\n> ```text\n> " + interview_query(record) + "\n> ```\n"
+            # User-maintained theme links live in the memo, not in the generated block.
+            body += "\n## 関連テーマ\n\n研究メモで共通テーマにリンクすると、テーマを経由して他のインタビューと比較できます。\n"
+            hub = self.decorate(pack({"note_id": "interview-" + item_id, "note_type": "interview",
+                "title": title, "conversation_id": item_id, "status": record["status"]}, body), item_id, "interview", "overview")
+            self.managed_note(record["hub"], hub)
+            self.publish_navigation()
+
+    def sync_finishing(self, state: dict) -> None:
+        active = {state[k] for k in ("work", "outline", "result_note", "final_outline_note", "meeting_minutes_note") if state.get(k)}
+        record = self.register(state["item_id"], state["title"])
+        for relative in state.get("note_ids", {}):
+            path = safe_path(self.vault, relative)
+            if not path.exists(): continue
+            text = path.read_text(encoding="utf-8-sig")
+            props, _ = unpack(text)
+            note_type = props.get("note_type", "")
+            kind = note_type.removeprefix("finishing-")
+            if kind not in {"transcript", "result", "outline", "meeting", "control", "source", "status"}: continue
+            scope = ("detail" if relative in active else "history") if kind in {"transcript", "result", "outline", "meeting"} else "support"
+            new = self.decorate(text, state["item_id"], "transcript" if kind == "result" else kind, scope)
+            if new != text: write_atomic(path, new.encode())
+        status = {"ready": "操作待ち", "running": "処理中", "error": "確認が必要", "interrupted": "中断"}.get(state["status"], "完了")
+        if state["status"] == "completed":
+            action = (state.get("observed") or [""])[-1]
+            status = {"outline": "アウトライン作成済み", "finish": "結果確認待ち", "apply": "反映済み"}.get(action, "完了")
+        self.update(state["item_id"], state["title"],
+                    {k: state[k] for k in ("work", "outline", "control", "status_note", "original_note",
+                                           "result_note", "final_outline_note") if state.get(k)}
+                    | ({"meeting_minutes": state["meeting_minutes_note"]} if state.get("meeting_minutes_note") else {}), status)
+
+    def publish_navigation(self) -> None:
+        with LAYOUT_LOCK:
+            records = list(self.load()["interviews"].values())
+            props = {"note_type": "navigation", "tags": ["graph/support"]}
+            rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) for r in records)
+            available = [r for r in records if r["links"].get("analysis")
+                         and safe_path(self.vault, r["links"]["analysis"]).is_file()]
+            analysis_rows = "\n".join("- " + link(r["links"]["analysis"], r["code"] + " " + display_title(r["title"]) + " の分析結果") for r in available)
+            pending_rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) + "：未保存" for r in records if r not in available)
+            group_links = "\n".join("- " + link(method_group_path(key), title) for key, title, _, _ in METHOD_GROUPS)
+            for key, title, description, method_ids in METHOD_GROUPS:
+                body = "# " + title + "\n\n" + link(ANALYSIS_INDEX, "分析結果一覧へ戻る") + "\n\n" + description + "\n\n"
+                body += "各手法の最新の保存記録を掲載します。状態は保存時点のものです。過去の結果は各インタビューの分析まとめにある保存履歴から開けます。\n\n"
+                for record in records:
+                    methods = [m for m in record.get("analysis_methods", []) if m["method_id"] in method_ids
+                               and safe_path(self.vault, m["path"]).is_file()]
+                    body += "## " + markdown(record["code"] + " " + display_title(record["title"])) + "\n\n"
+                    body += link(record["hub"], "インタビューの概要") + "\n\n"
+                    body += method_table(methods) + "\n" if methods else "この分類の保存記録はまだありません。\n\n"
+                if not records: body += "インタビューを保存すると、ここに表示されます。\n"
+                self.managed_note(method_group_path(key), pack({**props, "cssclasses": ["gurumoji-reading"]}, body))
+            self.managed_note(ANALYSIS_INDEX, pack(props, "# 分析結果\n\n"
+                + link(HOME, "ホームへ戻る") + "\n\n"
+                "分析まとめから、見解・根拠・分析条件・保存履歴へ進めます。\n\n"
+                "## 分析手法から選ぶ\n\n" + group_links + "\n\n"
+                f"## 保存済みの分析（{len(available)}件）\n\n"
+                + (analysis_rows or "保存済みの分析結果はまだありません。") + "\n\n"
+                "## 分析結果が未保存のインタビュー\n\n"
+                + (pending_rows or "未保存のインタビューはありません。") + "\n\n"
+                "アプリの「分析結果をObsidianに保存」で保存すると、この一覧にも自動で追加されます。\n"))
+            self.managed_note(INDEX, pack(props, "# インタビュー一覧\n\n" + (rows or "文字起こしを保存すると、ここにインタビューが追加されます。") + "\n"))
+            self.managed_note(HOME, pack(props, "# インタビュー研究\n\n"
+                "- " + link(INDEX, "インタビューを選ぶ") + "\n"
+                "- [[インタビュー一覧.base|日付・状態で一覧を見る]]\n"
+                "- " + link(GUIDE, "全体グラフ・インタビュー別グラフの使い方") + "\n\n"
+                "左のブックマーク → **Gurumoji** → **研究全体のグラフ** または **インタビュー別** で表示を切り替えます。\n\n"
+                "## 分析結果\n\n"
+                "> [!summary] 保存済みの分析を読む\n> " + link(ANALYSIS_INDEX, "分析結果一覧を開く") + "\n\n"
+                + group_links + "\n\n"
+                + (analysis_rows or "分析結果を保存すると、ここから開けます。") + "\n\n"
+                "## インタビュー\n\n" + rows + "\n"))
+            self.managed_note(GUIDE, pack(props, "# グラフと仕上げの使い方\n\n"
+                "1. この ResearchVault フォルダーを保管庫として開きます。\n"
+                "2. 左のブックマークから Gurumoji → 研究全体のグラフ を開きます。\n"
+                "3. インタビュー別のグラフは、その1件と関連テーマだけを表示します。\n"
+                "4. 概要から全文・アウトライン・分析まとめ・研究メモ・仕上げ操作を開きます。\n"
+                "5. 操作ノートではアウトライン作成 → 内容を調整 → AI仕上げ → 結果を確認 → アプリへ反映と進めます。\n"
+                "6. チェックは1つずつ選びます。次の操作の前にチェックを外し、状態ノートが「次の操作を選べます」になるのを待ちます。Gurumojiは起動したままにします。\n\n"
+                "## 関連テーマ\n\n研究メモに `[[20-テーマ/働き方]]` のようなリンクを記入して、リンク先にテーマノートを作成します。"
+                "テーマの対応はGurumoji起動中に更新します。発言本文にはリンクを挿入せず、メモや根拠欄に発話のブロックリンクを置きます。"
+                "AIがテーマを勝手に確定することはありません。\n\n"
+                "## 画面配置\n\nWorkspacesの「Gurumoji・研究全体」「Gurumoji・インタビュー作業」で配置を切り替えます。"
+                "グラフの表示対象はブックマークで選びます。"
+                "ローカルグラフは関連を探索する表示です。深度を上げると別のインタビューも表示されます。\n\n"
+                "全文は録音1件につき1ノートです。プロパティ・表示用リンクをAI入力に加えません。"
+                "操作・原文・履歴・テンプレートは通常のグラフから除外しています。\n\n"
+                "[Graph](https://help.obsidian.md/plugins/graph) / [Bookmarks](https://help.obsidian.md/plugins/bookmarks) / "
+                "[Workspaces](https://help.obsidian.md/plugins/workspaces)\n"))
+            base = {"filters": {"and": ['file.ext == "md"', 'note.graph_kind == "interview"']},
+                    "properties": {"note.title": {"displayName": "インタビュー"}, "note.status": {"displayName": "状態"}},
+                    "views": [{"type": "table", "name": "インタビュー一覧", "order": ["file.name", "note.title", "note.status", "file.mtime"]}]}
+            self.managed_note("インタビュー一覧.base", yaml.safe_dump(base, allow_unicode=True, sort_keys=False))
+            for folder in ("20-テーマ", "30-人物", "40-研究", "80-添付", "90-運用"):
+                safe_path(self.vault, folder).mkdir(parents=True, exist_ok=True)
+            self.configure(records)
+
+    def configure(self, records: list[dict]) -> None:
+        def read(name, default):
+            p = safe_path(self.vault, ".obsidian/" + name)
+            return json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else default
+        def write(name, value):
+            p = safe_path(self.vault, ".obsidian/" + name)
+            b = json.dumps(value, ensure_ascii=False, indent=2).encode()
+            if not p.exists() or p.read_bytes() != b: write_atomic(p, b)
+        core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
+            "command-palette": True, "file-recovery": True, "outline": True})
+        enabled = ("search", "global-search", "graph", "bookmarks", "workspaces", "bases", "backlink", "properties", "canvas")
+        if isinstance(core, list): core = list(dict.fromkeys(core + list(enabled)))
+        else: core.update({key: True for key in enabled})
+        write("core-plugins.json", core)
+        self.managed_note(".obsidian/snippets/gurumoji-reading.css",
+            ".gurumoji-reading .metadata-container, .gurumoji-reading .inline-title { display: none !important; }\n"
+            ".gurumoji-control .metadata-property:not([data-property-key=\"provider\"]), "
+            ".gurumoji-control .metadata-add-button { display: none; }\n"
+            ".gurumoji-reading h1 { font-size: 1.6em; }\n")
+        appearance = read("appearance.json", {})
+        appearance["enabledCssSnippets"] = list(dict.fromkeys(appearance.get("enabledCssSnippets", []) + ["gurumoji-reading"]))
+        write("appearance.json", appearance)
+        if not safe_path(self.vault, ".obsidian/graph.json").exists(): write("graph.json", graph_options())
+        bookmarks = read("bookmarks.json", {"items": []})
+        group = next((g for g in bookmarks["items"] if g.get("gurumoji") == "navigation"), None)
+        generated = {"type": "group", "title": "Gurumoji", "ctime": 0, "gurumoji": "navigation", "items": [
+            {"type": "file", "path": HOME, "title": "ホーム", "ctime": 0},
+            {"type": "file", "path": ANALYSIS_INDEX, "title": "分析結果", "ctime": 0},
+            {"type": "graph", "title": "研究全体のグラフ", "ctime": 0, "options": graph_options()},
+            {"type": "file", "path": "インタビュー一覧.base", "title": "インタビュー一覧", "ctime": 0},
+            {"type": "group", "title": "分析手法別", "ctime": 0, "items": [
+                {"type": "file", "path": method_group_path(key), "title": title, "ctime": 0}
+                for key, title, _, _ in METHOD_GROUPS]},
+            {"type": "group", "title": "分析を検索", "ctime": 0, "items": [
+                {"type": "search", "query": 'path:"10-インタビュー" tag:#graph/detail "相づち"',
+                 "title": "相づち・応答率", "ctime": 0},
+                {"type": "search", "query": 'path:"10-インタビュー" tag:#graph/detail ("意見・認識が変わった" OR "意見・認識が変わらなかった" OR "新しい見解・気づきを得た" OR "支持・選好が明確になった")',
+                 "title": "話者別リザルト", "ctime": 0},
+                {"type": "search", "query": 'path:"10-インタビュー" tag:#graph/detail "相づち統計"',
+                 "title": "相づち統計", "ctime": 0},
+            ]},
+            {"type": "group", "title": "インタビュー別", "ctime": 0, "items": [
+                {"type": "graph", "title": r["code"] + " " + display_title(r["title"]), "ctime": 0, "options": graph_options(interview_query(r))} for r in records]}]}
+        if group: bookmarks["items"][bookmarks["items"].index(group)] = generated
+        else: bookmarks["items"].append(generated)
+        write("bookmarks.json", bookmarks)
+        # Native workspace leaf shapes, matching the installed Obsidian format.
+        def leaf(kind, state):
+            return {"id": hashlib.sha256((kind + json.dumps(state)).encode()).hexdigest()[:16],
+                    "type": "leaf", "state": {"type": kind, "state": state}}
+        def pane(children, direction="vertical"):
+            key = hashlib.sha256(json.dumps(children).encode()).hexdigest()[:16]
+            return {"id": key, "type": "split", "children": [
+                {"id": key + str(i), "type": "tabs", "children": [c]} for i, c in enumerate(children)], "direction": direction}
+        def workspace(local):
+            record = records[0] if records else None
+            path = record["hub"] if local and record else HOME
+            main = [leaf("markdown", {"file": path, "mode": "preview"})] if local else [leaf("graph", {})]
+            return {"main": pane(main),
+                    "left": {**pane([leaf("bookmarks", {})]), "width": 220},
+                    "right": {**pane([leaf("localgraph", {"file": path, "options": {**graph_options(),
+                        "search": "-tag:#graph/support -tag:#graph/history",
+                        "localJumps": 1}})]), "width": 280, "collapsed": not local},
+                    "lastOpenFiles": [path]}
+        layouts = read("workspaces.json", {"workspaces": {}, "active": ""})
+        for name, local in (("Gurumoji・研究全体", False), ("Gurumoji・インタビュー作業", True)):
+            if name not in layouts["workspaces"]: layouts["workspaces"][name] = workspace(local)
+        write("workspaces.json", layouts)
+        if not safe_path(self.vault, ".obsidian/workspace.json").exists(): write("workspace.json", workspace(False))
+
+    def sync_themes(self) -> None:
+        """Materialize only explicit human links, no semantic inference or API use."""
+        with LAYOUT_LOCK:
+            records = list(self.load()["interviews"].values())
+            memberships = {}
+            for record in records:
+                for path in safe_path(self.vault, record["folder"]).glob("*.md"):
+                    props, body = unpack(path.read_text(encoding="utf-8-sig"))
+                    if props.get("graph_kind") != "memo": continue
+                    body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
+                    body = re.sub(r"`[^`\n]*`", "", body)
+                    for target in re.findall(r"(?<![!\\])\[\[(20-テーマ/[^\]#|]+)(?:[^\]]*)\]\]", body):
+                        target = target.removesuffix(".md") + ".md"
+                        if safe_path(self.vault, target).exists(): memberships.setdefault(target, []).append(record)
+            for path in safe_path(self.vault, "20-テーマ").rglob("*.md"):
+                relative = path.relative_to(self.vault).as_posix()
+                original = path.read_text(encoding="utf-8-sig")
+                props, body = unpack(original)
+                related = {r["item_id"]: r for r in memberships.get(relative, [])}
+                tags = props.get("tags") or []
+                if isinstance(tags, str): tags = tags.split()
+                props.update(graph_kind="theme", tags=[t for t in tags if not t.startswith(("interview/", "graph/"))]
+                    + ["graph/overview"] + ["interview/" + r["code"].lower() for r in related.values()])
+                block = "<!-- gurumoji:interviews -->\n## 関連インタビュー\n\n" + "\n".join("- " + link(r["hub"], r["code"] + " " + r["title"]) for r in related.values()) + "\n<!-- /gurumoji:interviews -->"
+                if "<!-- gurumoji:interviews -->" in body:
+                    body = re.sub(r"<!-- gurumoji:interviews -->.*?<!-- /gurumoji:interviews -->", lambda _: block, body, flags=re.S)
+                else: body = body.rstrip() + "\n\n" + block + "\n"
+                new = pack(props, body)
+                if original != new: write_atomic(path, new.encode())

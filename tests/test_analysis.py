@@ -13,6 +13,18 @@ import app
 
 
 ANALYSIS_DATASETS = {
+    "insights": {"kind", "category", "title", "text", "segment_ids", "stale"},
+    "characteristic_terms": {"speaker", "term", "count", "total", "difference_pp", "segment_ids"},
+    "transformer_topics": {"topic_id", "label", "keywords", "segment_count", "speaker_count"},
+    "transformer_assignments": {"segment_id", "topic_id", "topic_label", "speaker", "text"},
+    "transformer_speakers": {"topic_id", "speaker", "segment_count", "topic_percent"},
+    "transformer_timeline": {"bin_index", "topic_id", "segment_count", "speaking_seconds"},
+    "transformer_outliers": {"rank", "segment_id", "outlier_score", "nearest_similarity", "text"},
+    "transformer_backchannels": {"segment_id", "speaker", "kind", "topic_id", "responds_to_segment_id"},
+    "transformer_backchannel_speakers": {"speaker", "topic_id", "backchannel_count", "speaker_backchannel_percent"},
+    "transformer_backchannel_rates": {"speaker", "topic_id", "opportunity_count", "response_rate_percent", "backchannel_count"},
+    "transformer_backchannel_tests": {"test_id", "test", "p_value", "effect_size", "status"},
+    "transformer_speaker_results": {"speaker", "result_code", "result_label", "topic_id", "evidence_segment_ids"},
     "speakers": {
         "speaker", "speaker_name", "role", "turn_count", "speaking_seconds",
         "speaking_percent", "participant_percent",
@@ -351,7 +363,7 @@ class AnalysisApiTests(unittest.TestCase):
             {
                 "schema_version", "algorithm_version", "generated_at", "item",
                 "config", "annotations", "classification", "cautions",
-                "automatic", "manual", "segments", "exports", "research",
+                "automatic", "manual", "segments", "exports", "research", "insights", "transformer",
             },
         )
         self.assertEqual(

@@ -41,6 +41,77 @@ class AiModelSettingsTests(unittest.TestCase):
             self.assertEqual(stored["custom_setting"], {"keep": True})
             self.assertEqual(config.google_model, "gemini-flash-latest")
 
+    def test_lmstudio_default_is_local_loopback_and_model_ids_may_contain_slashes(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            token_file = Path(temporary_directory) / "tokens.json"
+            token_file.write_text(json.dumps({"custom_setting": True}), encoding="utf-8")
+
+            config = app.update_token_model(
+                "lmstudio",
+                "qwen/qwen3-8b-instruct",
+                token_file,
+            )
+
+            stored = json.loads(token_file.read_text(encoding="utf-8"))
+            self.assertEqual(config.lmstudio_base_url, "http://127.0.0.1:1234/v1")
+            self.assertEqual(config.lmstudio_model, "qwen/qwen3-8b-instruct")
+            self.assertEqual(stored["lmstudio_model"], "qwen/qwen3-8b-instruct")
+            self.assertEqual(stored["custom_setting"], True)
+
+    def test_lmstudio_url_only_accepts_local_loopback(self):
+        self.assertEqual(
+            app.lmstudio_base_url("http://127.0.0.1:4567/"),
+            "http://127.0.0.1:4567/v1",
+        )
+        self.assertEqual(
+            app.lmstudio_base_url("http://[::1]:1234/v1"),
+            "http://[::1]:1234/v1",
+        )
+        with self.assertRaises(ValueError):
+            app.lmstudio_base_url("http://192.168.1.10:1234/v1")
+
+    def test_lmstudio_model_list_uses_local_openai_compatible_endpoint(self):
+        response = mock.MagicMock()
+        response.read.return_value = json.dumps({
+            "data": [
+                {"id": "qwen/qwen3-8b-instruct", "object": "model"},
+                {"id": "", "object": "model"},
+            ]
+        }).encode("utf-8")
+        response.__enter__.return_value = response
+        config = app.TokenConfig(lmstudio_model="qwen/qwen3-8b-instruct")
+        with mock.patch.object(app.urllib.request, "urlopen", return_value=response) as urlopen:
+            models = app.available_ai_models("lmstudio", config)
+
+        self.assertEqual(models[0]["id"], "qwen/qwen3-8b-instruct")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:1234/v1/models")
+
+    def test_lmstudio_call_uses_chat_completions_structured_output(self):
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        }
+        response = {
+            "choices": [{"message": {"content": '{"ok":true}'}}],
+            "usage": {"prompt_tokens": 6, "completion_tokens": 2, "total_tokens": 8},
+        }
+        collected = []
+        with mock.patch.object(app, "post_json", return_value=response) as post_json:
+            result = app.call_ai_json(
+                "lmstudio", "", "qwen/qwen3-8b-instruct", "system", "user",
+                "test_schema", schema, usage_callback=collected.append,
+                base_url="http://127.0.0.1:1234/v1",
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(post_json.call_args.args[0], "http://127.0.0.1:1234/v1/chat/completions")
+        payload = post_json.call_args.args[2]
+        self.assertEqual(payload["response_format"]["type"], "json_schema")
+        self.assertEqual(collected[-1]["total_tokens"], 8)
+
     def test_model_api_reads_and_updates_the_patched_tokens_json(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             token_file = Path(temporary_directory) / "tokens.json"
@@ -86,6 +157,8 @@ class AiModelSettingsTests(unittest.TestCase):
 
         self.assertIn('data-model-provider="openai"', page)
         self.assertIn('data-model-provider="google"', page)
+        self.assertIn('data-model-provider="lmstudio"', page)
+        self.assertIn('value="lmstudio"', page)
         self.assertIn('id="ai-model-dialog"', page)
         self.assertIn("/api/ai/models?provider=", script)
         self.assertIn("/api/ai/model", script)
