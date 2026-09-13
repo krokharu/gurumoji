@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -15,6 +16,7 @@ from .analysis_store import safe_path, write_atomic, markdown
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 
 LAYOUT_LOCK = threading.RLock()
+LOGGER = logging.getLogger(__name__)
 HOME = "00-ホーム.md"
 ANALYSIS_INDEX = "01-分析結果.md"
 GUIDE = "90-運用/使い方.md"
@@ -189,19 +191,7 @@ class ObsidianLayout:
             self.publish_navigation()
 
     def sync_finishing(self, state: dict) -> None:
-        active = {state[k] for k in ("work", "outline", "result_note", "final_outline_note", "meeting_minutes_note") if state.get(k)}
-        record = self.register(state["item_id"], state["title"])
-        for relative in state.get("note_ids", {}):
-            path = safe_path(self.vault, relative)
-            if not path.exists(): continue
-            text = path.read_text(encoding="utf-8-sig")
-            props, _ = unpack(text)
-            note_type = props.get("note_type", "")
-            kind = note_type.removeprefix("finishing-")
-            if kind not in {"transcript", "result", "outline", "meeting", "control", "source", "status"}: continue
-            scope = ("detail" if relative in active else "history") if kind in {"transcript", "result", "outline", "meeting"} else "support"
-            new = self.decorate(text, state["item_id"], "transcript" if kind == "result" else kind, scope)
-            if new != text: write_atomic(path, new.encode())
+        # Existing finishing notes belong to the researcher. Refresh navigation only.
         status = {"ready": "操作待ち", "running": "処理中", "error": "確認が必要", "interrupted": "中断"}.get(state["status"], "完了")
         if state["status"] == "completed":
             action = (state.get("observed") or [""])[-1]
@@ -260,7 +250,9 @@ class ObsidianLayout:
                 "5. 操作ノートではアウトライン作成 → 内容を調整 → AI仕上げ → 結果を確認 → アプリへ反映と進めます。\n"
                 "6. チェックは1つずつ選びます。次の操作の前にチェックを外し、状態ノートが「次の操作を選べます」になるのを待ちます。Gurumojiは起動したままにします。\n\n"
                 "## 関連テーマ\n\n研究メモに `[[20-テーマ/働き方]]` のようなリンクを記入して、リンク先にテーマノートを作成します。"
-                "テーマの対応はGurumoji起動中に更新します。発言本文にはリンクを挿入せず、メモや根拠欄に発話のブロックリンクを置きます。"
+                "テーマの対応はGurumoji起動中に40-研究/テーマ関連へ出力します。テーマ本文は書き換えません。"
+                "仕上げノートのタグは作成時のまま保持し、現在の参照先は概要・状態ノートで確認します。"
+                "発言本文にはリンクを挿入せず、メモや根拠欄に発話のブロックリンクを置きます。"
                 "AIがテーマを勝手に確定することはありません。\n\n"
                 "## 画面配置\n\nWorkspacesの「Gurumoji・研究全体」「Gurumoji・インタビュー作業」で配置を切り替えます。"
                 "グラフの表示対象はブックマークで選びます。"
@@ -348,31 +340,60 @@ class ObsidianLayout:
         if not safe_path(self.vault, ".obsidian/workspace.json").exists(): write("workspace.json", workspace(False))
 
     def sync_themes(self) -> None:
-        """Materialize only explicit human links, no semantic inference or API use."""
+        """Publish explicit theme relationships separately; never rewrite human themes."""
         with LAYOUT_LOCK:
             records = list(self.load()["interviews"].values())
             memberships = {}
             for record in records:
                 for path in safe_path(self.vault, record["folder"]).glob("*.md"):
-                    props, body = unpack(path.read_text(encoding="utf-8-sig"))
+                    try:
+                        props, body = unpack(path.read_text(encoding="utf-8-sig"))
+                    except (OSError, ValueError, yaml.YAMLError):
+                        LOGGER.warning("テーマ同期で読めないメモをスキップしました。")
+                        continue
                     if props.get("graph_kind") != "memo": continue
                     body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
                     body = re.sub(r"`[^`\n]*`", "", body)
                     for target in re.findall(r"(?<![!\\])\[\[(20-テーマ/[^\]#|]+)(?:[^\]]*)\]\]", body):
                         target = target.removesuffix(".md") + ".md"
-                        if safe_path(self.vault, target).exists(): memberships.setdefault(target, []).append(record)
-            for path in safe_path(self.vault, "20-テーマ").rglob("*.md"):
-                relative = path.relative_to(self.vault).as_posix()
-                original = path.read_text(encoding="utf-8-sig")
-                props, body = unpack(original)
-                related = {r["item_id"]: r for r in memberships.get(relative, [])}
-                tags = props.get("tags") or []
-                if isinstance(tags, str): tags = tags.split()
-                props.update(graph_kind="theme", tags=[t for t in tags if not t.startswith(("interview/", "graph/"))]
-                    + ["graph/overview"] + ["interview/" + r["code"].lower() for r in related.values()])
-                block = "<!-- gurumoji:interviews -->\n## 関連インタビュー\n\n" + "\n".join("- " + link(r["hub"], r["code"] + " " + r["title"]) for r in related.values()) + "\n<!-- /gurumoji:interviews -->"
-                if "<!-- gurumoji:interviews -->" in body:
-                    body = re.sub(r"<!-- gurumoji:interviews -->.*?<!-- /gurumoji:interviews -->", lambda _: block, body, flags=re.S)
-                else: body = body.rstrip() + "\n\n" + block + "\n"
-                new = pack(props, body)
-                if original != new: write_atomic(path, new.encode())
+                        if safe_path(self.vault, target).is_file():
+                            memberships.setdefault(target, []).append(record)
+            managed = self.load()["managed"]
+            # Include previously generated relations when links or themes disappear.
+            prefix = "40-研究/テーマ関連/"
+            relatives = {target: prefix + hashlib.sha256(target.encode()).hexdigest()[:24] + ".md"
+                         for target in memberships}
+            for relative in managed:
+                if not relative.startswith(prefix): continue
+                path = safe_path(self.vault, relative)
+                if not path.is_file(): continue
+                try:
+                    props, _ = unpack(path.read_text(encoding="utf-8-sig"))
+                    target = props.get("theme_target")
+                    if isinstance(target, str) and target.startswith("20-テーマ/"):
+                        relatives.setdefault(target, relative)
+                except (OSError, ValueError, yaml.YAMLError):
+                    LOGGER.warning("テーマ関連ノートを読み込めませんでした。")
+            for target, relative in sorted(relatives.items()):
+                if relative in managed and not safe_path(self.vault, relative).exists():
+                    LOGGER.warning("移動・削除されたテーマ関連ノートは再作成しません。")
+                    continue
+                related = {r["item_id"]: r for r in memberships.get(target, [])}
+                source = {"theme": target, "exists": safe_path(self.vault, target).is_file(),
+                          "interviews": [{k: r[k] for k in ("item_id", "code", "title", "hub")}
+                                         for _, r in sorted(related.items())]}
+                props = {"note_id": "theme-links-" + Path(relative).stem,
+                         "note_type": "theme-relations", "managed_by": "gurumoji",
+                         "title": "テーマ関連：" + Path(target).stem,
+                         "theme_target": target, "schema_version": 1,
+                         "source_hash": hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest(),
+                         "graph_kind": "theme", "tags": ["graph/overview" if related else "graph/history"]
+                         + ["interview/" + r["code"].lower() for r in related.values()]}
+                body = "# テーマとインタビューの関連\n\n"
+                body += (link(target, Path(target).stem) if safe_path(self.vault, target).is_file()
+                         else "テーマノートは移動または削除されています。") + "\n\n"
+                body += "研究メモの明示リンクから作成した一覧です。テーマ本文は変更しません。\n\n"
+                body += "\n".join("- " + link(r["hub"], r["code"] + " " + r["title"])
+                                  for r in related.values()) or "現在、このテーマに関連するインタビューはありません。"
+                if not self.managed_note(relative, pack(props, body + "\n")):
+                    LOGGER.warning("手動編集されたテーマ関連ノートを保持しました。")

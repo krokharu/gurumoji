@@ -217,8 +217,33 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         updated = self.workbench.prepare('recording', '会議.wav', self.segments, revision=1)
         self.assertNotEqual(old['work'], updated['work'])
         self.assertEqual(split_properties(read_text(self.workbench.note_path(old['work'])))[1], split_properties(note)[1])
-        self.assertIn('graph/history', split_properties(read_text(self.workbench.note_path(old['work'])))[0]['tags'])
+        self.assertEqual(read_text(self.workbench.note_path(old['work'])), note)
         self.assertEqual(updated['original_note'], old['original_note'])
+
+    def test_missing_state_never_overwrites_existing_initial_notes(self):
+        for key in ('work', 'outline', 'control', 'original_note'):
+            path = self.workbench.note_path(self.state[key])
+            with path.open('a', encoding='utf-8') as handle:
+                handle.write('\nHuman change ^preserved\n')
+        before = {path: path.read_bytes() for path in self.workbench.vault.rglob('*') if path.is_file()}
+        self.workbench.state_path(self.state['item_id']).unlink()
+        for _ in range(2):
+            with self.assertRaisesRegex(ValueError, '既存ノート'):
+                self.workbench.prepare(self.state['item_id'], self.state['title'], self.segments, revision=0)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_create_only_write_preserves_a_concurrent_file(self):
+        from gurumoji import analysis_store
+        target = self.workbench.note_path('concurrent.md')
+        original_link = analysis_store.os.link
+        def concurrent_create(source, destination):
+            destination.write_bytes(b'Human concurrent edit')
+            original_link(source, destination)
+        with patch.object(analysis_store.os, 'link', side_effect=concurrent_create):
+            with self.assertRaises(FileExistsError):
+                analysis_store.write_atomic(target, b'Generated note', create_only=True)
+        self.assertEqual(target.read_bytes(), b'Human concurrent edit')
+        self.assertFalse(list(target.parent.glob('.concurrent.md.*.tmp')))
 
     def test_notes_do_not_add_per_utterance_ai_calls_or_markdown_overhead(self):
         segments = [{**self.segments[0], 'id': f's{i}', 'text': f'発話{i}'} for i in range(100)]

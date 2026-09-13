@@ -10,7 +10,7 @@ tags: [gurumoji/program, gurumoji/tests]
 
 # AI見解の根拠参照番号・GPT-OSS回帰チェックリスト
 
-実施状況：すべて未実施。ユーザー指定により、今回の変更では自動テスト、アプリ再起動、モデル呼び出し、実データ再分析を行わない。
+実施状況：2026-09-14に既存の自動テスト76件が成功。アプリ再起動、実LLM呼び出し、実データ再分析は未実施。新規の異常系はこのチェックリストに従って追加する。
 
 対象：`src/gurumoji/analysis_insights.py`、`src/gurumoji/app.py`の`call_ai_json`。参照：[[../50-Analysis-Methods/06-Generative-and-Workflow/01-AI-Insights|AI見解・下書きの実装契約]]。
 
@@ -61,6 +61,12 @@ $env:PYTHONPATH='src;tests'
 .\.venv\Scripts\python.exe -m unittest test_content_analysis test_ai_effort test_analysis_storage test_obsidian_layout -q
 ```
 
-`call_ai_json`を共有するアウトライン・仕上げについては、上限エラーの回帰確認として`test_ai_finishing`・`test_obsidian_finishing`も後日実施する。実LLMの実行は上のモック確認後に行う。
+`call_ai_json`を共有するアウトライン・仕上げの回帰テストも実施した。実LLMの実行は上のモック確認後に行う。
+
+## 実行記録
+
+- [x] 2026-09-14: `test_content_analysis test_ai_effort test_analysis_storage test_obsidian_layout` — 47件成功。
+- [x] 2026-09-14: `test_ai_finishing test_obsidian_finishing` — 29件成功。
+- [ ] 実LLM・実会話を使う確認は未実施。
 
 実施記録には、日時／コード版／モデルと設定／チェック項目／期待値と実際／合否／失敗時のエラー分類を残す。実会話全文やAPIキーはこの文書に記録しない。

@@ -415,7 +415,7 @@ class UiDefaultsTests(unittest.TestCase):
         page = response.data.decode("utf-8")
         self.assertEqual(app.APP_CREATOR, "Kurokawa")
         self.assertIn('class="boot-credit">CREATED BY KUROKAWA</p>', page)
-        self.assertIn("STARTING · CHECKING FOR UPDATES", page)
+        self.assertIn("STARTING · LOADING WORKSPACE", page)
         self.assertIn('id="progress-overall-track"', page)
         self.assertIn('id="progress-stage-track"', page)
         self.assertIn('id="progress-stage-bar"', page)
@@ -479,6 +479,50 @@ class UiDefaultsTests(unittest.TestCase):
             "cached_tokens": 0, "reasoning_tokens": 0, "reported": True,
         }
         self.assertEqual(job.public()["ai_usage"]["total_tokens"], 120)
+
+    def test_registered_ui_ux_fixes_stay_in_place(self):
+        page = app.app.test_client().get("/").data.decode("utf-8")
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+
+        # UX-11: deleting lives in its own zone, outside the sticky save bar.
+        sticky = re.search(r'<div class="sticky-actions">(.*?)</div>', page, re.S).group(1)
+        self.assertNotIn('id="delete-record-button"', sticky)
+        self.assertRegex(page, r'class="result-danger-zone"[\s\S]*id="delete-record-button"')
+        # UX-12: cancelling a job asks first.
+        self.assertRegex(
+            script,
+            r"listen\(cancelButton, 'click', async \(\) => \{\s*if \(!currentJobId\) return;\s*if \(!window\.confirm\(",
+        )
+        # UX-14: a mode switch keeps values the user changed by hand.
+        self.assertIn("const manuallyEditedModeFields = new Set();", script)
+        self.assertIn("if (!manuallyEditedModeFields.has(field.key))", script)
+        self.assertIn('id="conversation-mode-reset"', page)
+        # UX-17: no font size below the shared minimum.
+        self.assertIn("--text-min: .7rem;", styles)
+        sizes = [float(value) for value in re.findall(r"font(?:-size)?:[^;]*?(?<![\d.])(0?\.\d+)rem", styles)]
+        self.assertEqual([size for size in sizes if size < 0.7], [])
+        # UX-23: tab semantics match the markup and support arrow keys.
+        self.assertNotIn('aria-controls="processed-data-hub result-card"', page)
+        self.assertNotRegex(page, r'id="result-card"[^>]*role="tabpanel"')
+        self.assertIn("function syncTabStops()", script)
+        self.assertIn("ArrowRight: index + 1", script)
+        # UX-24: the focus ring applies at every width, not only on phones.
+        self.assertIn(":is(button, a, summary, input, select, textarea, [tabindex]):focus-visible { outline: var(--focus-ring);", styles)
+        self.assertNotIn("button:focus-visible, a:focus-visible, summary:focus-visible", styles)
+        # UX-06 / UX-07: the main task comes before the secondary panel.
+        self.assertLess(page.index('id="analysis-shell"'), page.index('id="interview-comparison-card"'))
+        self.assertLess(page.index('id="speaker-registry-body"'), page.index('id="speaker-survey-analysis"'))
+        # UX-08: the splash no longer claims an update check and shows once per session.
+        self.assertNotIn("CHECKING FOR UPDATES", page)
+        self.assertIn("gurumoji.bootSplashSeen", script)
+        # UX-10: phones can see token status and open the model dialog.
+        self.assertEqual(page.count("data-status-provider="), 3)
+        self.assertIn('[data-status-provider="${id}"]', script)
+        # UX-04: one name per concept.
+        for text in (page, script):
+            self.assertNotIn("ライブラリ", text)
+            self.assertNotIn("認識と話者分離", text)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@
   let catalog = [];
   let baseId = '';
   let selectedIds = new Set();
+  let running = false;
+  let catalogLoading = false;
 
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -50,7 +52,13 @@
   function updateSelectionUi() {
     const selected = selectedInOrder();
     selectionStatus.textContent = `${selected.length}件選択（2〜8件）`;
-    runButton.disabled = selected.length < 2 || selected.length > 8;
+    runButton.disabled = running || catalogLoading || selected.length < 2 || selected.length > 8;
+    baseSelect.disabled = running || catalogLoading || !catalog.length;
+    allowDifferent.disabled = running || catalogLoading;
+    refreshButton.disabled = running || catalogLoading;
+    targets.querySelectorAll('[data-comparison-target]').forEach(input => {
+      input.disabled = running || catalogLoading || input.dataset.comparisonTarget === baseId;
+    });
   }
 
   function renderTargets() {
@@ -153,7 +161,7 @@
     parent.append(list);
   }
 
-  function addCategoricalTable(parent, rows, label) {
+  function addCategoricalTable(parent, rows, label, interviews) {
     if (!rows.length) {
       parent.append(element('p', 'interview-comparison-empty', '記録済みの比較データがありません。'));
       return;
@@ -163,8 +171,8 @@
     const head = element('thead');
     const headRow = element('tr');
     headRow.append(element('th', '', label));
-    const interviewIds = selectedInOrder();
-    interviewIds.forEach(id => headRow.append(element('th', '', (itemFor(id) || {}).source_name || id)));
+    const interviewIds = interviews.map(item => item.item_id);
+    interviews.forEach(item => headRow.append(element('th', '', item.source_name || item.item_id)));
     head.append(headRow);
     const body = element('tbody');
     rows.forEach(row => {
@@ -188,9 +196,45 @@
     return section;
   }
 
+  // One request ID per displayed result: repeated clicks reuse the same saved run.
+  let lastRequest = null;
+  const requestId = () => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return 'comparison-' + Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  };
+
+  async function saveComparison(button, status) {
+    if (!lastRequest) return;
+    button.disabled = true;
+    status.textContent = '比較結果を保存しています…';
+    try {
+      const response = await apiFetch('/api/library/interview-comparison/runs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(lastRequest)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '比較結果を保存できませんでした。');
+      status.textContent = data.run.vault_status === 'completed'
+        ? '保存しました。ResearchVaultの「40-研究/インタビュー比較」とOrchestratorに記録しました。'
+        : '保存しました。Vaultへの書き出しは再試行が必要です。';
+    } catch (error) {
+      status.textContent = error.message;
+      button.disabled = false;
+    }
+  }
+
   function renderResult(data) {
     result.replaceChildren();
     result.hidden = false;
+    const save = element('div', 'interview-comparison-save');
+    const saveButton = element('button', 'secondary', '比較結果を保存');
+    saveButton.type = 'button';
+    const saveStatus = element('small', 'interview-comparison-save-status', '各インタビューの分析とは別の実行として保存します。');
+    saveButton.addEventListener('click', () => saveComparison(saveButton, saveStatus));
+    save.append(saveButton, saveStatus);
+    result.append(save);
     const intro = element('div', `interview-comparison-result-intro ${data.mode || ''}`);
     intro.append(
       element('strong', '', data.same_content ? '同内容のインタビュー比較' : '異なる内容を含む探索的比較'),
@@ -212,19 +256,22 @@
     addTermList(characteristics, data.characteristic_terms || [], 'characteristic');
     result.append(characteristics);
     const codes = panel('手動コードの比較', '同じラベルのコードを並べます。コード定義が異なる場合は比較しないでください。');
-    addCategoricalTable(codes, data.code_comparison || [], 'コード');
+    addCategoricalTable(codes, data.code_comparison || [], 'コード', data.interviews || []);
     result.append(codes);
     const emotions = panel('感情ラベルの比較', 'モデル名ごとの推定ラベルです。本人の感情を確定するものではありません。');
-    addCategoricalTable(emotions, data.emotion_comparison || [], '感情モデル・ラベル');
+    addCategoricalTable(emotions, data.emotion_comparison || [], '感情モデル・ラベル', data.interviews || []);
     result.append(emotions);
   }
 
   async function loadCatalog() {
+    if (running || catalogLoading) return;
+    catalogLoading = true;
+    result.hidden = true;
+    lastRequest = null;
     setMessage('');
-    refreshButton.disabled = true;
-    baseSelect.disabled = true;
+    updateSelectionUi();
     try {
-      const response = await fetch('/api/library?sort=updated_desc', {cache: 'no-store'});
+      const response = await apiFetch('/api/library?sort=updated_desc', {cache: 'no-store'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'インタビュー一覧を取得できませんでした。');
       catalog = Array.isArray(data.items) ? data.items : [];
@@ -244,36 +291,43 @@
       setMessage(error.message, true);
       updateSelectionUi();
     } finally {
-      refreshButton.disabled = false;
-      baseSelect.disabled = !catalog.length;
+      catalogLoading = false;
+      updateSelectionUi();
     }
   }
 
   async function runComparison() {
+    if (running || catalogLoading) return;
     const itemIds = selectedInOrder();
     if (itemIds.length < 2 || itemIds.length > 8) return;
+    const submitted = {item_ids: itemIds, allow_different_content: allowDifferent.checked};
+    running = true;
+    lastRequest = null;
     setMessage('');
-    runButton.disabled = true;
+    updateSelectionUi();
     runButton.textContent = '比較を集計中…';
     result.hidden = true;
     try {
-      const response = await fetch('/api/library/interview-comparison', {
+      const response = await apiFetch('/api/library/interview-comparison', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({item_ids: itemIds, allow_different_content: allowDifferent.checked})
+        body: JSON.stringify(submitted)
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'インタビュー比較を生成できませんでした。');
+      lastRequest = {...submitted, input_fingerprints: data.input_fingerprints, request_id: requestId()};
       renderResult(data);
     } catch (error) {
       setMessage(error.message, true);
     } finally {
+      running = false;
       runButton.textContent = '選択したインタビューを比較';
       updateSelectionUi();
     }
   }
 
   baseSelect.addEventListener('change', () => {
+    if (running || catalogLoading) return;
     baseId = baseSelect.value;
     selectedIds = new Set(baseId ? [baseId] : []);
     result.hidden = true;
@@ -281,6 +335,7 @@
     renderTargets();
   });
   allowDifferent.addEventListener('change', () => {
+    if (running || catalogLoading) return;
     const base = itemFor(baseId);
     if (!allowDifferent.checked && base) {
       selectedIds = new Set([...selectedIds].filter(id => id === baseId || sameContent(base, itemFor(id))));
@@ -290,6 +345,7 @@
     renderTargets();
   });
   targets.addEventListener('change', event => {
+    if (running || catalogLoading) return;
     const input = event.target.closest('[data-comparison-target]');
     if (!input) return;
     if (input.checked) {

@@ -11,6 +11,7 @@ import hashlib
 import html
 import io
 import json
+import logging
 import os
 import re
 import threading
@@ -21,6 +22,7 @@ from urllib.parse import quote, urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
 
+LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
 STORE_VERSION = 1
 
@@ -57,6 +59,15 @@ def initialize_store(connection) -> None:
         sha256 TEXT NOT NULL, updated_at TEXT NOT NULL)""")
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_pending_packages (
         run_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL)""")
+    # A multi-conversation run (interview comparison) records every member conversation.
+    connection.execute("""CREATE TABLE IF NOT EXISTS analysis_run_members (
+        run_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(run_id,item_id))""")
+    connection.execute("CREATE INDEX IF NOT EXISTS analysis_run_members_item ON analysis_run_members(item_id)")
+    connection.execute("""CREATE TRIGGER IF NOT EXISTS analysis_store_member_changed
+        AFTER UPDATE OF segments_json,speaker_names_json,speaker_profiles_json,session_profile_json,
+            analysis_config_json,analysis_annotations_json,revision_count,analysis_revision,outline_json,emotion_analysis_json ON library_items
+        BEGIN UPDATE analysis_runs SET stale=1
+            WHERE id IN (SELECT run_id FROM analysis_run_members WHERE item_id=NEW.id); END""")
     connection.execute("""CREATE TRIGGER IF NOT EXISTS analysis_store_input_changed
         AFTER UPDATE OF segments_json,speaker_names_json,speaker_profiles_json,session_profile_json,
             analysis_config_json,analysis_annotations_json,revision_count,analysis_revision,outline_json,emotion_analysis_json ON library_items
@@ -85,7 +96,7 @@ def safe_path(root: Path, relative: str) -> Path:
     return target
 
 
-def write_atomic(path: Path, data: bytes) -> None:
+def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -93,7 +104,11 @@ def write_atomic(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        if create_only:
+            # Publish the complete file without replacing a concurrently created note.
+            os.link(temporary, path)
+        else:
+            os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -136,10 +151,64 @@ def frontmatter(note_id: str, title: str, **properties) -> str:
 class AnalysisStore:
     def __init__(self, database_file: Path, connect):
         from .obsidian_layout import ObsidianLayout
+        from .vault_registry import VaultRegistry
         self.layout = ObsidianLayout(database_file)
+        self.vaults = VaultRegistry(database_file)
         self.connect = connect
         self.root = Path(database_file).parent / "analysis_store"
         self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+
+    def publish_vaults(self, run_id: str) -> None:
+        """Mirror a completed run into the Input, Orchestrator, and Visualization Vaults.
+
+        Those Vaults hold ID-linked summaries only. A failure there never changes
+        the run, its artifacts, or the ResearchVault publication.
+        """
+        run = self.get(run_id)
+        if not run or run["status"] != "completed":
+            return
+        try:
+            snapshot, result = self._read_package(run_id)
+            artifacts = self.artifacts(run_id)
+            fields = {}
+            for artifact in artifacts:
+                name = artifact["name"]
+                if name.startswith("tables/") and name.endswith(".csv"):
+                    with safe_path(self.root, artifact["path"]).open(encoding="utf-8-sig", newline="") as handle:
+                        fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(handle), [])
+            self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
+        except (OSError, ValueError, LookupError, TypeError) as exc:
+            LOGGER.warning("4 Vaultへの書き出しを完了できませんでした（%s）: %s", run_id, exc)
+
+    def refresh_vaults(self, item_id: str) -> None:
+        """Republish only runs whose stale state differs from their Orchestrator note.
+
+        Comparisons that include this conversation are checked as well.
+        """
+        with self.connect() as conn:
+            rows = conn.execute("""SELECT id,stale FROM analysis_runs WHERE status='completed' AND
+                (item_id=? OR id IN (SELECT run_id FROM analysis_run_members WHERE item_id=?))""",
+                                (item_id, item_id)).fetchall()
+        for row in rows:
+            try:
+                current = self.vaults.run_status(row["id"])
+            except (OSError, ValueError) as exc:
+                LOGGER.warning("Vault台帳を読み込めませんでした: %s", exc)
+                return
+            if current != ("stale" if row["stale"] else "current"):
+                self.publish_vaults(row["id"])
+
+    def members(self, run_id: str) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT item_id FROM analysis_run_members WHERE run_id=? ORDER BY item_id",
+                                (run_id,)).fetchall()
+        return [row[0] for row in rows]
+
+    def list_comparisons(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("""SELECT * FROM analysis_runs WHERE kind='interview_comparison'
+                ORDER BY created_at DESC,id DESC LIMIT 100""").fetchall()
+        return [dict(row) for row in rows]
 
     def library_id(self) -> str:
         with self.connect() as conn:
@@ -190,7 +259,7 @@ class AnalysisStore:
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
-             check_cancelled=lambda: None) -> dict:
+             member_ids: list[str] | None = None, check_cancelled=lambda: None) -> dict:
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
@@ -210,7 +279,16 @@ class AnalysisStore:
                     match = conn.execute("SELECT * FROM analysis_runs WHERE fingerprint=? AND item_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1", (fingerprint, item_id)).fetchone()
                 if match: previous = dict(match)
             if previous and previous["status"] == "completed":
-                if previous["vault_status"] != "completed": self.publish(previous["id"])
+                if previous["vault_status"] != "completed":
+                    self.publish(previous["id"])
+                else:
+                    try:
+                        unpublished = self.vaults.run_status(previous["id"]) is None
+                    except (OSError, ValueError):
+                        unpublished = False
+                    # Runs saved before the four Vaults existed are mirrored when saved again.
+                    if unpublished:
+                        self.publish_vaults(previous["id"])
                 return self.get(previous["id"])
             run_id = previous["id"] if previous else uuid.uuid5(uuid.NAMESPACE_URL, library_id + request_id).hex
             now = previous["created_at"] if previous else datetime.now(timezone.utc).isoformat()
@@ -220,13 +298,16 @@ class AnalysisStore:
             pending = {"item_id": item_id, "kind": kind, "snapshot": snapshot, "result": result,
                        "datasets": datasets, "request_id": request_id, "input_fingerprint": input_fingerprint,
                        "source_revision": source_revision, "analysis_revision": analysis_revision,
-                       "app_url": app_url, "provider": provider, "model": model}
+                       "app_url": app_url, "provider": provider, "model": model,
+                       "member_ids": list(member_ids or [])}
             with self.connect() as conn:
                 conn.execute("""INSERT INTO analysis_runs(id,request_id,item_id,kind,fingerprint,input_fingerprint,
                     snapshot_id,source_revision,analysis_revision,created_at,status,app_url,provider,model)
                     VALUES (?,?,?,?,?,?,?,?,?,?,'writing',?,?,?) ON CONFLICT(id) DO UPDATE SET status='writing',error=''""",
                     (run_id, request_id, item_id, kind, fingerprint, input_fingerprint, snapshot_id,
                      source_revision, analysis_revision, now, app_url.rstrip("/"), provider, model))
+                conn.executemany("INSERT OR IGNORE INTO analysis_run_members(run_id,item_id) VALUES (?,?)",
+                                 [(run_id, member) for member in (member_ids or [])])
                 existing = conn.execute("SELECT payload_json FROM analysis_pending_packages WHERE run_id=?", (run_id,)).fetchone()
                 if existing:
                     pending = json.loads(existing[0])
@@ -343,11 +424,53 @@ class AnalysisStore:
             self.write_note(page + ".md", f"source-{snapshot_id}-{index}", item_id, body)
         return refs
 
+    def _publish_comparison(self, run: dict) -> None:
+        """ResearchVault note for a multi-interview comparison, kept apart from every interview folder."""
+        snapshot, result = self._read_package(run["id"])
+        interviews = self.layout.load()["interviews"]
+        members = snapshot.get("members", [])
+        title = str(snapshot.get("title") or "グループインタビュー比較")
+        note_id = f"comparison-{run['id']}"
+        text = frontmatter(note_id, title, note_type="interview-comparison", analysis_id=run["id"],
+                           conversation_ids=[member["conversation_id"] for member in members],
+                           input_snapshot_id=run["snapshot_id"], created=run["created_at"],
+                           review_status="unreviewed", tags=["graph/overview"])
+        text += f"# {markdown(title)}\n\n{run['created_at']} に保存した比較です。各インタビューの分析とは別の実行として保存しています。\n\n"
+        text += "## 比較したインタビュー\n\n"
+        for member in members:
+            record = interviews.get(member["conversation_id"])
+            label = markdown(member.get("title"))
+            text += "- " + (f"[[{record['hub'][:-3]}|{record['code']} {label}]]" if record else label)
+            text += f"（revision {int(member.get('source_revision') or 0)}）\n"
+        for method in result.get("methods", []):
+            text += "\n## 見解\n\n" + "".join(f"- {markdown(s.get('title'))}：{markdown(s.get('text'))}\n"
+                                              for s in method.get("summaries", []))
+            for preview in method.get("previews", []):
+                fields = preview["fields"]
+                text += f"\n### {markdown(preview['dataset'])}（全{preview['total']}行・先頭10行まで）\n\n"
+                text += "| " + " | ".join(markdown(f) for f in fields) + " |\n"
+                text += "| " + " | ".join("---" for _ in fields) + " |\n"
+                for row in preview["rows"]:
+                    text += "| " + " | ".join(markdown(str(row.get(f, ""))[:160]).replace("\n", "<br>") for f in fields) + " |\n"
+            text += "\n## 限界と追加確認\n\n" + "\n".join("- " + markdown(v) for v in method.get("limitations", [])) + "\n"
+        text += "\n## 再現用ファイル\n\n" + "\n".join(
+            f"- [{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in self.artifacts(run["id"])) + "\n"
+        note_path = f"40-研究/インタビュー比較/comparison-{run['id']}.md"
+        self.write_note(note_path, note_id, "", text)
+        with self.connect() as conn:
+            conn.execute("UPDATE analysis_runs SET vault_status='completed',note_path=?,error='' WHERE id=?",
+                         (note_path, run["id"]))
+
     def publish(self, run_id: str) -> dict:
         with STORE_LOCK:
             run = self.get(run_id)
             if not run or run["status"] != "completed": raise LookupError("完了した保存結果がありません。")
+            # Independent of ResearchVault conflicts: the four Vaults use their own hash catalog.
+            self.publish_vaults(run_id)
             try:
+                if run["kind"] == "interview_comparison":
+                    self._publish_comparison(run)
+                    return self.get(run_id)
                 snapshot, result = self._read_package(run_id)
                 item_id = run["item_id"]
                 library_id = snapshot["library_id"]
@@ -546,6 +669,7 @@ class AnalysisStore:
 
     def publish_index(self, item_id: str) -> None:
         with STORE_LOCK:
+            self.refresh_vaults(item_id)
             self._publish_index(item_id)
 
     def _publish_index(self, item_id: str) -> None:

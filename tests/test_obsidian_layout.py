@@ -31,15 +31,18 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.assertEqual(len(list((self.layout.vault / record['folder']).glob('*-全文.md'))), 1)
         theme = self.layout.vault / '20-テーマ/働き方.md'
         theme.write_text('# 働き方\n\n研究者の解釈を保持する。\n', encoding='utf-8')
+        original_theme = theme.read_bytes()
         for i in (0, 1):
             memo = self.layout.vault / self.layout.note_path(str(i), '', '研究メモ')
             with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/働き方]]\n')
         self.layout.sync_themes()
-        props, body = unpack(theme.read_text(encoding='utf-8'))
+        self.assertEqual(theme.read_bytes(), original_theme)
+        relation = next((self.layout.vault / '40-研究/テーマ関連').glob('*.md'))
+        props, body = unpack(relation.read_text(encoding='utf-8'))
         self.assertIn('interview/i001', props['tags'])
         self.assertIn('interview/i002', props['tags'])
         self.assertNotIn('interview/i003', props['tags'])
-        self.assertIn('研究者の解釈を保持する', body)
+        self.assertIn('[[20-テーマ/働き方', body)
         self.assertIn(records[0]['hub'][:-3], body)
         self.assertNotIn(records[2]['hub'][:-3], body)
         before = theme.read_bytes()
@@ -59,6 +62,41 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertTrue(core['search'])
         self.assertTrue(core['global-search'])
         self.assertFalse((self.layout.vault / '15-Finishing').exists())
+
+    def test_theme_sync_keeps_all_human_bytes_and_tracks_removed_links(self):
+        self.layout.update('a', '会議', {})
+        theme = self.layout.vault / '20-テーマ/働き方.md'
+        original = ('---\r\n# comment\r\ntags: [graph/custom, interview/custom]\r\n'
+                    'extra: &value [one, two]\r\naliases: *value\r\n---\r\n'
+                    '> [!note] Human\r\n![[image.png]]\r\nText ^block\r\n').encode('utf-8')
+        theme.write_bytes(original)
+        unrelated = self.layout.vault / '20-テーマ/unrelated.md'
+        unrelated.write_bytes(b'---\ninvalid: [\n---\nHuman note')
+        memo = self.layout.vault / self.layout.note_path('a', '', '研究メモ')
+        with memo.open('a', encoding='utf-8') as handle:
+            handle.write('\n[[20-テーマ/働き方]]\n')
+        self.layout.sync_themes()
+        relation = next((self.layout.vault / '40-研究/テーマ関連').glob('*.md'))
+        before_relation = relation.read_bytes()
+        self.layout.sync_themes()
+        self.assertEqual(relation.read_bytes(), before_relation)
+        self.assertEqual(theme.read_bytes(), original)
+        self.assertEqual(unrelated.read_bytes(), b'---\ninvalid: [\n---\nHuman note')
+        memo.write_text(memo.read_text(encoding='utf-8').replace('[[20-テーマ/働き方]]', ''), encoding='utf-8')
+        self.layout.sync_themes()
+        self.assertIn('graph/history', unpack(relation.read_text(encoding='utf-8'))[0]['tags'])
+        self.assertEqual(theme.read_bytes(), original)
+
+    def test_finishing_sync_does_not_read_or_write_researcher_notes(self):
+        state = self.workbench.prepare('a', '会議', [], revision=0)
+        paths = [self.workbench.note_path(state[key]) for key in ('work', 'outline', 'control')]
+        for path in paths:
+            path.write_bytes(b'---\r\ninvalid: [\r\n---\r\nHuman edit ^block')
+        with patch('gurumoji.obsidian_layout.write_atomic', wraps=__import__(
+                'gurumoji.obsidian_layout', fromlist=['write_atomic']).write_atomic) as write:
+            self.layout.sync_finishing(state)
+        self.assertTrue(all(path.read_bytes().endswith(b'Human edit ^block') for path in paths))
+        self.assertFalse(any(call.args[0] in paths for call in write.call_args_list))
 
     def test_user_bookmarks_memos_and_workspace_edits_survive_regeneration(self):
         self.layout.update('a', '会議', {})

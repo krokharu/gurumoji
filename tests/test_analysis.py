@@ -13,6 +13,11 @@ import app
 
 
 ANALYSIS_DATASETS = {
+    "prepared_turns": {"segment_id", "input_version", "text_status", "content_ready", "interaction_ready"},
+    "analysis_units": {"segment_id", "text", "original_text", "source_hash"},
+    "analysis_plan": {"section", "item", "status"},
+    "codebook_history": {"version", "reason", "summary"},
+    "interaction_links": {"source_segment_id", "target_segment_id", "status"},
     "insights": {"kind", "category", "title", "text", "segment_ids", "stale"},
     "characteristic_terms": {"speaker", "term", "count", "total", "difference_pp", "segment_ids"},
     "transformer_topics": {"topic_id", "label", "keywords", "segment_count", "speaker_count"},
@@ -525,6 +530,71 @@ class AnalysisApiTests(unittest.TestCase):
         ).get_json()
         self.assertEqual(loaded["config"], data["config"])
         self.assertEqual(loaded["annotations"], data["annotations"])
+
+    def test_focus_group_plan_keeps_content_and_interaction_evidence_separate(self):
+        current = self.client.get(f"/api/library/{self.item_id}/analysis").get_json()
+        plan = current["manual"]["focus_group_plan"]
+        self.assertTrue(plan["status"])
+        self.assertTrue(any(
+            row["item"] == "研究質問" and row["status"] == "不明"
+            for row in plan["data_inventory"]
+        ))
+        first = current["segments"][0]
+        self.assertEqual(first["utterance_order"], 1)
+        self.assertEqual(first["next_segment_id"], "p1_first")
+        self.assertTrue(first["original_text_available"])
+        self.assertEqual(first["original_text_status"], "initial_import")
+
+        response = self.client.put(
+            f"/api/library/{self.item_id}/analysis",
+            json={
+                "source_revision": current["item"]["revision_count"],
+                "analysis_revision": current["item"]["analysis_revision"],
+                "config": {
+                    **current["config"],
+                    "research_question": "改善意見とその形成過程は何か",
+                    "codebook_change_reason": "初期コードを定義した",
+                    "codebook": [{
+                        "id": "improvement", "label": "改善ニーズ",
+                        "category": "利用上の課題", "theme": "導入を阻む負担",
+                        "description": "改善を求める発言", "include_example": "短くしたい",
+                        "exclude_example": "単なる相づち", "color": "#1C6B50",
+                    }],
+                },
+                "annotations": {
+                    "p2_overlap": {
+                        "codes": ["improvement"], "elicitation": "participant_prompted",
+                        "interaction_links": [{
+                            "target_segment_id": "p1_first", "relation": "agreement",
+                            "evidence_memo": "直前の改善提案に賛成と述べた",
+                        }],
+                    },
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        data = response.get_json()
+        self.assertEqual(data["manual"]["codebook_version"], 1)
+        self.assertEqual(data["manual"]["codebook_history"][0]["reason"], "初期コードを定義した")
+        links = data["manual"]["interaction_links"]
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["target_segment_id"], "p1_first")
+        self.assertEqual(links[0]["source_segment_id"], "p2_overlap")
+        self.assertEqual(links[0]["context_segment_ids"], ["p1_first", "p2_overlap"])
+
+        fields, rows = app.analysis_csv_rows(data, "analysis_units")
+        self.assertIn("original_text", fields)
+        mapped = next(row for row in rows if row["segment_id"] == "p2_overlap")
+        self.assertEqual(mapped["categories"], ["利用上の課題"])
+        self.assertEqual(mapped["themes"], ["導入を阻む負担"])
+        self.assertEqual(mapped["elicitation"], "participant_prompted")
+
+        report = self.client.get(f"/api/library/{self.item_id}/analysis/export.md")
+        self.assertEqual(report.status_code, 200)
+        text = report.data.decode("utf-8")
+        self.assertIn("内容に関する結果", text)
+        self.assertIn("相互作用に関する所見", text)
+        self.assertIn("p1_first → p2_overlap", text)
 
     def test_json_and_all_csv_exports_follow_contract(self):
         self.assertEqual(self.put_manual_analysis().status_code, 200)
@@ -1261,6 +1331,8 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertIn("analysis_revision", columns)
                 self.assertIn("analysis_updated_at", columns)
                 self.assertIn("ai_usage_json", columns)
+                self.assertIn("original_segments_json", columns)
+                self.assertIn("original_segments_status", columns)
                 migrated = connection.execute(
                     """
                     SELECT analysis_config_json, analysis_annotations_json,
@@ -1269,6 +1341,11 @@ class AnalysisApiTests(unittest.TestCase):
                     """
                 ).fetchone()
                 self.assertEqual(migrated, ("{}", "{}", 0, None))
+                original_snapshot = connection.execute(
+                    "SELECT original_segments_json, original_segments_status "
+                    "FROM library_items WHERE id = 'legacy_item'"
+                ).fetchone()
+                self.assertEqual(original_snapshot, ("[]", "migrated_current_snapshot"))
                 session_profile = json.loads(connection.execute(
                     "SELECT session_profile_json FROM library_items "
                     "WHERE id = 'legacy_item'"

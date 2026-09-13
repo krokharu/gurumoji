@@ -82,7 +82,8 @@ async function openInsightMedia(segment) {
     if (!response.ok) throw new Error(data.error || '元データを取得できませんでした。');
     if (analysisState.itemId !== itemId) return;
     const current = (data.segments || []).find(s => s.id === segment.id);
-    if (!current || String(current.text || '').trim() !== segment.text
+    if (!current || String(current.text || '') !== String(segment.text || '')
+      || String(current.speaker || 'UNKNOWN') !== String(segment.speaker || 'UNKNOWN')
       || Math.abs(Number(current.start) - Number(segment.start)) > .001
       || Math.abs(Number(current.end) - Number(segment.end)) > .001) {
       throw new Error('この発話は更新されています。分析を再集計してから確認してください。');

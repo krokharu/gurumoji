@@ -7,7 +7,7 @@
 .effort-card:disabled { opacity: .5; }
 .effort-card[data-effort="high"]:not(:disabled), .effort-card[data-effort="ultra"]:not(:disabled) { background: #678bef12; border-color: #678bef; }
 .thinking-mode.effort-options { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 12px; }
-.effort-group-title { display: block; margin: 0 0 6px; color: #536274; font-size: 11px; font-weight: 700; }
+.effort-group-title { display: block; margin: 0 0 6px; color: #536274; font-size: 12px; font-weight: 700; }
 .effort-options { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; }
 .effort-options label { position: relative; cursor: pointer; }
 .effort-options input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; }

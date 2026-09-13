@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='ai-effort.css') }}">
 </head>
 <body class="booting">
-  <div id="boot-splash" class="boot-splash" role="status" aria-label="Gurumoji is starting and checking for updates">
+  <div id="boot-splash" class="boot-splash" role="status" aria-label="Gurumojiを起動しています">
     <div class="boot-grid" aria-hidden="true"></div>
     <div class="boot-glow" aria-hidden="true"></div>
     <p class="boot-credit">CREATED BY KUROKAWA</p>
@@ -19,7 +19,7 @@
         <span></span><span></span><span></span><span></span><span></span>
       </div>
       <h1><span>GURU</span>MOJI</h1>
-      <p id="boot-status-text" class="boot-status-text">STARTING · CHECKING FOR UPDATES</p>
+      <p id="boot-status-text" class="boot-status-text">STARTING · LOADING WORKSPACE</p>
       <div class="boot-progress" aria-hidden="true"><i></i></div>
       <div class="boot-meta">
         <span>VERSION {{ app_version }}</span>
@@ -57,7 +57,7 @@
     <main>
       <nav class="view-tabs" aria-label="表示切り替え" role="tablist">
         <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="job-form" aria-selected="true">＋ 新規作成</button>
-        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="processed-data-hub result-card" aria-selected="false">処理済みデータ</button>
+        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="processed-data-hub" aria-selected="false">処理済みデータ</button>
         <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者管理</button>
       </nav>
 
@@ -94,37 +94,6 @@
             <small id="analysis-target-meta">処理済みデータを選択してください</small>
           </div>
         </div>
-
-        <section id="interview-comparison-card" class="interview-comparison-card" aria-labelledby="interview-comparison-title">
-          <div class="interview-comparison-heading">
-            <div>
-              <p class="eyebrow">CROSS-INTERVIEW COMPARISON</p>
-              <h3 id="interview-comparison-title">グループインタビューを比較</h3>
-              <p>通常は同じ比較グループ（同じ質問・議題）の回だけを比較します。異なる内容を扱う場合は、下のチェックを入れると探索的な比較に切り替わります。</p>
-            </div>
-            <button id="interview-comparison-refresh" class="secondary-button compact-button" type="button">↻ 一覧を更新</button>
-          </div>
-          <div class="interview-comparison-controls">
-            <label class="field">
-              <span>基準インタビュー</span>
-              <select id="interview-comparison-base"><option value="">読み込み中…</option></select>
-            </label>
-            <label class="comparison-override-check">
-              <input id="interview-comparison-allow-different" type="checkbox">
-              <span><strong>内容が異なるインタビューも比較する</strong><small>質問・対象条件の差を統制しない、記述的・探索的な比較になります。</small></span>
-            </label>
-          </div>
-          <div class="interview-comparison-targets-wrap">
-            <div class="interview-comparison-targets-heading"><strong>比較対象（基準を含めて2〜8件）</strong><small id="interview-comparison-target-status">基準インタビューを選択してください。</small></div>
-            <div id="interview-comparison-targets" class="interview-comparison-targets" aria-live="polite"></div>
-          </div>
-          <div class="interview-comparison-actions">
-            <button id="interview-comparison-run" class="primary-button" type="button" disabled>選択したインタビューを比較</button>
-            <span id="interview-comparison-selection" aria-live="polite">0件選択</span>
-          </div>
-          <div id="interview-comparison-message" class="alert" role="alert" hidden></div>
-          <div id="interview-comparison-result" class="interview-comparison-result" hidden></div>
-        </section>
 
         <div id="analysis-message" class="alert" role="alert" hidden></div>
         <div id="analysis-loading" class="analysis-loading" aria-live="polite" hidden>
@@ -182,12 +151,48 @@
             <div id="analysis-mobile-content" class="analysis-content mobile"></div>
           </div>
         </div>
+
+        <!-- Comparing several sessions is secondary to analysing one, so it follows
+             the single-item analysis and starts collapsed (UX-06). -->
+        <details id="interview-comparison-details" class="interview-comparison-details">
+          <summary>複数のグループインタビューを比較する</summary>
+        <section id="interview-comparison-card" class="interview-comparison-card" aria-labelledby="interview-comparison-title">
+          <div class="interview-comparison-heading">
+            <div>
+              <p class="eyebrow">CROSS-INTERVIEW COMPARISON</p>
+              <h3 id="interview-comparison-title">グループインタビューを比較</h3>
+              <p>通常は同じ比較グループ（同じ質問・議題）の回だけを比較します。異なる内容を扱う場合は、下のチェックを入れると探索的な比較に切り替わります。</p>
+            </div>
+            <button id="interview-comparison-refresh" class="secondary-button compact-button" type="button">↻ 一覧を更新</button>
+          </div>
+          <div class="interview-comparison-controls">
+            <label class="field">
+              <span>基準インタビュー</span>
+              <select id="interview-comparison-base"><option value="">読み込み中…</option></select>
+            </label>
+            <label class="comparison-override-check">
+              <input id="interview-comparison-allow-different" type="checkbox">
+              <span><strong>内容が異なるインタビューも比較する</strong><small>質問・対象条件の差を統制しない、記述的・探索的な比較になります。</small></span>
+            </label>
+          </div>
+          <div class="interview-comparison-targets-wrap">
+            <div class="interview-comparison-targets-heading"><strong>比較対象（基準を含めて2〜8件）</strong><small id="interview-comparison-target-status">基準インタビューを選択してください。</small></div>
+            <div id="interview-comparison-targets" class="interview-comparison-targets" aria-live="polite"></div>
+          </div>
+          <div class="interview-comparison-actions">
+            <button id="interview-comparison-run" class="primary-button" type="button" disabled>選択したインタビューを比較</button>
+            <span id="interview-comparison-selection" aria-live="polite">0件選択</span>
+          </div>
+          <div id="interview-comparison-message" class="alert" role="alert" hidden></div>
+          <div id="interview-comparison-result" class="interview-comparison-result" hidden></div>
+        </section>
+        </details>
       </section><!-- /analysis-card -->
 
       <section id="library-card" class="library-card" role="tabpanel" aria-labelledby="show-library-list-button library-title">
         <div class="library-header">
           <div>
-            <p class="eyebrow">TRANSCRIPT LIBRARY</p>
+            <p class="eyebrow">PROCESSED DATA</p>
             <h2 id="library-title">処理済みデータ</h2>
             <p>過去の文字起こしをすばやく探し、内容の確認・修正・再利用ができます。</p>
           </div>
@@ -326,17 +331,6 @@
           <p>Googleフォームの「回答」→「︙」→「回答をダウンロード（.csv）」で取得したCSVを読み込めます。参加者コードで既存話者と結合し、未知の質問列を事前アンケート回答として保持・分析します。</p>
         </details>
 
-        <section id="speaker-survey-analysis" class="speaker-survey-analysis" aria-labelledby="speaker-survey-analysis-title">
-          <header>
-            <div>
-              <p class="eyebrow">PRE-SURVEY ANALYSIS</p>
-              <h3 id="speaker-survey-analysis-title">事前アンケート分析</h3>
-              <p>質問別の回答分布、回答率、数値要約、2項目クロス集計、該当参加者を確認できます。</p>
-            </div>
-          </header>
-          <div id="speaker-survey-analysis-content" aria-live="polite"></div>
-        </section>
-
         <div class="registry-toolbar-shell">
           <div class="registry-toolbar">
             <label class="field"><span>話者を検索</span><input id="speaker-registry-search" type="search" placeholder="名前・コード・組織・タグ・アンケート回答"></label>
@@ -363,6 +357,18 @@
         </div>
         <div id="speaker-registry-list" class="speaker-registry-list" aria-live="polite"></div>
 
+        <!-- The speaker table is the main task; survey analysis follows it (UX-07). -->
+        <section id="speaker-survey-analysis" class="speaker-survey-analysis" aria-labelledby="speaker-survey-analysis-title">
+          <header>
+            <div>
+              <p class="eyebrow">PRE-SURVEY ANALYSIS</p>
+              <h3 id="speaker-survey-analysis-title">事前アンケート分析</h3>
+              <p>質問別の回答分布、回答率、数値要約、2項目クロス集計、該当参加者を確認できます。</p>
+            </div>
+          </header>
+          <div id="speaker-survey-analysis-content" aria-live="polite"></div>
+        </section>
+
         <div class="registry-save-bar">
           <div>
             <strong id="registry-save-state">保存済み</strong>
@@ -381,7 +387,7 @@
           </div>
           <ol class="quick-flow" aria-label="文字起こし開始までの流れ">
             <li class="active"><span>1</span>ファイル</li>
-            <li><span>2</span>認識設定</li>
+            <li><span>2</span>認識・話者分離</li>
             <li><span>3</span>仕上げ</li>
             <li><span>4</span>開始</li>
           </ol>
@@ -407,6 +413,11 @@
             <span data-hardware="cpu" class="hardware-light checking">CPU 確認中</span>
             <span data-hardware="gpu" class="hardware-light checking">GPU 確認中</span>
           </div>
+          <div class="mobile-model-strip" aria-label="AIのトークン設定とモデル変更（タップで変更）">
+            <button class="status-pill loading" type="button" data-model-provider="openai" data-status-provider="openai">OpenAI</button>
+            <button class="status-pill loading" type="button" data-model-provider="google" data-status-provider="google">Google</button>
+            <button class="status-pill loading" type="button" data-model-provider="lmstudio" data-status-provider="lmstudio">{{ local_llm_short_label }}</button>
+          </div>
         </header>
 
         <div class="create-workbench">
@@ -419,7 +430,7 @@
             <nav class="desktop-step-nav" aria-label="新規作成の設定項目">
               <a href="#setup-mode"><b>01</b><span>会話モード<small>用途に合うおすすめ設定</small></span></a>
               <a href="#setup-source"><b>02</b><span>入力ファイル<small>音声・動画と保存先</small></span></a>
-              <a href="#setup-recognition"><b>03</b><span>認識設定<small>モデル・言語・処理装置</small></span></a>
+              <a href="#setup-recognition"><b>03</b><span>認識・話者分離<small>モデル・言語・処理装置</small></span></a>
               <a href="#setup-finish"><b>04</b><span>AI仕上げ<small>修正・名前・アウトライン</small></span></a>
               <a href="#setup-emotion"><b>05</b><span>感情分析<small>AIST音声モデル</small></span></a>
               <a href="#setup-output"><b>06</b><span>出力と開始<small>字幕・動画書き出し</small></span></a>
@@ -468,7 +479,8 @@
                 </span>
               </label>
             </div>
-            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">会議モードの設定を適用しています。話者数や前処理は「認識と話者分離」で変更できます。</p>
+            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">会議モードの設定を適用しています。話者数や前処理は「認識・話者分離」で変更できます。</p>
+            <button id="conversation-mode-reset" class="conversation-mode-reset" type="button" hidden>このモードの推奨値に戻す</button>
           </fieldset>
         </section>
 
@@ -533,7 +545,7 @@
           <div class="section-heading">
             <span class="step">03</span>
             <div>
-              <h2>認識と話者分離</h2>
+              <h2>認識・話者分離</h2>
               <p>マシンに合わせたおすすめ設定を自動で選択しています</p>
             </div>
             <span class="recommended-badge">おすすめ設定済み</span>
@@ -738,7 +750,7 @@
               <button type="button" data-mobile-edit-step="1">編集</button>
             </div>
             <div>
-              <span>認識設定</span>
+              <span>認識・話者分離</span>
               <strong data-mobile-review-recognition>おすすめ設定</strong>
               <button type="button" data-mobile-edit-step="2">編集</button>
             </div>
@@ -853,7 +865,7 @@
         <button id="cancel-button" class="secondary-button danger" type="button">処理を中止</button>
       </section>
 
-      <section id="result-card" class="result-card" role="tabpanel" aria-labelledby="show-library-button" hidden>
+      <section id="result-card" class="result-card" aria-labelledby="result-title" hidden>
         <div class="result-header">
           <div><p class="eyebrow">TRANSCRIPT READY</p><h2 id="result-title">確認・手動編集</h2></div>
           <div id="download-links" class="download-links"></div>
@@ -974,6 +986,7 @@
             <label class="field"><span>会話種別</span><select id="session-type"><option value="focus_group">グループインタビュー</option><option value="meeting">会議</option><option value="chat">雑談</option><option value="interview">インタビュー</option><option value="workshop">ワークショップ</option><option value="other">その他</option></select></label>
             <label class="field"><span>実施日</span><input id="session-date" type="date"><small id="session-date-note" class="field-note">動画の撮影日時があれば自動入力します。いつでも手動で変更できます。</small></label>
             <label class="field"><span>場所／オンライン</span><input id="session-location" type="text" maxlength="300" placeholder="会議室、Zoomなど"></label>
+            <label class="field"><span>実施グループID</span><input id="session-interview-group-id" type="text" maxlength="120" placeholder="例：FG-01"><small class="field-note">比較グループ名とは別に、この回を識別するIDです。</small></label>
             <label class="field"><span>比較グループ</span><input id="session-comparison-group" type="text" maxlength="300" placeholder="例：新UI評価・2026春（同内容の回で統一）"><small class="field-note">同じ質問・議題の回には同じ名称を設定します。</small></label>
             <label class="field session-wide"><span>目的・調査テーマ</span><textarea id="session-objective" rows="2" placeholder="この会話で明らかにしたいこと"></textarea></label>
             <label class="field session-wide"><span>質問ガイド／議題</span><textarea id="session-guide" rows="3" placeholder="導入、移行、主要質問、締め／会議アジェンダ"></textarea></label>
@@ -999,9 +1012,15 @@
           <button id="save-button" class="primary-button small" type="button">編集内容を保存</button>
           <button id="obsidian-finishing-button" class="secondary-button" type="button">Obsidianで仕上げ</button>
           <button id="result-analysis-button" class="secondary-button analysis-jump-button" type="button">このデータを分析・可視化</button>
-          <button id="delete-record-button" class="secondary-button danger" type="button">このデータを削除</button>
           <button id="new-button" class="secondary-button" type="button">一覧へ戻る</button>
         </div>
+        <section class="result-danger-zone" aria-labelledby="result-danger-title">
+          <div>
+            <h3 id="result-danger-title">データの削除</h3>
+            <p>処理済みデータから削除し、保存メディアも削除します。出力ファイルと学習履歴は残ります。</p>
+          </div>
+          <button id="delete-record-button" class="secondary-button danger" type="button">このデータを削除</button>
+        </section>
       </section>
     </main>
   </div>

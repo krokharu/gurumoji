@@ -31,7 +31,7 @@ class ContentBrowserTests(unittest.TestCase):
         with app.database_connection() as connection:
             connection.execute("UPDATE library_items SET media_path=? WHERE id='content'", (str(audio),))
         _, args = self.fixture.start()
-        self.fixture.run_worker(args, response=content_support.finding(text="保存済みAI見解。<img src=x onerror=window.injected=1>"))
+        self.fixture.run_worker(args, response=content_support.finding(["E0001"], text="保存済みAI見解。<img src=x onerror=window.injected=1>"))
 
     def exercise_browser(self, mobile=False, reload_only=False, generate=False, linked=''):
         browser = browser_support.browser_executable()
@@ -188,7 +188,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             ai_calls.append(1)
             args[8]({"provider": "openai", "model": "test", "request_count": 1,
                      "input_tokens": 100, "output_tokens": 23, "total_tokens": 123, "reported": True})
-            return content_support.finding(text="新しい見解")
+            return content_support.finding(["E0001"], text="新しい見解")
 
         try:
             with patch.object(app, "render_template", side_effect=render), \

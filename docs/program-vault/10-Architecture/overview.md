@@ -41,4 +41,6 @@ Gurumojiは、音声・動画の文字起こし、話者分離、編集、会話
 
 読み進める順序：[[30-Data/current-storage]] → [[40-Design/storage-policy]] → [[40-Design/obsidian-plan]]。
 
+2026-09-14追記：モジュールの依存関係、操作から保存までのデータフロー、保存先、外部サービス、設定の所在をまとめた全体図は [[10-Architecture/system-map]] にある。
+
 確認元：リポジトリの `README.md`、`app.py`、`research_analysis.py`、`analysis_insights.py`、`ai_http_worker.py`。ファイル別の検証箇所は [[20-Modules/module-map]] にまとめています。

@@ -290,8 +290,11 @@ class ObsidianWorkbench:
             properties["source"] = "[[" + state["original_note"][:-3] + "]]"
         properties.update(extra)
         scope = "detail" if kind in {"transcript", "result", "outline", "meeting"} else "support"
-        self.note(relative, self.layout.decorate(with_properties(body, properties), state["item_id"],
-                                                "transcript" if kind == "result" else kind, scope))
+        content = self.layout.decorate(with_properties(body, properties), state["item_id"],
+                                       "transcript" if kind == "result" else kind, scope)
+        # Researcher-owned notes are immutable from our side after creation.
+        # The generated status note remains the existing mutable status channel.
+        write_atomic(self.note_path(relative), content.encode(), create_only=kind != "status")
 
     def locate_note(self, relative: str, note_id: str | None = None) -> str:
         if self.note_path(relative).exists():
@@ -361,7 +364,12 @@ class ObsidianWorkbench:
                  "segments": copy.deepcopy(segments), "model": model, "provider": provider,
                  "detect_names": detect_names, "create_outline": create_outline, "ai_efforts": ai_efforts,
                  "original_note": original_note,
-                 "observed": [], "status": "ready", "message": "会話本文を確認・編集し、操作を1つ選んでください。"}
+                  "observed": [], "status": "ready", "message": "会話本文を確認・編集し、操作を1つ選んでください。"}
+        initial_paths = [state[key] for key in ("work", "outline", "control", "status_note")]
+        if not existing:
+            initial_paths.append(original_note)
+        if any(self.note_path(relative).exists() for relative in initial_paths):
+            raise ValueError("仕上げ用の保存先に既存ノートがあります。上書きせず停止しました。管理状態の復元を確認してください。")
         for key in ("meeting_minutes_note", "meeting_minutes_fingerprint", "meeting_tasks_path",
                     "meeting_json_path"):
             if existing and existing.get(key):

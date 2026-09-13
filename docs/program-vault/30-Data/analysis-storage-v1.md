@@ -3,7 +3,7 @@ note_id: program-analysis-storage-v1
 note_type: data-model
 title: AI仕上げ・文章分析の保存契約 v1
 status: current
-verified: 2026-09-13
+verified: 2026-09-14
 schema_version: 1
 ---
 
@@ -58,6 +58,7 @@ Whisper原文を先に保存し、Obsidianの専用作業ノートから仕上�
 - AI見解は研究質問を優先し、1項目に1つの主張と根拠IDを持たせる。語の一致を合意とみなさず、少数意見・否定を保持する。人のコード・メモへ自動反映しない。
 - 空結果、未実行、利用不可、簡易分割、古い対象、工程の一部失敗を `empty / not_run / unavailable / fallback / stale / partial` で区別する。
 - 発話・話者・条件・注釈を更新すると旧実行を「更新が必要」にする。話者台帳の更新は保守的に全履歴を更新対象にする。固定JSON／CSV・過去引用は上書きしない。
+- 分析準備の追加・更新・削除も、SQLiteトリガーで同じトランザクション中に対象会話の単独実行・比較実行を`stale=1`にする。ロールバック時は更新待ちへの変更も戻す。修正前の古い履歴を一括補正する処理はない。
 
 ## 書き出しと回復
 
@@ -74,6 +75,8 @@ Obsidianノートが人の編集・移動・削除によって変わっていた
 | 操作 | API |
 | --- | --- |
 | 組み込み手法一覧 | `GET /api/analysis/methods` |
+| インタビュー比較 | `POST /api/library/interview-comparison`。応答に対象会話ごとの`input_fingerprints`を含む |
+| 比較の固定保存 | `POST /api/library/interview-comparison/runs`。集計時の`item_ids`・`allow_different_content`・`input_fingerprints`と`request_id`を送る。入力版の欠落は400、現在版との不一致は409で再集計が必要 |
 | 全件分析／KWICの固定保存 | `POST /api/library/<id>/analysis/runs`。`request_id`, `source_revision`, `analysis_revision` と任意の `kwic: {q, mode, speaker}` |
 | 保存履歴 | `GET /api/library/<id>/analysis/runs`。直近100件。古い成果物は保持 |
 | 保存・Vault生成の再試行 | `POST /api/analysis/runs/<run-id>/vault` |

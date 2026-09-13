@@ -3,7 +3,7 @@ note_id: program-module-map
 note_type: module-index
 title: 機能・コード・テストの対応表
 status: current
-verified: 2026-09-13
+verified: 2026-09-14
 tags:
   - gurumoji/program
 ---
@@ -11,6 +11,8 @@ tags:
 # 機能・コード・テストの対応表
 
 パスはリポジトリルートからの相対パスです。資料とコードの関連付けには、行番号より変更に強いファイル名・関数名を使います。
+
+2026-09-14の優先修正：`obsidian_layout.sync_themes/sync_finishing`による人のノート保護、`obsidian_finishing.prepare/save_note`と`analysis_store.write_atomic(create_only=True)`による既存ノート保護、比較APIの`input_fingerprints`照合、`transcript_preparation.initialize`の更新待ち伝播トリガー、`static/app.js`の未保存・応答順序制御。詳細と検証先は[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]。
 
 | 機能 | 実装・入口 | 主な検証先 |
 | --- | --- | --- |
@@ -30,6 +32,8 @@ tags:
 | AI通信・モデル設定 | `ai_http_worker.py`; `app.py`: `call_ai_json`, `configured_ai_credentials` | `tests/test_ai_http_worker.py`, `tests/test_ai_model_settings.py`, `tests/test_ai_scaling.py` |
 | 根拠付きAI仕上げ | `ai_finishing.py`: `clean_transcript`, `create_outline`, `finishing_changes` | `tests/test_ai_finishing.py`, `tests/test_pipeline_regressions.py` |
 | 手法別の固定保存・Vault | `analysis_method_registry.py`, `analysis_store.py`; `app.py`: `archive_group_analysis`, `archive_ai_finishing` | `tests/test_analysis_storage.py` |
+| 4 Vaultへの書き出し | `vault_registry.py`: `VaultRegistry.publish_input`, `retire_input`, `publish_analysis`; `analysis_store.py`: `AnalysisStore.publish_vaults`, `refresh_vaults`; `app.py`: `publish_input_vault`, `retire_input_vault`, `whisper_vault_settings` | `tests/test_four_vaults.py`, `tests/test_vault_coverage.py` |
+| 会議議事録・インタビュー比較の独立保存 | `app.py`: `archive_meeting_minutes`, `archive_interview_comparison`, `interview_comparison_datasets`; `analysis_store.py`: `analysis_run_members`, `list_comparisons`; `static/interview-comparison.js` | `tests/test_vault_coverage.py`, `tests/test_meeting_minutes.py`, `tests/test_interview_comparison.py` |
 | 保存履歴・Vaultからの発話参照 | `static/analysis-storage.js` | `tests/test_content_browser.py` |
 | 分析出力 | `app.py`: `analysis_csv_rows`, `export_library_analysis_json`; `research_analysis.py`: `build_analysis_workbook` | `tests/test_analysis.py`, `tests/test_research_analysis.py` |
 | 編集差分の学習データ | `app.py`: `training_export_contents`, `write_training_exports`, `refresh_training_exports` | `tests/test_backend_safety.py`, `tests/test_outputs.py` |
@@ -53,3 +57,5 @@ tags:
 リポジトリルートで `python -m unittest discover -s tests -q` を実行します。ブラウザーテストはEdge／Chrome／Chromium、メディアテストの一部はFFmpegを利用します。テスト結果の記録には実行日・対象commitまたは作業ツリー識別値・成功／失敗／スキップ理由を付けます。
 
 このノートはテストの対応表であり、現在の環境での全テスト合格を自動保証するものではありません。
+
+機能の分類（Core／Duplicate／Legacyなど）は [[20-Modules/feature-inventory]]、Obsidian連携の書き込み主体と競合処理は [[20-Modules/obsidian-integration]] を参照してください。

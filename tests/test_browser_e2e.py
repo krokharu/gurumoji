@@ -244,6 +244,113 @@ window.addEventListener('DOMContentLoaded', () => {
         self.assertIsNotNone(status, result.stderr[-2000:])
         self.assertEqual(status.group(1), 'passed')
 
+    def test_comparison_and_unsaved_navigation_regressions(self):
+        browser = browser_executable()
+        if browser is None:
+            self.skipTest('Chrome, Edge, or Chromium is required')
+        for item_id in ('compare_a', 'compare_b'):
+            app.upsert_library_item(item_id=item_id, source_name=item_id,
+                output_dir=self.root / item_id, media_path=None, language='ja',
+                segments=[{'id': item_id + '_1', 'speaker': 'A', 'start': 0, 'end': 1, 'text': '同じ話題を比較する'}],
+                speaker_names={'A': '参加者'}, files=[], outline=None, emotion_analysis=None,
+                write_srt=False, write_json=True,
+                session_profile={'session_type': 'focus_group', 'comparison_group': 'example'})
+        driver = r"""
+window.addEventListener('DOMContentLoaded', async () => {
+  const check = (condition, message) => { if (!condition) throw Error(message); };
+  const until = async condition => {
+    for (let n = 0; n < 200; n++) {
+      if (condition()) return;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw Error('Timed out waiting for UI');
+  };
+  try {
+    const base = document.querySelector('#interview-comparison-base');
+    const run = document.querySelector('#interview-comparison-run');
+    const result = document.querySelector('#interview-comparison-result');
+    await until(() => !base.disabled && base.options.length === 2);
+    const target = document.querySelector('#interview-comparison-targets input:not(:disabled)');
+    target.click();
+    run.click();
+    check(base.disabled && target.disabled && run.disabled, 'comparison selection not locked');
+    check(document.querySelector('#interview-comparison-allow-different').disabled, 'comparison mode not locked');
+    await until(() => !result.hidden);
+    result.querySelector('button').click();
+    await until(() => result.querySelector('.interview-comparison-save-status').textContent.includes('保存しました'));
+
+    const originalConfirm = window.confirm;
+    const originalLoad = loadAnalysisItem;
+    let confirms = 0, loads = 0;
+    window.confirm = () => { confirms++; return false; };
+    loadAnalysisItem = () => { loads++; };
+    analysisState.itemId = 'compare_a';
+    analysisState.dirty = false;
+    preparationDirty = true;
+    analysisCard.hidden = false;
+    currentJobDirty = false;
+    document.querySelector('#analysis-refresh-button').click();
+    check(confirms === 1 && loads === 0 && preparationDirty, 'preparation refresh discarded edits');
+    analysisState.dirty = true;
+    check(showView('analysis', {analysisItemId: 'compare_b'}) === false, 'analysis navigation bypassed confirmation');
+    check(loads === 0 && analysisState.itemId === 'compare_a', 'cancelled navigation changed target');
+    window.confirm = originalConfirm;
+    loadAnalysisItem = originalLoad;
+    analysisState.dirty = false;
+    preparationDirty = false;
+
+    const originalFetch = apiFetch, originalRender = renderResult;
+    const pending = {}, rendered = [];
+    apiFetch = url => new Promise(resolve => { pending[url] = resolve; });
+    renderResult = data => rendered.push(data.id);
+    const a = openLibraryItem('A'), b = openLibraryItem('B');
+    const reply = id => new Response(JSON.stringify({id}), {headers: {'Content-Type':'application/json'}});
+    pending['/api/library/B'](reply('B')); await b;
+    pending['/api/library/A'](reply('A')); await a;
+    check(rendered.join(',') === 'B', 'late response replaced selected result');
+    const c = openLibraryItem('C');
+    showView('new');
+    pending['/api/library/C'](reply('C')); await c;
+    check(rendered.join(',') === 'B', 'late response replaced a different view');
+    apiFetch = originalFetch; renderResult = originalRender;
+    document.body.dataset.priorityFixes = 'passed';
+  } catch (error) {
+    document.body.dataset.priorityFixes = error.message;
+  }
+});
+"""
+        original_render = app.render_template
+        original_static = app.app.send_static_file
+        def render(*args, **kwargs):
+            return original_render(*args, **kwargs).replace('</body>',
+                '<script src="/static/priority-fixes-test.js" defer></script></body>')
+        def static(filename):
+            if filename == 'priority-fixes-test.js':
+                return app.app.response_class(driver, mimetype='text/javascript')
+            return original_static(filename)
+        server = make_server('127.0.0.1', 0, app.app, threaded=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.object(app, 'render_template', side_effect=render), \
+                    patch.object(app.app, 'send_static_file', side_effect=static), \
+                    patch.object(app, 'get_machine_profile', return_value={}), \
+                    patch.object(app, 'system_activity_snapshot', return_value={}), \
+                    patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
+                result = subprocess.run([
+                    browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
+                    '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
+                    f'--user-data-dir={self.root / "priority-profile"}', '--virtual-time-budget=10000',
+                    '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
+                ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        status = re.search(r'data-priority-fixes="([^"]+)"', result.stdout)
+        self.assertIsNotNone(status, result.stderr[-2000:])
+        self.assertEqual(status.group(1), 'passed')
+        self.assertEqual(len(app.analysis_archive_store().list_comparisons()), 1)
+
     def test_real_browser_renders_pre_survey_dashboard(self):
         browser = browser_executable()
         if browser is None:

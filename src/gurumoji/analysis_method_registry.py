@@ -6,6 +6,7 @@ REGISTRY_VERSION = "text-analysis-store-5"
 COMMON_EXPORT_FIELDS = {
     "schema_version", "item_id", "source_name", "revision_count", "analysis_revision",
     "analysis_updated_at", "generated_at", "algorithm_version",
+    "input_version", "source_hash", "analysis_needs_review",
 }
 
 PREVIEW_FIELD_PRIORITIES = {
@@ -55,13 +56,17 @@ METHODS = [
     ("descriptive_statistics", "記述統計・度数", ["descriptives", "frequencies"]),
     ("group_statistics", "クロス集計・群間比較", ["crosstabs", "statistical_tests"]),
     ("correlation", "相関", ["correlations"]),
-    ("qualitative_coding", "手動コード・重要引用", ["codes", "coded_segments", "case_matrix", "interactions", "important_quotes", "context"]),
+    ("qualitative_coding", "手動コード・重要引用", ["prepared_turns", "analysis_plan", "analysis_units", "codes", "codebook_history", "coded_segments", "case_matrix", "interactions", "interaction_links", "important_quotes", "context"]),
     ("ai_insights", "AI見解・下書き", ["insights"]),
     ("audio_emotion", "音声感情推定", ["emotions"]),
     ("outline", "議題・アウトライン", []),
     ("kwic", "文脈検索", ["kwic"]),
     ("ai_finishing", "AI仕上げ・変更記録", ["ai_changes"]),
+    # Saved as their own runs: never mixed into a single conversation's text analysis.
+    ("meeting_minutes", "会議議事録・タスク候補", ["meeting_tasks", "meeting_decisions", "meeting_speaker_activity"]),
+    ("interview_comparison", "グループインタビュー比較", ["comparison_interviews", "comparison_common_terms", "comparison_characteristic_terms", "comparison_codes", "comparison_emotions"]),
 ]
+SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison"}
 
 # Navigation categories describe the implemented methods, not external engines.
 METHOD_GROUPS = [
@@ -83,6 +88,12 @@ METHOD_GROUPS = [
     ("qualitative", "質的分析・コード・引用",
      "手動コードと重要引用を、元の発言や文脈と合わせて確認します。",
      ("qualitative_coding",)),
+    ("meeting", "会議・議事録",
+     "会議モードの発話から、タスク候補・決定事項候補・発話量をルールで抽出した記録です。担当・期限は元発話で確認します。",
+     ("meeting_minutes",)),
+    ("comparison", "グループインタビュー横断比較",
+     "複数回のインタビューを、発話量・共通語・特徴語・手動コード・感情ラベルで記述的に並べた比較です。",
+     ("interview_comparison",)),
 ]
 
 METHOD_STATUS_LABELS = {
@@ -163,13 +174,16 @@ def transformer_note_content(result: dict) -> tuple[list[dict], list[dict]]:
 
 
 def method_results(analysis: dict, datasets: dict, *, outline: dict | None = None,
-                   finishing: dict | None = None, kwic: dict | None = None) -> list[dict]:
+                   finishing: dict | None = None, kwic: dict | None = None,
+                   meeting: dict | None = None, comparison: dict | None = None) -> list[dict]:
     research = analysis.get("research", {})
     engine = research.get("linguistics", {}).get("engine", {})
     insights = analysis.get("insights", {})
     results = []
+    optional = {"kwic": kwic, "ai_finishing": finishing, "meeting_minutes": meeting,
+                "interview_comparison": comparison}
     for key, title, tables in METHODS:
-        if key == "kwic" and kwic is None or key == "ai_finishing" and finishing is None:
+        if key in optional and optional[key] is None:
             continue
         findings = []
         summaries = []
@@ -181,6 +195,18 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
         if key == "outline": details = outline or {}
         if key == "ai_finishing": details = finishing or {}
         if key == "kwic": details = kwic or {}
+        if key == "meeting_minutes":
+            details = meeting or {}
+            counts = details.get("analysis", {})
+            summaries = [{"title": "抽出件数", "text": (
+                f"タスク候補{counts.get('task_count', 0)}件、期限の言及{counts.get('due_count', 0)}件、"
+                f"決定事項候補{counts.get('decision_count', 0)}件。")}]
+            summaries += [{"title": "サマリー", "text": value} for value in details.get("summary", [])[:5]]
+        if key == "interview_comparison":
+            details = comparison or {}
+            summaries = [{"title": "比較の種類", "text": (
+                ("同じ比較グループの比較" if details.get("same_content") else "異なる内容を含む探索的比較")
+                + f"。{len(details.get('interviews', []))}回を比較。")}]
         selected = [name for name in tables if name in datasets]
         count = sum(len(datasets[name][1]) for name in selected)
         state = "completed" if count or findings or details else "empty"
@@ -212,7 +238,12 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
             method_engine = research.get("statistics", {}).get("engine", {})
             if key in {"group_statistics", "correlation"} and method_engine.get("status") == "unavailable": state = "unavailable"
         unit = {"morphology": "形態素", "syntax": "形態素間の係り受け", "kwic": "出現箇所",
-                "speaker_characteristics": "本文のある対象発話"}.get(key, research.get("analysis_unit", "発話"))
+                "speaker_characteristics": "本文のある対象発話", "meeting_minutes": "発話（タスク・決定事項の候補）",
+                "interview_comparison": "インタビュー（セッション）"}.get(key, research.get("analysis_unit", "発話"))
+        if key == "meeting_minutes":
+            limitations = ["タスク・担当・優先度・期限・決定事項は規則で抽出した候補です。元発話を確認してから利用してください。"]
+        if key == "interview_comparison":
+            limitations = list(details.get("cautions", []))
         if key == "transformer_topics" and details.get("result"):
             unit = details["result"].get("analysis_unit", unit)
         previews = [{"dataset": name, "fields": preview_fields(name, datasets[name][0]),

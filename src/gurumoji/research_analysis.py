@@ -72,11 +72,13 @@ SOURCE_REFERENCES = [
 
 RESEARCH_CSV_FIELDS: dict[str, list[str]] = {
     "segments_all": [
-        "segment_id", "start", "end", "duration_seconds", "speaker",
-        "speaker_name", "role", "text", "characters", "token_count",
+        "segment_id", "group_id", "utterance_order", "start", "end", "duration_seconds", "speaker",
+        "speaker_name", "role", "text", "original_text", "original_text_available", "original_text_status",
+        "previous_segment_id", "next_segment_id", "characters", "token_count",
         "content_token_count", "unique_content_terms", "lexical_diversity",
         "characters_per_minute", "question_candidate", "code_ids",
-        "code_labels", "interaction_tags", "important", "excluded",
+        "code_labels", "categories", "themes", "interaction_tags", "elicitation", "interaction_links",
+        "important", "excluded",
     ],
     "morphemes": [
         "segment_id", "speaker", "speaker_name", "role", "sentence_id",
@@ -721,8 +723,8 @@ def _segment_dataset(
     tokens_by_segment: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in morphemes:
         tokens_by_segment[str(row["segment_id"])].append(row)
-    code_labels = {
-        str(item.get("id")): str(item.get("label") or item.get("id"))
+    codebook = {
+        str(item.get("id")): item
         for item in analysis.get("manual", {}).get("codebook", [])
     }
     rows = []
@@ -747,8 +749,18 @@ def _segment_dataset(
         characters = int(segment.get("characters") or 0)
         annotation = segment.get("annotation") if isinstance(segment.get("annotation"), dict) else {}
         code_ids = [str(value) for value in annotation.get("codes", [])]
+        categories = list(dict.fromkeys(
+            str(codebook.get(value, {}).get("category") or "")
+            for value in code_ids if str(codebook.get(value, {}).get("category") or "")
+        ))
+        themes = list(dict.fromkeys(
+            str(codebook.get(value, {}).get("theme") or "")
+            for value in code_ids if str(codebook.get(value, {}).get("theme") or "")
+        ))
         rows.append({
             "segment_id": segment_id,
+            "group_id": segment.get("group_id", "不明"),
+            "utterance_order": segment.get("utterance_order", ""),
             "start": segment.get("start", 0),
             "end": segment.get("end", 0),
             "duration_seconds": round(duration, 3),
@@ -756,6 +768,11 @@ def _segment_dataset(
             "speaker_name": segment.get("speaker_name", ""),
             "role": segment.get("role", "participant"),
             "text": segment.get("text", ""),
+            "original_text": segment.get("original_text", ""),
+            "original_text_available": bool(segment.get("original_text_available")),
+            "original_text_status": segment.get("original_text_status", "unavailable"),
+            "previous_segment_id": segment.get("previous_segment_id", ""),
+            "next_segment_id": segment.get("next_segment_id", ""),
             "characters": characters,
             "token_count": len(token_rows),
             "content_token_count": len(content_terms),
@@ -766,8 +783,12 @@ def _segment_dataset(
             if duration > 0 else None,
             "question_candidate": bool(segment.get("question_candidate")),
             "code_ids": code_ids,
-            "code_labels": [code_labels.get(value, value) for value in code_ids],
+            "code_labels": [str(codebook.get(value, {}).get("label") or value) for value in code_ids],
+            "categories": categories,
+            "themes": themes,
             "interaction_tags": annotation.get("interaction_tags", []),
+            "elicitation": annotation.get("elicitation", "unknown"),
+            "interaction_links": annotation.get("interaction_links", []),
             "important": bool(annotation.get("important")),
             "excluded": bool(segment.get("excluded")),
             "_normalized_terms": normalized_terms,
@@ -1509,9 +1530,14 @@ EXCEL_SHEETS = [
     ("timeline", "時間推移"),
     ("emotions", "感情推定"),
     ("groups", "属性比較"),
+    ("analysis_plan", "分析方針・データ確認"),
+    ("analysis_units", "発話と分析結果の対応"),
+    ("prepared_turns", "逐語録の分析準備"),
     ("codes", "コード集計"),
+    ("codebook_history", "コードブック変更履歴"),
     ("coded_segments", "コード済み発話"),
     ("interactions", "相互作用"),
+    ("interaction_links", "相互作用の根拠発話"),
     ("case_matrix", "話者コード表"),
     ("important_quotes", "重要引用"),
     ("context", "確認状況"),

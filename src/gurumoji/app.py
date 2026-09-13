@@ -81,6 +81,7 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHODS, REGISTRY_VERSION, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
+from . import transcript_preparation as preparation
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -1752,6 +1753,7 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
             )
         ensure_output_import_provenance_schema(connection)
         initialize_store(connection)
+        preparation.initialize(connection)
         if repair_provenance:
             repair_output_import_provenance(connection)
         for row in connection.execute("SELECT id, source_name FROM library_items").fetchall():
@@ -2296,6 +2298,31 @@ def row_segments(row: sqlite3.Row) -> list[dict[str, Any]]:
     return ensure_segment_ids(row["id"], raw if isinstance(raw, list) else [])
 
 
+def row_original_segments(row: sqlite3.Row) -> tuple[dict[str, dict[str, Any]], str]:
+    """Return the immutable-at-import transcript snapshot, if one is available.
+
+    This deliberately does not fall back to the editable `segments_json` value:
+    doing so would hide a missing original source.  Legacy records migrated to
+    this schema retain a separate snapshot, but its status is labelled so it is
+    not mistaken for the pre-edit transcript.
+    """
+    if "original_segments_json" not in row.keys():
+        return {}, "unavailable"
+    raw = json_load(row["original_segments_json"], [])
+    if not isinstance(raw, list):
+        return {}, "unavailable"
+    values = {
+        str(segment.get("id") or ""): dict(segment)
+        for segment in raw
+        if isinstance(segment, dict) and str(segment.get("id") or "")
+    }
+    status = (
+        clean_single_line(row["original_segments_status"], 80)
+        if "original_segments_status" in row.keys() else ""
+    )
+    return values, status or "unavailable"
+
+
 def normalize_session_profile(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         raw = {}
@@ -2531,8 +2558,10 @@ def upsert_library_item(
     connection: sqlite3.Connection | None = None,
     ai_usage: dict[str, Any] | None = None,
     meeting_minutes: dict[str, Any] | None = None,
+    original_segments: list[dict[str, Any]] | None = None,
 ) -> sqlite3.Row:
     validate_json_value(segments)
+    validate_json_value(original_segments)
     validate_json_value(speaker_names)
     validate_json_value(outline)
     validate_json_value(emotion_analysis)
@@ -2543,6 +2572,7 @@ def upsert_library_item(
     validate_json_value(ai_usage)
     now = utc_now_iso()
     segments = ensure_segment_ids(item_id, segments)
+    import_segments = ensure_segment_ids(item_id, original_segments) if original_segments is not None else segments
     session_profile = normalize_session_profile(session_profile)
     meeting_minutes = normalize_meeting_minutes(meeting_minutes)
     labels = {str(item.get("speaker") or "UNKNOWN") for item in segments}
@@ -2552,6 +2582,9 @@ def upsert_library_item(
         speaker_names,
     )
     def persist(active_connection: sqlite3.Connection) -> sqlite3.Row:
+        if not active_connection.in_transaction:
+            active_connection.execute("BEGIN IMMEDIATE")
+        previous = active_connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
         if expected_revision is not None:
             if not active_connection.in_transaction:
                 active_connection.execute("BEGIN IMMEDIATE")
@@ -2563,6 +2596,8 @@ def upsert_library_item(
             current_revision = int(current["revision_count"] or 0)
             if current_revision != expected_revision:
                 raise TranscriptConflictError(current_revision)
+        if previous is not None:
+            preparation.capture(active_connection, previous, "legacy_current_baseline")
         active_connection.execute(
             """
             INSERT INTO library_items (
@@ -2589,7 +2624,7 @@ def upsert_library_item(
             (
                 item_id, source_name, str(output_dir), str(media_path) if media_path else None,
                 language, json.dumps(segments, ensure_ascii=False),
-                json.dumps(segments, ensure_ascii=False), "initial_import",
+                json.dumps(import_segments, ensure_ascii=False), "initial_import",
                 json.dumps(speaker_names, ensure_ascii=False),
                 json.dumps(outline, ensure_ascii=False) if outline else None,
                 json.dumps(meeting_minutes, ensure_ascii=False),
@@ -2608,6 +2643,7 @@ def upsert_library_item(
         ).fetchone()
         if row is None:
             raise RuntimeError("The library record could not be read back before commit.")
+        preparation.capture(active_connection, row, "saved" if previous is not None else "initial_import")
         return row
 
     if connection is not None:
@@ -4696,6 +4732,8 @@ def analysis_bool(value: Any, default: bool = False) -> bool:
 def default_analysis_config() -> dict[str, Any]:
     return {
         "research_question": "",
+        "analysis_method": "auto",
+        "method_rationale": "",
         "analysis_unit": "turn",
         "exclude_moderator": True,
         "excluded_speakers": [],
@@ -4711,6 +4749,9 @@ def default_analysis_config() -> dict[str, Any]:
         "statistics_group_by": "speaker",
         "crosstab_terms": [],
         "codebook": [],
+        "codebook_version": 0,
+        "codebook_change_reason": "",
+        "codebook_history": [],
         "analyst_memo": "",
         "interpretation_status": "draft",
     }
@@ -4741,9 +4782,34 @@ def normalize_analysis_codebook(raw: Any) -> list[dict[str, str]]:
             "description": clean_multiline(value.get("description"), 4000),
             "include_example": clean_multiline(value.get("include_example"), 2000),
             "exclude_example": clean_multiline(value.get("exclude_example"), 2000),
+            "category": clean_single_line(value.get("category"), 160),
+            "theme": clean_single_line(value.get("theme"), 160),
             "color": color,
         })
     return codebook
+
+
+def normalize_codebook_history(raw: Any) -> list[dict[str, Any]]:
+    """Keep a compact, inspectable log of intentional codebook revisions."""
+    if not isinstance(raw, list):
+        return []
+    history: list[dict[str, Any]] = []
+    for value in raw[-20:]:
+        if not isinstance(value, dict):
+            continue
+        try:
+            version = int(value.get("version", 0))
+        except (TypeError, ValueError):
+            version = 0
+        if version < 1:
+            continue
+        history.append({
+            "version": version,
+            "changed_at": clean_single_line(value.get("changed_at"), 80),
+            "reason": clean_multiline(value.get("reason"), 2000),
+            "summary": clean_multiline(value.get("summary"), 4000),
+        })
+    return history
 
 
 def normalize_analysis_group_by(value: Any) -> str:
@@ -4772,8 +4838,17 @@ def normalize_analysis_config(raw: Any) -> dict[str, Any]:
     status = clean_single_line(
         source.get("interpretation_status", config["interpretation_status"]), 30
     )
+    analysis_method = clean_single_line(
+        source.get("analysis_method", config["analysis_method"]), 40
+    )
+    try:
+        codebook_version = int(source.get("codebook_version", 0))
+    except (TypeError, ValueError):
+        codebook_version = 0
     config.update({
         "research_question": clean_multiline(source.get("research_question"), 10000),
+        "analysis_method": analysis_method if analysis_method in ANALYSIS_METHODS else "auto",
+        "method_rationale": clean_multiline(source.get("method_rationale"), 4000),
         "analysis_unit": unit if unit in ANALYSIS_UNITS else "turn",
         "exclude_moderator": analysis_bool(source.get("exclude_moderator"), True),
         "excluded_speakers": [
@@ -4805,6 +4880,9 @@ def normalize_analysis_config(raw: Any) -> dict[str, Any]:
         ),
         "crosstab_terms": normalize_tags(source.get("crosstab_terms"))[:30],
         "codebook": normalize_analysis_codebook(source.get("codebook")),
+        "codebook_version": max(0, min(codebook_version, 100000)),
+        "codebook_change_reason": clean_multiline(source.get("codebook_change_reason"), 2000),
+        "codebook_history": normalize_codebook_history(source.get("codebook_history")),
         "analyst_memo": clean_multiline(source.get("analyst_memo"), 30000),
         "interpretation_status": (
             status if status in ANALYSIS_INTERPRETATION_STATUSES else "draft"
@@ -4842,6 +4920,37 @@ def normalize_analysis_annotations(
             tag = str(tag)
             if tag in ANALYSIS_INTERACTION_TAGS and tag not in tags:
                 tags.append(tag)
+        elicitation = clean_single_line(value.get("elicitation"), 40)
+        if elicitation not in ANALYSIS_ELICITATION_TYPES:
+            elicitation = "unknown"
+        links: list[dict[str, str]] = []
+        raw_links = (
+            value.get("interaction_links")
+            if isinstance(value.get("interaction_links"), list)
+            else []
+        )
+        seen_links: set[tuple[str, str, str]] = set()
+        for raw_link in raw_links[:50]:
+            if not isinstance(raw_link, dict):
+                continue
+            target_segment_id = clean_single_line(raw_link.get("target_segment_id"), 160)
+            relation = clean_single_line(raw_link.get("relation"), 40)
+            if (
+                not target_segment_id
+                or target_segment_id == segment_id
+                or relation not in ANALYSIS_INTERACTION_RELATIONS
+            ):
+                continue
+            evidence_memo = clean_multiline(raw_link.get("evidence_memo"), 2000)
+            key = (target_segment_id, relation, evidence_memo)
+            if key in seen_links:
+                continue
+            seen_links.add(key)
+            links.append({
+                "target_segment_id": target_segment_id,
+                "relation": relation,
+                "evidence_memo": evidence_memo,
+            })
         annotation = {
             "codes": codes,
             "interaction_tags": tags,
@@ -4849,7 +4958,14 @@ def normalize_analysis_annotations(
             "important": analysis_bool(value.get("important"), False),
             "excluded": analysis_bool(value.get("excluded"), False),
         }
-        if any((codes, tags, annotation["memo"], annotation["important"], annotation["excluded"])):
+        if elicitation != "unknown":
+            annotation["elicitation"] = elicitation
+        if links:
+            annotation["interaction_links"] = links
+        if any((
+            codes, tags, elicitation != "unknown", links, annotation["memo"],
+            annotation["important"], annotation["excluded"],
+        )):
             annotations[segment_id] = annotation
     return annotations
 
@@ -4924,7 +5040,8 @@ def analysis_segment_bounds(segment: dict[str, Any]) -> tuple[float, float, bool
     if not math.isfinite(raw_start) or not math.isfinite(raw_end):
         return 0.0, 0.0, False
     valid = (
-        raw_start >= 0
+        preparation.valid_time(segment)
+        and raw_start >= 0
         and raw_end >= raw_start
         and raw_start <= ANALYSIS_MAX_TIMELINE_SECONDS
         and raw_end <= ANALYSIS_MAX_TIMELINE_SECONDS
@@ -4960,12 +5077,368 @@ def analysis_emotion_entries(segment: dict[str, Any]) -> list[dict[str, str]]:
     return entries
 
 
+FOCUS_GROUP_METHOD_REFERENCES = [
+    {
+        "method_id": "qualitative_content",
+        "citation": "Hsieh & Shannon (2005), Three Approaches to Qualitative Content Analysis",
+        "url": "https://doi.org/10.1177/1049732305276687",
+    },
+    {
+        "method_id": "thematic",
+        "citation": "Braun & Clarke (2006), Using thematic analysis in psychology",
+        "url": "https://doi.org/10.1191/1478088706qp063oa",
+    },
+    {
+        "method_id": "framework",
+        "citation": "Gale et al. (2013), Using the framework method for qualitative data analysis",
+        "url": "https://doi.org/10.1186/1471-2288-13-117",
+    },
+    {
+        "method_id": "interaction",
+        "citation": "Kitzinger (1994), The methodology of focus groups: the importance of interaction",
+        "url": "https://doi.org/10.1111/1467-9566.ep11347023",
+    },
+]
+
+
+def focus_group_data_inventory(
+    row: sqlite3.Row,
+    session_profile: dict[str, str],
+    config: dict[str, Any],
+    timeline: list[dict[str, Any]],
+    speaker_metrics: list[dict[str, Any]],
+    profiles: dict[str, dict[str, Any]],
+    original_snapshot_status: str,
+) -> list[dict[str, Any]]:
+    """Describe only available evidence; blank fields remain explicitly unknown."""
+    valid_times = sum(1 for item in timeline if item.get("valid_time"))
+    roles = {str(item.get("role") or "") for item in speaker_metrics}
+    attributes_present = any(
+        profile.get("organization") or profile.get("department")
+        or profile.get("job_title") or profile.get("attributes")
+        for profile in profiles.values()
+    )
+    media_value = str(row["media_path"] or "")
+    suffix = Path(media_value).suffix.lower()
+    try:
+        media_exists = bool(media_value and Path(media_value).is_file())
+    except OSError:
+        media_exists = False
+    if suffix in VIDEO_EXTENSIONS:
+        video_status = "利用可" if media_exists else "登録あり・所在未確認"
+        audio_status = "動画音声として利用可" if media_exists else "登録あり・所在未確認"
+    elif suffix in ALLOWED_EXTENSIONS:
+        video_status = "不明"
+        audio_status = "利用可" if media_exists else "登録あり・所在未確認"
+    else:
+        video_status = "不明"
+        audio_status = "不明"
+    return [
+        {
+            "item": "研究目的",
+            "status": "確認済み" if session_profile.get("objective") else "不明",
+            "value": session_profile.get("objective") or "不明",
+        },
+        {
+            "item": "研究質問",
+            "status": "確認済み" if config.get("research_question") else "不明",
+            "value": config.get("research_question") or "不明",
+        },
+        {
+            "item": "インタビューのテーマ・質問項目",
+            "status": "確認済み" if session_profile.get("moderator_guide") else "不明",
+            "value": session_profile.get("moderator_guide") or "不明",
+        },
+        {
+            "item": "実際のグループID",
+            "status": "確認済み" if session_profile.get("interview_group_id") else "不明",
+            "value": session_profile.get("interview_group_id") or "不明",
+        },
+        {
+            "item": "グループ数",
+            "status": "不明",
+            "value": "このレコードだけからは不明（比較対象として扱う回の指定が必要）",
+        },
+        {
+            "item": "このレコードの参加者数",
+            "status": "確認済み" if timeline else "不明",
+            "value": str(sum(1 for item in speaker_metrics if item.get("role") not in ANALYSIS_NON_PARTICIPANT_ROLES)) if timeline else "不明",
+        },
+        {
+            "item": "参加者属性・比較属性",
+            "status": "確認済み" if attributes_present else "不明",
+            "value": "話者プロファイルに登録あり" if attributes_present else "不明",
+        },
+        {
+            "item": "発言者・発言順",
+            "status": "確認済み" if timeline and all(item.get("id") and item.get("speaker") for item in timeline) else "不明",
+            "value": f"{len(timeline)}発話。発言順は保存配列に分析用付番（原資料との確認は別）" if timeline else "不明",
+        },
+        {
+            "item": "時刻または元ファイル内の位置",
+            "status": "確認済み" if timeline and valid_times == len(timeline) else ("一部" if valid_times else "不明"),
+            "value": f"{valid_times}/{len(timeline)}発話に有効な時刻" if timeline else "不明",
+        },
+        {
+            "item": "司会者の発言・役割",
+            "status": "確認済み" if roles & ANALYSIS_FACILITATOR_ROLES else "不明",
+            "value": "役割登録あり" if roles & ANALYSIS_FACILITATOR_ROLES else "不明",
+        },
+        {
+            "item": "逐語録",
+            "status": "利用可" if timeline else "不明",
+            "value": f"{len(timeline)}発話（編集用本文と原文スナップショットは分離）" if timeline else "不明",
+        },
+        {"item": "原文スナップショットの来歴", "status": original_snapshot_status, "value": original_snapshot_status},
+        {"item": "音声", "status": audio_status, "value": audio_status},
+        {"item": "動画", "status": video_status, "value": video_status},
+    ]
+
+
+def build_focus_group_analysis_plan(
+    row: sqlite3.Row,
+    session_profile: dict[str, str],
+    config: dict[str, Any],
+    timeline: list[dict[str, Any]],
+    speaker_metrics: list[dict[str, Any]],
+    profiles: dict[str, dict[str, Any]],
+    original_snapshot_status: str,
+) -> dict[str, Any]:
+    inventory = focus_group_data_inventory(
+        row, session_profile, config, timeline, speaker_metrics, profiles,
+        original_snapshot_status,
+    )
+    has_transcript = bool(timeline)
+    has_order = has_transcript and all(item.get("id") and item.get("speaker") for item in timeline)
+    has_times = has_transcript and any(item.get("valid_time") for item in timeline)
+    has_comparison_axis = config.get("group_by") != "none" or bool(session_profile.get("comparison_group"))
+    selected = str(config.get("analysis_method") or "auto")
+    primary = "qualitative_content" if selected == "auto" else selected
+    provisional = not bool(config.get("research_question") or session_profile.get("objective"))
+    method_rows: list[dict[str, Any]] = []
+
+    def add(method_id: str, role: str, sufficient: bool, reason: str, limitation: str) -> None:
+        method_rows.append({
+            "method_id": method_id,
+            "method": ANALYSIS_METHODS[method_id],
+            "role": role,
+            "data_sufficiency": "要確認（データあり。手法の要件充足は未判定）" if sufficient else "不足",
+            "reason": reason,
+            "limitation": limitation,
+        })
+
+    primary_reason = {
+        "qualitative_content": "意見・課題・ニーズを文脈に沿ってコードとカテゴリーへ整理するため。",
+        "thematic": "経験や考え方に共通する意味のパターンを検討するため。",
+        "framework": "ケース・話者・属性を行列で比較するため。",
+        "scat": "少量のデータで段階的な解釈過程を明示するため。",
+        "mgta": "認識や関係性が変化する過程を説明するため。",
+        "kj": "多様な意見の構造をカード化して検討するため。",
+        "quantitative_text": "語彙的傾向を補助的に確認するため。",
+        "interaction": "その場の応答を通じた意見形成を検討するため。",
+    }[primary]
+    primary_limitations = {
+        "qualitative_content": "コード・カテゴリーの確定は研究者が原文と文脈を読んで行う。",
+        "thematic": "自動クラスタはテーマ分析の代替ではない。",
+        "framework": "複数の比較可能なグループ／属性が未設定なら行列比較はできない。",
+        "scat": "4段階のコーディング、ストーリーライン、理論記述は研究者が実施する。",
+        "mgta": "分析テーマ・分析焦点者・継続比較を設定しなければ理論生成とは呼べない。",
+        "kj": "自動類似クラスタリングはKJ法ではなく、カード化と関係づけが必要。",
+        "quantitative_text": "頻度・共起から意味や重要性を断定しない。",
+        "interaction": "正確な応答関係の確認には話者・順序のある逐語録が必要。",
+    }[primary]
+    add(primary, "主", has_transcript, primary_reason, primary_limitations)
+    if primary != "interaction":
+        add(
+            "interaction", "補助", has_order,
+            "内容分析とは別に、同意・反論・補足・意見変化を根拠発話の連鎖で検討するため。",
+            "時刻があっても、声色・沈黙の長さ・重なり・表情は音声／動画と適切な転記なしには解釈しない。",
+        )
+    if has_comparison_axis and primary != "framework":
+        add(
+            "framework", "補助", has_transcript,
+            "話者または属性による共通点・相違点を、原発話へ戻れる行列で確認するため。",
+            "比較対象のグループ数と同一性は研究者が明示する。",
+        )
+    if primary != "quantitative_text":
+        add(
+            "quantitative_text", "補助", has_transcript,
+            "語彙・共起の偏りを探索し、原発話を読み返す入口にするため。",
+            "頻度は支持人数、代表性、重要性の指標ではない。",
+        )
+    not_selected = [
+        {"method_id": method_id, "method": label,
+         "reason": "主手法として未選択。研究目的・分析単位・必要な固有手順を研究者が確認してから採用する。"}
+        for method_id, label in ANALYSIS_METHODS.items()
+        if method_id not in {"auto", *(item["method_id"] for item in method_rows)}
+    ]
+    return {
+        "status": "暫定" if provisional or selected == "auto" else "研究者による選択案",
+        "provisional_assumption": (
+            "研究目的または研究質問が未入力のため、内容を整理する質的内容分析と相互作用分析を暫定案とする。"
+            if provisional else "手法は既定案または研究者の選択。研究目的への適合は自動判定していない。"
+        ),
+        "researcher_method_rationale": config.get("method_rationale") or "未入力",
+        "analysis_unit": "保存逐語録の発話。保存配列の順に分析用付番。発話の区切り・順序が確認済みかは準備記録で区別する。",
+        "data_inventory": inventory,
+        "methods": method_rows,
+        "not_selected_methods": not_selected,
+        "integration": "内容分析では何が語られたかをコード・カテゴリー・テーマで扱い、相互作用分析では発話間リンクと連続文脈を別表で扱う。両者を混同せず、同じ根拠発話IDから照合する。",
+        "procedure": [
+            "原文スナップショットと編集用本文の来歴を確認し、研究目的・質問・比較設計を確定する。",
+            "発話単位でコードを付与し、コード定義・適用条件・除外条件・変更理由をコードブックに残す。",
+            "コードをカテゴリー・テーマへ統合し、少数意見、反例、矛盾を原文とともに検討する。",
+            "同意・反論・補足・変化は、発話間リンクとその連続した文脈を根拠に別途検討する。",
+            "比較を行う場合は、同じ質問設計のグループを明示し、行列から原発話へ戻って解釈する。",
+        ],
+        "references": FOCUS_GROUP_METHOD_REFERENCES,
+    }
+
+
+def focus_group_analysis_report_markdown(analysis: dict[str, Any]) -> str:
+    """Render a conservative report: facts and analyst interpretation stay separate."""
+    plan = analysis.get("manual", {}).get("focus_group_plan", {})
+    item = analysis.get("item", {})
+    automatic = analysis.get("automatic", {})
+    manual = analysis.get("manual", {})
+    lines = [
+        "# グループインタビュー分析レポート（下書き）",
+        "",
+        "## 研究目的と分析方針",
+        "",
+        f"- 研究目的: {item.get('session_profile', {}).get('objective') or '不明'}",
+        f"- 研究質問: {analysis.get('config', {}).get('research_question') or '不明'}",
+        f"- 方針の状態: {plan.get('status', '不明')}",
+        f"- 前提: {plan.get('provisional_assumption', '不明')}",
+        f"- 研究者が記録した手法選定理由: {plan.get('researcher_method_rationale', '未入力')}",
+        "",
+        "## データ確認結果",
+        "",
+    ]
+    for entry in plan.get("data_inventory", []):
+        lines.append(f"- {entry.get('item')}: {entry.get('value')}（{entry.get('status')}）")
+    overview = automatic.get("overview", {})
+    prepared = manual.get("preparation", {})
+    reviewed_rows = {r["segment_id"]: r for r in prepared.get("rows", [])}
+    lines.extend([
+        f"- 分析対象版: {prepared.get('input_version') or '未固定'} / source_hash: {prepared.get('source_hash', '不明')}",
+        f"- 逐語録準備状態: {prepared.get('status', 'draft')}。本文照合と話者・順序の確認は別に管理する。",
+        "- 引用はこの分析対象版の本文。取込原本・加工文とは区別し、未確認の本文を音声照合済みとは扱わない。",
+    ])
+    if prepared.get("analysis_needs_review"):
+        lines.append("- 要再確認: 入力版または確認状態と分析の根拠が一致しないため、旧コード・相互作用を現在の本文の結果として提示しない。")
+    lines.extend([
+        "",
+        "## 採用手法と役割",
+        "",
+    ])
+    for method in plan.get("methods", []):
+        lines.append(
+            f"- {method.get('role')}：{method.get('method')} — {method.get('reason')} "
+            f"データ充足: {method.get('data_sufficiency')}。限界: {method.get('limitation')}"
+        )
+    lines.extend([
+        "",
+        "## 分析単位と手順",
+        "",
+        f"- 分析単位: {plan.get('analysis_unit', '不明')}",
+    ])
+    for step in plan.get("procedure", []):
+        lines.append(f"- {step}")
+    lines.extend([
+        "",
+        "## 直接確認できるデータ概要",
+        "",
+        f"- 発話数: {overview.get('segment_count', 0)}、実参加人数: {prepared.get('participant_count') if prepared.get('participant_count') is not None else '不明'}、確認済み発言者数: {prepared.get('known_speaker_count', 0)}。",
+        f"- 時間情報: 総発話時間 {overview.get('total_speaking_seconds', 0)} 秒。",
+        "- 以下のコード・相互作用の件数は記録済みの注釈数であり、重要性・代表性・支持人数を意味しない。",
+        "",
+        "## 内容に関する結果（コード済みの事実）",
+        "",
+    ])
+    metrics = [
+        metric for metric in manual.get("code_metrics", [])
+        if int(metric.get("segment_count") or 0) > 0
+    ]
+    if prepared.get("analysis_needs_review"):
+        metrics = []
+    if metrics:
+        segments = analysis.get("segments", [])
+        for metric in metrics:
+            group_count = metric.get("group_count")
+            lines.append(
+                f"- {metric.get('label')}: {metric.get('segment_count', 0)}発話、"
+                f"{metric.get('speaker_count', 0)}話者、"
+                f"{'不明' if group_count is None else group_count}グループ。"
+            )
+            evidence = [
+                segment for segment in segments
+                if metric.get("id") in segment.get("annotation", {}).get("codes", [])
+                and not segment.get("excluded")
+            ][:3]
+            for segment in evidence:
+                state = reviewed_rows.get(segment['id'], {}).get('text_status', 'unreviewed')
+                lines.append(f"  - 根拠発話 {segment['id']}（分析対象版・本文確認: {state}）: {segment.get('text', '')}")
+    else:
+        lines.append("- コードが未入力または根拠が要再確認のため、内容に関する結果は出力しない。")
+    lines.extend([
+        "",
+        "## 相互作用に関する所見（根拠発話リンク）",
+        "",
+    ])
+    links = manual.get("interaction_links", [])
+    if prepared.get("analysis_needs_review"):
+        links = []
+    if links:
+        by_id = {str(segment.get("id") or ""): segment for segment in analysis.get("segments", [])}
+        for link in links:
+            if link.get("status") == "missing_target":
+                lines.append(f"- 要再確認: {link.get('source_segment_id')} の参照先 {link.get('target_segment_id')} は削除済み。記録は保持。")
+                continue
+            lines.append(
+                f"- {link.get('relation_label')}：{link.get('target_segment_id')} → "
+                f"{link.get('source_segment_id')}（文脈発話ID: "
+                f"{', '.join(link.get('context_segment_ids', []))}）"
+            )
+            for segment_id in link.get("context_segment_ids", []):
+                segment = by_id.get(str(segment_id))
+                if segment is None:
+                    continue
+                state = reviewed_rows.get(segment_id, {}).get('text_status', 'unreviewed')
+                lines.append(f"  - #{segment.get('utterance_order')} {segment.get('speaker_name')} [{segment_id} / {state}]: {segment.get('text', '')}")
+    else:
+        lines.append("- 根拠発話を結ぶ相互作用リンクが未入力のため、意見形成・変化に関する所見はまだ出力しない。")
+    lines.extend([
+        "",
+        "## 研究者の解釈（データ上の事実とは別）",
+        "",
+        manual.get("analyst_memo") or "- 研究者の解釈メモは未入力。",
+        "",
+        "## 反例・少数意見・限界",
+        "",
+        "- 反例・少数意見・矛盾する発言は、研究者がコードと原文を照合して記録する必要がある。未記録の沈黙や反論の不在を同意とは扱わない。",
+        "- 音声・動画または精密な転記がなければ、声色、正確な沈黙時間、発話の重なり、表情は解釈しない。",
+        "- AIによる候補、語彙集計、意味クラスタは研究者の確認前の補助情報であり、テーマ・概念・因果関係を確定しない。",
+        "",
+        "## 方法の参照文献",
+        "",
+    ])
+    for reference in plan.get("references", []):
+        lines.append(f"- [{reference.get('citation')}]({reference.get('url')})")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def group_analysis_for_row(
     row: sqlite3.Row,
     *,
     include_research_rows: bool = False,
 ) -> dict[str, Any]:
     segments = row_segments(row)
+    with database_connection() as connection:
+        prepared = preparation.view(connection, row, segments)
+    prepared_by_id = {value["segment_id"]: value for value in prepared["rows"]}
+    original_segments, original_segments_status = row_original_segments(row)
     config = row_analysis_config(row)
     annotations, orphaned_annotations = row_analysis_annotation_state(
         row, segments, config
@@ -4991,7 +5464,8 @@ def group_analysis_for_row(
     codebook = {str(item["id"]): item for item in config["codebook"]}
     excluded_speakers = set(config["excluded_speakers"])
 
-    ordered = sorted(segments, key=lambda item: analysis_segment_bounds(item)[:2])
+    # Missing times are never invented to establish conversational order.
+    ordered = segments
     included: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
     speaker_buckets: dict[str, dict[str, Any]] = {}
@@ -5001,16 +5475,17 @@ def group_analysis_for_row(
     zero_duration_count = 0
     invalid_time_count = 0
 
-    for segment in ordered:
+    for source_index, segment in enumerate(ordered, 1):
         segment_id = str(segment.get("id") or "")
         speaker = str(segment.get("speaker") or "UNKNOWN")
         start, end, valid_time = analysis_segment_bounds(segment)
         if not valid_time:
             invalid_time_count += 1
         duration = max(0.0, end - start)
-        text = str(segment.get("text") or "").strip()
+        text = str(segment.get("text") or "")
         annotation = annotations.get(segment_id, {
-            "codes": [], "interaction_tags": [], "memo": "",
+            "codes": [], "interaction_tags": [], "elicitation": "unknown",
+            "interaction_links": [], "memo": "",
             "important": False, "excluded": False,
         })
         profile = profiles.get(speaker, {})
@@ -5020,6 +5495,8 @@ def group_analysis_for_row(
             or default_speaker_name(speaker)
         )
         role = str(profile.get("session_role") or "participant")
+        if prepared_by_id.get(segment_id, {}).get("role", "unknown") != "unknown":
+            role = prepared_by_id[segment_id]["role"]
         color = str(profile.get("theme_color") or "#1C6B50")
         emotion_details = analysis_emotion_entries(segment)
         emotions = list(dict.fromkeys(item["label_ja"] for item in emotion_details))
@@ -5035,6 +5512,10 @@ def group_analysis_for_row(
         )
         item = {
             "id": segment_id,
+            # Analysis-only numbering of the saved transcript array, not proof
+            # that source order or ASR turn boundaries have been verified.
+            "utterance_order": source_index,
+            "group_id": session_profile.get("interview_group_id") or "不明",
             "start": round(start, 3),
             "end": round(end, 3),
             "duration": round(duration, 3),
@@ -5043,6 +5524,14 @@ def group_analysis_for_row(
             "role": role,
             "color": color,
             "text": text,
+            "original_text": str(
+                original_segments.get(segment_id, {}).get("text") or ""
+            ),
+            "original_text_available": segment_id in original_segments,
+            "original_text_status": original_segments_status,
+            "input_version": prepared["input_version"],
+            "source_hash": prepared["source_hash"],
+            "analysis_needs_review": prepared["analysis_needs_review"],
             "characters": len(re.sub(r"\s+", "", text)),
             "emotions": emotions,
             "emotion_details": emotion_details,
@@ -5093,6 +5582,15 @@ def group_analysis_for_row(
             emotion_row["seconds"] += duration
         for code_id in annotation.get("codes", []):
             bucket["code_counts"][code_id] += 1
+
+    # Keep transcript adjacency with every analysis row.  It is intentionally
+    # based on all ordered turns, including excluded ones, so a reviewer can
+    # return to the original conversational context.
+    for index, item in enumerate(timeline):
+        item["previous_segment_id"] = timeline[index - 1]["id"] if index else ""
+        item["next_segment_id"] = (
+            timeline[index + 1]["id"] if index + 1 < len(timeline) else ""
+        )
 
     valid_included = [
         item for item in included
@@ -5378,7 +5876,9 @@ def group_analysis_for_row(
             "segment_count": len(coded),
             "speaking_seconds": round(sum(float(item["duration"]) for item in coded), 3),
             "characters": sum(int(item["characters"]) for item in coded),
-            "speaker_count": len({item["speaker"] for item in coded}),
+            "speaker_count": len({item["speaker"] for item in coded if item["speaker"] != "UNKNOWN"}),
+            "unknown_speaker_turns": sum(item["speaker"] == "UNKNOWN" for item in coded),
+            "group_count": 1 if coded and session_profile.get("interview_group_id") else None,
             "important_count": sum(1 for item in coded if item["annotation"].get("important")),
         })
     interaction_counts = Counter(
@@ -5390,6 +5890,49 @@ def group_analysis_for_row(
         {"tag": key, "label": label, "count": int(interaction_counts.get(key, 0))}
         for key, label in ANALYSIS_INTERACTION_TAGS.items()
     ]
+    timeline_positions = {item["id"]: index for index, item in enumerate(timeline)}
+    timeline_by_id = {item["id"]: item for item in timeline}
+    interaction_links: list[dict[str, Any]] = []
+    for item in timeline:
+        for link in item["annotation"].get("interaction_links", []):
+            target_id = str(link.get("target_segment_id") or "")
+            target = timeline_by_id.get(target_id)
+            if target is None:
+                interaction_links.append({"source_segment_id": item["id"], "target_segment_id": target_id,
+                    "source_order": item["utterance_order"], "target_order": 0,
+                    "relation": link.get("relation"), "relation_label": ANALYSIS_INTERACTION_RELATIONS.get(link.get("relation"), ""),
+                    "evidence_memo": link.get("evidence_memo", ""), "status": "missing_target",
+                    "context_segment_ids": [], "analysis_needs_review": True})
+                continue
+            first, last = sorted((timeline_positions[target_id], timeline_positions[item["id"]]))
+            # A bounded run is exported as auditable context.  If the two
+            # turns are far apart, the endpoint turns are still retained but
+            # we do not imply that all omitted intervening turns were read.
+            context_ids = [value["id"] for value in timeline[first:last + 1]]
+            interaction_links.append({
+                "status": "needs_review" if prepared["analysis_needs_review"] else "recorded",
+                "analysis_needs_review": prepared["analysis_needs_review"],
+                "relation": str(link.get("relation") or ""),
+                "relation_label": ANALYSIS_INTERACTION_RELATIONS.get(
+                    str(link.get("relation") or ""), str(link.get("relation") or "")
+                ),
+                "source_segment_id": item["id"],
+                "source_order": item["utterance_order"],
+                "source_speaker": item["speaker"],
+                "source_speaker_name": item["speaker_name"],
+                "source_role": item["role"],
+                "source_text": item["text"],
+                "target_segment_id": target["id"],
+                "target_order": target["utterance_order"],
+                "target_speaker": target["speaker"],
+                "target_speaker_name": target["speaker_name"],
+                "target_role": target["role"],
+                "target_text": target["text"],
+                "context_segment_ids": context_ids,
+                "context_truncated": last - first + 1 > len(context_ids),
+                "evidence_memo": str(link.get("evidence_memo") or ""),
+            })
+    interaction_links.sort(key=lambda value: (value["source_order"], value["target_order"], value["relation"]))
     case_code_matrix = []
     for metric in speaker_metrics:
         case_code_matrix.append({
@@ -5529,11 +6072,38 @@ def group_analysis_for_row(
             ),
             "kind": "manual",
         },
+        {
+            "id": "original_snapshot",
+            "label": "原文スナップショット",
+            "ready": original_segments_status in {"initial_import", "migrated_current_snapshot"},
+            "kind": "automatic",
+        },
+        {
+            "id": "interaction_links",
+            "label": "根拠発話を結ぶ相互作用記録",
+            "ready": bool(interaction_links),
+            "kind": "manual",
+        },
     ]
+    focus_group_plan = build_focus_group_analysis_plan(
+        row, session_profile, config, timeline, speaker_metrics, profiles,
+        original_segments_status,
+    )
+    for entry in focus_group_plan["data_inventory"]:
+        if entry["item"] == "このレコードの参加者数":
+            entry.update(status="確認済み" if prepared["participant_count"] is not None else "不明",
+                         value=str(prepared["participant_count"]) if prepared["participant_count"] is not None else "不明（発言した話者数と実参加人数は別）")
+        elif entry["item"] == "発言者・発言順":
+            entry.update(status="確認済み" if timeline and prepared["order_verified"] and not prepared["unknown_speaker_turns"] else "不明",
+                         value=f"話者未確認 {prepared['unknown_speaker_turns']}発言。順序確認: {prepared['order_verified']}")
+        elif entry["item"] == "司会者の発言・役割":
+            ready = any(r["role"] == "moderator" and r["speaker_verified"] for r in prepared["rows"])
+            entry.update(status="確認済み" if ready else "不明", value="準備画面で確認済み" if ready else "不明")
 
     analysis = {
+        # Additive fields preserve the v1 export contract for existing tools.
         "schema_version": 1,
-        "algorithm_version": "focus-group-local-1",
+        "algorithm_version": "focus-group-local-2",
         "generated_at": utc_now_iso(),
         "item": {
             "id": row["id"],
@@ -5593,12 +6163,16 @@ def group_analysis_for_row(
             },
         },
         "manual": {
+            "preparation": prepared,
             "codebook": list(codebook.values()),
+            "codebook_version": config["codebook_version"],
+            "codebook_history": config["codebook_history"],
             "code_metrics": code_metrics,
             "interaction_tags": [
                 {"id": key, "label": label} for key, label in ANALYSIS_INTERACTION_TAGS.items()
             ],
             "interaction_summary": interaction_summary,
+            "interaction_links": interaction_links,
             "case_code_matrix": case_code_matrix,
             "coded_segment_count": sum(1 for item in included if item["annotation"].get("codes")),
             "important_quote_count": sum(1 for item in included if item["annotation"].get("important")),
@@ -5610,6 +6184,7 @@ def group_analysis_for_row(
                 {"segment_id": segment_id, **value}
                 for segment_id, value in orphaned_annotations.items()
             ],
+            "focus_group_plan": focus_group_plan,
         },
         "segments": timeline,
         "exports": {
@@ -5656,10 +6231,13 @@ def group_analysis_for_row(
         analysis["exports"][dataset] = (
             f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
         )
+    for dataset in ("prepared_turns", "analysis_units", "analysis_plan", "codebook_history", "interaction_links"):
+        analysis["exports"][dataset] = f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
     return analysis
 
 
 ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
+    "prepared_turns": preparation.FIELDS,
     "speakers": [
         "speaker", "speaker_name", "role", "turn_count", "speaking_seconds",
         "speaking_percent", "participant_percent", "average_turn_seconds",
@@ -5685,24 +6263,40 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "index", "start", "end", "speaking_seconds", "turn_count", "speakers",
     ],
     "codes": [
-        "id", "label", "description", "include_example", "exclude_example",
+        "id", "label", "description", "include_example", "exclude_example", "category", "theme",
         "color", "segment_count", "speaking_seconds", "characters",
-        "speaker_count", "important_count",
+        "speaker_count", "group_count", "important_count",
     ],
+    "codebook_history": ["version", "changed_at", "reason", "summary"],
     "groups": [
         "group", "speaker_count", "turn_count", "speaking_seconds",
         "speaking_percent", "characters",
     ],
     "coded_segments": [
-        "segment_id", "start", "end", "duration", "speaker", "speaker_name",
-        "role", "text", "code_ids", "code_labels", "interaction_tags", "memo",
-        "important", "excluded",
+        "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
+        "role", "text", "original_text", "original_text_available", "original_text_status",
+        "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
+        "interaction_tags", "elicitation", "interaction_links", "memo", "important", "excluded",
+    ],
+    "analysis_units": [
+        "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
+        "role", "text", "original_text", "original_text_available", "original_text_status",
+        "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
+        "interaction_tags", "elicitation", "interaction_links", "memo", "important", "excluded",
     ],
     "interactions": ["tag", "label", "count"],
+    "interaction_links": [
+        "status", "analysis_needs_review",
+        "relation", "relation_label", "source_segment_id", "source_order", "source_speaker",
+        "source_speaker_name", "source_role", "source_text", "target_segment_id", "target_order",
+        "target_speaker", "target_speaker_name", "target_role", "target_text", "context_segment_ids",
+        "context_truncated", "evidence_memo",
+    ],
     "case_matrix": ["speaker", "speaker_name", "role", "codes"],
     "context": ["id", "label", "ready", "kind"],
     "summary": ["section", "metric", "value"],
     "observations": ["level", "label", "message"],
+    "analysis_plan": ["section", "item", "status", "value", "role", "data_sufficiency", "reason", "limitation"],
     "important_quotes": [
         "segment_id", "start", "end", "speaker", "speaker_name", "role", "text",
         "code_labels", "memo", "excluded",
@@ -5738,7 +6332,9 @@ def analysis_csv_rows(
     code_labels = {
         str(item["id"]): str(item["label"]) for item in manual["codebook"]
     }
+    code_details = {str(item["id"]): item for item in manual["codebook"]}
     coded_segments = []
+    analysis_units = []
     important_quotes = []
     for segment in analysis["segments"]:
         annotation = segment["annotation"]
@@ -5746,8 +6342,20 @@ def analysis_csv_rows(
             code_labels.get(str(code_id), str(code_id))
             for code_id in annotation.get("codes", [])
         ]
+        categories = list(dict.fromkeys(
+            str(code_details.get(str(code_id), {}).get("category") or "")
+            for code_id in annotation.get("codes", [])
+            if str(code_details.get(str(code_id), {}).get("category") or "")
+        ))
+        themes = list(dict.fromkeys(
+            str(code_details.get(str(code_id), {}).get("theme") or "")
+            for code_id in annotation.get("codes", [])
+            if str(code_details.get(str(code_id), {}).get("theme") or "")
+        ))
         row = {
             "segment_id": segment["id"],
+            "group_id": segment.get("group_id", "不明"),
+            "utterance_order": segment.get("utterance_order", ""),
             "start": segment["start"],
             "end": segment["end"],
             "duration": segment["duration"],
@@ -5755,15 +6363,26 @@ def analysis_csv_rows(
             "speaker_name": segment["speaker_name"],
             "role": segment["role"],
             "text": segment["text"],
+            "original_text": segment.get("original_text", ""),
+            "original_text_available": segment.get("original_text_available", False),
+            "original_text_status": segment.get("original_text_status", "unavailable"),
+            "previous_segment_id": segment.get("previous_segment_id", ""),
+            "next_segment_id": segment.get("next_segment_id", ""),
             "code_ids": annotation.get("codes", []),
             "code_labels": labels,
+            "categories": categories,
+            "themes": themes,
             "interaction_tags": annotation.get("interaction_tags", []),
+            "elicitation": annotation.get("elicitation", "unknown"),
+            "interaction_links": annotation.get("interaction_links", []),
             "memo": annotation.get("memo", ""),
             "important": annotation.get("important", False),
             "excluded": segment.get("excluded", False),
         }
+        analysis_units.append(row)
         if any((
             row["code_ids"], row["interaction_tags"], row["memo"],
+            row["elicitation"] != "unknown", row["interaction_links"],
             row["important"], row["excluded"],
         )):
             coded_segments.append(row)
@@ -5779,7 +6398,25 @@ def analysis_csv_rows(
         )
         for key, value in values.items()
     ]
+    plan = manual.get("focus_group_plan", {})
+    plan_rows = [
+        {
+            "section": "data_inventory", "item": row.get("item", ""),
+            "status": row.get("status", ""), "value": row.get("value", ""),
+            "role": "", "data_sufficiency": "", "reason": "", "limitation": "",
+        }
+        for row in plan.get("data_inventory", [])
+    ]
+    plan_rows.extend(
+        {
+            "section": "method", "item": row.get("method", ""), "status": "", "value": "",
+            "role": row.get("role", ""), "data_sufficiency": row.get("data_sufficiency", ""),
+            "reason": row.get("reason", ""), "limitation": row.get("limitation", ""),
+        }
+        for row in plan.get("methods", [])
+    )
     sources: dict[str, list[dict[str, Any]]] = {
+        "prepared_turns": manual.get("preparation", {}).get("rows", []),
         "speakers": automatic["speaker_metrics"],
         "transitions": automatic["transitions"],
         "gaps": automatic["long_gaps"],
@@ -5788,13 +6425,17 @@ def analysis_csv_rows(
         "emotions": automatic["emotions"],
         "timeline": automatic["time_bins"],
         "codes": manual["code_metrics"],
+        "codebook_history": manual.get("codebook_history", []),
         "groups": automatic["groups"],
         "coded_segments": coded_segments,
+        "analysis_units": analysis_units,
         "interactions": manual["interaction_summary"],
+        "interaction_links": manual.get("interaction_links", []),
         "case_matrix": manual["case_code_matrix"],
         "context": manual["context_checks"],
         "summary": summary_rows,
         "observations": automatic["observations"],
+        "analysis_plan": plan_rows,
         "important_quotes": important_quotes,
     }
     sources.update(research_csv_sources(analysis))
@@ -5810,6 +6451,9 @@ def analysis_csv_rows(
         "analysis_updated_at": analysis["item"]["analysis_updated_at"],
         "generated_at": analysis["generated_at"],
         "algorithm_version": analysis["algorithm_version"],
+        "input_version": manual.get("preparation", {}).get("input_version"),
+        "source_hash": manual.get("preparation", {}).get("source_hash"),
+        "analysis_needs_review": manual.get("preparation", {}).get("analysis_needs_review", True),
     }
     transformer_result = analysis.get("transformer", {}).get("result") or {}
     if dataset.startswith("transformer_") and transformer_result:
@@ -5817,7 +6461,7 @@ def analysis_csv_rows(
         common["generated_at"] = transformer_result.get("generated_at", common["generated_at"])
         common["algorithm_version"] = transformer_result.get("algorithm_version", common["algorithm_version"])
     rows = [{**common, **dict(value)} for value in sources[dataset]]
-    fields = list(common) + ANALYSIS_CSV_FIELDS[dataset]
+    fields = list(dict.fromkeys([*common, *ANALYSIS_CSV_FIELDS[dataset]]))
     return fields, rows
 
 
@@ -5829,6 +6473,25 @@ def analysis_csv_content(analysis: dict[str, Any], dataset: str) -> bytes:
     for row in rows:
         writer.writerow({key: analysis_csv_safe(row.get(key)) for key in fields})
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def summarize_codebook_change(before: list[dict[str, str]], after: list[dict[str, str]]) -> str:
+    previous = {str(item.get("id") or ""): item for item in before}
+    current = {str(item.get("id") or ""): item for item in after}
+    added = [item.get("label") or item_id for item_id, item in current.items() if item_id not in previous]
+    removed = [item.get("label") or item_id for item_id, item in previous.items() if item_id not in current]
+    changed = [
+        current[item_id].get("label") or item_id for item_id in current.keys() & previous.keys()
+        if current[item_id] != previous[item_id]
+    ]
+    parts = []
+    if added:
+        parts.append("追加: " + "、".join(str(value) for value in added))
+    if removed:
+        parts.append("削除: " + "、".join(str(value) for value in removed))
+    if changed:
+        parts.append("変更: " + "、".join(str(value) for value in changed))
+    return " / ".join(parts) or "コードブックの順序または定義を変更"
 
 
 def save_group_analysis(item_id: str, payload: Any) -> dict[str, Any]:
@@ -5893,8 +6556,36 @@ def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
     )
     config_source = payload.get("config", current_config)
     config = normalize_analysis_config(config_source)
+    # The client is allowed to submit an older configuration, but only the
+    # server-held history is authoritative.  Record the reason even when it
+    # was omitted so that a later reviewer can see the gap rather than assume
+    # that no change occurred.
+    config["codebook_history"] = list(current_config.get("codebook_history", []))
+    config["codebook_version"] = int(current_config.get("codebook_version", 0))
+    if config["codebook"] != current_config.get("codebook", []):
+        version = config["codebook_version"] + 1
+        config["codebook_version"] = version
+        config["codebook_history"] = (
+            config["codebook_history"] + [{
+                "version": version,
+                "changed_at": utc_now_iso(),
+                "reason": config["codebook_change_reason"] or "変更理由未記入（要確認）",
+                "summary": summarize_codebook_change(
+                    current_config.get("codebook", []), config["codebook"]
+                ),
+            }]
+        )[-20:]
+        config["codebook_change_reason"] = ""
     annotations_source = payload.get("annotations", current_annotations)
     annotations = normalize_analysis_annotations(annotations_source, segments, config)
+    existing_links = {(sid, link.get("target_segment_id"), link.get("relation"))
+        for sid, annotation in {**orphaned_annotations, **current_annotations}.items()
+        for link in annotation.get("interaction_links", [])}
+    current_ids = {s["id"] for s in segments}
+    for sid, annotation in annotations.items():
+        for link in annotation.get("interaction_links", []):
+            if link["target_segment_id"] not in current_ids and (sid, link["target_segment_id"], link["relation"]) not in existing_links:
+                raise ValueError("相互作用リンクの対象発言が存在しません。削除済みの既存リンクのみ履歴として保持できます。")
     stored_annotations = {**orphaned_annotations, **annotations}
     now = utc_now_iso()
     with database_connection() as connection:
@@ -5918,6 +6609,9 @@ def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
             raise AnalysisConflictError(
                 "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
             )
+        if stored_annotations and not current_annotations and not orphaned_annotations:
+            preparation.capture(connection, row, "analysis_baseline")
+            preparation.bind_analysis(connection, row)
     updated = library_row(item_id)
     if updated is None:
         raise LookupError("処理済みデータが見つかりません。")
@@ -6291,6 +6985,7 @@ def import_existing_outputs() -> None:
                     (canonical_path,),
                 )
             known.add(item_id)
+            publish_input_vault(library_row(item_id), source_kind="imported")
         except (OSError, ValueError, json.JSONDecodeError):
             continue
 
@@ -10398,6 +11093,9 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+        # Freeze the ASR/diarization output before any AI rewriting.
+        segments = ensure_segment_ids(job.id, segments)
+        imported_transcript = json.loads(json.dumps(segments, ensure_ascii=False))
         set_stage("finishing", "文字起こしの仕上げ", 10)
         ai_base_kwargs = (
             {"base_url": options.ai_base_url}
@@ -10653,6 +11351,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             emotion_analysis=emotion_analysis,
             files=files,
             write_srt=options.write_srt,
+            original_segments=imported_transcript,
             write_json=True,
             burn_subtitled_video=options.burn_subtitled_video,
             session_profile=session_profile,
@@ -10660,6 +11359,13 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             ai_usage=job.ai_usage,
             meeting_minutes=meeting_minutes,
         )
+        publish_input_vault(persisted, whisper_vault_settings(options, language_code))
+        if meeting_minutes:
+            try:
+                with library_write_lock:
+                    archive_meeting_minutes(persisted)
+            except (OSError, ValueError, TypeError, LookupError, sqlite3.Error):
+                record_warning("会議議事録はアプリに保存済みですが、分析履歴として保存できませんでした。")
         if obsidian_prepared:
             try:
                 obsidian_workbench().activate(job.id, int(persisted["revision_count"] or 0), segments)
@@ -10798,6 +11504,9 @@ def normalize_edited_segments(item_id: str, raw_segments: Any) -> list[dict[str,
             raise ValueError(f"発話 {index + 1} のIDが不正です。")
         segment = dict(raw)
         segment.update({"start": start, "end": end, "speaker": speaker or "UNKNOWN", "text": text_value.strip()})
+        segment["text"] = text_value
+        if raw.get("time_unknown") or any(raw.get(key) in (None, "") for key in ("start", "end")):
+            segment["time_unknown"] = True
         segment_id = stable_segment_id(item_id, index, segment)
         if segment_id in used_ids:
             segment_id = uuid.uuid4().hex
@@ -10827,7 +11536,9 @@ def normalize_edited_segments(item_id: str, raw_segments: Any) -> list[dict[str,
                 emotions.pop("kushinada", None)
             segment["emotions"] = emotions
         normalized.append(segment)
-    return sorted(normalized, key=lambda item: (float(item.get("start", 0)), float(item.get("end", 0))))
+    return sorted(normalized, key=lambda item: (float(item.get("start", 0)), float(item.get("end", 0)))) if all(
+        preparation.valid_time(item) for item in normalized
+    ) else normalized
 
 
 def kushinada_label(segment: dict[str, Any]) -> str:
@@ -11186,7 +11897,59 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
     with library_write_lock:
         result = _update_library_from_payload_locked(item_id, payload)
         refresh_archive_index(item_id)
+        publish_input_vault(library_row(item_id))
         return result
+
+
+def vault_registry():
+    from .vault_registry import VaultRegistry
+    return VaultRegistry(DATABASE_FILE, PROJECT_DIRECTORY / "docs" / "program-vault")
+
+
+def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_kind: str | None = None) -> None:
+    """Mirror the input ledger into InputVault. The transcript itself stays in SQLite."""
+    if row is None:
+        return
+    try:
+        with database_connection() as connection:
+            prep_state = preparation.view(connection, row, row_segments(row))
+        vault_registry().publish_input(
+            item_id=str(row["id"]), title=str(row["source_name"]), segments=row_segments(row),
+            revision=int(row["revision_count"] or 0), session_profile=row_session_profile(row),
+            language=row["language"], media_path=Path(row["media_path"]) if row["media_path"] else None,
+            created_at=str(row["created_at"] or ""), whisper=whisper,
+            source_kind="whisper" if whisper else (source_kind or "saved"), preparation_state=prep_state)
+    except (OSError, ValueError, TypeError, LookupError, sqlite3.Error) as exc:
+        # The saved transcript is authoritative; a Vault failure must not fail the job or the save.
+        app.logger.warning("InputVaultを更新できませんでした: %s", exc)
+
+
+def retire_input_vault(item_id: str) -> None:
+    """Mark a deleted conversation's Input ledger. Saved runs and notes are kept as provenance."""
+    try:
+        vault_registry().retire_input(item_id)
+    except (OSError, ValueError, TypeError, LookupError) as exc:
+        app.logger.warning("InputVaultに削除を記録できませんでした: %s", exc)
+
+
+def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
+    """Non-secret transcription provenance. hf_token and AI keys never reach a Vault."""
+    vocabulary = list(options.custom_vocabulary)
+    return {
+        "model": options.model_name, "language": language, "device": options.device,
+        "diarization_device": options.diarization_device, "diarization_model": DIARIZATION_MODEL,
+        "audio_preprocess": options.audio_preprocess, "triple_pass": options.triple_pass,
+        "boost_quiet_speech": options.boost_quiet_speech, "vad_onset": options.vad_onset,
+        "vad_offset": options.vad_offset, "no_speech_threshold": options.no_speech_threshold,
+        "min_speakers": options.min_speakers, "max_speakers": options.max_speakers,
+        "emotion_analysis": options.emotion_analysis,
+        "emotion_model": options.emotion_model if options.emotion_analysis else "",
+        "conversation_mode": options.conversation_mode,
+        # The registered terms may name people or products: record only their count and hash.
+        "custom_vocabulary_terms": len(vocabulary),
+        "custom_vocabulary_sha256": hashlib.sha256(
+            json.dumps(vocabulary, ensure_ascii=False).encode("utf-8")).hexdigest() if vocabulary else "",
+    }
 
 
 def _update_library_from_payload_locked(
@@ -12595,42 +13358,93 @@ def build_interview_comparison(
     }
 
 
-@app.post("/api/library/interview-comparison")
-def compare_group_interviews():
-    if request.content_length and request.content_length > 64 * 1024:
-        return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
-    payload = request.get_json(silent=True)
+class ComparisonRequestError(ValueError):
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def interview_comparison_request(payload: Any) -> tuple[list[sqlite3.Row], bool]:
+    """Validate a 2-8 interview selection and read the rows in the selected order."""
     if not isinstance(payload, dict) or not isinstance(payload.get("item_ids"), list):
-        return jsonify({"error": "比較するインタビューを指定してください。"}), 400
+        raise ComparisonRequestError("比較するインタビューを指定してください。")
     item_ids: list[str] = []
     for value in payload["item_ids"]:
         item_id = str(value or "")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item_id):
-            return jsonify({"error": "比較対象のIDが正しくありません。"}), 400
+            raise ComparisonRequestError("比較対象のIDが正しくありません。")
         if item_id not in item_ids:
             item_ids.append(item_id)
     if not 2 <= len(item_ids) <= 8:
-        return jsonify({"error": "比較するインタビューは2〜8件選択してください。"}), 400
-    if not isinstance(payload.get("allow_different_content", False), bool):
-        return jsonify({"error": "内容が異なる比較の指定が正しくありません。"}), 400
+        raise ComparisonRequestError("比較するインタビューは2〜8件選択してください。")
+    allow_different = payload.get("allow_different_content", False)
+    if not isinstance(allow_different, bool):
+        raise ComparisonRequestError("内容が異なる比較の指定が正しくありません。")
     with database_connection() as connection:
         placeholders = ",".join("?" for _ in item_ids)
         fetched = connection.execute(
             f"SELECT * FROM library_items WHERE id IN ({placeholders})", item_ids
         ).fetchall()
     by_id = {str(row["id"]): row for row in fetched}
-    missing = [item_id for item_id in item_ids if item_id not in by_id]
-    if missing:
-        return jsonify({"error": "比較対象のデータが見つかりません。"}), 404
+    if any(item_id not in by_id for item_id in item_ids):
+        raise ComparisonRequestError("比較対象のデータが見つかりません。", 404)
+    return [by_id[item_id] for item_id in item_ids], allow_different
+
+
+@app.post("/api/library/interview-comparison")
+def compare_group_interviews():
+    if request.content_length and request.content_length > 64 * 1024:
+        return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
     try:
-        return jsonify(build_interview_comparison(
-            [by_id[item_id] for item_id in item_ids],
-            allow_different_content=payload["allow_different_content"],
-        ))
+        with library_write_lock:
+            rows, allow_different = interview_comparison_request(request.get_json(silent=True))
+            result = build_interview_comparison(rows, allow_different_content=allow_different)
+            result["input_fingerprints"] = {str(row["id"]): archive_source_stamp(row) for row in rows}
+    except ComparisonRequestError as exc:
+        return jsonify({"error": str(exc)}), exc.status
     except (TypeError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 409
     except (OverflowError, sqlite3.Error):
         return jsonify({"error": "インタビュー比較を生成できません。"}), 500
+    return jsonify(result)
+
+
+@app.post("/api/library/interview-comparison/runs")
+def save_interview_comparison_run():
+    """Save a comparison as its own run. The server recomputes it; a client result is never stored."""
+    if request.content_length and request.content_length > 64 * 1024:
+        return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
+    payload = request.get_json(silent=True)
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
+        return jsonify({"error": "リクエストIDを指定してください。"}), 400
+    if not isinstance(payload.get("input_fingerprints"), dict):
+        return jsonify({"error": "表示時の入力版が必要です。比較を再集計してください。"}), 400
+    try:
+        with library_write_lock:
+            rows, allow_different = interview_comparison_request(payload)
+            current = {str(row["id"]): archive_source_stamp(row) for row in rows}
+            if payload["input_fingerprints"] != current:
+                raise StoreConflict("比較対象が更新されています。比較を再集計してから保存してください。")
+            comparison = build_interview_comparison(rows, allow_different_content=allow_different)
+            run = archive_interview_comparison(rows, comparison, request_id, app_url=request.url_root)
+        return jsonify({"run": analysis_archive_store().public(run, local=local_path_access_allowed())})
+    except ComparisonRequestError as exc:
+        return jsonify({"error": str(exc)}), exc.status
+    except StoreConflict as exc:
+        return jsonify({"error": str(exc), "conflict": True}), 409
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 409
+    except (OSError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "インタビュー比較を保存できませんでした。元データは保持されています。"}), 500
+
+
+@app.get("/api/library/interview-comparison/runs")
+def list_interview_comparison_runs():
+    store = analysis_archive_store()
+    local = local_path_access_allowed()
+    return jsonify({"runs": [{**store.public(run, local=local), "member_ids": store.members(run["id"])}
+                             for run in store.list_comparisons()]})
 
 
 @app.post("/api/library")
@@ -12789,6 +13603,9 @@ def rerun_library_speaker_identification(item_id: str):
                     ai_usage_override=combined_usage,
                     record_training=False,
                 )
+                # Same follow-up as an ordinary edit: stale analyses and the Input ledger.
+                refresh_archive_index(item_id)
+                publish_input_vault(library_row(item_id))
             else:
                 with database_connection() as connection:
                     connection.execute(
@@ -12890,6 +13707,7 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
             }, record_training=False, outline_override=context.get("outline"),
                 ai_usage_override=merge_ai_usage(json_load(latest["ai_usage_json"], {}), state.get("pending_usage", {})),
                 check_cancelled=check)
+            publish_input_vault(library_row(item_id))
             try:
                 archive_ai_finishing(library_row(item_id), context["before"], context["stages"],
                     context["provider"], context["model"], context["usage"],
@@ -13016,10 +13834,12 @@ def analysis_archive_store() -> AnalysisStore:
 def archive_source_stamp(row) -> str:
     with database_connection() as connection:
         registry = connection.execute("SELECT value FROM application_metadata WHERE key='speaker_registry_revision'").fetchone()
+        prep_revision, _ = preparation.load_state(connection, row["id"])
     keys = ("id", "source_name", "segments_json", "speaker_names_json", "speaker_profiles_json",
             "session_profile_json", "outline_json", "emotion_analysis_json", "revision_count",
             "analysis_revision", "analysis_config_json", "analysis_annotations_json")
     return archive_digest({"source": {key: row[key] for key in keys},
+                           "preparation_revision": prep_revision,
                            "registry_revision": registry[0] if registry else "0"})
 
 
@@ -13028,6 +13848,7 @@ def archive_snapshot(row, analysis: dict) -> dict:
             "source_revision": int(row["revision_count"]), "analysis_revision": int(row["analysis_revision"]),
             "segments": analysis["segments"], "config": analysis.get("config", {}),
             "annotations": analysis.get("annotations", {}),
+            "preparation": analysis.get("manual", {}).get("preparation", {}),
             "speakers": analysis.get("automatic", {}).get("speaker_metrics", []),
             "original_source": {"segments": row_segments(row),
                                 "speaker_names": json_load(row["speaker_names_json"], {}),
@@ -13095,6 +13916,92 @@ def archive_ai_finishing(row, original_segments: list[dict], stages: dict, provi
         request_id=request_id or "finishing-" + str(row["id"]), input_fingerprint=archive_source_stamp(row),
         source_revision=int(row["revision_count"]), analysis_revision=int(row["analysis_revision"]),
         provider=provider, model=model, app_url=f"http://127.0.0.1:{port}")
+
+
+def archive_app_url() -> str:
+    port = os.environ.get("MOJIOKOSI_PORT", "7860")
+    return f"http://127.0.0.1:{port if port.isdigit() and 1 <= int(port) <= 65535 else '7860'}"
+
+
+def archive_meeting_minutes(row) -> dict | None:
+    """Save meeting minutes as their own run, never inside the conversation's text analysis."""
+    minutes = row_meeting_minutes(row)
+    if row_session_profile(row).get("session_type") != "meeting" or not (
+            minutes["tasks"] or minutes["decisions"] or minutes["summary"]
+            or minutes["analysis"]["speaker_activity"]):
+        return None
+    segments = row_segments(row)
+    names = json_load(row["speaker_names_json"], {})
+    config = row_analysis_config(row)
+    analysis = {"segments": [{**s, "speaker_name": names.get(s.get("speaker"), s.get("speaker", "UNKNOWN"))}
+                             for s in segments],
+                "config": config, "annotations": row_analysis_annotations(row, segments, config)}
+    datasets = {
+        "meeting_tasks": (["task_id", "title", "owner", "priority", "due_date", "due_text", "status", "confidence",
+                           "evidence_segment_id", "evidence_start", "evidence_end", "source_text"], minutes["tasks"]),
+        "meeting_decisions": (["decision_id", "text", "speaker", "evidence_segment_id", "evidence_start",
+                               "evidence_end"], minutes["decisions"]),
+        "meeting_speaker_activity": (["speaker", "turns", "seconds"], minutes["analysis"]["speaker_activity"]),
+    }
+    methods = [m for m in method_results(analysis, datasets, meeting=minutes) if m["method_id"] == "meeting_minutes"]
+    result = {"schema_version": 1, "methods": methods,
+              "parameters": {"method": minutes.get("method", ""), "version": minutes.get("version", "")},
+              "algorithms": {"meeting_minutes": MEETING_MINUTES_VERSION}, "meeting_minutes": minutes}
+    stamp = archive_source_stamp(row)
+    return analysis_archive_store().save(item_id=str(row["id"]), kind="meeting_minutes",
+        snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
+        request_id="meeting-" + archive_digest({"source": stamp, "minutes": minutes})[:40],
+        input_fingerprint=stamp, source_revision=int(row["revision_count"]),
+        analysis_revision=int(row["analysis_revision"]), app_url=archive_app_url())
+
+
+def interview_comparison_datasets(comparison: dict[str, Any]) -> dict[str, tuple[list[str], list[dict]]]:
+    """Long-format tables: one row per interview, so every value keeps its conversation ID."""
+    def spread(rows: list[dict], label: str, summary: str) -> list[dict]:
+        return [{label: row.get(label), summary: row.get(summary), **value}
+                for row in rows for value in row.get("interviews", [])]
+    return {
+        "comparison_interviews": (["item_id", "source_name", "comparison_label", "comparison_source", "session_type",
+                                   "session_date", "objective", "included_segment_count", "speaker_count",
+                                   "participant_count", "session_duration", "total_speaking_seconds", "term_count",
+                                   "excluded_segment_count"], comparison.get("interviews", [])),
+        "comparison_common_terms": (["term", "minimum_count", "item_id", "count", "rate_per_1000_terms"],
+                                    spread(comparison.get("common_terms", []), "term", "minimum_count")),
+        "comparison_characteristic_terms": (["item_id", "source_name", "term", "count", "rate_per_1000_terms",
+                                             "other_count", "other_rate_per_1000_terms", "difference_per_1000_terms"],
+                                            comparison.get("characteristic_terms", [])),
+        "comparison_codes": (["code", "max_count", "item_id", "count", "rate_per_100_segments"],
+                             spread(comparison.get("code_comparison", []), "code", "max_count")),
+        "comparison_emotions": (["emotion", "max_count", "item_id", "count", "rate_per_100_segments"],
+                                spread(comparison.get("emotion_comparison", []), "emotion", "max_count")),
+    }
+
+
+def archive_interview_comparison(rows: list, comparison: dict[str, Any], request_id: str, *,
+                                 app_url: str) -> dict:
+    """Save a group-interview comparison as one multi-conversation run, apart from each interview's runs."""
+    item_ids = [str(row["id"]) for row in rows]
+    group_id = "comparison-" + hashlib.sha256("\n".join(sorted(item_ids)).encode("utf-8")).hexdigest()[:24]
+    members = [{"conversation_id": str(row["id"]), "title": str(row["source_name"]),
+                "source_revision": int(row["revision_count"] or 0),
+                "analysis_revision": int(row["analysis_revision"] or 0),
+                "input_fingerprint": archive_source_stamp(row)} for row in rows]
+    datasets = interview_comparison_datasets(comparison)
+    methods = [m for m in method_results({"segments": [], "config": {}}, datasets, comparison=comparison)
+               if m["method_id"] == "interview_comparison"]
+    allow_different = bool(comparison.get("allow_different_content"))
+    snapshot = {"title": "グループインタビュー比較：" + " / ".join(member["title"] for member in members),
+                "conversation_id": group_id, "kind": "interview_comparison", "members": members,
+                "allow_different_content": allow_different,
+                "comparison_key": comparison.get("comparison_key", ""), "segments": []}
+    result = {"schema_version": 1, "methods": methods,
+              "parameters": {"item_ids": item_ids, "allow_different_content": allow_different},
+              "algorithms": {"interview_comparison": comparison.get("schema_version", 1)},
+              "comparison": comparison}
+    return analysis_archive_store().save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,
+        result=result, datasets=datasets, request_id=request_id,
+        input_fingerprint=archive_digest([member["input_fingerprint"] for member in members]),
+        source_revision=0, analysis_revision=0, app_url=app_url, member_ids=item_ids)
 
 
 def refresh_archive_index(item_id: str) -> None:
@@ -13708,6 +14615,56 @@ def update_library_analysis(item_id: str):
         return jsonify({"error": "分析設定を保存できません。"}), 500
 
 
+@app.put("/api/library/<item_id>/preparation")
+def update_transcript_preparation(item_id: str):
+    if request.content_length and request.content_length > 16 * 1024 * 1024:
+        return jsonify({"error": "準備データが大きすぎます。"}), 413
+    try:
+        with library_write_lock, database_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+            if row is None:
+                return jsonify({"error": "データが見つかりません。"}), 404
+            result = preparation.save(connection, row, row_segments(row), request.get_json(silent=True))
+        refresh_archive_index(item_id)
+        publish_input_vault(library_row(item_id))
+        return jsonify(result)
+    except preparation.Conflict as exc:
+        return jsonify({"error": str(exc), "conflict": True}), 409
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/library/<item_id>/preparation/export.json")
+def export_transcript_preparation(item_id: str):
+    with database_connection() as connection:
+        connection.execute("BEGIN")
+        row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+        if row is None:
+            return jsonify({"error": "データが見つかりません。"}), 404
+        value = preparation.view(connection, row, row_segments(row))
+        value["original_segments"] = json_load(row["original_segments_json"], [])
+        value["original_status"] = row["original_segments_status"]
+        value["versions"] = [
+            {**dict(v), "source": json.loads(v["source_json"])} for v in connection.execute(
+                "SELECT version, source_hash, source_json, origin, created_at FROM transcript_versions WHERE item_id=? ORDER BY version", (item_id,))
+        ]
+        for version in value["versions"]:
+            version.pop("source_json")
+        value["review_history"] = [
+            {"revision": v["revision"], "created_at": v["created_at"], "state": json.loads(v["state_json"])}
+            for v in connection.execute("SELECT * FROM transcript_preparation_events WHERE item_id=? ORDER BY revision", (item_id,))
+        ]
+        value["manifest"] = {"schema_version": 1, "encoding": "UTF-8", "row_count": len(value["rows"]),
+            "rows_sha256": preparation.digest(value["rows"]), "columns": preparation.FIELDS,
+            "missing_value": "JSON null / CSV empty", "order_basis": "saved transcript array; verification is separate",
+            "ids": "application-managed IDs; split/merge lineage is researcher-confirmed",
+            "csv_note": "CSV applies spreadsheet formula escaping; JSON preserves exact text.",
+            "privacy": "Local export may contain personal data. Review before sharing. Media not included."}
+    return send_file(io.BytesIO(preparation.encode(value).encode("utf-8")),
+                     mimetype="application/json", as_attachment=True, download_name=f"{item_id}_preparation.json")
+
+
 @app.get("/api/library/<item_id>/analysis/export.json")
 def export_library_analysis_json(item_id: str):
     row = library_row(item_id)
@@ -13728,6 +14685,24 @@ def export_library_analysis_json(item_id: str):
         mimetype="application/json; charset=utf-8",
         as_attachment=True,
         download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_analysis.json",
+    )
+
+
+@app.get("/api/library/<item_id>/analysis/export.md")
+def export_library_analysis_report(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+    try:
+        analysis = group_analysis_for_row(row, include_research_rows=True)
+        content = focus_group_analysis_report_markdown(analysis).encode("utf-8")
+    except (ValueError, TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "分析レポートを出力できません。元データを確認してください。"}), 500
+    return send_file(
+        io.BytesIO(content),
+        mimetype="text/markdown; charset=utf-8",
+        as_attachment=True,
+        download_name=f"{safe_output_stem(str(row['source_name']))[:64]}_分析レポート.md",
     )
 
 
@@ -13817,6 +14792,12 @@ def save_meeting_to_obsidian(item_id: str):
         return jsonify({"error": "Obsidian連携は保存PCから操作してください。"}), 403
     try:
         row, _minutes = meeting_minutes_export_row(item_id)
+        try:
+            with library_write_lock:
+                archive_meeting_minutes(row)
+        except (OSError, ValueError, TypeError, LookupError, sqlite3.Error):
+            # The meeting note is still published; its separate analysis run can be saved again later.
+            app.logger.warning("会議議事録を分析履歴として保存できませんでした。", exc_info=True)
         return jsonify(publish_meeting_minutes_to_obsidian(row))
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
@@ -14147,6 +15128,8 @@ def _delete_library_item_locked(item_id: str):
                 "DELETE FROM output_import_provenance WHERE item_id = ?",
                 (item_id,),
             )
+            for table in ("transcript_versions", "transcript_preparations", "transcript_preparation_events"):
+                connection.execute(f"DELETE FROM {table} WHERE item_id=?", (item_id,))
             connection.execute("DELETE FROM library_items WHERE id = ?", (item_id,))
     except sqlite3.Error as exc:
         restore_errors = restore_assets()
@@ -14161,6 +15144,7 @@ def _delete_library_item_locked(item_id: str):
 
     with jobs_lock:
         jobs.pop(item_id, None)
+    retire_input_vault(item_id)
     cleanup_errors: list[str] = []
     for quarantine_root in quarantine_roots:
         try:

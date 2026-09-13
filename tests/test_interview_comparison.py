@@ -75,6 +75,31 @@ class InterviewComparisonApiTests(unittest.TestCase):
         self.assertIn("#session-comparison-group", script)
         self.assertIn("/api/library/interview-comparison", comparison_script)
 
+    def test_browser_requests_require_csrf_and_save_the_displayed_input_version(self):
+        headers = {'Origin': 'http://localhost', 'Sec-Fetch-Site': 'same-origin'}
+        selection = {'item_ids': ['same_a', 'same_b'], 'allow_different_content': False}
+        url = '/api/library/interview-comparison'
+        self.assertEqual(self.client.post(url, json=selection, headers=headers).status_code, 403)
+        self.assertEqual(self.client.post(url + '/runs', json=selection, headers=headers).status_code, 403)
+        headers['X-Gurumoji-Request'] = '1'
+        compared = self.client.post(url, json=selection, headers=headers)
+        self.assertEqual(compared.status_code, 200)
+        payload = {**selection, 'request_id': 'versioned-comparison-0001',
+                   'input_fingerprints': compared.get_json()['input_fingerprints']}
+        missing = {key: value for key, value in payload.items() if key != 'input_fingerprints'}
+        self.assertEqual(self.client.post(url + '/runs', json=missing, headers=headers).status_code, 400)
+        with app.database_connection() as connection:
+            connection.execute("UPDATE library_items SET source_name='changed',revision_count=revision_count+1 WHERE id='same_a'")
+        stale = self.client.post(url + '/runs', json=payload, headers=headers)
+        self.assertEqual(stale.status_code, 409, stale.get_json())
+        self.assertTrue(stale.get_json()['conflict'])
+        self.assertEqual(app.analysis_archive_store().list_comparisons(), [])
+        payload['input_fingerprints'] = self.client.post(url, json=selection, headers=headers).get_json()['input_fingerprints']
+        saved = self.client.post(url + '/runs', json=payload, headers=headers)
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        repeated = self.client.post(url + '/runs', json=payload, headers=headers)
+        self.assertEqual(repeated.get_json()['run']['id'], saved.get_json()['run']['id'])
+
 
 if __name__ == "__main__":
     unittest.main()
