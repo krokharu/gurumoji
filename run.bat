@@ -51,11 +51,6 @@ if not defined BASE_PYTHON (
   goto :error
 )
 
-where ffmpeg >nul 2>nul || (
-  echo ffmpeg was not found in PATH. Install it first: winget install Gyan.FFmpeg
-  goto :error
-)
-
 if not exist "%VENV_DIR%\Scripts\python.exe" (
   echo Creating virtual environment in %VENV_DIR% ...
   %BASE_PYTHON% -m venv "%VENV_DIR%" || goto :error
@@ -98,6 +93,30 @@ echo Checking required Python package imports ...
 )
 "%PYTHON%" -m pip check || goto :error
 if not exist "%SETUP_MARKER%" type nul > "%SETUP_MARKER%" || goto :error
+
+rem imageio-ffmpeg ships a Windows ffmpeg executable with the Python package.
+rem Copy it to the venv Scripts folder under the conventional name so every
+rem child process (including Whisper and the Web UI) can resolve "ffmpeg".
+set "PROJECT_FFMPEG=%VENV_DIR%\Scripts\ffmpeg.exe"
+if not exist "%PROJECT_FFMPEG%" (
+  echo Installing project-local FFmpeg ...
+  set "PACKAGED_FFMPEG="
+  for /f "usebackq delims=" %%F in (`"%PYTHON%" -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"`) do set "PACKAGED_FFMPEG=%%F"
+  if not defined PACKAGED_FFMPEG (
+    echo Could not obtain the FFmpeg executable from imageio-ffmpeg.
+    goto :error
+  )
+  if not exist "%PACKAGED_FFMPEG%" (
+    echo The packaged FFmpeg executable was not found: %PACKAGED_FFMPEG%
+    goto :error
+  )
+  copy /y "%PACKAGED_FFMPEG%" "%PROJECT_FFMPEG%" >nul || goto :error
+)
+set "PATH=%VENV_DIR%\Scripts;%VENV_DIR%\Lib\site-packages\torch\lib;%PATH%"
+where ffmpeg >nul 2>nul || (
+  echo Project-local FFmpeg could not be added to PATH.
+  goto :error
+)
 "%PYTHON%" -c "import torch; print('Torch:', torch.__version__); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not available (CPU mode can be used)'); print('CUDA:', torch.version.cuda)" || goto :error
 if /I "%MOJIOKOSI_CHECK_ONLY%"=="1" (
   echo Environment checks passed.

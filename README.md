@@ -53,23 +53,17 @@
 
 別のPCやPython未導入のWindows環境では、フォルダー内の **`setup_gui.bat`** をダブルクリックしてください。組み込みのセットアップ画面で、次を順番に行えます。
 
-1. Python 3.12（64 bit）と FFmpeg の有無を確認し、必要なら `winget` 経由で導入します。
+1. Python 3.10〜3.13（64 bit）の有無を確認し、必要なら確認画面で承認後、公式の python.org から Python 3.13.15 を自動導入します。FFmpeg はアプリ環境内へ自動導入されます。
 2. Hugging Face token、任意のOpenAI / Google API key、LM Studio接続先を安全な伏せ字入力で `config/tokens.json` に保存します。秘密鍵はセットアップログに出力しません。
-3. 「アプリ環境を作成」で、このフォルダー内の `.venv` と必要なパッケージを作成します。
+3. 「アプリ環境を作成」で、このフォルダー内の `.venv`、必要なPythonパッケージ、FFmpeg を作成します。
 4. 「Gurumoji を起動」で通常のWeb UIを開きます。
 
-Python または FFmpeg をGUIから新規導入した直後だけは、PATHを読み直すためセットアップ画面を一度閉じて開き直してください。`winget` を使えないPCでは、画面の案内に従ってPython 3.10〜3.13（64 bit）とFFmpegを手動で導入できます。Google ColabではこのGUIではなく、付属ノートブックを使用します。
+Python をGUIから新規導入した直後だけは、PATHを読み直すためセットアップ画面を一度閉じて開き直してください。自動導入では、ダウンロードしたインストーラーのSHA-256とPython Software FoundationのWindows署名を確認します。Google ColabではこのGUIではなく、付属ノートブックを使用します。
 
 ### 手動セットアップ
 
 1. 64 bit 版 Python 3.10～3.13 をインストールします（Python 3.12 推奨）。
-2. ffmpeg をインストールし、PATH を通します。
-
-   ```powershell
-   winget install Gyan.FFmpeg
-   ```
-
-3. Hugging Face で read token を作成し、次のモデルの利用条件へ同意します。
+2. Hugging Face で read token を作成し、次のモデルの利用条件へ同意します。
    - <https://huggingface.co/pyannote/speaker-diarization-community-1>
    - <https://huggingface.co/pyannote/speaker-diarization-3.1>
    - <https://huggingface.co/pyannote/segmentation-3.0>

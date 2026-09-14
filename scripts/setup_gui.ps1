@@ -13,8 +13,10 @@ Add-Type -AssemblyName System.Drawing
 $script:Root = Split-Path -Parent $PSScriptRoot
 $script:TokenFile = Join-Path $script:Root 'config\tokens.json'
 $script:RunBatch = Join-Path $script:Root 'run.bat'
+$script:PythonInstallerScript = Join-Path $PSScriptRoot 'install_python.ps1'
 $script:ActiveProcess = $null
 $script:ActiveOutput = $null
+$script:ActiveLines = $null
 $script:ActiveTitle = ''
 
 function Get-JsonSettings {
@@ -97,12 +99,11 @@ function Find-SupportedPython {
 
 function Get-EnvironmentReport {
     $python = Find-SupportedPython
-    $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
     $venvPython = Join-Path $script:Root '.venv\Scripts\python.exe'
     $tokenState = if (Test-Path -LiteralPath $script:TokenFile) { '設定ファイルあり' } else { '未作成' }
     $lines = @(
         $(if ($python) { "Python: OK — $python" } else { 'Python: 未検出（3.10〜3.13 / 64 bit が必要）' }),
-        $(if ($ffmpeg) { "FFmpeg: OK — $($ffmpeg.Source)" } else { 'FFmpeg: 未検出' }),
+        'FFmpeg: アプリ環境の作成時にプロジェクト内へ自動導入',
         $(if (Test-Path -LiteralPath $venvPython) { "アプリ環境: OK — $venvPython" } else { 'アプリ環境: 未作成' }),
         "tokens.json: $tokenState"
     )
@@ -113,6 +114,94 @@ function Refresh-ProcessPath {
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path = @($machine, $user, $env:Path) -join ';'
+}
+
+function Get-SetupFailureGuidance {
+    param(
+        [string]$Title,
+        [string[]]$Lines
+    )
+    $output = $Lines -join [Environment]::NewLine
+    $code = ''
+    if ($output -match 'GURUMOJI_SETUP_ERROR:\s*([A-Z_]+)') { $code = $Matches[1] }
+    if (-not $code) {
+        if ($output -match '(?i)proxy|407') { $code = 'PROXY' }
+        elseif ($output -match '(?i)403|forbidden|blocked|web filter') { $code = 'NETWORK_FILTER' }
+        elseif ($output -match '(?i)tls|ssl|certificate|secure channel') { $code = 'TLS' }
+        elseif ($output -match '(?i)timed out|network.*unreachable|could not resolve|name resolution|connection') { $code = 'NETWORK' }
+        elseif ($output -match '(?i)temporary directory|temp.*access|cannot create.*temp') { $code = 'TEMP' }
+        elseif ($output -match '(?i)disk.*full|not enough space|insufficient.*space') { $code = 'DISK' }
+        elseif ($output -match '(?i)used by another process|file.*locked|sharing violation') { $code = 'FILE_LOCK' }
+        elseif ($output -match '(?i)defender|antivirus|malware|virus') { $code = 'SECURITY_SOFTWARE' }
+        elseif ($output -match '(?i)applocker|application control|group policy|blocked by your administrator|not permitted') { $code = 'POLICY' }
+        elseif ($output -match '(?i)access.*denied|unauthorized|permission') { $code = 'PERMISSION' }
+        elseif ($output -match '(?i)Supported 64-bit Python') { $code = 'PYTHON_VERSION' }
+        elseif ($output -match '(?i)could not create.*virtual environment|failed to create.*venv|python.*-m venv') { $code = 'VENV' }
+        elseif ($output -match '(?i)no matching distribution|could not find a version|pip install|pip check|requirements\.txt') { $code = 'PACKAGES' }
+        elseif ($output -match '(?i)cuda|cudnn|torch|torchvision|torchaudio|ctranslate2') { $code = 'GPU_PACKAGES' }
+        elseif ($output -match '(?i)ffmpeg') { $code = 'FFMPEG' }
+        elseif ($output -match '(?i)hugging.?face|pyannote|token') { $code = 'HUGGINGFACE' }
+    }
+    switch ($code) {
+        'NETWORK_FILTER' { return "会社のWebフィルターがダウンロードを遮断した可能性があります。AI相談用ログとともに、python.org、pypi.org、files.pythonhosted.org、download.pytorch.org、huggingface.co へのHTTPS接続が必要とAIへ伝えてください。" }
+        'PROXY' { return '会社のプロキシ認証が必要か、設定がWindowsに登録されていない可能性があります。AI相談用ログを添えて、Windowsのプロキシ設定・認証方法をAIへ質問してください。' }
+        'TLS' { return 'TLS証明書の検証に失敗しました。企業の通信検査用証明書が必要な場合があります。検証を無効化せず、AI相談用ログを添えて証明書設定の確認方法をAIへ質問してください。' }
+        'NETWORK' { return 'インターネットまたは社内ネットワークへ接続できません。接続後に再実行してください。会社PCではプロキシ・VPN・Webフィルターの設定も確認してください。' }
+        'POLICY' { return '会社のアプリ実行ポリシー（AppLocker／Application Control／グループポリシー）により止められた可能性があります。AI相談用ログを添えて、ポリシーの状態を確認する安全な方法をAIへ質問してください。' }
+        'PERMISSION' { return 'このユーザーの一時フォルダーまたはPythonの導入先へ書き込む権限がありません。AI相談用ログを添えて、管理者権限を要求せずに確認できる保存先・権限の確認方法をAIへ質問してください。' }
+        'DISK' { return '空き容量が不足しています。Python・仮想環境・モデル用に十分な空き容量を確保してから再実行してください。' }
+        'TEMP' { return 'Windowsの一時フォルダーを作成または書き込めません。空き容量、ユーザープロファイル、セキュリティソフトによる一時フォルダーの制限を確認してください。' }
+        'FILE_LOCK' { return '必要なファイルが他のアプリにより使用中です。Gurumoji、Python、エクスプローラーのプレビュー、ウイルス対策ソフトの検査を閉じるか完了を待ってから再実行してください。' }
+        'SECURITY_SOFTWARE' { return 'ウイルス対策ソフトまたはEDRがダウンロード・展開・実行を止めた可能性があります。保護を無効化せず、AI相談用ログを添えてPython公式インストーラーの実行可否をAIへ質問してください。' }
+        'INTEGRITY' { return 'ダウンロードしたPythonのハッシュが公式値と一致しません。ネットワーク改変の可能性があるため導入を中止しました。AI相談用ログを添えて、安全な確認方法をAIへ質問してください。' }
+        'SIGNATURE' { return 'Python Software Foundationの署名を確認できませんでした。安全のため導入を中止しました。AI相談用ログを添えて、安全な確認方法をAIへ質問してください。' }
+        'PYTHON_VERSION' { return '対応する64 bit版Python 3.10〜3.13が見つかりません。Pythonの自動導入後は、このセットアップ画面を閉じて開き直してください。' }
+        'VENV' { return 'プロジェクト用の仮想環境を作成できません。フォルダーへの書込権限、空き容量、既存の .venv が他のPythonで使用中でないかを確認してください。' }
+        'PACKAGES' { return 'Pythonパッケージを取得または検証できません。ネットワーク・プロキシのほか、Pythonの対応版、会社のPyPI利用ポリシーを確認してください。AI相談用ログの最初のpipエラーをAIへ渡してください。' }
+        'GPU_PACKAGES' { return 'GPU対応パッケージを設定できません。NVIDIA GPUやCUDAドライバーがないPCでもCPU動作は可能ですが、パッケージ取得が止められた場合はAI相談用ログを添えて download.pytorch.org への接続確認方法をAIへ質問してください。' }
+        'FFMPEG' { return 'プロジェクト内FFmpegを準備できません。PyPIからの imageio-ffmpeg 取得や実行が、ネットワークまたはセキュリティポリシーで止められていないか確認してください。' }
+        'HUGGINGFACE' { return 'Hugging Faceの利用条件・トークン・接続を確認してください。会社のネットワークでは huggingface.co へのHTTPS接続許可が必要な場合があります。' }
+        default { return "$Title に失敗しました。AI相談用ログをAIへ貼り付けてください。ネットワーク制限・プロキシ・社内ポリシーがある場合は、必要な接続先と実行許可の確認方法を質問できます。" }
+    }
+}
+
+function Protect-SetupLogLine {
+    param([string]$Line)
+    $safe = $Line
+    $safe = [regex]::Replace($safe, '(?i)(bearer\s+)[^\s]+', '$1<redacted>')
+    $safe = [regex]::Replace($safe, '(?i)(\b(?:token|api[_ -]?key|password|authorization)\b\s*[:=]\s*)[^\s,;]+', '$1<redacted>')
+    $safe = [regex]::Replace($safe, '(?i)([?&](?:token|key|password)=)[^&\s]+', '$1<redacted>')
+    return $safe
+}
+
+function Save-SetupSupportLog {
+    param(
+        [string]$Title,
+        [int]$ExitCode,
+        [string[]]$Lines
+    )
+    $directory = Join-Path $script:Root 'runtime\logs'
+    [System.IO.Directory]::CreateDirectory($directory) | Out-Null
+    $path = Join-Path $directory ('setup-error-{0}-{1}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), $PID)
+    $content = [System.Collections.Generic.List[string]]::new()
+    $content.Add('Gurumoji setup diagnostic log')
+    $content.Add("Action: $Title")
+    $content.Add("Exit code: $ExitCode")
+    $content.Add('Before sharing this log with an AI, remove any information you do not want to share, such as your name, PC name, local paths, or company network details.')
+    $content.Add('--- process output ---')
+    foreach ($line in $Lines) { $content.Add((Protect-SetupLogLine $line)) }
+    [System.IO.File]::WriteAllLines($path, $content, [System.Text.UTF8Encoding]::new($false))
+    return $path
+}
+
+function Show-SetupActionError {
+    param(
+        [string]$Title,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+    $message = "$Title を開始できませんでした: $($ErrorRecord.Exception.Message)"
+    if ($null -ne $setupLog) { $setupLog.AppendText("$message`r`n") }
+    [System.Windows.Forms.MessageBox]::Show($message, 'セットアップ エラー')
 }
 
 function Normalize-LmStudioUrl {
@@ -197,6 +286,7 @@ function Start-BackgroundCommand {
     if (-not $process.Start()) { throw 'セットアップ処理を開始できませんでした。' }
     $script:ActiveProcess = $process
     $script:ActiveOutput = $queue
+    $script:ActiveLines = [System.Collections.Generic.List[string]]::new()
     $script:ActiveTitle = $Title
     $buttonCheck.Enabled = $false
     $buttonInstallPrerequisites.Enabled = $false
@@ -229,7 +319,7 @@ $header.Font = [System.Drawing.Font]::new('Yu Gothic UI', 18, [System.Drawing.Fo
 $rootPanel.Controls.Add($header)
 
 $description = [System.Windows.Forms.Label]::new()
-$description.Text = 'この画面だけで、必要なソフトの確認・アプリ環境の作成・tokens.json の設定を行えます。秘密鍵は画面上で伏せて表示し、ログには書き込みません。'
+$description.Text = 'この画面だけで、Python の確認・アプリ環境の作成・tokens.json の設定を行えます。FFmpeg はアプリ環境に自動導入されます。秘密鍵は画面上で伏せて表示し、ログには書き込みません。'
 $description.AutoSize = $true
 $description.MaximumSize = [System.Drawing.Size]::new(830, 0)
 $description.Margin = [System.Windows.Forms.Padding]::new(3, 6, 3, 12)
@@ -268,15 +358,25 @@ $buttonCheck.add_Click({ $statusBox.Text = Get-EnvironmentReport })
 $environmentButtons.Controls.Add($buttonCheck)
 
 $buttonInstallPrerequisites = [System.Windows.Forms.Button]::new()
-$buttonInstallPrerequisites.Text = 'Python と FFmpeg をインストール'
+$buttonInstallPrerequisites.Text = 'Python を自動インストール'
 $buttonInstallPrerequisites.AutoSize = $true
 $buttonInstallPrerequisites.add_Click({
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        [System.Windows.Forms.MessageBox]::Show('winget が見つかりません。Microsoft Store の「アプリ インストーラー」を更新するか、Python 3.12 と FFmpeg を手動で導入してください。', 'winget が必要です')
-        return
+    try {
+        if (-not (Test-Path -LiteralPath $script:PythonInstallerScript)) {
+            throw 'Python インストーラーが見つかりません。setup_gui.ps1 と install_python.ps1 が同じ scripts フォルダーにあることを確認してください。'
+        }
+        $choice = [System.Windows.Forms.MessageBox]::Show(
+            'Python 3.13.15（64 bit）を公式の python.org からダウンロードし、このユーザー用に導入します。約30 MBのダウンロード後、セットアップ画面を閉じて開き直してください。続けますか？',
+            'Python を自動インストール',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        if ($choice -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        $command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $script:PythonInstallerScript
+        Start-BackgroundCommand -Title 'Python 3.13.15 のインストール' -Command $command
+    } catch {
+        Show-SetupActionError -Title 'Python の自動インストール' -ErrorRecord $_
     }
-    $command = 'winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements && winget install --id Gyan.FFmpeg -e --source winget --accept-package-agreements --accept-source-agreements'
-    Start-BackgroundCommand -Title 'Python と FFmpeg のインストール' -Command $command
 })
 $environmentButtons.Controls.Add($buttonInstallPrerequisites)
 
@@ -377,7 +477,7 @@ $applicationGroup.Margin = [System.Windows.Forms.Padding]::new(3, 16, 3, 3)
 $rootPanel.Controls.Add($applicationGroup)
 
 $applicationHelp = [System.Windows.Forms.Label]::new()
-$applicationHelp.Text = '「アプリ環境を作成」は、このフォルダー内に .venv を作り、必要なPythonパッケージを導入します。初回は大きなダウンロードがあります。Python/FFmpegを今インストールした場合は、この画面を一度閉じて開き直してください。'
+$applicationHelp.Text = '「アプリ環境を作成」は、このフォルダー内に .venv、必要なPythonパッケージ、FFmpeg を導入します。初回は大きなダウンロードがあります。Pythonを今インストールした場合は、この画面を一度閉じて開き直してください。'
 $applicationHelp.AutoSize = $true
 $applicationHelp.MaximumSize = [System.Drawing.Size]::new(820, 0)
 $applicationHelp.Location = [System.Drawing.Point]::new(12, 24)
@@ -465,6 +565,7 @@ $script:ProcessPollTimer.add_Tick({
     $line = ''
     while ($script:ActiveOutput.TryDequeue([ref]$line)) {
         $setupLog.AppendText($line + [Environment]::NewLine)
+        $script:ActiveLines.Add($line)
     }
     $setupLog.SelectionStart = $setupLog.TextLength
     $setupLog.ScrollToCaret()
@@ -472,12 +573,15 @@ $script:ProcessPollTimer.add_Tick({
     $script:ActiveProcess.WaitForExit()
     while ($script:ActiveOutput.TryDequeue([ref]$line)) {
         $setupLog.AppendText($line + [Environment]::NewLine)
+        $script:ActiveLines.Add($line)
     }
     $exitCode = $script:ActiveProcess.ExitCode
     $title = $script:ActiveTitle
+    $lines = @($script:ActiveLines)
     $script:ActiveProcess.Dispose()
     $script:ActiveProcess = $null
     $script:ActiveOutput = $null
+    $script:ActiveLines = $null
     $script:ActiveTitle = ''
     $script:ProcessPollTimer.Stop()
     $buttonCheck.Enabled = $true
@@ -490,7 +594,15 @@ $script:ProcessPollTimer.add_Tick({
     if ($exitCode -eq 0) {
         [System.Windows.Forms.MessageBox]::Show("$title が完了しました。", 'セットアップ')
     } else {
-        [System.Windows.Forms.MessageBox]::Show('ログを確認し、表示されたエラーを解消してから再実行してください。', 'セットアップ')
+        $guidance = Get-SetupFailureGuidance -Title $title -Lines $lines
+        try {
+            $supportLog = Save-SetupSupportLog -Title $title -ExitCode $exitCode -Lines $lines
+            $aiHint = "AI相談用ログを保存しました: $supportLog`r`nこのファイルを開き、共有したくない名前・PC名・パス・社内ネットワーク情報を削除してから、エラー内容と一緒にAIへ貼り付けてください。APIキー・トークン・パスワードは共有しないでください。"
+        } catch {
+            $aiHint = "AI相談用ログをファイルへ保存できませんでした: $($_.Exception.Message)`r`n画面下部のセットアップログをコピーし、共有したくない情報を削除してからAIへ貼り付けてください。APIキー・トークン・パスワードは共有しないでください。"
+        }
+        $setupLog.AppendText("対処: $guidance`r`n$aiHint`r`n")
+        [System.Windows.Forms.MessageBox]::Show("$guidance`r`n`r`n$aiHint", 'セットアップ エラー')
     }
 })
 

@@ -404,6 +404,8 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("MOJIOKOSI_SKIP_UPDATE_CHECK", launcher_script)
         self.assertIn("MOJIOKOSI_SKIP_LIBRARY_UPDATE", run_script)
         self.assertIn("--upgrade-strategy only-if-needed", run_script)
+        self.assertIn("imageio_ffmpeg.get_ffmpeg_exe()", run_script)
+        self.assertIn('"%PROJECT_FFMPEG%"', run_script)
         self.assertIn("EMOTION_REQUIREMENTS_HASH", emotion_script)
         self.assertIn('-r "%EMOTION_REQUIREMENTS%"', emotion_script)
         self.assertIn('"%PYTHON%" -m pip check', emotion_script)
