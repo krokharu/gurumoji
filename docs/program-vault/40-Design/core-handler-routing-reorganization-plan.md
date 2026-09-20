@@ -3,7 +3,7 @@ note_id: design-core-handler-routing-reorganization
 note_type: architecture-plan
 title: コア・ハンドラー・ルーティング再編案
 summary: 冒頭で着手範囲・作業手順・完了条件を定め、分析UI、追加分析の入力・保存・再開、LLMの手法別契約と知識固定を段階的な再編へ結ぶ。
-status: in-progress
+status: complete
 verified: 2026-09-20
 updated: 2026-09-20
 feature: architecture
@@ -44,7 +44,7 @@ FLOW-1以降を始める前に、本書の「計画案から確定入力への�
 
 ## 結論
 
-**段階的な分離は採用する。ただし、7層の一括整備ではなく、分析履歴・成果物取得の小さな縦切りを先に完成させ、効果を確認して対象を広げる。** 2026-09-20にPhase 0〜2の読み取り・固定保存・Vault再試行を実装済み。Phase 3は順序1から段階的に移行中。
+**段階的な分離は採用する。ただし、7層の一括整備ではなく、分析履歴・成果物取得の小さな縦切りを先に完成させ、効果を確認して対象を広げる。** 2026-09-20にPhase 0〜4の構造再編を完了した。後述のAI管理・追加分析・統計・UIは、それぞれの導入条件に従う別の機能拡張である。
 
 次の7項目は責務を見分ける観点であり、7つのパッケージや基盤を最初から作る要求ではない。
 
@@ -1449,7 +1449,7 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 **完了条件：** 移行した機能について、正常・失敗・取消・再起動の該当経路が維持される。未移行機能の分離はその変更の合否条件にしない。
 
-**実装状態（2026-09-20）：進行中。** 順序1のうち比較の固定保存、分析準備の保存、通常の会話編集（話者名・会話内話者プロファイルを含む）を`AnalysisCommands`と共通Blueprintへ移した。比較は表示時の複数入力fingerprint照合、サーバー側の再集計、専用run・member保存、stale伝播、Vault公開を確認した。分析準備は`BEGIN IMMEDIATE`からrevision・本文版更新・stale伝播までの単一トランザクション、commit後の索引更新、InputVaultへ本文を出さない契約を確認した。通常編集は共有lock内の確定、revision競合、編集manifest・回復、学習用差分、索引とInputVaultの更新を既存テストで確認した。グローバル話者台帳のGET／PUTとCSV取込から共用する保存処理も`SpeakerRegistryHandler`と専用Blueprintへ移し、台帳revision競合、削除、保存後の分析索引更新を確認した。AI話者再同定は送信内容・provider規則を変えず、資格情報解決、同期AI実行、実行後revision照合、利用量保存、話者修復とInputVault更新をFlask非依存のユースケースとHandlerへ分離した。
+**実装状態（2026-09-20）：完了。** 順序1のうち比較の固定保存、分析準備の保存、通常の会話編集（話者名・会話内話者プロファイルを含む）を`AnalysisCommands`と共通Blueprintへ移した。比較は表示時の複数入力fingerprint照合、サーバー側の再集計、専用run・member保存、stale伝播、Vault公開を確認した。分析準備は`BEGIN IMMEDIATE`からrevision・本文版更新・stale伝播までの単一トランザクション、commit後の索引更新、InputVaultへ本文を出さない契約を確認した。通常編集は共有lock内の確定、revision競合、編集manifest・回復、学習用差分、索引とInputVaultの更新を既存テストで確認した。グローバル話者台帳のGET／PUTとCSV取込から共用する保存処理も`SpeakerRegistryHandler`と専用Blueprintへ移し、台帳revision競合、削除、保存後の分析索引更新を確認した。AI話者再同定は送信内容・provider規則を変えず、資格情報解決、同期AI実行、実行後revision照合、利用量保存、話者修復とInputVault更新をFlask非依存のユースケースとHandlerへ分離した。
 
 順序2はAI見解、Transformer、発話分類の取得・実行境界を`AnalysisQueries`／`AnalysisCommands`と共通Blueprintへ移した。状態取得は保存済み結果と最新requestをSQLite snapshotから読み、取得操作でAI・Transformer・Jevを再実行しない。AI見解とTransformerの開始・取消はrequest ID再送、同時実行拒否、revision照合、AI見解の専門家ゲート、Transformerの自動／候補／手動条件、thread開始失敗時の後始末、取消eventを既存の共有lockとDB状態のまま保持した。発話分類は同期実行のまま、Jev利用指定、実行前後のrevision照合、手動・ルール・Jev・Transformer値の分離、SQLite確定後の固定履歴作成とVault失敗時の警告を維持した。非同期workerは既存のFlask非依存関数を継続利用する。
 
@@ -1466,6 +1466,8 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 - `app.py`を薄くすること自体を完了条件にしない。移行対象の入口から実処理まで追跡でき、不要な二重登録・二重状態・逆importが消えたことを確認する。
 
 **完了条件：** 既存の起動・import・HTTP契約が保たれ、移行済み機能が単一の実装を参照する。全体起動や共通hookに触れた変更では、局所テストに加えて広い回帰確認を行う。
+
+**実装状態（2026-09-20）：完了。** 移行対象の旧ルート実装を削除し、組み立て側から各Handler／Routingへ依存を渡す単一経路にした。`src/app.py`の互換importは`gurumoji.app`と同一モジュールを返し、`create_job`／`import_speaker_registry`のendpoint名は共通security hookとの契約として維持する。一時的な再exportや旧新二重登録はなく、移行済みHTTP操作の一意性と`handlers`／`web`からcomposition moduleへの逆import不在を機械検証する。
 
 ## 移行時の必須確認
 
