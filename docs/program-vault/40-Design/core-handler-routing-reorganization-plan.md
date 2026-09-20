@@ -1453,6 +1453,8 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 順序2はAI見解、Transformer、発話分類の取得・実行境界を`AnalysisQueries`／`AnalysisCommands`と共通Blueprintへ移した。状態取得は保存済み結果と最新requestをSQLite snapshotから読み、取得操作でAI・Transformer・Jevを再実行しない。AI見解とTransformerの開始・取消はrequest ID再送、同時実行拒否、revision照合、AI見解の専門家ゲート、Transformerの自動／候補／手動条件、thread開始失敗時の後始末、取消eventを既存の共有lockとDB状態のまま保持した。発話分類は同期実行のまま、Jev利用指定、実行前後のrevision照合、手動・ルール・Jev・Transformer値の分離、SQLite確定後の固定履歴作成とVault失敗時の警告を維持した。非同期workerは既存のFlask非依存関数を継続利用する。
 
+順序3は文字起こしジョブの受付、状態取得、取消、完了後編集、ジョブ所有ファイル取得を`JobHandler`と専用Routingへ移した。話者台帳のCSV取込も既存の`SpeakerRegistryHandler`保存処理を使うRoutingへ統合した。`create_job`と`import_speaker_registry`を含むendpoint名は共通security hookと互換入口のため維持し、submission IDの再送、同時受付予約、メディア／CSVのmultipart上限、`after_request`での予約解放を既存hookへ残した。文字起こしフォーム検証から作業・出力ディレクトリ確保、worker開始、開始失敗時のジョブ登録・upload・出力の後始末は1つのFlask非依存コマンドとして維持し、`committing`以降を取消不可とする状態境界も変えていない。
+
 ### Phase 4：互換入口と不要な橋渡しを整理
 
 - 移行済み機能の一時的な橋渡しだけを削除し、設定・依存を組み立て側で明示する。`src/app.py`による`import app`と`gurumoji.app`の同一モジュール性を保つ。

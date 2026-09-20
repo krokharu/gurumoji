@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 import subprocess
-from typing import Callable
+from typing import Any, Callable
 
 from flask import Blueprint, Flask, jsonify, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from ..handlers.speaker_registry import (
     SpeakerIdentificationHandler,
@@ -22,6 +23,9 @@ def register_speaker_routes(
     handler: Callable[[], SpeakerRegistryHandler],
     identification: Callable[[], SpeakerIdentificationHandler],
     ai_providers: frozenset[str] | set[str],
+    import_csv: Callable[..., tuple[list[dict[str, Any]], int, int]],
+    read_upload: Callable[[Any, int], bytes],
+    max_csv_bytes: Callable[[], int],
 ) -> None:
     blueprint = Blueprint("speaker_registry", __name__)
 
@@ -93,4 +97,44 @@ def register_speaker_routes(
         except (OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
             return jsonify({"error": f"話者名を保存できません: {exc}"}), 500
 
+    def import_speaker_registry():
+        upload = request.files.get("csv_file")
+        if upload is None or not upload.filename:
+            return jsonify({
+                "error": "GoogleフォームまたはスプレッドシートのCSVを選択してください。"
+            }), 400
+        try:
+            expected_revision = parse_registry_revision(
+                request.form.get("registry_revision")
+            )
+            records, imported_count, revision = import_csv(
+                read_upload(upload, max_csv_bytes()),
+                expected_revision=expected_revision,
+            )
+            return jsonify({
+                "speakers": records,
+                "total": len(records),
+                "imported_count": imported_count,
+                "registry_revision": revision,
+            })
+        except SpeakerRegistryConflictError as exc:
+            return jsonify({
+                "error": str(exc),
+                "conflict": True,
+                "current_revision": exc.current_revision,
+            }), 409
+        except RequestEntityTooLarge:
+            raise
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except (OSError, sqlite3.Error) as exc:
+            return jsonify({"error": f"CSVを取り込めません: {exc}"}), 500
+
     app.register_blueprint(blueprint)
+    # Preserve the endpoint consumed by the global upload-size security hook.
+    app.add_url_rule(
+        "/api/speakers/import",
+        "import_speaker_registry",
+        import_speaker_registry,
+        methods=["POST"],
+    )

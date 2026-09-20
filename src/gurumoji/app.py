@@ -111,14 +111,15 @@ from .handlers.analysis_commands import (
     TranscriptConflictError,
 )
 from .handlers.analysis_queries import AnalysisQueries
+from .handlers.jobs import JobHandler, JobRequestError
 from .handlers.speaker_registry import (
     SpeakerIdentificationHandler,
     SpeakerIdentificationRequestError,
     SpeakerRegistryConflictError,
     SpeakerRegistryHandler,
-    parse_registry_revision,
 )
 from .web.analysis_routes import register_analysis_routes
+from .web.job_routes import register_job_routes
 from .web.speaker_routes import register_speaker_routes
 from . import transcript_preparation as preparation
 from . import method_experts
@@ -12700,15 +12701,17 @@ def _update_library_from_payload_locked(
     return result
 
 
-def parse_bool(name: str, default: bool = False) -> bool:
-    values = request.form.getlist(name)
+def parse_bool(name: str, default: bool = False, *, form: Any = None) -> bool:
+    form = request.form if form is None else form
+    values = form.getlist(name)
     if not values:
         return default
     return any(value.lower() in {"1", "true", "yes", "on"} for value in values)
 
 
-def parse_optional_int(name: str) -> int | None:
-    raw = request.form.get(name, "").strip()
+def parse_optional_int(name: str, *, form: Any = None) -> int | None:
+    form = request.form if form is None else form
+    raw = form.get(name, "").strip()
     if not raw or raw == "0":
         return None
     try:
@@ -12720,8 +12723,11 @@ def parse_optional_int(name: str) -> int | None:
     return value
 
 
-def parse_optional_float(name: str, default: float, min_value: float, max_value: float) -> float:
-    raw = request.form.get(name, "").strip()
+def parse_optional_float(
+    name: str, default: float, min_value: float, max_value: float, *, form: Any = None
+) -> float:
+    form = request.form if form is None else form
+    raw = form.get(name, "").strip()
     if not raw:
         return default
     try:
@@ -12733,8 +12739,9 @@ def parse_optional_float(name: str, default: float, min_value: float, max_value:
     return value
 
 
-def parse_audio_preprocess() -> str:
-    preset = request.form.get("audio_preprocess", "standard").strip() or "standard"
+def parse_audio_preprocess(*, form: Any = None) -> str:
+    form = request.form if form is None else form
+    preset = form.get("audio_preprocess", "standard").strip() or "standard"
     if preset not in AUDIO_PREPROCESS_PRESETS:
         raise ValueError("音声前処理の指定が不正です。")
     return preset
@@ -13350,37 +13357,6 @@ def api_update_ai_model():
 @app.get("/api/system/activity")
 def api_system_activity():
     return jsonify({"ok": True, **system_activity_snapshot()})
-
-
-@app.post("/api/speakers/import")
-def import_speaker_registry():
-    upload = request.files.get("csv_file")
-    if upload is None or not upload.filename:
-        return jsonify({"error": "GoogleフォームまたはスプレッドシートのCSVを選択してください。"}), 400
-    try:
-        expected_revision = parse_registry_revision(request.form.get("registry_revision"))
-        records, imported_count, revision = import_speaker_registry_csv(
-            read_upload_limited(upload, MAX_CSV_UPLOAD_BYTES),
-            expected_revision=expected_revision,
-        )
-        return jsonify({
-            "speakers": records,
-            "total": len(records),
-            "imported_count": imported_count,
-            "registry_revision": revision,
-        })
-    except SpeakerRegistryConflictError as exc:
-        return jsonify({
-            "error": str(exc),
-            "conflict": True,
-            "current_revision": exc.current_revision,
-        }), 409
-    except RequestEntityTooLarge:
-        raise
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, sqlite3.Error) as exc:
-        return jsonify({"error": f"CSVを取り込めません: {exc}"}), 500
 
 
 @app.get("/api/speakers/export.csv")
@@ -14483,6 +14459,21 @@ def speaker_identification_handler() -> SpeakerIdentificationHandler:
     return SpeakerIdentificationHandler(identify_library_speakers)
 
 
+def job_handler() -> JobHandler:
+    return JobHandler(
+        jobs=jobs,
+        lock=jobs_lock,
+        active_statuses=ACTIVE_JOB_STATUSES,
+        prune=prune_jobs_locked,
+        admission_id=lambda: _job_admission_id,
+        admission_public=admission_job_public,
+        start_job=start_transcription_job_command,
+        update_job=update_job,
+        update_transcript=update_library_from_payload,
+        path_is_within=path_is_within,
+    )
+
+
 register_analysis_routes(
     app, analysis_queries, analysis_commands, AI_MODEL_PROVIDERS
 )
@@ -14491,7 +14482,11 @@ register_speaker_routes(
     speaker_registry_handler,
     speaker_identification_handler,
     AI_MODEL_PROVIDERS,
+    import_speaker_registry_csv,
+    read_upload_limited,
+    lambda: MAX_CSV_UPLOAD_BYTES,
 )
+register_job_routes(app, job_handler)
 
 
 @app.get("/api/analysis/experts")
@@ -15858,17 +15853,20 @@ def download_training_manifest():
     )
 
 
-@app.post("/api/jobs")
-def create_job():
+def start_transcription_job_command(
+    form: Any, upload: Any, *, admission_id: str | None
+) -> tuple[dict[str, Any], int]:
     upload_dir: Path | None = None
     reserved_output_dir: Path | None = None
     registered_job_id: str | None = None
     try:
         with jobs_lock:
             if any(job.status in ACTIVE_JOB_STATUSES for job in jobs.values()):
-                return jsonify({"error": "別の文字起こしを処理中です。完了または中止までお待ちください。"}), 409
-        upload = request.files.get("input_file")
-        source_path_raw = request.form.get("source_path", "").strip().strip('"')
+                raise JobRequestError(
+                    "別の文字起こしを処理中です。完了または中止までお待ちください。",
+                    409,
+                )
+        source_path_raw = form.get("source_path", "").strip().strip('"')
         direct_input_path: Path | None = None
         if source_path_raw:
             if not local_path_access_allowed():
@@ -15878,30 +15876,30 @@ def create_job():
         elif upload is not None and upload.filename:
             original_name = Path(upload.filename).name
         else:
-            return jsonify({"error": "処理する音声・動画ファイルを選択してください。"}), 400
+            raise ValueError("処理する音声・動画ファイルを選択してください。")
         original_name = normalize_source_name(original_name)
         if Path(original_name).suffix.lower() not in ALLOWED_EXTENSIONS:
-            return jsonify({"error": "対応形式は MP4/MOV/MKV/WAV/MP3/M4A/FLAC です。"}), 400
+            raise ValueError("対応形式は MP4/MOV/MKV/WAV/MP3/M4A/FLAC です。")
 
-        model_name = request.form.get("model_name", "base")
+        model_name = form.get("model_name", "base")
         if model_name not in MODEL_NAMES:
             raise ValueError("認識モデルが不正です。")
-        language_raw = request.form.get("language", "ja").strip()
+        language_raw = form.get("language", "ja").strip()
         language = language_raw or None
         if language not in LANGUAGES:
             raise ValueError("言語が不正です。")
-        audio_preprocess = parse_audio_preprocess()
-        conversation_mode = request.form.get("conversation_mode", "meeting").strip()
+        audio_preprocess = parse_audio_preprocess(form=form)
+        conversation_mode = form.get("conversation_mode", "meeting").strip()
         if conversation_mode not in CONVERSATION_MODES:
             raise ValueError("会話モードが不正です。")
         custom_vocabulary = normalize_custom_vocabulary(
-            request.form.get("custom_vocabulary", "")
+            form.get("custom_vocabulary", "")
         )
         # Save here as well as from the UI's background save so a term entered
         # immediately before pressing start is retained for the next job.
         save_custom_vocabulary(custom_vocabulary)
-        device = request.form.get("device", "cuda")
-        diarization_device = request.form.get("diarization_device", "cpu")
+        device = form.get("device", "cuda")
+        diarization_device = form.get("diarization_device", "cpu")
         if device not in {"cpu", "cuda"} or diarization_device not in {"cpu", "cuda"}:
             raise ValueError("処理装置の指定が不正です。")
         machine = get_machine_profile()
@@ -15910,15 +15908,19 @@ def create_job():
                 "このマシンではGPU (CUDA)を利用できません。"
                 "文字起こし装置と話者分離装置をCPUに設定してください。"
             )
-        min_speakers = parse_optional_int("min_speakers")
-        max_speakers = parse_optional_int("max_speakers")
+        min_speakers = parse_optional_int("min_speakers", form=form)
+        max_speakers = parse_optional_int("max_speakers", form=form)
         if min_speakers and max_speakers and min_speakers > max_speakers:
             raise ValueError("最少話者数は最多話者数以下にしてください。")
-        triple_pass = parse_bool("triple_pass")
-        boost_quiet_speech = parse_bool("boost_quiet_speech", default=True)
+        triple_pass = parse_bool("triple_pass", form=form)
+        boost_quiet_speech = parse_bool("boost_quiet_speech", default=True, form=form)
         if boost_quiet_speech or triple_pass:
-            vad_onset = parse_optional_float("vad_onset", 0.35, 0.05, 0.95)
-            vad_offset = parse_optional_float("vad_offset", 0.25, 0.05, 0.95)
+            vad_onset = parse_optional_float(
+                "vad_onset", 0.35, 0.05, 0.95, form=form
+            )
+            vad_offset = parse_optional_float(
+                "vad_offset", 0.25, 0.05, 0.95, form=form
+            )
             if vad_offset > vad_onset:
                 raise ValueError("VAD offset は onset 以下にしてください。")
             # Keep quiet speech discoverable without accepting nearly silent
@@ -15929,14 +15931,16 @@ def create_job():
             vad_offset = 0.363
             no_speech_threshold = 0.6
 
-        provider = request.form.get("ai_provider", "none")
+        provider = form.get("ai_provider", "none")
         if provider not in AI_PROVIDERS:
             raise ValueError("AI プロバイダーが不正です。")
-        clean_transcript = parse_bool("clean_transcript")
-        detect_names = parse_bool("detect_speaker_names")
-        create_outline = parse_bool("create_outline")
-        finish_in_obsidian = parse_bool("finish_in_obsidian", default=True)
-        jev_compare = parse_bool("jev_compare")
+        clean_transcript = parse_bool("clean_transcript", form=form)
+        detect_names = parse_bool("detect_speaker_names", form=form)
+        create_outline = parse_bool("create_outline", form=form)
+        finish_in_obsidian = parse_bool(
+            "finish_in_obsidian", default=True, form=form
+        )
+        jev_compare = parse_bool("jev_compare", form=form)
         if provider == "none":
             clean_transcript = False
             detect_names = False
@@ -15945,8 +15949,8 @@ def create_job():
         elif jev_compare:
             # The comparison needs a result from the existing finishing AI.
             clean_transcript = True
-        emotion_analysis = parse_bool("emotion_analysis")
-        emotion_model = request.form.get("emotion_model", "kushinada").strip() or "kushinada"
+        emotion_analysis = parse_bool("emotion_analysis", form=form)
+        emotion_model = form.get("emotion_model", "kushinada").strip() or "kushinada"
         if emotion_model not in AIST_EMOTION_MODEL_CHOICES:
             raise ValueError("感情分析モデルの指定が不正です。")
         token_config = load_token_config()
@@ -15968,12 +15972,12 @@ def create_job():
                     f"tokens.json に {ai_provider_label(provider)} のAPIキーを設定してください。"
                 )
 
-        output_raw = request.form.get("output_dir", "").strip().strip('"')
+        output_raw = form.get("output_dir", "").strip().strip('"')
         if output_raw and not local_path_access_allowed():
             raise ValueError("Custom output paths are disabled for remote access.")
         output_root = prepare_output_root(output_raw)
 
-        job_id = str(getattr(g, "job_admission_id", "") or uuid.uuid4().hex)
+        job_id = str(admission_id or uuid.uuid4().hex)
         output_dir = job_output_directory(output_root, original_name, job_id)
         output_dir.mkdir(exist_ok=False)
         reserved_output_dir = output_dir
@@ -16012,9 +16016,9 @@ def create_job():
             vad_onset=vad_onset,
             vad_offset=vad_offset,
             no_speech_threshold=no_speech_threshold,
-            write_srt=parse_bool("write_srt"),
+            write_srt=parse_bool("write_srt", form=form),
             write_json=True,
-            burn_subtitled_video=parse_bool("burn_subtitled_video"),
+            burn_subtitled_video=parse_bool("burn_subtitled_video", form=form),
             ai_provider=provider,
             clean_transcript=clean_transcript,
             detect_speaker_names=detect_names,
@@ -16025,7 +16029,7 @@ def create_job():
             ai_model=ai_model,
             ai_base_url=ai_base_url,
             owns_output_dir=True,
-            ai_efforts=normalize_efforts({key: request.form.get("ai_effort_" + key, "auto")
+            ai_efforts=normalize_efforts({key: form.get("ai_effort_" + key, "auto")
                                           for key in ("outline", "cleanup", "name_extract", "name_verify")}),
             finish_in_obsidian=finish_in_obsidian,
             conversation_mode=conversation_mode,
@@ -16062,8 +16066,17 @@ def create_job():
             if reserved_output_dir is not None:
                 remove_owned_directory(reserved_output_dir, ignore_errors=True)
             raise RuntimeError(f"Could not start the transcription worker: {exc}") from exc
-        return jsonify(job.public()), 202
+        return job.public(), 202
     except RequestEntityTooLarge:
+        if registered_job_id:
+            with jobs_lock:
+                jobs.pop(registered_job_id, None)
+        if upload_dir is not None:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+        if reserved_output_dir is not None:
+            remove_owned_directory(reserved_output_dir, ignore_errors=True)
+        raise
+    except JobRequestError:
         if registered_job_id:
             with jobs_lock:
                 jobs.pop(registered_job_id, None)
@@ -16080,7 +16093,7 @@ def create_job():
             shutil.rmtree(upload_dir, ignore_errors=True)
         if reserved_output_dir is not None:
             remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        return jsonify({"error": str(exc)}), 400
+        raise JobRequestError(str(exc), 400) from exc
     except (RuntimeError, OSError) as exc:
         if registered_job_id:
             with jobs_lock:
@@ -16089,7 +16102,7 @@ def create_job():
             shutil.rmtree(upload_dir, ignore_errors=True)
         if reserved_output_dir is not None:
             remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        return jsonify({"error": str(exc)}), 500
+        raise JobRequestError(str(exc), 500) from exc
 
 
 def admission_job_public(job_id: str) -> dict[str, Any]:
@@ -16120,91 +16133,6 @@ def admission_job_public(job_id: str) -> dict[str, Any]:
         "output_warning": "",
         "revision_count": 0,
     }
-
-
-@app.get("/api/jobs/<job_id>")
-def get_job(job_id: str):
-    with jobs_lock:
-        prune_jobs_locked()
-        job = jobs.get(job_id)
-        admitting = job is None and _job_admission_id == job_id
-    if job is None:
-        if admitting:
-            return jsonify(admission_job_public(job_id)), 202
-        return jsonify({"error": "ジョブが見つかりません。"}), 404
-    return jsonify(job.public())
-
-
-@app.get("/api/jobs/active")
-def get_active_job():
-    with jobs_lock:
-        prune_jobs_locked()
-        active = [job for job in jobs.values() if job.status in ACTIVE_JOB_STATUSES]
-        job = max(active, key=lambda value: value.created_at) if active else None
-        admitting_id = _job_admission_id if job is None else None
-    public_job = (
-        job.public()
-        if job is not None
-        else admission_job_public(admitting_id) if admitting_id else None
-    )
-    return jsonify({"job": public_job})
-
-
-@app.post("/api/jobs/<job_id>/cancel")
-def cancel_job(job_id: str):
-    with jobs_lock:
-        job = jobs.get(job_id)
-        if job is None:
-            return jsonify({"error": "ジョブが見つかりません。"}), 404
-        if job.status not in {"queued", "running"}:
-            return jsonify({"error": "このジョブは既に終了しています。"}), 409
-        job.cancel_event.set()
-    update_job(job, message="中止を要求しました。現在の処理区切りで停止します…")
-    return jsonify({"ok": True})
-
-
-@app.put("/api/jobs/<job_id>/transcript")
-def save_transcript(job_id: str):
-    with jobs_lock:
-        job = jobs.get(job_id)
-    if job is None:
-        return jsonify({"error": "ジョブが見つかりません。"}), 404
-    if job.status != "completed":
-        return jsonify({"error": "完了したジョブだけを編集できます。"}), 409
-    try:
-        result = update_library_from_payload(job_id, request.get_json(silent=True))
-        update_job(job, message="手動編集を保存し、修正差分を学習データへ蓄積しました。")
-        return jsonify(result)
-    except TranscriptConflictError as exc:
-        return jsonify({
-            "error": str(exc),
-            "conflict": True,
-            "current_revision": exc.current_revision,
-        }), 409
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
-        return jsonify({"error": f"ファイルを保存できません: {exc}"}), 500
-
-
-@app.get("/api/jobs/<job_id>/files/<path:filename>")
-def download_file(job_id: str, filename: str):
-    with jobs_lock:
-        job = jobs.get(job_id)
-        if job is None:
-            return jsonify({"error": "ジョブが見つかりません。"}), 404
-        matching = next(
-            (
-                path for path in job.files
-                if path.name == filename and path_is_within(path, job.output_dir)
-            ),
-            None,
-        )
-    if matching is None or not matching.is_file():
-        return jsonify({"error": "出力ファイルが見つかりません。"}), 404
-    return send_file(matching, as_attachment=True, download_name=matching.name)
 
 
 def main() -> int:
