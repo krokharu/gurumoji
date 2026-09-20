@@ -111,6 +111,8 @@ from .handlers.analysis_commands import (
 )
 from .handlers.analysis_queries import AnalysisQueries
 from .handlers.speaker_registry import (
+    SpeakerIdentificationHandler,
+    SpeakerIdentificationRequestError,
     SpeakerRegistryConflictError,
     SpeakerRegistryHandler,
     parse_registry_revision,
@@ -13784,44 +13786,43 @@ def get_library_item(item_id: str):
     return jsonify(library_public(row))
 
 
-@app.post("/api/library/<item_id>/speaker-identification")
-def rerun_library_speaker_identification(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "話者特定の指定が JSON ではありません。"}), 400
-    provider = str(payload.get("provider") or "").strip().casefold()
-    if provider not in AI_MODEL_PROVIDERS:
-        return jsonify({"error": "OpenAI、Google Gemini、またはローカルLLMを選択してください。"}), 400
-    expected_revision = payload.get("revision_count")
-    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
-        return jsonify({"error": "最新の編集内容を保存してから実行してください。"}), 400
+def identify_library_speakers(
+    item_id: str, *, provider: str, expected_revision: int
+) -> dict[str, Any]:
     row = library_row(item_id)
     if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
+        raise SpeakerIdentificationRequestError("データが見つかりません。", 404)
     current_revision = int(row["revision_count"] or 0)
     if current_revision != expected_revision:
-        return jsonify({
-            "error": "別の画面でデータが更新されています。再読み込みしてください。",
-            "conflict": True,
-            "current_revision": current_revision,
-        }), 409
+        raise SpeakerIdentificationRequestError(
+            "別の画面でデータが更新されています。再読み込みしてください。",
+            409,
+            current_revision=current_revision,
+        )
     segments = row_segments(row)
     if not segments:
-        return jsonify({"error": "話者特定に使用できる発話がありません。"}), 400
+        raise SpeakerIdentificationRequestError(
+            "話者特定に使用できる発話がありません。", 400
+        )
 
     try:
         token_config = load_token_config()
     except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
+        raise SpeakerIdentificationRequestError(str(exc), 503) from exc
     try:
         api_key, model = configured_ai_credentials(token_config, provider)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        raise SpeakerIdentificationRequestError(str(exc), 400) from exc
     base_url = token_config.lmstudio_base_url if provider == "lmstudio" else ""
     if provider != "lmstudio" and not api_key:
-        return jsonify({"error": f"tokens.json に {ai_provider_label(provider)} のAPIキーを設定してください。"}), 400
+        raise SpeakerIdentificationRequestError(
+            f"tokens.json に {ai_provider_label(provider)} のAPIキーを設定してください。",
+            400,
+        )
     if not model:
-        return jsonify({"error": local_llm_model_required_message()}), 400
+        raise SpeakerIdentificationRequestError(
+            local_llm_model_required_message(), 400
+        )
 
     run_usage: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
@@ -13841,23 +13842,26 @@ def rerun_library_speaker_identification(item_id: str):
             base_url=base_url,
         )
     except (OSError, RuntimeError, ValueError, TypeError) as exc:
-        return jsonify({
-            "error": "話者特定AIを実行できませんでした: "
-            + public_diagnostic_text(str(exc), reveal_local_paths=False)
-        }), 502
+        raise SpeakerIdentificationRequestError(
+            "話者特定AIを実行できませんでした: "
+            + public_diagnostic_text(str(exc), reveal_local_paths=False),
+            502,
+        ) from exc
 
     try:
         with library_write_lock:
             latest = library_row(item_id)
             if latest is None:
-                return jsonify({"error": "データが見つかりません。"}), 404
+                raise SpeakerIdentificationRequestError(
+                    "データが見つかりません。", 404
+                )
             latest_revision = int(latest["revision_count"] or 0)
             if latest_revision != expected_revision:
-                return jsonify({
-                    "error": "AI処理中にデータが更新されました。結果を反映せず再読み込みします。",
-                    "conflict": True,
-                    "current_revision": latest_revision,
-                }), 409
+                raise SpeakerIdentificationRequestError(
+                    "AI処理中にデータが更新されました。結果を反映せず再読み込みします。",
+                    409,
+                    current_revision=latest_revision,
+                )
             existing_names = json_load(latest["speaker_names_json"], {})
             if not isinstance(existing_names, dict):
                 existing_names = {}
@@ -13942,17 +13946,11 @@ def rerun_library_speaker_identification(item_id: str):
                 "repairs": repair_summary,
                 "registration": registration_summary,
             }
-            return jsonify(result)
+            return result
     except TranscriptConflictError as exc:
-        return jsonify({
-            "error": str(exc),
-            "conflict": True,
-            "current_revision": exc.current_revision,
-        }), 409
-    except (LookupError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
-        return jsonify({"error": f"話者名を保存できません: {exc}"}), 500
+        raise SpeakerIdentificationRequestError(
+            str(exc), 409, current_revision=exc.current_revision
+        ) from exc
 
 
 def obsidian_workbench() -> ObsidianWorkbench:
@@ -14471,8 +14469,17 @@ def speaker_registry_handler() -> SpeakerRegistryHandler:
     )
 
 
+def speaker_identification_handler() -> SpeakerIdentificationHandler:
+    return SpeakerIdentificationHandler(identify_library_speakers)
+
+
 register_analysis_routes(app, analysis_queries, analysis_commands)
-register_speaker_routes(app, speaker_registry_handler)
+register_speaker_routes(
+    app,
+    speaker_registry_handler,
+    speaker_identification_handler,
+    AI_MODEL_PROVIDERS,
+)
 
 
 @app.get("/api/analysis/experts")

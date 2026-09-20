@@ -5,7 +5,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
-from gurumoji.handlers.speaker_registry import SpeakerRegistryHandler
+from gurumoji.handlers.speaker_registry import (
+    SpeakerIdentificationHandler,
+    SpeakerRegistryHandler,
+)
 
 
 class TrackingLock:
@@ -39,6 +42,22 @@ class CompletedRunConnection:
 
 
 class SpeakerRegistryHandlerTests(unittest.TestCase):
+    def test_identification_handler_is_framework_independent(self):
+        calls = []
+        handler = SpeakerIdentificationHandler(
+            lambda item_id, **options: calls.append((item_id, options)) or {
+                "id": item_id,
+                "speaker_identity": {"provider": options["provider"]},
+            }
+        )
+        result = handler.run(
+            "item-1", provider="openai", expected_revision=3
+        )
+        self.assertEqual(result["speaker_identity"]["provider"], "openai")
+        self.assertEqual(calls, [(
+            "item-1", {"provider": "openai", "expected_revision": 3}
+        )])
+
     def test_save_and_archive_refresh_stay_under_shared_lock(self):
         lock = TrackingLock()
         connection = CompletedRunConnection(["item-1", "item-2"])
@@ -131,6 +150,15 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertTrue(all(
             rule.endpoint.startswith("speaker_registry.") for rule in rules
         ))
+        identification = [
+            rule for rule in app.app.url_map.iter_rules()
+            if str(rule.rule) == "/api/library/<item_id>/speaker-identification"
+            and "POST" in rule.methods
+        ]
+        self.assertEqual(len(identification), 1)
+        self.assertTrue(
+            identification[0].endpoint.startswith("speaker_registry.")
+        )
 
     def test_identified_speakers_link_only_to_a_unique_registered_name(self):
         profiles = app.normalize_conversation_speaker_profiles(

@@ -14,6 +14,33 @@ class SpeakerRegistryConflictError(RuntimeError):
         self.current_revision = current_revision
 
 
+class SpeakerIdentificationRequestError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        status: int,
+        *,
+        current_revision: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.current_revision = current_revision
+
+
+class SpeakerIdentificationHandler:
+    """Run one synchronous speaker-identification use case without Flask."""
+
+    def __init__(self, run_identification: Callable[..., dict[str, Any]]) -> None:
+        self._run_identification = run_identification
+
+    def run(
+        self, item_id: str, *, provider: str, expected_revision: int
+    ) -> dict[str, Any]:
+        return self._run_identification(
+            item_id, provider=provider, expected_revision=expected_revision
+        )
+
+
 def parse_registry_revision(value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError("registry_revision must be a non-negative integer.")
