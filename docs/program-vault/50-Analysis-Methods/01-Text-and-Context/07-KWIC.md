@@ -1,5 +1,6 @@
 ---
 note_id: method-kwic
+note_type: analysis-method
 method_id: kwic
 method_version: text-analysis-store-2
 algorithm_version: content-insights-2
@@ -28,3 +29,7 @@ KWICは発見・監査の道具であり、頻度比較、テーマ抽出、感�
 ## 査読文献
 
 - [Kilgarriff (2001)](https://kilgarriff.co.uk/Publications/2001-K-CompCorpIJCL.pdf) はコーパス比較を、[Kudo et al. (2004)](https://aclanthology.org/W04-3230/) は日本語の語境界を論じる。KWICの正規化検索では、どの分割・正規化を用いたかを記録する根拠になる。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/quantitative-text-analysis/01-Expert|計量テキスト分析の専門家]]（原文への往復の手順）。

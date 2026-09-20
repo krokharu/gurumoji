@@ -2,8 +2,11 @@
 note_id: program-system-map
 note_type: architecture
 title: システム全体構造・データフロー・設定の所在
+summary: Gurumojiの主要モジュール、データフロー、保存先、設定の所在を現行実装に照らして示す。
 status: current
+feature: architecture
 verified: 2026-09-14
+updated: 2026-09-15
 tags:
   - gurumoji/program
   - gurumoji/architecture
@@ -11,8 +14,8 @@ tags:
 
 # システム全体構造・データフロー・設定の所在
 
-- **確認元：** 作業ツリー（ブランチ `agent/expand-analysis-ai-workflows`、未コミット変更を含む、2026-09-14）。
-- **調査条件：** コードは変更していない。行数は確認時点の概数。
+- **確認元：** 2026-09-14の調査内容は、ブランチ`agent/expand-analysis-ai-workflows`のコミット`1b8fe41`に収録し、プッシュ済み。
+- **調査条件：** 行数は初回調査時点の概数。2026-09-15に収録版の表記を更新した。優先修正による保存・UIの動作変更は[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]を参照する。
 - **関連ノート：** 問題点は [[40-Design/known-issues]]、整理方針は [[40-Design/convergence-plan]] に分けて記録する。
 
 ## アプリの目的（コードから推定）

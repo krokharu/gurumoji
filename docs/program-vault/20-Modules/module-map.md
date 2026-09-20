@@ -29,6 +29,8 @@ tags:
 | 日本語解析・統計 | `research_analysis.py`: `build_research_analysis`, `_linguistic_analysis`, `_statistics_analysis` | `tests/test_research_analysis.py` |
 | 見解・KWIC・特徴語 | `analysis_insights.py`: `build_content_analysis`, `search_kwic`, `create_ai_insights`, `validate_findings` | `tests/test_content_analysis.py` |
 | AI見解の実行と保存 | `app.py`: `start_analysis_insights`, `run_analysis_insight_job`, `get_analysis_insights`, `cancel_analysis_insights` | `tests/test_content_analysis.py`, `tests/test_content_browser.py` |
+| 手法ごとの専門家定義 | `method_experts.py`: `ExpertCatalog`, `review_for_analysis`, `ai_context`, `attach_method_reviews`, `report_lines`; `app.py`: `group_analysis_for_row`, `start_analysis_insights`, `get_analysis_experts`。定義はSoftware Vaultの `50-Analysis-Methods/10-Experts`（ADR-115） | `tests/test_method_experts.py`, `tests/test_method_expert_samples.py` |
+| 手法別の分析画面 | `app.py`: `get_analysis_method_overview`; `method_experts.py`: `method_overview`; `static/app.js`: `renderMethodAnalysis`, `buildExpertDetails`, `methodResultPanels`（パネルは `data-analysis-method` で対応付け、ADR-116） | `tests/test_analysis_method_view.py` |
 | AI通信・モデル設定 | `ai_http_worker.py`; `app.py`: `call_ai_json`, `configured_ai_credentials` | `tests/test_ai_http_worker.py`, `tests/test_ai_model_settings.py`, `tests/test_ai_scaling.py` |
 | 根拠付きAI仕上げ | `ai_finishing.py`: `clean_transcript`, `create_outline`, `finishing_changes` | `tests/test_ai_finishing.py`, `tests/test_pipeline_regressions.py` |
 | 手法別の固定保存・Vault | `analysis_method_registry.py`, `analysis_store.py`; `app.py`: `archive_group_analysis`, `archive_ai_finishing` | `tests/test_analysis_storage.py` |
@@ -37,7 +39,7 @@ tags:
 | 保存履歴・Vaultからの発話参照 | `static/analysis-storage.js` | `tests/test_content_browser.py` |
 | 分析出力 | `app.py`: `analysis_csv_rows`, `export_library_analysis_json`; `research_analysis.py`: `build_analysis_workbook` | `tests/test_analysis.py`, `tests/test_research_analysis.py` |
 | 編集差分の学習データ | `app.py`: `training_export_contents`, `write_training_exports`, `refresh_training_exports` | `tests/test_backend_safety.py`, `tests/test_outputs.py` |
-| UI・引用から音声確認 | `templates/index.html`, `static/app.js`, `static/analysis-content.js`, `static/style.css` | `tests/test_content_browser.py`, `tests/test_browser_e2e.py`, `tests/test_ui_defaults.py` |
+| UI・引用から音声確認（画面構成は [[20-Modules/ui-screens]]） | `templates/index.html`, `static/app.js`, `static/analysis-content.js`, `static/style.css`, `static/ai-effort.css` | `tests/test_content_browser.py`, `tests/test_browser_e2e.py`, `tests/test_ui_defaults.py` |
 | メディアパス・リモートアクセス | `app.py` のメディアAPI・認証・アクセス制限 | `tests/test_media_paths.py`, `tests/test_backend_safety.py` |
 
 ## 現在の分析API

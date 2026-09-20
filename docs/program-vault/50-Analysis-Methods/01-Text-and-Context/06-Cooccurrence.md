@@ -1,5 +1,6 @@
 ---
 note_id: method-cooccurrence
+note_type: analysis-method
 method_id: cooccurrence
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/text, gurumoji/orchestrator]
 
 - [Callon et al. (1983)](https://doi.org/10.1177/053901883022002003) は共語分析を問題領域のネットワークとして扱う基礎論文。
 - [Salton & Buckley (1988)](https://doi.org/10.1016/0306-4573(88)90021-0) は、語の重み付けが表現と検索結果へ強く影響することを示す。現実装のJaccard/Diceは同論文のTF–IDFと別の尺度である。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/quantitative-text-analysis/01-Expert|計量テキスト分析の専門家]]。

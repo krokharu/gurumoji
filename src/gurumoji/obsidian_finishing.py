@@ -301,17 +301,11 @@ class ObsidianWorkbench:
             return relative
         if not note_id:
             raise ValueError("作業ノートが見つかりません。旧形式のノートは元の場所に戻してください。")
-        matches = []
-        for path in self.vault.rglob("*.md"):
-            candidate = path.relative_to(self.vault).as_posix()
-            try:
-                with self.note_path(candidate).open(encoding="utf-8-sig") as handle:
-                    header = handle.read(65000).replace("\r\n", "\n")
-                properties, _ = split_properties(header)
-                if properties.get("note_id") == note_id:
-                    matches.append(candidate)
-            except (OSError, ValueError):
-                continue
+        from .obsidian_layout import find_notes
+        # Hidden folders are excluded: a note in Obsidian's .trash is deleted, not moved.
+        matches = find_notes(self.vault, {note_id}).get(note_id, [])
+        if not matches:
+            raise ValueError("作業ノートが見つかりません。削除した場合は、Obsidianのゴミ箱などから保管庫内に戻してください。")
         if len(matches) != 1:
             raise ValueError("作業ノートの移動先を一意に確認できません。note_idの変更・重複を確認してください。")
         return matches[0]
@@ -338,7 +332,8 @@ class ObsidianWorkbench:
 
     def prepare(self, item_id: str, title: str, segments: list[dict], *, revision: int,
                 provider: str = "none", model: str = "", detect_names: bool = True,
-                create_outline: bool = True, ready: bool = True, source_kind: str = "whisper", ai_efforts: dict | None = None) -> dict:
+                create_outline: bool = True, jev_compare: bool = False,
+                ready: bool = True, source_kind: str = "whisper", ai_efforts: dict | None = None) -> dict:
         update_efforts = ai_efforts is not None
         ai_efforts = normalize_efforts(ai_efforts)
         existing = self.load(item_id)
@@ -362,7 +357,8 @@ class ObsidianWorkbench:
                  "outline": folder + "/" + prefix + "アウトライン.md", "control": folder + "/" + prefix + "操作.md",
                  "status_note": folder + "/" + prefix + "状態.md", "note_ids": dict((existing or {}).get("note_ids", {})),
                  "segments": copy.deepcopy(segments), "model": model, "provider": provider,
-                 "detect_names": detect_names, "create_outline": create_outline, "ai_efforts": ai_efforts,
+                 "detect_names": detect_names, "create_outline": create_outline,
+                 "jev_compare": jev_compare, "ai_efforts": ai_efforts,
                  "original_note": original_note,
                   "observed": [], "status": "ready", "message": "会話本文を確認・編集し、操作を1つ選んでください。"}
         initial_paths = [state[key] for key in ("work", "outline", "control", "status_note")]
@@ -390,7 +386,8 @@ class ObsidianWorkbench:
         controls.extend(f"- [ ] {label} <!-- gurumoji-command:{key} -->" for key, label in COMMANDS.items())
         controls.extend(["", "## AI仕上げに含める処理", ""])
         for key, label in (("detect_names", "自己紹介から話者名も特定する"),
-                           ("create_outline", "仕上げ後のアウトラインも出力する")):
+                           ("create_outline", "仕上げ後のアウトラインも出力する"),
+                           ("jev_compare", "Jevでも修正要否を判定し、現行AIと比較する")):
             controls.append(f"- [{'x' if state[key] else ' '}] {label} <!-- gurumoji-option:{key} -->")
         controls.extend(["", "会話の自動削除は行いません。結果を確認してから「結果をアプリへ反映」を選べます。", ""])
         self.save_note(state, state["control"], "\n".join(controls), "control", provider=provider)
@@ -522,26 +519,39 @@ class ObsidianWorkbench:
             if stopping():
                 return
             state = None
+            latched = False
             try:
                 state = json.loads(read_text(path))
                 if not state.get("ready") or state["status"] == "running":
                     continue
                 self.refresh_paths(state)
                 selected, provider = self.selection(state)
-                if selected == state["observed"]:
-                    continue
-                state["observed"] = selected
-                # Latch before doing any AI work. Unchanged notes never repeat API calls.
-                self.save(state)
-                if not selected:
+                # A note problem reported before latching clears once the notes are readable again.
+                recovered = state.pop("poll_error", False)
+                if recovered:
                     state.update(status="ready", message="次の操作を選べます。編集先と前回結果は下のリンクから開けます。")
-                elif len(selected) != 1:
-                    raise ValueError("操作は1つだけチェックしてください。")
+                if selected == state["observed"]:
+                    if not recovered:
+                        continue
                 else:
-                    self.execute(state, selected[0], provider, engine, stopping)
+                    state["observed"] = selected
+                    latched = True
+                    # Latch before doing any AI work. Unchanged notes never repeat API calls.
+                    self.save(state)
+                    if not selected:
+                        state.update(status="ready", message="次の操作を選べます。編集先と前回結果は下のリンクから開けます。")
+                    elif len(selected) != 1:
+                        raise ValueError("操作は1つだけチェックしてください。")
+                    else:
+                        self.execute(state, selected[0], provider, engine, stopping)
             except Exception as exc:
                 if state is None:
                     continue
+                if not latched:
+                    # The same unresolved problem (e.g. a deleted note) is published once, not every poll.
+                    if state.get("poll_error") and state.get("message") == str(exc):
+                        continue
+                    state["poll_error"] = True
                 state.update(status="error", message=str(exc))
             if state is not None:
                 self.publish_status(state)
@@ -557,7 +567,7 @@ class ObsidianWorkbench:
         if action in {"outline", "finish"}:
             state.pop("candidate", None)
             _, control = split_properties(read_text(self.note_path(state["control"]), 64000))
-            for key in ("detect_names", "create_outline"):
+            for key in ("detect_names", "create_outline", "jev_compare"):
                 state[key] = bool(re.search(r"^- \[[xX]\] [^\n]*<!-- gurumoji-option:" + key + r" -->\s*$", control, re.M))
             if action == "finish":
                 state.pop("final_outline_note", None)

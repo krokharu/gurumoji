@@ -14,6 +14,7 @@ $script:Root = Split-Path -Parent $PSScriptRoot
 $script:TokenFile = Join-Path $script:Root 'config\tokens.json'
 $script:RunBatch = Join-Path $script:Root 'run.bat'
 $script:PythonInstallerScript = Join-Path $PSScriptRoot 'install_python.ps1'
+$script:VisualizationShortcutScript = Join-Path $PSScriptRoot 'ensure_visualization_shortcut.ps1'
 $script:ActiveProcess = $null
 $script:ActiveOutput = $null
 $script:ActiveLines = $null
@@ -393,7 +394,7 @@ $tokenGroup = [System.Windows.Forms.GroupBox]::new()
 $tokenGroup.Text = '2. 認証・ローカルLLM設定（必要なものだけ）'
 $tokenGroup.Dock = 'Top'
 $tokenGroup.AutoSize = $false
-$tokenGroup.Height = 350
+$tokenGroup.Height = 410
 $tokenGroup.Padding = [System.Windows.Forms.Padding]::new(12)
 $tokenGroup.Margin = [System.Windows.Forms.Padding]::new(3, 16, 3, 3)
 $rootPanel.Controls.Add($tokenGroup)
@@ -402,7 +403,7 @@ $tokenTable = [System.Windows.Forms.TableLayoutPanel]::new()
 $tokenTable.Location = [System.Drawing.Point]::new(12, 24)
 $tokenTable.Anchor = 'Top,Left,Right'
 $tokenTable.AutoSize = $false
-$tokenTable.Size = [System.Drawing.Size]::new(850, 190)
+$tokenTable.Size = [System.Drawing.Size]::new(850, 250)
 $tokenTable.ColumnCount = 2
 $tokenTable.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new([System.Windows.Forms.SizeType]::Absolute, 220))
 $tokenTable.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new([System.Windows.Forms.SizeType]::Percent, 100))
@@ -432,29 +433,33 @@ if (-not $hfValue) { $hfValue = Get-SettingText $settings 'hf_token' }
 $hfToken = Add-SettingRow 'Hugging Face token（必須）' $hfValue $true
 $openAiKey = Add-SettingRow 'OpenAI API key（任意）' (Get-SettingText $settings 'openai_api_key') $true
 $googleKey = Add-SettingRow 'Google Gemini API key（任意）' (Get-SettingText $settings 'google_api_key') $true
+$typeSafeKey = Add-SettingRow 'TypeSafe API key（Jev比較用）' (Get-SettingText $settings 'typesafe_api_key') $true
+$typeSafeModel = Add-SettingRow 'TypeSafe model' (Get-SettingText $settings 'typesafe_model' 'jev-latest') $false
 $lmStudioUrl = Add-SettingRow 'LM Studio URL' (Get-SettingText $settings 'lmstudio_base_url' 'http://127.0.0.1:1234/v1') $false
 $lmStudioModel = Add-SettingRow 'LM Studio model（空欄でも可）' (Get-SettingText $settings 'lmstudio_model') $false
 $lmStudioKey = Add-SettingRow 'LM Studio API key（認証時のみ）' (Get-SettingText $settings 'lmstudio_api_key') $true
 
 $tokenHelp = [System.Windows.Forms.Label]::new()
-$tokenHelp.Text = 'Hugging Face は pyannote の利用条件に同意後の read token が必要です。LM Studio は既定のまま Developer → Start server を有効にし、モデルはアプリ画面上部の LM Studio ライトから選べます。'
+$tokenHelp.Text = 'Hugging Face は pyannote の利用条件に同意後の read token が必要です。TypeSafe は Jevで修正要否を比較する場合だけ必要です。LM Studio は既定のまま Developer → Start server を有効にし、モデルはアプリ画面上部の LM Studio ライトから選べます。'
 $tokenHelp.AutoSize = $true
 $tokenHelp.MaximumSize = [System.Drawing.Size]::new(820, 0)
 $tokenHelp.Margin = [System.Windows.Forms.Padding]::new(3, 10, 3, 3)
-$tokenHelp.Location = [System.Drawing.Point]::new(12, 225)
+$tokenHelp.Location = [System.Drawing.Point]::new(12, 285)
 $tokenGroup.Controls.Add($tokenHelp)
 
 $buttonSave = [System.Windows.Forms.Button]::new()
 $buttonSave.Text = '設定を保存'
 $buttonSave.AutoSize = $true
 $buttonSave.Margin = [System.Windows.Forms.Padding]::new(3, 10, 3, 3)
-$buttonSave.Location = [System.Drawing.Point]::new(12, 292)
+$buttonSave.Location = [System.Drawing.Point]::new(12, 352)
 $buttonSave.add_Click({
     try {
         $next = Get-JsonSettings
         Set-SettingValue $next 'huggingface_token' $hfToken.Text
         Set-SettingValue $next 'openai_api_key' $openAiKey.Text
         Set-SettingValue $next 'google_api_key' $googleKey.Text
+        Set-SettingValue $next 'typesafe_api_key' $typeSafeKey.Text
+        Set-SettingValue $next 'typesafe_model' $typeSafeModel.Text
         Set-SettingValue $next 'lmstudio_base_url' (Normalize-LmStudioUrl $lmStudioUrl.Text)
         Set-SettingValue $next 'lmstudio_model' $lmStudioModel.Text
         Set-SettingValue $next 'lmstudio_api_key' $lmStudioKey.Text
@@ -605,5 +610,14 @@ $script:ProcessPollTimer.add_Tick({
         [System.Windows.Forms.MessageBox]::Show("$guidance`r`n`r`n$aiHint", 'セットアップ エラー')
     }
 })
+
+if (Test-Path -LiteralPath $script:VisualizationShortcutScript) {
+    try {
+        $shortcutMessage = @(& $script:VisualizationShortcutScript)
+        foreach ($message in $shortcutMessage) { $setupLog.AppendText($message + [Environment]::NewLine) }
+    } catch {
+        $setupLog.AppendText("可視化用Obsidianショートカットを作成できませんでした: $($_.Exception.Message)`r`n")
+    }
+}
 
 [void]$form.ShowDialog()

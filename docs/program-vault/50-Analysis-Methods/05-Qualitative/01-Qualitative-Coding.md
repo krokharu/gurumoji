@@ -1,5 +1,6 @@
 ---
 note_id: method-qualitative-coding
+note_type: analysis-method
 method_id: qualitative_coding
 method_version: text-analysis-store-2
 algorithm_version: focus-group-local-1
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/qualitative, gurumoji/orchestrator]
 
 - [Braun & Clarke (2006)](https://doi.org/10.1191/1478088706qp063oa) はテーマ分析を柔軟な質的手法として説明し、データへの精通、初期コード、テーマ候補、見直し、定義、報告という反復的な工程を示す。
 - この実装はテーマ分析を自動実行しない。コードブック、原文、反例、研究者メモを保存できるようにする土台である。
+
+## 専門家定義との関係
+
+手動コードは手法ではなく、質的分析の各専門家（質的内容分析、テーマ分析、フレームワーク法、SCAT、M-GTA、KJ法、相互作用分析）が共通に使う記録の道具のため、専用の専門家を置かない（[[50-Analysis-Methods/10-Experts/00-Index]]）。

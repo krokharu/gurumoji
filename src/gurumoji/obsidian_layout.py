@@ -22,6 +22,40 @@ ANALYSIS_INDEX = "01-分析結果.md"
 GUIDE = "90-運用/使い方.md"
 INDEX = "10-インタビュー/インタビュー一覧.md"
 GLOBAL_QUERY = "tag:#graph/overview -tag:#graph/history -tag:#graph/support"
+WIKILINK = re.compile(r"(?<![!\\])\[\[([^\]#|]+)(?:[^\]]*)\]\]")
+# Process-wide, so the 10-second watcher reports a persistent condition once.
+_WARNED: set[tuple[str, str]] = set()
+_SCANNED: dict[tuple[str, str], float] = {}
+
+
+def warn_once(key: tuple[str, str], message: str) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        LOGGER.warning(message)
+
+
+def visible_notes(vault: Path) -> list[str]:
+    """Vault-relative Markdown paths, excluding hidden folders such as .obsidian and .trash."""
+    notes = []
+    for path in vault.rglob("*.md"):
+        relative = path.relative_to(vault).as_posix()
+        if not any(part.startswith(".") for part in relative.split("/")):
+            notes.append(relative)
+    return notes
+
+
+def find_notes(vault: Path, note_ids: set[str]) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for relative in visible_notes(vault):
+        try:
+            with safe_path(vault, relative).open(encoding="utf-8-sig") as handle:
+                props, _ = unpack(handle.read(65000))
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        note_id = props.get("note_id")
+        if isinstance(note_id, str) and note_id in note_ids:
+            found.setdefault(note_id, []).append(relative)
+    return found
 
 
 def unpack(text: str) -> tuple[dict, str]:
@@ -62,7 +96,8 @@ def method_table(methods: list[dict]) -> str:
     text = "| 分析手法・結果 | 状態 | 保存日時（UTC） |\n| --- | --- | --- |\n"
     for method in methods:
         date = str(method.get("created_at", ""))[:19].replace("T", " ")
-        text += "| " + link(method["path"], method["title"]) + " | " + markdown(method_status_label(method)) + " | " + markdown(date) + " |\n"
+        # Inside a table, Obsidian requires the alias separator to be escaped.
+        text += "| [[" + method["path"].removesuffix(".md") + "\\|" + markdown(method["title"]) + "]] | " + markdown(method_status_label(method)) + " | " + markdown(date) + " |\n"
     return text
 
 
@@ -96,9 +131,50 @@ class ObsidianLayout:
     def save(self, data: dict) -> None:
         write_atomic(self.registry, json.dumps(data, ensure_ascii=False, indent=2).encode())
 
+    def relocate(self, data: dict, item_id: str) -> bool:
+        """Follow an interview folder renamed or moved in Obsidian instead of recreating it."""
+        record = data["interviews"].get(item_id)
+        if (not record or record["hub"] not in data["managed"]
+                or safe_path(self.vault, record["folder"]).exists()):
+            return False
+        key = (str(self.vault), item_id)
+        # A deleted folder stays missing; do not rescan the whole Vault on every call.
+        if time.monotonic() - _SCANNED.get(key, float("-inf")) < 60:
+            return False
+        _SCANNED[key] = time.monotonic()
+        found = find_notes(self.vault, {"interview-" + item_id}).get("interview-" + item_id, [])
+        if len(found) != 1 or "/" not in found[0]:
+            warn_once(("missing-folder", record["folder"]),
+                      "インタビューのフォルダーが見つからないため、概要ノートを元の場所に作成します。")
+            return False
+        old, hub = record["folder"], found[0]
+        folder = hub.rsplit("/", 1)[0]
+        def move(path: str) -> str:
+            return folder + path[len(old):] if path == old or path.startswith(old + "/") else path
+        managed = {move(path): value for path, value in data["managed"].items()}
+        if move(record["hub"]) != hub and move(record["hub"]) in managed:
+            managed[hub] = managed.pop(move(record["hub"]))
+        data["managed"] = managed
+        record.update(folder=folder, hub=hub, links={k: move(v) for k, v in record["links"].items()})
+        for method in record.get("analysis_methods", []):
+            method["path"] = move(method["path"])
+        # AnalysisStore applies the same prefix change to its SQLite catalog.
+        record["moved_from"] = list(dict.fromkeys(record.get("moved_from", []) + [old]))
+        _SCANNED.pop(key, None)
+        LOGGER.info("移動されたインタビューのフォルダーに追従しました。")
+        return True
+
+    def follow(self, item_id: str) -> None:
+        with LAYOUT_LOCK:
+            data = self.load()
+            if self.relocate(data, item_id):
+                self.save(data)
+
     def register(self, item_id: str, title: str) -> dict:
         with LAYOUT_LOCK:
             data = self.load()
+            if self.relocate(data, item_id):
+                self.save(data)
             if item_id not in data["interviews"]:
                 code = f"I{len(data['interviews']) + 1:03d}"
                 name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')[:48] or "インタビュー"
@@ -145,8 +221,10 @@ class ObsidianLayout:
             encoded = text.encode()
             if not path.exists() or path.read_bytes() != encoded:
                 write_atomic(path, encoded)
-            data["managed"][relative] = hashlib.sha256(encoded).hexdigest()
-            self.save(data)
+            digest = hashlib.sha256(encoded).hexdigest()
+            if data["managed"].get(relative) != digest:
+                data["managed"][relative] = digest
+                self.save(data)
             return True
 
     def update(self, item_id: str, title: str, links: dict, status: str | None = None,
@@ -270,30 +348,49 @@ class ObsidianLayout:
             self.configure(records)
 
     def configure(self, records: list[dict]) -> None:
-        def read(name, default):
+        def read(name, default, valid=lambda value: isinstance(value, dict)):
             p = safe_path(self.vault, ".obsidian/" + name)
-            return json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else default
+            if not p.exists():
+                return default
+            try:
+                value = json.loads(p.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                value = None
+            if value is None or not valid(value):
+                # Unreadable or half-written by Obsidian: never replace the user's settings.
+                warn_once(("settings", name), f"Obsidian設定 {name} を読み取れないため、変更しませんでした。")
+                return None
+            return value
         def write(name, value):
             p = safe_path(self.vault, ".obsidian/" + name)
             b = json.dumps(value, ensure_ascii=False, indent=2).encode()
             if not p.exists() or p.read_bytes() != b: write_atomic(p, b)
         core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
-            "command-palette": True, "file-recovery": True, "outline": True})
+            "command-palette": True, "file-recovery": True, "outline": True},
+            lambda value: isinstance(value, (dict, list)))
         enabled = ("search", "global-search", "graph", "bookmarks", "workspaces", "bases", "backlink", "properties", "canvas")
-        if isinstance(core, list): core = list(dict.fromkeys(core + list(enabled)))
-        else: core.update({key: True for key in enabled})
-        write("core-plugins.json", core)
+        if isinstance(core, list): write("core-plugins.json", list(dict.fromkeys(core + list(enabled))))
+        elif core is not None: write("core-plugins.json", core | {key: True for key in enabled})
         self.managed_note(".obsidian/snippets/gurumoji-reading.css",
             ".gurumoji-reading .metadata-container, .gurumoji-reading .inline-title { display: none !important; }\n"
             ".gurumoji-control .metadata-property:not([data-property-key=\"provider\"]), "
             ".gurumoji-control .metadata-add-button { display: none; }\n"
             ".gurumoji-reading h1 { font-size: 1.6em; }\n")
-        appearance = read("appearance.json", {})
-        appearance["enabledCssSnippets"] = list(dict.fromkeys(appearance.get("enabledCssSnippets", []) + ["gurumoji-reading"]))
-        write("appearance.json", appearance)
+        appearance = read("appearance.json", {}, lambda value: isinstance(value, dict)
+                          and isinstance(value.get("enabledCssSnippets", []), list))
+        if appearance is not None:
+            appearance["enabledCssSnippets"] = list(dict.fromkeys(appearance.get("enabledCssSnippets", []) + ["gurumoji-reading"]))
+            write("appearance.json", appearance)
         if not safe_path(self.vault, ".obsidian/graph.json").exists(): write("graph.json", graph_options())
-        bookmarks = read("bookmarks.json", {"items": []})
-        group = next((g for g in bookmarks["items"] if g.get("gurumoji") == "navigation"), None)
+        bookmarks = read("bookmarks.json", {"items": []},
+                         lambda value: isinstance(value, dict) and isinstance(value.get("items"), list))
+        items = [g for g in (bookmarks or {"items": []})["items"] if isinstance(g, dict)]
+        group = next((g for g in items if g.get("gurumoji") == "navigation"), None)
+        if group is None:
+            # Obsidian may drop the unknown marker key when it rewrites bookmarks; avoid a duplicate group.
+            group = next((g for g in items if g.get("type") == "group" and g.get("title") == "Gurumoji"
+                          and isinstance(g.get("items"), list) and g["items"]
+                          and isinstance(g["items"][0], dict) and g["items"][0].get("path") == HOME), None)
         generated = {"type": "group", "title": "Gurumoji", "ctime": 0, "gurumoji": "navigation", "items": [
             {"type": "file", "path": HOME, "title": "ホーム", "ctime": 0},
             {"type": "file", "path": ANALYSIS_INDEX, "title": "分析結果", "ctime": 0},
@@ -312,9 +409,10 @@ class ObsidianLayout:
             ]},
             {"type": "group", "title": "インタビュー別", "ctime": 0, "items": [
                 {"type": "graph", "title": r["code"] + " " + display_title(r["title"]), "ctime": 0, "options": graph_options(interview_query(r))} for r in records]}]}
-        if group: bookmarks["items"][bookmarks["items"].index(group)] = generated
-        else: bookmarks["items"].append(generated)
-        write("bookmarks.json", bookmarks)
+        if bookmarks is not None:
+            if group: bookmarks["items"][bookmarks["items"].index(group)] = generated
+            else: bookmarks["items"].append(generated)
+            write("bookmarks.json", bookmarks)
         # Native workspace leaf shapes, matching the installed Obsidian format.
         def leaf(kind, state):
             return {"id": hashlib.sha256((kind + json.dumps(state)).encode()).hexdigest()[:16],
@@ -333,30 +431,49 @@ class ObsidianLayout:
                         "search": "-tag:#graph/support -tag:#graph/history",
                         "localJumps": 1}})]), "width": 280, "collapsed": not local},
                     "lastOpenFiles": [path]}
-        layouts = read("workspaces.json", {"workspaces": {}, "active": ""})
-        for name, local in (("Gurumoji・研究全体", False), ("Gurumoji・インタビュー作業", True)):
-            if name not in layouts["workspaces"]: layouts["workspaces"][name] = workspace(local)
-        write("workspaces.json", layouts)
+        layouts = read("workspaces.json", {"workspaces": {}, "active": ""},
+                       lambda value: isinstance(value, dict) and isinstance(value.get("workspaces"), dict))
+        if layouts is not None:
+            for name, local in (("Gurumoji・研究全体", False), ("Gurumoji・インタビュー作業", True)):
+                if name not in layouts["workspaces"]: layouts["workspaces"][name] = workspace(local)
+            write("workspaces.json", layouts)
         if not safe_path(self.vault, ".obsidian/workspace.json").exists(): write("workspace.json", workspace(False))
 
     def sync_themes(self) -> None:
         """Publish explicit theme relationships separately; never rewrite human themes."""
         with LAYOUT_LOCK:
-            records = list(self.load()["interviews"].values())
+            data = self.load()
+            if any([self.relocate(data, item_id) for item_id in list(data["interviews"])]):
+                self.save(data)
+            records = list(data["interviews"].values())
+            theme_root = safe_path(self.vault, "20-テーマ")
+            themes = {"20-テーマ/" + path for path in visible_notes(theme_root)} if theme_root.is_dir() else set()
+            notes = None
+            def resolve(target: str) -> str | None:
+                nonlocal notes
+                target = target.strip().removesuffix(".md")
+                if target + ".md" in themes:
+                    return target + ".md"
+                # Obsidian's default "shortest path" links omit folders when the name is unique in the Vault.
+                if not any(theme.endswith("/" + target + ".md") for theme in themes):
+                    return None
+                if notes is None:
+                    notes = visible_notes(self.vault)
+                matches = [note for note in notes if note == target + ".md" or note.endswith("/" + target + ".md")]
+                return matches[0] if len(matches) == 1 and matches[0] in themes else None
             memberships = {}
             for record in records:
                 for path in safe_path(self.vault, record["folder"]).glob("*.md"):
                     try:
                         props, body = unpack(path.read_text(encoding="utf-8-sig"))
                     except (OSError, ValueError, yaml.YAMLError):
-                        LOGGER.warning("テーマ同期で読めないメモをスキップしました。")
+                        warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
                         continue
                     if props.get("graph_kind") != "memo": continue
                     body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
                     body = re.sub(r"`[^`\n]*`", "", body)
-                    for target in re.findall(r"(?<![!\\])\[\[(20-テーマ/[^\]#|]+)(?:[^\]]*)\]\]", body):
-                        target = target.removesuffix(".md") + ".md"
-                        if safe_path(self.vault, target).is_file():
+                    for target in dict.fromkeys(resolve(value) for value in WIKILINK.findall(body)):
+                        if target:
                             memberships.setdefault(target, []).append(record)
             managed = self.load()["managed"]
             # Include previously generated relations when links or themes disappear.
@@ -373,10 +490,10 @@ class ObsidianLayout:
                     if isinstance(target, str) and target.startswith("20-テーマ/"):
                         relatives.setdefault(target, relative)
                 except (OSError, ValueError, yaml.YAMLError):
-                    LOGGER.warning("テーマ関連ノートを読み込めませんでした。")
+                    warn_once(("relation-read", relative), "テーマ関連ノートを読み込めませんでした。")
             for target, relative in sorted(relatives.items()):
                 if relative in managed and not safe_path(self.vault, relative).exists():
-                    LOGGER.warning("移動・削除されたテーマ関連ノートは再作成しません。")
+                    warn_once(("relation-missing", relative), "移動・削除されたテーマ関連ノートは再作成しません。")
                     continue
                 related = {r["item_id"]: r for r in memberships.get(target, [])}
                 source = {"theme": target, "exists": safe_path(self.vault, target).is_file(),
@@ -395,5 +512,7 @@ class ObsidianLayout:
                 body += "研究メモの明示リンクから作成した一覧です。テーマ本文は変更しません。\n\n"
                 body += "\n".join("- " + link(r["hub"], r["code"] + " " + r["title"])
                                   for r in related.values()) or "現在、このテーマに関連するインタビューはありません。"
-                if not self.managed_note(relative, pack(props, body + "\n")):
-                    LOGGER.warning("手動編集されたテーマ関連ノートを保持しました。")
+                if self.managed_note(relative, pack(props, body + "\n")):
+                    _WARNED.discard(("relation-edited", relative))
+                else:
+                    warn_once(("relation-edited", relative), "手動編集されたテーマ関連ノートを保持しました。")

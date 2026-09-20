@@ -112,6 +112,67 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(memo.read_bytes(), before)
         self.assertEqual(json.loads(bookmark.read_text(encoding='utf-8'))['items'][-1]['title'], '自分用')
 
+    def test_method_tables_escape_link_alias_separator(self):
+        from gurumoji.obsidian_layout import method_table
+        row = method_table([{'path': 'a/method-x.md', 'title': '手法', 'status': 'completed',
+                             'stale': False, 'created_at': ''}]).splitlines()[-1]
+        self.assertIn('[[a/method-x\\|手法]]', row)
+        self.assertEqual(row.replace('\\|', '').count('|'), 4)
+
+    def test_shortest_path_theme_links_resolve_only_when_unique(self):
+        self.layout.update('a', '会議', {})
+        (self.layout.vault / '20-テーマ/働き方.md').write_text('# 働き方\n', encoding='utf-8')
+        memo = self.layout.vault / self.layout.note_path('a', '会議', '研究メモ')
+        with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[働き方|働き方の話]]\n')
+        self.layout.sync_themes()
+        relation = next((self.layout.vault / '40-研究/テーマ関連').glob('*.md'))
+        self.assertIn('interview/i001', unpack(relation.read_text(encoding='utf-8'))[0]['tags'])
+        (self.layout.vault / '40-研究/働き方.md').write_text('# 別の働き方\n', encoding='utf-8')
+        self.layout.sync_themes()
+        self.assertIn('graph/history', unpack(relation.read_text(encoding='utf-8'))[0]['tags'])
+
+    def test_idle_theme_sync_writes_nothing(self):
+        self.layout.update('a', '会議', {})
+        (self.layout.vault / '20-テーマ/働き方.md').write_text('# 働き方\n', encoding='utf-8')
+        memo = self.layout.vault / self.layout.note_path('a', '会議', '研究メモ')
+        with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/働き方]]\n')
+        self.layout.sync_themes()
+        with patch('gurumoji.obsidian_layout.write_atomic') as write:
+            self.layout.sync_themes()
+        write.assert_not_called()
+
+    def test_renamed_interview_folder_is_followed_instead_of_recreated(self):
+        self.layout.update('a', '会議', {})
+        record = self.layout.register('a', '会議')
+        old = self.layout.vault / record['folder']
+        memo = old / f"{record['code']}-研究メモ.md"
+        with memo.open('a', encoding='utf-8') as handle: handle.write('\n手書き\n')
+        new = old.with_name(old.name + '-移動後')
+        old.rename(new)
+        self.layout.update('a', '会議', {}, '完了')
+        moved = self.layout.register('a', '会議')
+        self.assertFalse(old.exists())
+        self.assertEqual(moved['folder'], record['folder'] + '-移動後')
+        self.assertIn('手書き', (new / memo.name).read_text(encoding='utf-8'))
+        self.assertIn('状態：完了', (self.layout.vault / moved['hub']).read_text(encoding='utf-8'))
+
+    def test_unreadable_obsidian_settings_are_left_untouched(self):
+        self.layout.update('a', '会議', {})
+        bookmark = self.layout.vault / '.obsidian/bookmarks.json'
+        bookmark.write_bytes(b'{"items": [')
+        self.layout.update('a', '会議', {}, '完了')
+        self.assertEqual(bookmark.read_bytes(), b'{"items": [')
+
+    def test_bookmark_group_without_marker_is_replaced_not_duplicated(self):
+        self.layout.update('a', '会議', {})
+        bookmark = self.layout.vault / '.obsidian/bookmarks.json'
+        data = json.loads(bookmark.read_text(encoding='utf-8'))
+        data['items'][0].pop('gurumoji')
+        bookmark.write_text(json.dumps(data), encoding='utf-8')
+        self.layout.update('a', '会議', {}, '完了')
+        items = json.loads(bookmark.read_text(encoding='utf-8'))['items']
+        self.assertEqual([item['title'] for item in items], ['Gurumoji'])
+
     def seed_legacy(self):
         old = '25-Sources/snapshot/part-0001.md'
         text = pack({'note_id': 'source-1', 'note_type': 'source-snapshot', 'title': '会議',

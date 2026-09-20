@@ -1,5 +1,6 @@
 ---
 note_id: method-correlation
+note_type: analysis-method
 method_id: correlation
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/statistics, gurumoji/orchestrator]
 
 - [Spearman (1904)](https://doi.org/10.2307/1412159) は順位に基づく関連の測定を提示した。
 - [Kruskal & Wallis (1952)](https://doi.org/10.1080/01621459.1952.10483441) と同様、順位ベースの手続きでもデータの設計・独立性は別途検討が必要である。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/correlation/01-Expert|相関の専門家]]。

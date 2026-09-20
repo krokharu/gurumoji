@@ -2,6 +2,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import app
 
@@ -46,6 +47,78 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertEqual(record["participant_code"], "P-001")
         self.assertEqual(record["attributes"]["年齢層"], "40代")
         self.assertEqual(record["recording_consent"], "granted")
+
+    def test_identified_speakers_link_only_to_a_unique_registered_name(self):
+        profiles = app.normalize_conversation_speaker_profiles(
+            None,
+            {"SPEAKER_00", "SPEAKER_01", "SPEAKER_02"},
+            {"SPEAKER_00": "田中 太郎", "SPEAKER_01": "佐藤", "SPEAKER_02": "山田"},
+        )
+        profiles, summary = app.link_detected_speakers_to_registry(profiles, {
+            "SPEAKER_00": "田中 太郎",
+            "SPEAKER_01": "佐藤",
+            "SPEAKER_02": "山田",
+        }, [
+            {"id": "speaker_tanaka", "display_name": "田中太郎", "pseudonym": "田中", "active": True},
+            {"id": "speaker_sato_a", "display_name": "佐藤", "active": True},
+            {"id": "speaker_sato_b", "pseudonym": "佐藤", "active": True},
+        ])
+
+        self.assertEqual(profiles["SPEAKER_00"]["global_speaker_id"], "speaker_tanaka")
+        self.assertEqual(profiles["SPEAKER_00"]["registration_status"], "registered")
+        self.assertEqual(profiles["SPEAKER_01"]["global_speaker_id"], "")
+        self.assertEqual(
+            profiles["SPEAKER_01"]["registration_status"],
+            "temporary_single_group",
+        )
+        self.assertEqual(
+            profiles["SPEAKER_02"]["registration_status"],
+            "temporary_single_group",
+        )
+        self.assertEqual(summary["linked"], {"SPEAKER_00": "speaker_tanaka"})
+        self.assertEqual(summary["temporary"], {"SPEAKER_01": "佐藤", "SPEAKER_02": "山田"})
+        self.assertEqual(summary["ambiguous"], {"SPEAKER_01": ["speaker_sato_a", "speaker_sato_b"]})
+
+    def test_rerun_identification_links_registered_and_keeps_unknown_as_temporary(self):
+        app.save_speaker_registry_records([{
+            "id": "speaker_tanaka",
+            "display_name": "田中太郎",
+        }], expected_revision=0)
+        app.upsert_library_item(
+            item_id="identity_link_test",
+            source_name="group.wav",
+            output_dir=Path(self.temporary.name) / "output",
+            media_path=None,
+            language="ja",
+            segments=[
+                {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_00", "text": "田中太郎です"},
+                {"start": 2.0, "end": 4.0, "speaker": "SPEAKER_01", "text": "山田です"},
+            ],
+            speaker_names={}, outline=None, emotion_analysis=None, files=[],
+            write_srt=False, write_json=False,
+        )
+        revision = self.client.get("/api/library/identity_link_test").get_json()["revision_count"]
+        with patch.object(app, "load_token_config", return_value=object()), \
+             patch.object(app, "configured_ai_credentials", return_value=("secret", "test-model")), \
+             patch.object(app, "detect_speaker_names_with_ai", return_value={
+                 "SPEAKER_00": "田中 太郎", "SPEAKER_01": "山田",
+             }), \
+             patch.object(app, "refresh_archive_index"), \
+             patch.object(app, "publish_input_vault"):
+            response = self.client.post("/api/library/identity_link_test/speaker-identification", json={
+                "provider": "openai", "revision_count": revision,
+            })
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["speaker_profiles"]["SPEAKER_00"]["global_speaker_id"], "speaker_tanaka")
+        self.assertEqual(data["speaker_profiles"]["SPEAKER_00"]["registration_status"], "registered")
+        self.assertEqual(data["speaker_profiles"]["SPEAKER_01"]["global_speaker_id"], "")
+        self.assertEqual(
+            data["speaker_profiles"]["SPEAKER_01"]["registration_status"],
+            "temporary_single_group",
+        )
+        self.assertEqual(data["speaker_identity"]["registration"]["temporary"], {"SPEAKER_01": "山田"})
 
     def test_imports_google_forms_csv_and_preserves_unknown_questions(self):
         csv_body = (
@@ -180,11 +253,13 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertEqual(data["session_profile"]["session_type"], "focus_group")
         self.assertEqual(data["speaker_profiles"]["SPEAKER_00"]["session_role"], "moderator")
         self.assertEqual(data["speaker_profiles"]["SPEAKER_01"]["job_title"], "部長")
+        self.assertEqual(data["speaker_profiles"]["SPEAKER_01"]["registration_status"], "registered")
 
         exported = self.client.get("/api/library/conversation_test/speakers.csv")
         self.assertEqual(exported.status_code, 200)
         exported_text = exported.data.decode("utf-8-sig")
         self.assertIn("会話役割", exported_text)
+        self.assertIn("話者登録状態", exported_text)
         self.assertIn("moderator", exported_text)
         self.assertIn("既存利用3年以上", exported_text)
         self.assertNotIn("研究同意", exported_text.splitlines()[0])

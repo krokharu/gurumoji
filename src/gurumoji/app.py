@@ -61,14 +61,18 @@ from .research_analysis import (
     research_csv_sources,
 )
 from .analysis_insights import (
-    INSIGHT_VERSION, KWIC_FIELDS, create_ai_insights, included_segments,
-    input_fingerprint, search_kwic,
+    INSIGHT_VERSION, KWIC_FIELDS, build_session_outline, create_ai_insights,
+    included_segments, input_fingerprint, plan_items, search_kwic,
 )
 from .transformer_analysis import (
+    DEFAULT_MANUAL_MIN_SIMILARITY,
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
+    MAX_MANUAL_TOPICS,
+    TOPIC_MODES,
     TRANSFORMER_ANALYSIS_VERSION,
     TRANSFORMER_CSV_FIELDS,
     analyze_transformer_topics,
+    saved_embeddings as saved_transformer_embeddings,
     semantic_search as transformer_semantic_search,
     transformer_csv_sources,
     transformer_input_fingerprint,
@@ -77,11 +81,33 @@ from .ai_finishing import (
     FINISHING_VERSION, clean_transcript as finish_clean_transcript,
     create_outline as finish_create_outline, finishing_changes,
 )
+from .jev_review import (
+    JEV_DEFAULT_MODEL, JEV_REVIEW_VERSION,
+    attach_comparison as attach_jev_comparison,
+    comparison_rows as jev_comparison_rows,
+    review_transcript as review_transcript_with_jev,
+)
+from .segment_classification import (
+    CLASSIFICATION_FIELDS,
+    CROSSTAB_FIELDS as SEGMENT_CLASSIFICATION_CROSSTAB_FIELDS,
+    DIALOGUE_ACTS,
+    SEGMENT_CLASSIFICATION_VERSION,
+    build_result as build_segment_classification_result,
+    classification_fingerprint,
+    classification_rows,
+    classify_with_jev,
+    crosstab_rows as segment_classification_crosstab_rows,
+    summary as segment_classification_summary,
+    topic_candidates as segment_classification_topic_candidates,
+)
 from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
-from .analysis_method_registry import METHODS, REGISTRY_VERSION, method_results
+from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
+from .handlers.analysis_queries import AnalysisQueries
+from .web.analysis_routes import register_analysis_routes
 from . import transcript_preparation as preparation
+from . import method_experts
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -327,6 +353,9 @@ SPEAKER_ROLES = {
     "participant", "moderator", "facilitator", "assistant_moderator", "observer",
     "note_taker", "interviewer", "chair", "presenter", "decision_maker",
     "attendee", "guest", "other",
+}
+SPEAKER_REGISTRATION_STATUSES = {
+    "registered", "temporary_single_group", "unidentified",
 }
 CONSENT_STATUSES = {"unknown", "pending", "granted", "declined", "not_required"}
 ATTENDANCE_STATUSES = {"unknown", "planned", "attended", "absent", "left_early", "remote"}
@@ -683,6 +712,8 @@ class TokenConfig:
     lmstudio_api_key: str = ""
     lmstudio_base_url: str = LMSTUDIO_DEFAULT_BASE_URL
     lmstudio_model: str = ""
+    typesafe_api_key: str = ""
+    typesafe_model: str = JEV_DEFAULT_MODEL
 
     def availability(self) -> dict[str, Any]:
         return {
@@ -695,6 +726,8 @@ class TokenConfig:
             "lmstudio_base_url": self.lmstudio_base_url,
             "lmstudio_model": self.lmstudio_model,
             "lmstudio_has_api_key": bool(self.lmstudio_api_key),
+            "typesafe": bool(self.typesafe_api_key),
+            "typesafe_model": self.typesafe_model,
             # Keep the lmstudio_* keys for backwards compatibility. The same
             # loopback-only OpenAI-compatible provider is backed by Ollama in
             # the Colab notebook.
@@ -739,6 +772,9 @@ class JobOptions:
     ai_efforts: dict = field(default_factory=normalize_efforts)
     conversation_mode: str = "meeting"
     custom_vocabulary: tuple[str, ...] = ()
+    jev_compare: bool = False
+    jev_api_key: str = ""
+    jev_model: str = JEV_DEFAULT_MODEL
 
 
 @dataclass
@@ -1527,6 +1563,7 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
                 burn_subtitled_video INTEGER NOT NULL DEFAULT 0,
                 analysis_config_json TEXT NOT NULL DEFAULT '{}',
                 analysis_annotations_json TEXT NOT NULL DEFAULT '{}',
+                segment_classification_json TEXT NOT NULL DEFAULT '{}',
                 analysis_revision INTEGER NOT NULL DEFAULT 0,
                 analysis_updated_at TEXT,
                 revision_count INTEGER NOT NULL DEFAULT 0,
@@ -1610,6 +1647,10 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
             connection.execute(
                 "ALTER TABLE library_items ADD COLUMN transformer_analysis_json TEXT NOT NULL DEFAULT '{}'"
             )
+        if "segment_classification_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN segment_classification_json TEXT NOT NULL DEFAULT '{}'"
+            )
         connection.execute("""
             CREATE TABLE IF NOT EXISTS analysis_insight_requests (
                 request_id TEXT PRIMARY KEY, item_id TEXT NOT NULL,
@@ -1633,6 +1674,8 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
                 fingerprint TEXT NOT NULL, model TEXT NOT NULL,
                 max_topics INTEGER NOT NULL, min_topic_size INTEGER NOT NULL,
                 topic_count INTEGER NOT NULL DEFAULT 0,
+                mode TEXT NOT NULL DEFAULT 'auto',
+                min_similarity REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
                 message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             )
@@ -1645,6 +1688,16 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
             connection.execute(
                 "ALTER TABLE transformer_analysis_requests "
                 "ADD COLUMN topic_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "mode" not in transformer_request_columns:
+            connection.execute(
+                "ALTER TABLE transformer_analysis_requests "
+                "ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto'"
+            )
+        if "min_similarity" not in transformer_request_columns:
+            connection.execute(
+                "ALTER TABLE transformer_analysis_requests "
+                "ADD COLUMN min_similarity REAL NOT NULL DEFAULT 0"
             )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS transformer_requests_item "
@@ -2396,15 +2449,23 @@ def normalize_conversation_speaker_profiles(
         consent_status = clean_single_line(value.get("consent_status", "unknown"), 30)
         recording_consent = clean_single_line(value.get("recording_consent", "unknown"), 30)
         attendance_status = clean_single_line(value.get("attendance_status", "attended"), 30)
+        registration_status = clean_single_line(value.get("registration_status"), 40)
         theme_color = clean_single_line(value.get("theme_color"), 7).upper()
         if not re.fullmatch(r"#[0-9A-F]{6}", theme_color):
             theme_color = SPEAKER_THEME_COLORS[index % len(SPEAKER_THEME_COLORS)]
+        global_speaker_id = clean_single_line(value.get("global_speaker_id"), 80)
+        display_name = clean_single_line(
+            value.get("display_name") or speaker_names.get(label), 120
+        )
+        if global_speaker_id:
+            registration_status = "registered"
+        elif registration_status not in SPEAKER_REGISTRATION_STATUSES:
+            registration_status = "temporary_single_group" if display_name else "unidentified"
         profiles[label] = {
             "speaker_label": label,
-            "global_speaker_id": clean_single_line(value.get("global_speaker_id"), 80),
-            "display_name": clean_single_line(
-                value.get("display_name") or speaker_names.get(label), 120
-            ),
+            "global_speaker_id": global_speaker_id,
+            "registration_status": registration_status,
+            "display_name": display_name,
             "theme_color": theme_color,
             "session_role": role,
             "organization": clean_single_line(value.get("organization"), 200),
@@ -2435,6 +2496,28 @@ def row_meeting_minutes(row: sqlite3.Row) -> dict[str, Any]:
     except (KeyError, IndexError):
         raw = "{}"
     return normalize_meeting_minutes(json_load(raw, {}))
+
+
+def row_session_outline(row: sqlite3.Row, session_profile: dict[str, Any]) -> dict[str, Any]:
+    """Join the planned agenda, the saved agenda sections and the saved themes."""
+    try:
+        saved = json_load(row["transformer_analysis_json"], {})
+    except (KeyError, IndexError):
+        saved = {}
+    transformer = saved if isinstance(saved, dict) else {}
+    # The analysis screen owns the exact staleness check; here the saved revisions
+    # answer the question this block asks: was this run made from the current text?
+    saved_revisions = tuple(
+        value if isinstance(value, int) and not isinstance(value, bool) else None
+        for value in (transformer.get("source_revision"), transformer.get("analysis_revision"))
+    )
+    stale = bool(transformer) and saved_revisions != (
+        int(row["revision_count"] or 0), int(row["analysis_revision"] or 0),
+    )
+    return build_session_outline(
+        outline=json_load(row["outline_json"], None), transformer=transformer,
+        session_profile=session_profile, transformer_stale=stale,
+    )
 
 
 def row_speaker_profiles(
@@ -2537,6 +2620,7 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
             "session_profile": session_profile,
             "speaker_profiles": row_speaker_profiles(row, segments, speaker_names),
             "outline": json_load(row["outline_json"], None),
+            "session_outline": row_session_outline(row, session_profile),
             "meeting_minutes": row_meeting_minutes(row),
             "emotion_analysis": json_load(row["emotion_analysis_json"], None),
             "ai_usage": normalize_ai_usage(json_load(row["ai_usage_json"], {})),
@@ -4729,6 +4813,19 @@ def analysis_bool(value: Any, default: bool = False) -> bool:
     return value if isinstance(value, bool) else default
 
 
+def analysis_optional_score(value: Any) -> int | None:
+    """Normalize an explicitly entered screening score without inventing one."""
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(round(min(100.0, max(0.0, number))))
+
+
 def default_analysis_config() -> dict[str, Any]:
     return {
         "research_question": "",
@@ -4752,9 +4849,45 @@ def default_analysis_config() -> dict[str, Any]:
         "codebook_version": 0,
         "codebook_change_reason": "",
         "codebook_history": [],
+        "transformer_topics": [],
         "analyst_memo": "",
         "interpretation_status": "draft",
     }
+
+
+def normalize_transformer_topics(raw: Any) -> list[dict[str, Any]]:
+    """Keep the researcher's own theme definitions for the manual assignment mode."""
+    if not isinstance(raw, list):
+        return []
+    topics: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for index, value in enumerate(raw[:MAX_MANUAL_TOPICS]):
+        if not isinstance(value, dict):
+            continue
+        label = clean_single_line(value.get("label"), 120)
+        if not label:
+            continue
+        topic_id = clean_single_line(value.get("id"), 80)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", topic_id) or topic_id in used_ids:
+            seed = f"gurumoji-transformer-topic:{index}:{label}"
+            topic_id = f"topic_{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex[:16]}"
+        used_ids.add(topic_id)
+        seed_ids: list[str] = []
+        raw_seeds = value.get("seed_segment_ids")
+        if not isinstance(raw_seeds, list):
+            raw_seeds = re.split(r"[,、;\s]+", str(raw_seeds or ""))
+        for raw_seed in raw_seeds[:50]:
+            seed_id = clean_single_line(raw_seed, 160)
+            if seed_id and seed_id not in seed_ids:
+                seed_ids.append(seed_id)
+        topics.append({
+            "id": topic_id,
+            "label": label,
+            "cues": normalize_tags(value.get("cues"))[:20],
+            "seed_segment_ids": seed_ids,
+            "memo": clean_multiline(value.get("memo"), 2000),
+        })
+    return topics
 
 
 def normalize_analysis_codebook(raw: Any) -> list[dict[str, str]]:
@@ -4880,6 +5013,7 @@ def normalize_analysis_config(raw: Any) -> dict[str, Any]:
         ),
         "crosstab_terms": normalize_tags(source.get("crosstab_terms"))[:30],
         "codebook": normalize_analysis_codebook(source.get("codebook")),
+        "transformer_topics": normalize_transformer_topics(source.get("transformer_topics")),
         "codebook_version": max(0, min(codebook_version, 100000)),
         "codebook_change_reason": clean_multiline(source.get("codebook_change_reason"), 2000),
         "codebook_history": normalize_codebook_history(source.get("codebook_history")),
@@ -4958,6 +5092,23 @@ def normalize_analysis_annotations(
             "important": analysis_bool(value.get("important"), False),
             "excluded": analysis_bool(value.get("excluded"), False),
         }
+        dialogue_act = clean_single_line(value.get("dialogue_act"), 40)
+        if dialogue_act in DIALOGUE_ACTS:
+            annotation["dialogue_act"] = dialogue_act
+        classification_status = clean_single_line(
+            value.get("classification_status"), 30
+        )
+        if classification_status not in {"unreviewed", "draft", "reviewed"}:
+            classification_status = "unreviewed"
+        if classification_status != "unreviewed":
+            annotation["classification_status"] = classification_status
+        classification_note = clean_multiline(value.get("classification_note"), 5000)
+        if classification_note:
+            annotation["classification_note"] = classification_note
+        for field in ("importance_score", "review_score", "sensitivity_score"):
+            score = analysis_optional_score(value.get(field))
+            if score is not None:
+                annotation[field] = score
         if elicitation != "unknown":
             annotation["elicitation"] = elicitation
         if links:
@@ -4965,6 +5116,12 @@ def normalize_analysis_annotations(
         if any((
             codes, tags, elicitation != "unknown", links, annotation["memo"],
             annotation["important"], annotation["excluded"],
+            annotation.get("dialogue_act"),
+            annotation.get("importance_score") is not None,
+            annotation.get("review_score") is not None,
+            annotation.get("sensitivity_score") is not None,
+            annotation.get("classification_status") != "unreviewed",
+            annotation.get("classification_note"),
         )):
             annotations[segment_id] = annotation
     return annotations
@@ -5337,6 +5494,7 @@ def focus_group_analysis_report_markdown(analysis: dict[str, Any]) -> str:
             f"- {method.get('role')}：{method.get('method')} — {method.get('reason')} "
             f"データ充足: {method.get('data_sufficiency')}。限界: {method.get('limitation')}"
         )
+    lines.extend(method_experts.report_lines(analysis.get("experts")))
     lines.extend([
         "",
         "## 分析単位と手順",
@@ -5487,6 +5645,9 @@ def group_analysis_for_row(
             "codes": [], "interaction_tags": [], "elicitation": "unknown",
             "interaction_links": [], "memo": "",
             "important": False, "excluded": False,
+            "dialogue_act": "", "importance_score": None,
+            "review_score": None, "sensitivity_score": None,
+            "classification_status": "unreviewed", "classification_note": "",
         })
         profile = profiles.get(speaker, {})
         display_name = str(
@@ -6227,7 +6388,45 @@ def group_analysis_for_row(
             analysis, model=str(transformer_result.get("engine", {}).get("name") or DEFAULT_TRANSFORMER_MODEL)
         ),
     }
+    classification_saved = json_load(row["segment_classification_json"], {}) \
+        if "segment_classification_json" in row.keys() else {}
+    classification_result = (
+        classification_saved if isinstance(classification_saved, dict) and classification_saved else None
+    )
+    classification_expected = classification_fingerprint(
+        analysis["segments"], analysis["config"].get("codebook", []),
+        transformer_result if transformer_result and not analysis["transformer"]["stale"] else None,
+    )
+    classification_stale = bool(classification_result) and any((
+        classification_result.get("fingerprint") != classification_expected,
+        classification_result.get("source_revision") != int(analysis["item"]["revision_count"]),
+        classification_result.get("analysis_revision") != int(analysis["item"]["analysis_revision"]),
+    ))
+    analysis["segment_classification"] = {
+        "result": classification_result,
+        "stale": classification_stale,
+        "summary": segment_classification_summary(classification_result),
+        "dialogue_acts": DIALOGUE_ACTS,
+    }
+    # The planned agenda, parsed the same way the workspace outline block reads it,
+    # so themes imported from it match the plan items line for line.
+    analysis["plan_items"] = plan_items(analysis["item"].get("session_profile"))
+    # Only the experts named by the analysis plan are read (docs/program-vault/50-Analysis-Methods/10-Experts).
+    analysis["experts"] = method_experts.review_for_analysis(analysis)
+    expert_procedure = method_experts.plan_procedure(analysis["experts"])
+    if expert_procedure:
+        analysis["manual"]["focus_group_plan"]["procedure"] = expert_procedure
+    if analysis["experts"]["ai"].get("mode") == "expert":
+        # Method-specific AI drafts depend on the expert knowledge, so an updated note makes them stale.
+        analysis["insights"]["fingerprint"] = input_fingerprint(analysis)
+        if analysis["insights"].get("ai"):
+            analysis["insights"]["stale"] = (
+                analysis["insights"]["ai"].get("fingerprint") != analysis["insights"]["fingerprint"])
     for dataset in TRANSFORMER_CSV_FIELDS:
+        analysis["exports"][dataset] = (
+            f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
+        )
+    for dataset in ("segment_classifications", "segment_classification_crosstabs"):
         analysis["exports"][dataset] = (
             f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
         )
@@ -6276,13 +6475,17 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
         "role", "text", "original_text", "original_text_available", "original_text_status",
         "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
-        "interaction_tags", "elicitation", "interaction_links", "memo", "important", "excluded",
+        "interaction_tags", "elicitation", "interaction_links", "dialogue_act",
+        "dialogue_act_label", "importance_score", "review_score", "sensitivity_score",
+        "classification_status", "classification_note", "memo", "important", "excluded",
     ],
     "analysis_units": [
         "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
         "role", "text", "original_text", "original_text_available", "original_text_status",
         "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
-        "interaction_tags", "elicitation", "interaction_links", "memo", "important", "excluded",
+        "interaction_tags", "elicitation", "interaction_links", "dialogue_act",
+        "dialogue_act_label", "importance_score", "review_score", "sensitivity_score",
+        "classification_status", "classification_note", "memo", "important", "excluded",
     ],
     "interactions": ["tag", "label", "count"],
     "interaction_links": [
@@ -6301,6 +6504,8 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "segment_id", "start", "end", "speaker", "speaker_name", "role", "text",
         "code_labels", "memo", "excluded",
     ],
+    "segment_classifications": CLASSIFICATION_FIELDS,
+    "segment_classification_crosstabs": SEGMENT_CLASSIFICATION_CROSSTAB_FIELDS,
 }
 ANALYSIS_CSV_FIELDS.update(RESEARCH_CSV_FIELDS)
 ANALYSIS_CSV_FIELDS.update(TRANSFORMER_CSV_FIELDS)
@@ -6375,6 +6580,13 @@ def analysis_csv_rows(
             "interaction_tags": annotation.get("interaction_tags", []),
             "elicitation": annotation.get("elicitation", "unknown"),
             "interaction_links": annotation.get("interaction_links", []),
+            "dialogue_act": annotation.get("dialogue_act", ""),
+            "dialogue_act_label": DIALOGUE_ACTS.get(annotation.get("dialogue_act", ""), ""),
+            "importance_score": annotation.get("importance_score"),
+            "review_score": annotation.get("review_score"),
+            "sensitivity_score": annotation.get("sensitivity_score"),
+            "classification_status": annotation.get("classification_status", "unreviewed"),
+            "classification_note": annotation.get("classification_note", ""),
             "memo": annotation.get("memo", ""),
             "important": annotation.get("important", False),
             "excluded": segment.get("excluded", False),
@@ -6384,6 +6596,9 @@ def analysis_csv_rows(
             row["code_ids"], row["interaction_tags"], row["memo"],
             row["elicitation"] != "unknown", row["interaction_links"],
             row["important"], row["excluded"],
+            row["dialogue_act"], row["importance_score"] is not None,
+            row["review_score"] is not None, row["sensitivity_score"] is not None,
+            row["classification_status"] != "unreviewed", row["classification_note"],
         )):
             coded_segments.append(row)
         if row["important"] and not row["excluded"]:
@@ -6437,6 +6652,12 @@ def analysis_csv_rows(
         "observations": automatic["observations"],
         "analysis_plan": plan_rows,
         "important_quotes": important_quotes,
+        "segment_classifications": classification_rows(
+            analysis.get("segment_classification", {}).get("result")
+        ),
+        "segment_classification_crosstabs": segment_classification_crosstab_rows(
+            analysis.get("segment_classification", {}).get("result")
+        ),
     }
     sources.update(research_csv_sources(analysis))
     sources.update(transformer_csv_sources(analysis.get("transformer", {}).get("result")))
@@ -7018,6 +7239,8 @@ def load_token_config(path: Path = TOKEN_FILE) -> TokenConfig:
             raw.get("lmstudio_base_url"), 300
         ) or LMSTUDIO_DEFAULT_BASE_URL,
         lmstudio_model=clean_single_line(raw.get("lmstudio_model"), 200),
+        typesafe_api_key=clean_secret(raw.get("typesafe_api_key")),
+        typesafe_model=clean_single_line(raw.get("typesafe_model"), 200) or JEV_DEFAULT_MODEL,
     )
 
 
@@ -10025,6 +10248,52 @@ def clean_segments_with_ai(
     return finish_clean_transcript(segments, call, status, check_cancelled, outline=outline)
 
 
+def review_segments_with_jev(
+    segments: list[dict[str, Any]], api_key: str, model: str,
+    status: Callable[[str], None], check_cancelled: Callable[[], None],
+    outline: dict[str, Any] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Judge correction necessity without allowing Jev to rewrite transcript text."""
+    if not api_key:
+        raise ValueError("tokens.json に typesafe_api_key を設定してください。")
+    resolved_model = clean_single_line(model, 200) or JEV_DEFAULT_MODEL
+
+    def call(state, questions):
+        return post_json(
+            "https://api.typesafe.ai/v1/systemone",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            {"state": state, "model": resolved_model, "questions": questions},
+            check_cancelled=check_cancelled,
+        )
+    return review_transcript_with_jev(
+        segments, outline, call, status, check_cancelled, model=resolved_model,
+    )
+
+
+def classify_segments_with_jev(
+    segments: list[dict[str, Any]], topics: list[dict[str, str]],
+    api_key: str, model: str,
+    status: Callable[[str], None] = lambda _message: None,
+    check_cancelled: Callable[[], None] = lambda: None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Create bounded Jev proposals; transcript and manual values remain unchanged."""
+    if not api_key:
+        raise ValueError("tokens.json に typesafe_api_key を設定してください。")
+    resolved_model = clean_single_line(model, 200) or JEV_DEFAULT_MODEL
+
+    def call(state, questions):
+        return post_json(
+            "https://api.typesafe.ai/v1/systemone",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            {"state": state, "model": resolved_model, "questions": questions},
+            check_cancelled=check_cancelled,
+        )
+
+    return classify_with_jev(
+        segments, topics, call, status, check_cancelled, model=resolved_model,
+    )
+
+
 def normalize_detected_speaker_name(value: Any, evidence: Any = "") -> str:
     name = clean_single_line(value, 80).strip(" 　、。,.・:：;；「」『』【】()（）[]")
     evidence_text = clean_single_line(evidence, 300)
@@ -10048,6 +10317,102 @@ def normalize_detected_speaker_name(value: Any, evidence: Any = "") -> str:
             name = base
         break
     return clean_single_line(name, 80)
+
+
+def speaker_registry_identity_key(value: Any) -> str:
+    """Return a conservative comparison key for a person name.
+
+    This deliberately supports only harmless formatting differences.  It must
+    not turn a partial or similar-looking name into a global-person match.
+    """
+    normalized = unicodedata.normalize("NFKC", clean_single_line(value, 120)).casefold()
+    return re.sub(r"[\s\u3000・.．,，、。]", "", normalized)
+
+
+def link_detected_speakers_to_registry(
+    speaker_profiles: dict[str, dict[str, Any]],
+    speaker_names: dict[str, str],
+    registry_records: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Link verified self-introductions to one registered person when safe.
+
+    A name with no unique active registry match remains scoped to this
+    conversation as a temporary single-group speaker.  We intentionally do
+    not create a global registry record or guess from a partial-name match.
+    """
+    if not speaker_names:
+        return speaker_profiles, {
+            "linked": {}, "temporary": {}, "ambiguous": {}, "changed": False,
+        }
+    records = registry_records if registry_records is not None else list_speaker_registry(
+        include_inactive=False
+    )
+    matches_by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        if not isinstance(record, dict) or record.get("active") is False:
+            continue
+        keys = {
+            speaker_registry_identity_key(record.get(field))
+            for field in ("display_name", "pseudonym")
+        }
+        for key in keys - {""}:
+            matches_by_name[key].append(record)
+
+    linked: dict[str, str] = {}
+    temporary: dict[str, str] = {}
+    ambiguous: dict[str, list[str]] = {}
+    changed = False
+    for label, raw_name in speaker_names.items():
+        name = clean_single_line(raw_name, 120)
+        profile = speaker_profiles.get(str(label))
+        if not name or not isinstance(profile, dict):
+            continue
+        # A user-selected link is authoritative; auto-identification must not
+        # replace it based on a name collision.
+        if clean_single_line(profile.get("global_speaker_id"), 80):
+            if profile.get("registration_status") != "registered":
+                profile["registration_status"] = "registered"
+                changed = True
+            continue
+        candidates = matches_by_name.get(speaker_registry_identity_key(name), [])
+        unique = {str(item.get("id") or ""): item for item in candidates if item.get("id")}
+        if len(unique) == 1:
+            record = next(iter(unique.values()))
+            profile["global_speaker_id"] = str(record["id"])
+            profile["registration_status"] = "registered"
+            profile["display_name"] = (
+                clean_single_line(record.get("pseudonym"), 120)
+                or clean_single_line(record.get("display_name"), 120)
+                or name
+            )
+            profile["session_role"] = clean_single_line(
+                record.get("default_role"), 40
+            ) if clean_single_line(record.get("default_role"), 40) in SPEAKER_ROLES else "participant"
+            for field in ("organization", "department", "job_title"):
+                profile[field] = clean_single_line(record.get(field), 200)
+            attributes = record.get("attributes")
+            profile["conditions"] = "; ".join(
+                f"{clean_single_line(key, 120)}={clean_multiline(value, 2000)}"
+                for key, value in attributes.items()
+                if clean_single_line(key, 120)
+            ) if isinstance(attributes, dict) else ""
+            linked[str(label)] = str(record["id"])
+            changed = True
+        else:
+            if profile.get("global_speaker_id") or profile.get("registration_status") != "temporary_single_group":
+                profile["global_speaker_id"] = ""
+                profile["registration_status"] = "temporary_single_group"
+                changed = True
+            profile["display_name"] = name
+            temporary[str(label)] = name
+            if len(unique) > 1:
+                ambiguous[str(label)] = sorted(unique)
+    return speaker_profiles, {
+        "linked": linked,
+        "temporary": temporary,
+        "ambiguous": ambiguous,
+        "changed": changed,
+    }
 
 
 def speaker_identity_context_records(
@@ -11072,14 +11437,17 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                     job.id, options.source_name, segments, revision=0,
                     provider=options.ai_provider, model=options.ai_model, ai_efforts=options.ai_efforts,
                     detect_names=options.detect_speaker_names or options.ai_provider == "none",
-                    create_outline=options.create_outline or options.ai_provider == "none", ready=False,
+                    create_outline=options.create_outline or options.ai_provider == "none",
+                    jev_compare=options.jev_compare, ready=False,
                 )
                 obsidian_prepared = True
                 status("Whisperの原文と会話全文をObsidianに保存しました。仕上げは操作ノートから実行できます。")
             except (OSError, ValueError) as exc:
                 record_warning("Obsidianの作業ノートを保存できませんでした。処理完了後に「Obsidianで仕上げ」から再試行してください: " + str(exc))
         finishing_stages = {"outline_context": "not_requested", "cleanup": "not_requested",
+                            "jev_comparison": "not_requested",
                             "speaker_identity": "not_requested", "outline": "not_requested"}
+        jev_usage: dict[str, Any] = {}
         check_cancelled()
         set_stage("speaker_assignment", "話者ラベルの割り当て", 100)
 
@@ -11143,6 +11511,29 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
                 finishing_stages["cleanup"] = "failed"
                 record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
+        if options.jev_compare and not options.finish_in_obsidian:
+            if finishing_stages["cleanup"] != "completed":
+                finishing_stages["jev_comparison"] = "skipped"
+                record_warning("現行AIの文字整形が完了しなかったため、Jevとの比較を省略しました。")
+            else:
+                try:
+                    reviews, jev_usage = review_segments_with_jev(
+                        imported_transcript,
+                        options.jev_api_key,
+                        options.jev_model,
+                        status,
+                        check_cancelled,
+                        outline=context_outline,
+                    )
+                    segments = attach_jev_comparison(segments, reviews)
+                    finishing_stages["jev_comparison"] = "completed"
+                    check_cancelled()
+                except InterruptedError:
+                    raise
+                except Exception as exc:
+                    details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+                    finishing_stages["jev_comparison"] = "failed"
+                    record_warning("Jevによる修正要否の比較を省略しました: " + details)
         set_stage("finishing", "文字起こしの仕上げ", 100)
         progress(88)
         emotion_analysis: dict[str, Any] | None = None
@@ -11230,6 +11621,15 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             {str(item.get("speaker") or "UNKNOWN") for item in segments},
             speaker_names,
         )
+        speaker_profiles, speaker_registration_summary = link_detected_speakers_to_registry(
+            speaker_profiles,
+            speaker_names,
+        )
+        if speaker_registration_summary["temporary"]:
+            status(
+                "台帳に一致しない話者を、この会話のみの一時話者として登録しました: "
+                + "、".join(speaker_registration_summary["temporary"].values())
+            )
         session_profile = session_profile_from_media(options.input_path, check_cancelled)
         session_profile["session_type"] = CONVERSATION_MODES.get(
             options.conversation_mode, "meeting"
@@ -11381,7 +11781,8 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 with library_write_lock:
                     archived = archive_ai_finishing(persisted, speaker_identity_segments, finishing_stages,
                                                    options.ai_provider, options.ai_model, job.ai_usage,
-                                                   context_outline=context_outline)
+                                                   context_outline=context_outline,
+                                                   jev_usage=jev_usage)
                 if archived["vault_status"] != "completed":
                     record_warning("AI仕上げの結果は保存済みです。Vaultへの書き出しは分析画面から再試行できます。")
             except (OSError, ValueError, TypeError, sqlite3.Error):
@@ -13581,6 +13982,10 @@ def rerun_library_speaker_identification(item_id: str):
                 profile["display_name"] = name
                 speaker_profiles[label] = profile
                 applied_names[label] = name
+            speaker_profiles, registration_summary = link_detected_speakers_to_registry(
+                speaker_profiles,
+                detected_names,
+            )
             combined_usage = merge_ai_usage(
                 json_load(latest["ai_usage_json"], {}),
                 run_usage,
@@ -13589,7 +13994,7 @@ def rerun_library_speaker_identification(item_id: str):
                 repair_summary["aliased_segments"]
                 or repair_summary["corrected_segments"]
             )
-            if applied_names or repairs_applied:
+            if applied_names or repairs_applied or registration_summary["changed"]:
                 result = _update_library_from_payload_locked(
                     item_id,
                     {
@@ -13631,6 +14036,7 @@ def rerun_library_speaker_identification(item_id: str):
                 "ambiguous_labels": diagnostics.get("ambiguous_labels", {}),
                 "duplicate_names": diagnostics.get("duplicate_names", {}),
                 "repairs": repair_summary,
+                "registration": registration_summary,
             }
             return jsonify(result)
     except TranscriptConflictError as exc:
@@ -13712,6 +14118,7 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
                 archive_ai_finishing(library_row(item_id), context["before"], context["stages"],
                     context["provider"], context["model"], context["usage"],
                     context_outline=context["context_outline"],
+                    jev_usage=context.get("jev_usage"),
                     request_id="obsidian-finishing-" + context["run_id"])
             except (OSError, ValueError, TypeError, sqlite3.Error):
                 # The candidate package remains durable even if Vault publication fails.
@@ -13745,7 +14152,16 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
     revised = clean_segments_with_ai(segments, provider, api_key, model, status,
         check, record_usage, base_url=base_url, ai_efforts=state.get("ai_efforts"), outline=context)
     stages = {"outline_context": "completed", "cleanup": "completed",
+              "jev_comparison": "not_requested",
               "speaker_identity": "not_requested", "outline": "not_requested"}
+    jev_usage: dict[str, Any] = {}
+    if state.get("jev_compare"):
+        reviews, jev_usage = review_segments_with_jev(
+            segments, config.typesafe_api_key, config.typesafe_model,
+            status, check, outline=context,
+        )
+        revised = attach_jev_comparison(revised, reviews)
+        stages["jev_comparison"] = "completed"
     if state.get("detect_names"):
         diagnostics = {}
         detected = detect_speaker_names_with_ai(segments, provider, api_key, model,
@@ -13760,7 +14176,8 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
     check()
     return {"segments": revised, "names": names, "outline": final_outline,
             "context_outline": context, "stages": stages, "provider": provider,
-            "model": model, "usage": state.get("pending_usage", usage)}
+            "model": model, "usage": state.get("pending_usage", usage),
+            "jev_usage": jev_usage}
 
 
 @app.post("/api/library/<item_id>/obsidian-finishing")
@@ -13780,6 +14197,7 @@ def prepare_obsidian_finishing_route(item_id: str):
                 raise ValueError("AIプロバイダーが不正です。")
             state = obsidian_workbench().prepare(item_id, row["source_name"], row_segments(row),
                 revision=int(row["revision_count"] or 0), provider=provider, source_kind="saved_transcript",
+                jev_compare=payload.get("jev_compare") is True,
                 ai_efforts=normalize_efforts(payload.get("ai_efforts")))
             if not state.get("ready"):
                 obsidian_workbench().activate(item_id, int(row["revision_count"] or 0), row_segments(row))
@@ -13866,12 +14284,15 @@ def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = 
     ai = analysis.get("insights", {}).get("ai") or {}
     methods = method_results(analysis, datasets, outline=outline, kwic=kwic)
     if kwic is not None: methods = [m for m in methods if m["method_id"] == "kwic"]
+    expert_hashes = method_experts.attach_method_reviews(methods, analysis)
+    expert_hashes.update(method_experts.knowledge_hashes(analysis.get("experts")))
     parameters: dict[str, Any] = ({key: kwic[key] for key in ("query", "mode", "speaker")}
                                   if kwic is not None else analysis["config"])
     algorithms = {"automatic": analysis.get("algorithm_version"),
                   "insights": INSIGHT_VERSION, "finishing": FINISHING_VERSION,
                   "research": analysis.get("research", {}).get("algorithm_version"),
-                  "engine": analysis.get("research", {}).get("linguistics", {}).get("engine", {})}
+                  "engine": analysis.get("research", {}).get("linguistics", {}).get("engine", {}),
+                  "experts": dict(sorted(expert_hashes.items()))}
     if kind == "transformer_topics":
         transformer_result = analysis.get("transformer", {}).get("result") or {}
         parameters = {"analysis": analysis["config"],
@@ -13889,26 +14310,104 @@ def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = 
         model=ai.get("model", "") if kind == "ai_insights" else "", check_cancelled=check_cancelled)
 
 
+def archive_segment_classification(
+    row: sqlite3.Row, analysis: dict[str, Any], classification: dict[str, Any],
+    request_id: str, *, app_url: str = "http://127.0.0.1:7860",
+) -> dict[str, Any]:
+    """Persist one immutable proposal run without changing manual annotations."""
+    analysis_with_result = dict(analysis)
+    analysis_with_result["segment_classification"] = {
+        "result": classification,
+        "stale": False,
+        "summary": segment_classification_summary(classification),
+        "dialogue_acts": DIALOGUE_ACTS,
+    }
+    datasets = {
+        name: analysis_csv_rows(analysis_with_result, name)
+        for name in ("segment_classifications", "segment_classification_crosstabs")
+    }
+    classification_state = analysis_with_result["segment_classification"]
+    methods = method_results(
+        analysis_with_result, datasets, classification=classification_state
+    )
+    methods = [value for value in methods if value["method_id"] == "segment_classification"]
+    llm_source = (classification.get("sources") or {}).get("llm") or {}
+    usage = llm_source.get("usage") or {}
+    result = {
+        "schema_version": 1,
+        "parameters": {
+            "use_jev": bool(llm_source.get("available")),
+            "topic_candidate_count": len(segment_classification_topic_candidates(
+                analysis.get("config", {}).get("codebook", [])
+            )),
+            "classification_fingerprint": str(classification.get("fingerprint") or ""),
+        },
+        "algorithms": {
+            "segment_classification": SEGMENT_CLASSIFICATION_VERSION,
+            "template": SEGMENT_CLASSIFICATION_VERSION,
+            "transformer": ((classification.get("sources") or {}).get("transformer") or {}).get("algorithm_version", ""),
+        },
+        "methods": methods,
+        "classification": classification,
+        "usage": usage,
+    }
+    return analysis_archive_store().save(
+        item_id=str(row["id"]), kind="segment_classification",
+        snapshot=archive_snapshot(row, analysis_with_result), result=result,
+        datasets=datasets, request_id=request_id,
+        input_fingerprint=archive_source_stamp(row),
+        source_revision=int(row["revision_count"]),
+        analysis_revision=int(row["analysis_revision"]), app_url=app_url,
+        provider="typesafe" if llm_source.get("available") else "",
+        model=str(usage.get("model") or ""),
+    )
+
+
 def archive_ai_finishing(row, original_segments: list[dict], stages: dict, provider: str,
                          model: str, usage: dict, context_outline: dict | None = None,
+                         jev_usage: dict | None = None,
                          request_id: str | None = None) -> dict:
     segments = row_segments(row)
     names = json_load(row["speaker_names_json"], {})
     display = [{**s, "speaker_name": names.get(s.get("speaker"), s.get("speaker", "UNKNOWN"))} for s in segments]
+    jev_rows = jev_comparison_rows(segments)
+    agreement_counts = Counter(str(row.get("agreement") or "") for row in jev_rows)
+    jev_details = ({
+        "review_version": JEV_REVIEW_VERSION,
+        "model": str(jev_rows[0].get("jev_model") or JEV_DEFAULT_MODEL),
+        "usage": jev_usage or {},
+        "decision_labels": ["correction_needed", "no_correction_needed"],
+        "reviewed_segment_count": len(jev_rows),
+        "agreement_counts": dict(agreement_counts),
+    } if jev_rows else {})
     details = {"prompt_version": FINISHING_VERSION, "provider": provider, "model": model,
                "usage": usage, "stages": stages, "original_segments": original_segments,
                "changes": finishing_changes(original_segments, segments),
-               "context_outline": context_outline}
+               "context_outline": context_outline, "jev_comparison": jev_details}
     datasets = {"ai_changes": (["segment_id", "start", "end", "before_text", "after_text",
                                  "before_speaker", "after_speaker", "noise_candidate", "review_reason"], details["changes"])}
+    if jev_rows:
+        datasets["ai_jev_comparison"] = ([
+            "segment_id", "start", "end", "speaker", "original_text", "current_text",
+            "current_ai_flagged", "jev_flagged", "agreement", "jev_decision",
+            "correction_needed_probability", "jev_confidence", "jev_model",
+        ], jev_rows)
+    cautions = ["AI仕上げは自動処理です。修正前の原文と比較して確認してください。"]
+    if jev_rows:
+        cautions.append(
+            "Jevは音声ではなく文字起こしと会話文脈だけで修正要否を二択判定します。候補は原音で確認してください。"
+        )
     analysis = {"segments": display, "config": row_analysis_config(row),
                 "annotations": row_analysis_annotations(row, segments, row_analysis_config(row)),
-                "cautions": ["AI仕上げは自動処理です。修正前の原文と比較して確認してください。"]}
+                "cautions": cautions}
     outline = json_load(row["outline_json"], None)
     methods = [m for m in method_results(analysis, datasets, outline=outline, finishing=details)
                if m["method_id"] in {"ai_finishing", "outline"}]
+    algorithms = {"finishing": FINISHING_VERSION}
+    if jev_rows:
+        algorithms["jev_review"] = JEV_REVIEW_VERSION
     result = {"schema_version": 1, "methods": methods, "parameters": {"stages": stages},
-              "algorithms": {"finishing": FINISHING_VERSION}, "finishing": details, "outline": outline}
+              "algorithms": algorithms, "finishing": details, "outline": outline}
     port = os.environ.get("MOJIOKOSI_PORT", "7860")
     if not port.isdigit() or not 1 <= int(port) <= 65535: port = "7860"
     return analysis_archive_store().save(item_id=str(row["id"]), kind="ai_finishing",
@@ -13989,6 +14488,8 @@ def archive_interview_comparison(rows: list, comparison: dict[str, Any], request
     datasets = interview_comparison_datasets(comparison)
     methods = [m for m in method_results({"segments": [], "config": {}}, datasets, comparison=comparison)
                if m["method_id"] == "interview_comparison"]
+    expert_hashes = method_experts.attach_method_reviews(
+        methods, {"segments": [], "config": {}}, context={"session_count": len(comparison.get("interviews", []))})
     allow_different = bool(comparison.get("allow_different_content"))
     snapshot = {"title": "グループインタビュー比較：" + " / ".join(member["title"] for member in members),
                 "conversation_id": group_id, "kind": "interview_comparison", "members": members,
@@ -13996,7 +14497,7 @@ def archive_interview_comparison(rows: list, comparison: dict[str, Any], request
                 "comparison_key": comparison.get("comparison_key", ""), "segments": []}
     result = {"schema_version": 1, "methods": methods,
               "parameters": {"item_ids": item_ids, "allow_different_content": allow_different},
-              "algorithms": {"interview_comparison": comparison.get("schema_version", 1)},
+              "algorithms": {"interview_comparison": comparison.get("schema_version", 1), "experts": expert_hashes},
               "comparison": comparison}
     return analysis_archive_store().save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,
         result=result, datasets=datasets, request_id=request_id,
@@ -14013,22 +14514,67 @@ def refresh_archive_index(item_id: str) -> None:
             connection.execute("UPDATE analysis_runs SET vault_status='conflict',error='原文は保存済みですが、Vaultの更新確認が必要です。' WHERE item_id=? AND status='completed'", (item_id,))
 
 
-@app.get("/api/analysis/methods")
-def get_analysis_methods():
-    return jsonify({"version": REGISTRY_VERSION, "methods": [
-        {"id": key, "title": title, "datasets": tables} for key, title, tables in METHODS]})
+def analysis_queries() -> AnalysisQueries:
+    """Build request-time query dependencies so patched settings stay effective."""
+    return AnalysisQueries(
+        store=analysis_archive_store(),
+        find_item=library_row,
+        source_fingerprint=archive_source_stamp,
+        expose_local_paths=local_path_access_allowed(),
+    )
 
 
-@app.get("/api/library/<item_id>/analysis/runs")
-def get_analysis_runs(item_id: str):
+register_analysis_routes(app, analysis_queries)
+
+
+@app.get("/api/analysis/experts")
+def get_analysis_experts():
+    return jsonify(method_experts.catalog_summary())
+
+
+@app.get("/api/analysis/experts/<expert_id>")
+def get_analysis_expert(expert_id: str):
+    try:
+        return jsonify(method_experts.expert_detail(expert_id))
+    except (method_experts.ExpertDefinitionError, KeyError) as exc:
+        return jsonify({"error": str(exc)}), 404
+
+
+@app.get("/api/library/<item_id>/analysis/methods")
+def get_analysis_method_overview(item_id: str):
+    """Per-method state for the method view: what each analysis produced and what its expert says."""
     row = library_row(item_id)
-    if row is None: return jsonify({"error": "対象の会話が見つかりません。"}), 404
-    store = analysis_archive_store()
-    stamp = archive_source_stamp(row)
-    runs = store.list(item_id)
-    for run in runs: run["stale"] = bool(run["stale"] or run["input_fingerprint"] != stamp)
-    return jsonify({"runs": [store.public(r, local=local_path_access_allowed()) for r in runs],
-                    "storage": {"database": "SQLite", "artifacts": "CSV / JSON", "notes": "ResearchVault"}})
+    if row is None:
+        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+    try:
+        analysis = group_analysis_for_row(row, include_research_rows=True)
+        datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
+        outline = json_load(row["outline_json"], None)
+        finished = any(run["kind"] == "ai_finishing" and run["status"] == "completed"
+                       for run in analysis_archive_store().list(item_id))
+        methods = [method for method in method_results(analysis, datasets, outline=outline)
+                   if method["method_id"] not in SEPARATE_RUN_METHODS]
+        # Context search runs on demand and AI finishing belongs to the transcript screen,
+        # so both are listed with their own state instead of a result table.
+        methods += [
+            {"method_id": "kwic", "title": "文脈検索", "status": "not_run", "datasets": ["kwic"],
+             "previews": [], "analysis_unit": "出現箇所",
+             "limitations": ["語を検索したときだけ結果が出ます。検索結果はCSVで保存できます。"]},
+            {"method_id": "ai_finishing", "title": "AI仕上げ・変更記録",
+             "datasets": ["ai_changes", "ai_jev_comparison"],
+             "status": "completed" if finished else "not_run", "previews": [], "analysis_unit": "発話",
+             "limitations": ["実行と変更記録の確認は文字起こし画面です。保存記録に仕上げ前後の発話が残ります。"]},
+        ]
+        overview = method_experts.method_overview(methods, analysis)
+        overview["groups"] = [
+            {"id": key, "title": title, "description": description,
+             "method_ids": [value for value in ids if value not in SEPARATE_RUN_METHODS]}
+            for key, title, description, ids in METHOD_GROUPS
+            if any(value not in SEPARATE_RUN_METHODS for value in ids)
+        ]
+        return jsonify(overview)
+    except (ValueError, TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "手法別の分析状態を取得できませんでした。"}), 500
 
 
 @app.post("/api/library/<item_id>/analysis/runs")
@@ -14075,19 +14621,6 @@ def retry_analysis_vault(run_id: str):
             result = store.retry(run_id)
         return jsonify({"run": store.public(result, local=local_path_access_allowed())})
     except (OSError, ValueError, LookupError, sqlite3.Error): return jsonify({"error": "Vaultへの再保存に失敗しました。"}), 409
-
-
-@app.get("/api/analysis/artifacts/<artifact_id>")
-def get_analysis_artifact(artifact_id: str):
-    try:
-        store = analysis_archive_store()
-        metadata, data = store.read_artifact(artifact_id)
-        run = store.get(metadata["run_id"])
-        if not run or library_row(run["item_id"]) is None: raise LookupError()
-        return send_file(io.BytesIO(data), mimetype=metadata["media_type"], as_attachment=True,
-                         download_name=Path(metadata["name"]).name)
-    except LookupError: return jsonify({"error": "保存ファイルが見つかりません。"}), 404
-    except (OSError, ValueError): return jsonify({"error": "保存ファイルが移動または変更されています。"}), 409
 
 
 def public_insight_request(row) -> dict[str, Any] | None:
@@ -14141,7 +14674,8 @@ def run_analysis_insight_job(request_id: str, analysis: dict, provider: str, api
                             schema, cancelled, record_usage, base_url, ai_efforts=ai_efforts)
 
     try:
-        findings = create_ai_insights(analysis, call, progress, cancelled)
+        expert = method_experts.ai_context(analysis.get("experts"))
+        findings = create_ai_insights(analysis, call, progress, cancelled, expert=expert)
         with insight_jobs_lock, library_write_lock:
             cancelled()
             latest = library_row(analysis["item"]["id"])
@@ -14156,6 +14690,9 @@ def run_analysis_insight_job(request_id: str, analysis: dict, provider: str, api
                      "algorithm_version": INSIGHT_VERSION, "request_id": request_id,
                      "source_revision": analysis["item"]["revision_count"],
                      "analysis_revision": analysis["item"]["analysis_revision"], "usage": usage,
+                     **({"expert": {key: expert[key] for key in
+                                    ("expert_id", "definition_version", "knowledge_hash", "fingerprint")}}
+                        if expert else {}),
                      "evidence": {s["id"]: {k: s.get(k) for k in
                                   ("id", "speaker", "speaker_name", "start", "end", "text")}
                                   for s in included_segments(analysis)
@@ -14280,6 +14817,9 @@ def start_analysis_insights(item_id: str):
         if payload["source_revision"] != int(row["revision_count"]) or payload["analysis_revision"] != int(row["analysis_revision"]):
             return jsonify({"error": "データが更新されています。分析を再読み込みしてください。", "conflict": True}), 409
         analysis = group_analysis_for_row(row)
+        blocked = method_experts.ai_block_reason(analysis.get("experts"))
+        if blocked:
+            return jsonify({"error": blocked, "expert_blocked": True}), 409
         if not included_segments(analysis):
             return jsonify({"error": "見解の生成に利用できる発話がありません。"}), 400
         try:
@@ -14338,11 +14878,16 @@ def cancel_analysis_insights(item_id: str):
 def public_transformer_request(row) -> dict[str, Any] | None:
     if row is None:
         return None
-    return {key: row[key] for key in (
-        "request_id", "item_id", "model", "max_topics", "min_topic_size", "topic_count",
-        "status", "progress", "message", "created_at", "updated_at",
-        "source_revision", "analysis_revision",
-    )}
+    keys = row.keys()
+    return {
+        **{key: row[key] for key in (
+            "request_id", "item_id", "model", "max_topics", "min_topic_size", "topic_count",
+            "status", "progress", "message", "created_at", "updated_at",
+            "source_revision", "analysis_revision",
+        )},
+        "mode": str(row["mode"]) if "mode" in keys else "auto",
+        "min_similarity": float(row["min_similarity"]) if "min_similarity" in keys else 0.0,
+    }
 
 
 def update_transformer_request(request_id: str, status: str, progress: int, message: str) -> None:
@@ -14360,7 +14905,10 @@ class TransformerAnalysisCancelled(RuntimeError):
 def run_transformer_analysis_job(
     request_id: str, analysis: dict, model: str, max_topics: int,
     min_topic_size: int, topic_count: int, cancel_event: threading.Event,
-    app_url: str = "http://127.0.0.1:7860",
+    app_url: str = "http://127.0.0.1:7860", mode: str = "auto",
+    manual_topics: list[dict] | None = None,
+    min_similarity: float = DEFAULT_MANUAL_MIN_SIMILARITY,
+    saved_result: dict | None = None,
 ) -> None:
     progress_value = 0
 
@@ -14378,10 +14926,23 @@ def run_transformer_analysis_job(
     try:
         progress(2, "日本語の解析結果を準備しています。")
         research = build_research_analysis(analysis)
+        reuse = (saved_transformer_embeddings(saved_result, analysis, model=model)
+                 if mode in {"candidate", "manual"} else None)
+        embeddings, embedding_segment_ids, engine = reuse if reuse else (None, None, None)
+        saved_quality = (saved_result or {}).get("quality")
+        previous_candidates = (saved_quality.get("cluster_candidates")
+                               if isinstance(saved_quality, dict) else None)
+        if reuse:
+            progress(60, "保存済みの意味ベクトルを再利用します。")
+        elif mode != "auto":
+            progress(5, "保存済みの意味ベクトルがないため、発話を意味ベクトル化します。")
         result = analyze_transformer_topics(
             analysis, research["linguistics"]["morphemes"], model_name=model,
             max_topics=max_topics, min_topic_size=min_topic_size,
-            topic_count=topic_count or None,
+            topic_count=topic_count or None, mode=mode,
+            manual_topics=manual_topics or [], manual_min_similarity=min_similarity,
+            embeddings=embeddings, embedding_segment_ids=embedding_segment_ids, engine=engine,
+            previous_candidates=previous_candidates,
             progress=progress, check_cancelled=cancelled,
         )
         result.update({
@@ -14472,6 +15033,19 @@ def start_transformer_analysis(item_id: str):
             raise ValueError
     except (TypeError, ValueError):
         return jsonify({"error": "テーマ上限・固定数は2〜12、最小発話数は2〜20で指定してください。"}), 400
+    mode = str(payload.get("mode") or "auto")
+    if mode not in TOPIC_MODES:
+        return jsonify({"error": "テーマの決め方は自動・候補・手動のいずれかで指定してください。"}), 400
+    try:
+        min_similarity = float(payload.get("min_similarity", DEFAULT_MANUAL_MIN_SIMILARITY))
+        if not 0.0 <= min_similarity <= 0.95:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "割り当てのしきい値は0〜0.95で指定してください。"}), 400
+    if mode == "candidate" and topic_count < 2:
+        return jsonify({"error": "候補から選ぶときは、テーマ数を指定してください。"}), 400
+    if mode == "auto":
+        topic_count = 0
     model = str(os.environ.get("MOJIOKOSI_TRANSFORMER_MODEL", DEFAULT_TRANSFORMER_MODEL)).strip()
     if not model or len(model) > 200:
         return jsonify({"error": "Transformerモデルの設定が正しくありません。"}), 400
@@ -14489,7 +15063,7 @@ def start_transformer_analysis(item_id: str):
                     "source_revision": payload["source_revision"],
                     "analysis_revision": payload["analysis_revision"],
                     "max_topics": max_topics, "min_topic_size": min_topic_size,
-                    "topic_count": topic_count,
+                    "topic_count": topic_count, "mode": mode,
                 }
                 if any(previous[key] != value for key, value in expected.items()):
                     return jsonify({"error": "リクエストIDが別の指定に使われています。"}), 409
@@ -14508,16 +15082,25 @@ def start_transformer_analysis(item_id: str):
         analysis = group_analysis_for_row(row)
         if not included_segments(analysis):
             return jsonify({"error": "Transformer分析に利用できる発話がありません。"}), 400
+        manual_topics = list(analysis.get("config", {}).get("transformer_topics") or [])
+        if mode == "manual" and not 2 <= len(manual_topics) <= MAX_MANUAL_TOPICS:
+            return jsonify({"error": (
+                f"手動で割り当てるには、テーマを2〜{MAX_MANUAL_TOPICS}件定義して保存してください。"
+            )}), 400
+        saved_result = json_load(row["transformer_analysis_json"], {}) \
+            if "transformer_analysis_json" in row.keys() else {}
         fingerprint = transformer_input_fingerprint(analysis, model=model)
         now = utc_now_iso()
         with database_connection() as connection:
             connection.execute("""
                 INSERT INTO transformer_analysis_requests
                 (request_id,item_id,source_revision,analysis_revision,fingerprint,model,
-                 max_topics,min_topic_size,topic_count,status,message,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,'queued','モデルの準備を開始します。',?,?)
+                 max_topics,min_topic_size,topic_count,mode,min_similarity,
+                 status,message,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued','モデルの準備を開始します。',?,?)
             """, (request_id, item_id, payload["source_revision"], payload["analysis_revision"],
-                  fingerprint, model, max_topics, min_topic_size, topic_count, now, now))
+                  fingerprint, model, max_topics, min_topic_size, topic_count, mode,
+                  min_similarity, now, now))
             run = connection.execute(
                 "SELECT * FROM transformer_analysis_requests WHERE request_id=?", (request_id,)
             ).fetchone()
@@ -14528,6 +15111,9 @@ def start_transformer_analysis(item_id: str):
                 target=run_transformer_analysis_job,
                 args=(request_id, analysis, model, max_topics, min_topic_size,
                       topic_count, event, request.url_root),
+                kwargs={"mode": mode, "manual_topics": manual_topics,
+                        "min_similarity": min_similarity,
+                        "saved_result": saved_result if isinstance(saved_result, dict) else {}},
                 name=f"transformer-{item_id}", daemon=True,
             ).start()
         except RuntimeError:
@@ -14597,6 +15183,126 @@ def get_library_analysis(item_id: str):
         return jsonify(group_analysis_for_row(row))
     except (ValueError, TypeError, OverflowError, sqlite3.Error):
         return jsonify({"error": "分析データを生成できません。元データを確認してください。"}), 500
+
+
+@app.get("/api/library/<item_id>/analysis/classifications")
+def get_segment_classifications(item_id: str):
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "データが見つかりません。"}), 404
+    try:
+        analysis = group_analysis_for_row(row)
+        return jsonify({"segment_classification": analysis["segment_classification"]})
+    except (ValueError, TypeError, OverflowError, sqlite3.Error):
+        return jsonify({"error": "発話分類の状態を取得できませんでした。"}), 500
+
+
+@app.post("/api/library/<item_id>/analysis/classifications")
+def run_segment_classifications(item_id: str):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "実行条件をJSONオブジェクトで送信してください。"}), 400
+    if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
+        return jsonify({"error": "元データと分析のrevisionを指定してください。"}), 400
+    if "use_jev" not in payload or not isinstance(payload.get("use_jev"), bool):
+        return jsonify({"error": "Jevへ発話を送信するか use_jev で明示してください。"}), 400
+    request_id = str(payload.get("request_id") or uuid.uuid4().hex)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
+        return jsonify({"error": "リクエストIDが正しくありません。"}), 400
+
+    row = library_row(item_id)
+    if row is None:
+        return jsonify({"error": "データが見つかりません。"}), 404
+    source_revision = int(row["revision_count"] or 0)
+    analysis_revision = int(row["analysis_revision"] or 0)
+    if (payload["source_revision"] != source_revision
+            or payload["analysis_revision"] != analysis_revision):
+        return jsonify({"error": "データが更新されています。分析を再読み込みしてください。",
+                        "conflict": True}), 409
+
+    try:
+        analysis = group_analysis_for_row(row)
+        segments = analysis["segments"]
+        if not segments:
+            return jsonify({"error": "分類できる発話がありません。"}), 400
+        transformer_state = analysis.get("transformer", {})
+        transformer_result = (
+            transformer_state.get("result") if not transformer_state.get("stale") else None
+        )
+        llm_proposals: dict[str, dict[str, Any]] = {}
+        llm_usage: dict[str, Any] = {}
+        if payload["use_jev"]:
+            token_config = load_token_config()
+            if not token_config.typesafe_api_key:
+                raise ValueError("tokens.json に typesafe_api_key を設定してください。")
+            llm_proposals, llm_usage = classify_segments_with_jev(
+                segments,
+                segment_classification_topic_candidates(analysis["config"].get("codebook", [])),
+                token_config.typesafe_api_key,
+                token_config.typesafe_model,
+            )
+        result = build_segment_classification_result(
+            segments, analysis["annotations"], analysis["config"].get("codebook", []),
+            transformer_result, llm_proposals,
+            source_revision=source_revision, analysis_revision=analysis_revision,
+            llm_usage=llm_usage,
+        )
+        result["generated_at"] = utc_now_iso()
+        result["request_id"] = request_id
+        with library_write_lock:
+            latest = library_row(item_id)
+            if latest is None:
+                return jsonify({"error": "データが削除されています。"}), 404
+            if (int(latest["revision_count"] or 0) != source_revision
+                    or int(latest["analysis_revision"] or 0) != analysis_revision):
+                return jsonify({"error": "実行中にデータが更新されました。もう一度実行してください。",
+                                "conflict": True}), 409
+            with database_connection() as connection:
+                cursor = connection.execute(
+                    """UPDATE library_items SET segment_classification_json=?
+                       WHERE id=? AND revision_count=? AND analysis_revision=?""",
+                    (json.dumps(result, ensure_ascii=False), item_id,
+                     source_revision, analysis_revision),
+                )
+                if cursor.rowcount != 1:
+                    raise AnalysisConflictError(
+                        "保存前にデータが更新されました。もう一度実行してください。"
+                    )
+        latest = library_row(item_id)
+        refreshed = group_analysis_for_row(latest)
+        archive_warning = ""
+        public_run = None
+        try:
+            archived = archive_segment_classification(
+                latest, refreshed, result, "segment-classification-" + request_id,
+                app_url=request.url_root,
+            )
+            public_run = analysis_archive_store().public(
+                archived, local=local_path_access_allowed()
+            )
+            result["archive_id"] = archived["id"]
+            with database_connection() as connection:
+                connection.execute(
+                    "UPDATE library_items SET segment_classification_json=? WHERE id=?",
+                    (json.dumps(result, ensure_ascii=False), item_id),
+                )
+            refreshed = group_analysis_for_row(library_row(item_id))
+        except (OSError, ValueError, TypeError, sqlite3.Error, StoreConflict) as exc:
+            archive_warning = (
+                "分類結果は保存しましたが、固定分析履歴の作成に失敗しました: "
+                + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]
+            )
+        return jsonify({
+            "segment_classification": refreshed["segment_classification"],
+            "run": public_run, "archive_warning": archive_warning,
+        })
+    except AnalysisConflictError as exc:
+        return jsonify({"error": str(exc), "conflict": True}), 409
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": public_diagnostic_text(str(exc), reveal_local_paths=False)[:700]}), 400
+    except (OSError, urllib.error.URLError, sqlite3.Error) as exc:
+        return jsonify({"error": "発話分類を実行できませんでした: "
+                        + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]}), 500
 
 
 @app.put("/api/library/<item_id>/analysis")
@@ -14888,7 +15594,7 @@ def export_conversation_speakers(item_id: str):
     fixed_headers = [
         "会話ID", "データ名", "会話種別", "実施日", "場所", "目的",
         "話者ラベル", "表示名", "グローバル話者ID", "参加者コード",
-        "テーマカラー", "会話役割", "組織", "部署", "役職", "参加状態",
+        "話者登録状態", "テーマカラー", "会話役割", "組織", "部署", "役職", "参加状態",
         "会話固有条件", "メモ", "発話数", "発話秒数", "文字数",
     ]
     stream = io.StringIO(newline="")
@@ -14908,6 +15614,11 @@ def export_conversation_speakers(item_id: str):
             "表示名": profile["display_name"] or speaker_names.get(label, ""),
             "グローバル話者ID": profile["global_speaker_id"],
             "参加者コード": global_record.get("participant_code", ""),
+            "話者登録状態": {
+                "registered": "登録済み",
+                "temporary_single_group": "一時話者（この会話のみ）",
+                "unidentified": "未特定",
+            }.get(profile.get("registration_status"), "未特定"),
             "テーマカラー": profile["theme_color"],
             "会話役割": profile["session_role"],
             "組織": profile["organization"],
@@ -15338,10 +16049,16 @@ def create_job():
         clean_transcript = parse_bool("clean_transcript")
         detect_names = parse_bool("detect_speaker_names")
         create_outline = parse_bool("create_outline")
+        finish_in_obsidian = parse_bool("finish_in_obsidian", default=True)
+        jev_compare = parse_bool("jev_compare")
         if provider == "none":
             clean_transcript = False
             detect_names = False
             create_outline = False
+            jev_compare = False
+        elif jev_compare:
+            # The comparison needs a result from the existing finishing AI.
+            clean_transcript = True
         emotion_analysis = parse_bool("emotion_analysis")
         emotion_model = request.form.get("emotion_model", "kushinada").strip() or "kushinada"
         if emotion_model not in AIST_EMOTION_MODEL_CHOICES:
@@ -15349,6 +16066,8 @@ def create_job():
         token_config = load_token_config()
         if not token_config.huggingface_token:
             raise ValueError("tokens.json に huggingface_token を設定してください。")
+        if jev_compare and not token_config.typesafe_api_key:
+            raise ValueError("Jev比較には tokens.json の typesafe_api_key が必要です。")
         ai_api_key = ""
         ai_model = ""
         ai_base_url = ""
@@ -15422,9 +16141,12 @@ def create_job():
             owns_output_dir=True,
             ai_efforts=normalize_efforts({key: request.form.get("ai_effort_" + key, "auto")
                                           for key in ("outline", "cleanup", "name_extract", "name_verify")}),
-            finish_in_obsidian=parse_bool("finish_in_obsidian", default=True),
+            finish_in_obsidian=finish_in_obsidian,
             conversation_mode=conversation_mode,
             custom_vocabulary=custom_vocabulary,
+            jev_compare=jev_compare,
+            jev_api_key=token_config.typesafe_api_key,
+            jev_model=token_config.typesafe_model,
         )
         job = JobRecord(
             id=job_id,

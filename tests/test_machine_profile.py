@@ -64,12 +64,15 @@ class DetectMachineProfileTests(unittest.TestCase):
         expected_device = "cuda" if self.profile["gpu"]["cuda_available"] else "cpu"
         self.assertEqual(self.profile["recommended"]["device"], expected_device)
 
-    def test_cpu_and_gpu_lights_are_visible_in_header_and_settings(self):
+    def test_cpu_and_gpu_lights_are_visible_in_header_dialog_and_settings(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
 
-        self.assertEqual(page.count('data-hardware="cpu"'), 3)
-        self.assertEqual(page.count('data-hardware="gpu"'), 3)
-        self.assertIn("PROCESSOR STATUS", page)
+        self.assertEqual(page.count('data-hardware="cpu"'), 2)
+        self.assertEqual(page.count('data-hardware="gpu"'), 2)
+        self.assertIn('data-device-dot="cpu"', page)
+        self.assertIn('data-device-dot="gpu"', page)
+        self.assertIn('id="machine-summary"', page)
+        self.assertIn('id="machine-recommendation"', page)
 
     def test_live_system_activity_endpoint_has_resource_and_io_metrics(self):
         response = app.app.test_client().get("/api/system/activity")

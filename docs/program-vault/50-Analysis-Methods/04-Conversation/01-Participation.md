@@ -1,5 +1,6 @@
 ---
 note_id: method-participation
+note_type: analysis-method
 method_id: participation
 method_version: text-analysis-store-2
 algorithm_version: focus-group-local-1
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/conversation, gurumoji/orchestrator]
 
 - [Stephan & Mishler (1952)](https://doi.org/10.2307/2088227) は小集団の相対的参加頻度の分布を扱う。参加分布に規則性があっても、個別会話の望ましさを意味しないことを示唆する基礎文献。
 - [Sacks, Schegloff & Jefferson (1974)](https://doi.org/10.2307/412243) はターン交替を会話の組織として分析する。単純な量的ターン数はその組織の一部にすぎない。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/participation-balance/01-Expert|参加バランスの専門家]]。結果の解釈の適用条件・手順・禁止事項と、文献の確認範囲は専門家定義を参照する。

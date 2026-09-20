@@ -16,6 +16,21 @@ class AiModelSettingsTests(unittest.TestCase):
                 "gemini-flash-latest",
             )
 
+    def test_typesafe_credentials_and_model_are_loaded_without_exposing_the_key(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            token_file = Path(temporary_directory) / "tokens.json"
+            token_file.write_text(json.dumps({
+                "typesafe_api_key": "test-typesafe-secret",
+                "typesafe_model": "jev-test",
+            }), encoding="utf-8")
+            config = app.load_token_config(token_file)
+            self.assertEqual(config.typesafe_api_key, "test-typesafe-secret")
+            self.assertEqual(config.typesafe_model, "jev-test")
+            availability = config.availability()
+            self.assertTrue(availability["typesafe"])
+            self.assertEqual(availability["typesafe_model"], "jev-test")
+            self.assertNotIn("test-typesafe-secret", json.dumps(availability))
+
     def test_update_model_preserves_credentials_and_unrelated_values(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             token_file = Path(temporary_directory) / "tokens.json"
@@ -160,6 +175,7 @@ class AiModelSettingsTests(unittest.TestCase):
         self.assertIn('data-model-provider="lmstudio"', page)
         self.assertIn('value="lmstudio"', page)
         self.assertIn('id="ai-model-dialog"', page)
+        self.assertIn('id="jev-compare"', page)
         self.assertIn("/api/ai/models?provider=", script)
         self.assertIn("/api/ai/model", script)
         self.assertIn("openAiModelDialog", script)

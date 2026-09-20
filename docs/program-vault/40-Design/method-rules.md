@@ -3,7 +3,7 @@ note_id: design-analysis-method-rules
 note_type: registration-rules
 title: 分析手法ごとのObsidian登録規約
 status: proposed
-updated: 2026-09-13
+updated: 2026-09-20
 schema_version: 1
 tags:
   - gurumoji/analysis
@@ -35,9 +35,10 @@ tags:
 | `local_insights` ローカル見解 | 会話の入口に最大5項目。実行ノートに生成時点の見解 | `insights` のローカル行、対象集合、入力版、アルゴリズム版 | 各項目に発話ID・話者・件数。語の一致から意見の一致を断定しない |
 | `kwic` 文脈検索 | 保存した検索ごとに目的、ヒット数、選択引用 | 検索条件JSON、全一致CSV。`q`, `mode`, `speaker`, 前後幅40文字 | 自由入力と正規化語を区別。同一発話内の複数出現は文字位置で別行。50件の表示ページは保存範囲にしない |
 | `speaker_characteristics` 話者別特徴語 | 話者ごとの上位10語、対象・他話者の率と差 | `characteristic_terms`、対象・他話者の件数・分母・割合 | 発話出現率の差。語の延べ回数と混同しない。比較相手なしは算出不能。クリック・リンク先は話者付きKWIC |
-| `transformer_topics` Transformerテーマ分析 | ノイズ除外・同一話者の短文文脈補完後の意味クラスタ、参加者／進行役候補を分けた代表発話・話者分布、相づちの話者×対象テーマ対応・応答率・探索的検定、話者別の会議リザルト、時間推移、例外候補 | `transformer_topics`, `transformer_assignments`, `transformer_speakers`, `transformer_timeline`, `transformer_outliers`, `transformer_backchannels`, `transformer_backchannel_speakers`, `transformer_backchannel_rates`, `transformer_backchannel_tests`, `transformer_speaker_results`、反応機会数・応答対象数・応答率・種類別件数・Pearsonカイ二乗・Cramér's V・期待度数診断、リザルト種別・対象テーマ・根拠発話ID・明示表現、相づちの種類・応答先発話ID・時間差、除外／文脈補完件数、話者補正、テーマ数の自動／固定指定、モデルrevision、次元、K-means seed、silhouette係数 | テーマ名は汎用語を除いた特徴語による仮ラベル。低いsilhouette係数を警告する。相づち率の反応機会は他者の有意味発話数による代理分母。反復観測の非独立性と疎な期待度数があるため検定は探索用とする。話者別リザルトは本人の明示表現だけを抽出し、表現がなければ未判定とする。会議前調査との比較ではない。相づちの対象は時系列上の推定で、賛同とは断定しない。意味類似度から合意・重要性を断定せず、代表発話を原文と照合する |
+| `transformer_topics` Transformerテーマ分析 | ノイズ除外・同一話者の短文文脈補完後の意味クラスタ、参加者／進行役候補を分けた代表発話・話者分布、相づちの話者×対象テーマ対応・応答率・探索的検定、話者別の会議リザルト、時間推移、例外候補 | `transformer_topics`, `transformer_assignments`, `transformer_speakers`, `transformer_timeline`, `transformer_outliers`, `transformer_backchannels`, `transformer_backchannel_speakers`, `transformer_backchannel_rates`, `transformer_backchannel_tests`, `transformer_speaker_results`、反応機会数・応答対象数・応答率・種類別件数・Pearsonカイ二乗・Cramér's V・期待度数診断、リザルト種別・対象テーマ・根拠発話ID・明示表現、相づちの種類・応答先発話ID・時間差、除外／文脈補完件数、話者補正、テーマの決め方（`auto`／`candidate`／`manual`）、候補ごとのsilhouetteと選んだテーマ数、手動テーマの定義（見出し・手がかり語・シード発話）と割り当てのしきい値、未割当・境界例の件数、保存済み意味ベクトルの再利用、モデルrevision、次元、K-means seed、silhouette係数 | テーマ名は汎用語を除いた特徴語による仮ラベル。低いsilhouette係数を警告する。相づち率の反応機会は他者の有意味発話数による代理分母。反復観測の非独立性と疎な期待度数があるため検定は探索用とする。話者別リザルトは本人の明示表現だけを抽出し、表現がなければ未判定とする。会議前調査との比較ではない。相づちの対象は時系列上の推定で、賛同とは断定しない。意味類似度から合意・重要性を断定せず、代表発話を原文と照合する。手動のテーマは研究者の見出しで、割り当ては最近傍の候補である。しきい値と境界例の目安は実装上の判断であり、割り当てを妥当性が確認された分類として示さない |
 | `participation` 発話量・参加バランス | 会話全体／話者／属性群の集計、確認候補 | `speakers`, `groups`, `summary`, `observations`、除外・役割・属性・単位・しきい値 | 発話量を影響力や重要性の順位に置き換えない。分母と役割を表示 |
 | `conversation_dynamics` 話者遷移・無音・重なり・時間推移 | 遷移表、時間区間、確認対象へのリンク | `transitions`, `gaps`, `overlaps`, `timeline`、各しきい値・時間窓 | タイムスタンプからの候補と明記。発話除外によって存在しない物理的無音を作らない。対象集合と元の時間配置を保存 |
+| `segment_classification` 発話種別・確認スコア | 手動確定値とテンプレート・Jev・Transformerの提案比較、クロス集計 | `segment_classifications`, `segment_classification_crosstabs`、入力revision、規則版、Jevモデル・使用量、Transformer版 | 自動提案を人手の正解に置き換えない。重要度・要確認度・機密らしさは0〜100の選別スコアで、確率・法的判定ではない。Transformer話題の近さを発話機能や重要性に読み替えない |
 | `morphology` 形態素・品詞 | 解析器、分割単位、代表例、品詞分布 | 全件 `morphemes`, `pos_frequency`、辞書・モデル・版・分割モード・ストップワード | プレビューから保存しない。表層形／原形／正規形／読みを保持。簡易解析は `fallback` とし正式解析と混合しない |
 | `syntax` 係り受け | 対象文の構造説明と選択例 | 全件 `dependencies`、形態素入力への参照、解析器・モデル版 | 係り元・係り先・関係ラベル・発話IDを保持。利用不可なら理由を記録し空結果を成功扱いしない |
 | `lexical_frequency` 頻出語・TF／DF | 上位語と集計の定義、保存した語へのリンク | `term_frequency` とJSON内の話者別語彙。既存 `keywords` は別系列と明記 | TF＝延べ出現、DF＝語を含む発話数を区別。旧簡易キーワードと正規化語の値を混ぜない |
@@ -70,7 +71,46 @@ tags:
 6. サーバーでschema・ID・hash・対象版を検証し、登録プレビューでノート・表・リンクを確認する。
 7. 条件・根拠・原文へ戻れることを確認して手法を有効化する。式や対象単位が変わったら手法版を上げる。
 
+追加の完了条件（2026-09-20設計）：新設・拡張する手法は、登録票にUI入口・設定、結果と根拠、比較・再利用、状態と操作検証も記入する。計算・保存/APIと対応するUIを一組として公開し、画面がモックだけの段階で「利用可能」にしない。詳細は[[40-Design/core-handler-routing-reorganization-plan]]の「分析手法とUIの対応確認」。共通部品の利用や既存編集画面への往復は認め、手法ごとに専用画面を量産しない。
+
 登録票やJSONは宣言的なデータとして読む。ファイル内の任意Python・JavaScript・シェルコマンドを自動実行する仕組みにはしない。
+
+2026-09-20追加設計（未実装）：[[40-Design/core-handler-routing-reorganization-plan]]の図6では、LLM分析専用オーケストレーターと疑似人格の相談で、この登録票に沿う手法別契約の原案を作る。入出力の型に単位・尺度・欠測・キー・根拠と後続手法の要件を含め、既存の登録・検証経路へ渡す。相談の合意だけでは有効化せず、schema・実装能力の確認と試行を行い、採用した版を固定する。結果の形は表だけに限定せず、主張集合・関係表・系列・ベクトルを必要に応じて追加する。生成案が既存の専門家定義や人の確定コードを直接上書きすることはない。
+
+## 専門家定義の登録
+
+分析手法ごとの専門家定義は `50-Analysis-Methods/10-Experts/<専門家>/` に置く（ADR-115）。書式は [[90-Templates/expert-definition]]、一覧は [[50-Analysis-Methods/10-Experts/00-Index]]、実装は `src/gurumoji/method_experts.py`。
+
+1. `01-Expert.md` のプロパティ（`expert_id`、`definition_version`、`knowledge_verified`、`title`、`role`、`analysis_method_ids`、`registry_method_ids`）と、本文の「実行定義」（YAML）の同じ項目を一致させる。
+2. `applicability_checks` と `quality_checks` の `check` には、下表の判定名か `human_review` だけを書く。ノートに書いたコードを実行させない。`human_review` の項目は、アプリが確認済みと表示しない。
+3. `basis` には、`literature` に並べた文献ID（`LIT-`／`RES-`）か、実装上の判断を示す `implementation` を書く。書誌のみの文献を、手順や基準の唯一の根拠にしない（[[50-Analysis-Methods/08-Common-Knowledge/02-Source-Classification]]）。
+4. AI補助を許可する場合は、`actor: ai_draft` の段階を `ai_assist.steps` に並べ、各段階に文献の根拠を付け、1500文字以内の `brief` を書く。許可しない場合は `steps` を空にして `reason` を書く。
+5. 手順・判定・禁止事項を変えたら `definition_version` を上げ、文献を再確認したら `knowledge_verified` を更新する。知識hash（同じフォルダーの7ノート、`common_notes`、`literature` の文献ノート）は自動で計算され、変わると保存済みの専門家モードのAI見解は「更新が必要」になる。
+6. `readiness` の `literature_checked`、`procedure_documented`、`integrated`、`sample_verified` は、確認できた場合だけ `true` にする。文献ノートの解決と未解決事項の有無は、アプリが計算して表示する。
+7. `tests/test_method_experts.py` で、定義の検証、文献の解決、手法との対応を確認する。
+
+| 判定名 | 読む値 | パラメーター |
+| --- | --- | --- |
+| `research_question_present` | 研究質問（`allow_objective: false` でなければ研究目的でも可） | `allow_objective` |
+| `method_rationale_present` | 手法の選定理由 | — |
+| `moderator_guide_present` | インタビューのテーマ・質問項目 | — |
+| `min_included_segments`／`max_included_segments` | 対象の発話数 | `min`／`max` |
+| `min_speakers`／`min_participants` | 話者数／参加者数 | `min` |
+| `preparation_confirmed` | 逐語録の準備状態が `confirmed` | — |
+| `analysis_basis_current` | 準備記録と分析の根拠が一致（`analysis_needs_review` でない） | — |
+| `speaker_order_confirmed` | 順序の確認済みで、未確認の話者の発話が0 | — |
+| `valid_time_ratio_min` | 有効な時刻を持つ発話の割合 | `min`（0〜1） |
+| `unknown_speaker_ratio_max` | 不明な話者の発話の割合 | `max`（0〜1） |
+| `codebook_min_codes`／`codebook_definitions_complete` | コードブックの件数／定義の有無 | `min` |
+| `coded_segments_min` | コードを付けた発話数 | `min` |
+| `interaction_links_min` | 有効な発話間リンクの数 | `min` |
+| `comparison_axis_present` | 比較軸または比較グループ | — |
+| `statistics_engine_ready`／`statistics_min_groups` | SciPyの状態／群の数 | `min` |
+| `chi_square_expected_cells` | 期待度数5未満のセルの割合（最悪の表） | `max_low_ratio` |
+| `morphology_engine_ready`／`syntax_available` | 形態素解析が簡易解析でない／係り受けが利用できる | — |
+| `transformer_result_current`／`transformer_silhouette_min` | Transformerテーマ分析の結果が最新／シルエット係数 | `min` |
+| `emotion_coverage_min` | 感情推定のカバー率（%） | `min` |
+| `comparison_sessions_min` | 保存する比較の会話数 | `min` |
 
 ## 将来手法を保存する場合の追加項目
 

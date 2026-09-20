@@ -30,6 +30,8 @@ ANALYSIS_DATASETS = {
     "transformer_backchannel_rates": {"speaker", "topic_id", "opportunity_count", "response_rate_percent", "backchannel_count"},
     "transformer_backchannel_tests": {"test_id", "test", "p_value", "effect_size", "status"},
     "transformer_speaker_results": {"speaker", "result_code", "result_label", "topic_id", "evidence_segment_ids"},
+    "segment_classifications": {"segment_id", "manual_dialogue_act", "template_dialogue_act", "llm_dialogue_act"},
+    "segment_classification_crosstabs": {"table_id", "row_value", "column_value", "count"},
     "speakers": {
         "speaker", "speaker_name", "role", "turn_count", "speaking_seconds",
         "speaking_percent", "participant_percent",
@@ -343,6 +345,12 @@ class AnalysisApiTests(unittest.TestCase):
                         "interaction_tags": ["engagement"],
                         "memo": "改善案を初めて提示",
                         "important": True,
+                        "dialogue_act": "proposal",
+                        "importance_score": 85,
+                        "review_score": 30,
+                        "sensitivity_score": 10,
+                        "classification_status": "reviewed",
+                        "classification_note": "提案として確認済み",
                     },
                     "p2_overlap": {
                         "codes": ["code_improvement"],
@@ -369,6 +377,8 @@ class AnalysisApiTests(unittest.TestCase):
                 "schema_version", "algorithm_version", "generated_at", "item",
                 "config", "annotations", "classification", "cautions",
                 "automatic", "manual", "segments", "exports", "research", "insights", "transformer",
+                "experts", "plan_items",
+                "segment_classification",
             },
         )
         self.assertEqual(
@@ -500,6 +510,9 @@ class AnalysisApiTests(unittest.TestCase):
         )
         self.assertEqual(data["manual"]["coded_segment_count"], 2)
         self.assertEqual(data["manual"]["important_quote_count"], 1)
+        self.assertEqual(data["annotations"]["p1_first"]["dialogue_act"], "proposal")
+        self.assertEqual(data["annotations"]["p1_first"]["importance_score"], 85)
+        self.assertEqual(data["annotations"]["p1_first"]["classification_status"], "reviewed")
 
         code_metrics = {
             item["id"]: item for item in data["manual"]["code_metrics"]
@@ -530,6 +543,49 @@ class AnalysisApiTests(unittest.TestCase):
         ).get_json()
         self.assertEqual(loaded["config"], data["config"])
         self.assertEqual(loaded["annotations"], data["annotations"])
+
+    def test_segment_classification_endpoint_keeps_proposals_separate_from_manual(self):
+        current = self.client.get(f"/api/library/{self.item_id}/analysis").get_json()
+
+        def fake_classify(segments, topics, api_key, model, **_kwargs):
+            return ({str(row["id"]): {
+                "source": "llm", "provider": "typesafe", "model": model,
+                "dialogue_act": "information", "dialogue_act_label": "情報・経験の共有",
+                "dialogue_act_confidence": 0.8, "importance_score": 50,
+                "review_score": 25, "sensitivity_score": 0,
+                "topic_id": "", "topic_label": "",
+            } for row in segments}, {"provider": "typesafe", "model": model, "request_count": 1})
+
+        with (
+            patch.object(app, "load_token_config", return_value=app.TokenConfig(
+                typesafe_api_key="secret", typesafe_model="jev-test"
+            )),
+            patch.object(app, "classify_segments_with_jev", side_effect=fake_classify),
+            patch.object(app, "archive_segment_classification", side_effect=OSError("archive unavailable")),
+        ):
+            response = self.client.post(
+                f"/api/library/{self.item_id}/analysis/classifications",
+                json={
+                    "request_id": "classification_test_001",
+                    "source_revision": current["item"]["revision_count"],
+                    "analysis_revision": current["item"]["analysis_revision"],
+                    "use_jev": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        state = response.get_json()["segment_classification"]
+        self.assertFalse(state["stale"])
+        self.assertEqual(state["summary"]["segment_count"], 6)
+        self.assertEqual(state["result"]["segments"][0]["llm"]["model"], "jev-test")
+        self.assertEqual(current["annotations"], self.client.get(
+            f"/api/library/{self.item_id}/analysis"
+        ).get_json()["annotations"])
+        csv_response = self.client.get(
+            f"/api/library/{self.item_id}/analysis/export.csv?dataset=segment_classifications"
+        )
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertIn("template_dialogue_act", csv_response.data.decode("utf-8-sig"))
 
     def test_focus_group_plan_keeps_content_and_interaction_evidence_separate(self):
         current = self.client.get(f"/api/library/{self.item_id}/analysis").get_json()
@@ -1330,6 +1386,7 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertIn("analysis_annotations_json", columns)
                 self.assertIn("analysis_revision", columns)
                 self.assertIn("analysis_updated_at", columns)
+                self.assertIn("segment_classification_json", columns)
                 self.assertIn("ai_usage_json", columns)
                 self.assertIn("original_segments_json", columns)
                 self.assertIn("original_segments_status", columns)

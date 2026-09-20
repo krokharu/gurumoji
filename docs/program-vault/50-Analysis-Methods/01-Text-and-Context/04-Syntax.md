@@ -1,5 +1,6 @@
 ---
 note_id: method-syntax
+note_type: analysis-method
 method_id: syntax
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -29,3 +30,7 @@ GiNZAのUniversal Dependencies出力から、発話ID、文ID、語、lemma、UP
 
 - [Omura & Asahara (2018)](https://aclanthology.org/W18-6014/) は日本語コーパスをUDスキーマへ変換する方法と規模を報告する。
 - [Nivre et al. (2020)](https://aclanthology.org/2020.lrec-1.497/) はUDの統語層が述語・項・修飾の関係を対象にすることを示す。これはGiNZAの出力形式の基礎であって、本実装の口語精度の保証ではない。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/japanese-text-preprocessing/01-Expert|日本語テキストの前処理の専門家]]（形態素解析と共通）。

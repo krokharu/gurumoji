@@ -1,5 +1,6 @@
 ---
 note_id: method-ai-insights
+note_type: analysis-method
 method_id: ai_insights
 method_version: text-analysis-store-2
 algorithm_version: content-insights-3
@@ -35,3 +36,9 @@ tags: [gurumoji/analysis, gurumoji/generative-ai, gurumoji/orchestrator]
 
 - [Gilardi, Alizadeh & Kubli (2023)](https://doi.org/10.1073/pnas.2305016120) は限定されたテキスト注釈タスクでのLLM評価を報告した。対象はツイート・ニュースであり、本アプリの日本語会話の解釈や要約を検証した論文ではない。
 - よって本機能は結論生成器ではなく、根拠付きの下書き・監査対象として扱う。
+
+## 専門家モード（2026-09-16）
+
+研究者が主手法を選び、その専門家定義がAI補助を許可し、主の専門家に分析を始めない条件がない場合、AI見解は専門家モードで生成する。システム指示には専門家の短い指示（`brief`）と、許可された手順の段階ID・文献IDだけを加え、各見解に `method_step` と `basis_ids` を必須にする。値はJSON Schemaの `enum` とサーバーの検証の両方で制限し、段階に登録されていない文献IDは1回の再試行の後も不正なら全体を失敗にする。根拠に使える文献IDは文献ノートが存在するものに限り、AI下書きの段階の根拠がすべて見つからない場合は生成しない。保存する見解には専門家ID・定義の版・知識hashを残し、入力fingerprintに知識hashを含める。KJ法・計量テキスト分析を主手法にした場合と、主の専門家の分析を始めない条件がある場合は生成しない。主手法が未選択（`auto`）の場合は従来の動作。
+
+実装参照：`src/gurumoji/method_experts.py` の `review_for_analysis`・`ai_context`・`ai_block_reason`、`analysis_insights.py` の `ai_schema`・`validate_findings`・`create_ai_insights`・`input_fingerprint`。規則：[[50-Analysis-Methods/08-Common-Knowledge/04-AI-Assistance-Boundaries]]、ADR-115。

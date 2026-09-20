@@ -3,7 +3,7 @@ note_id: tests-obsidian-safety-plan
 note_type: test-plan
 title: Obsidian連携の安全性テスト計画
 status: in-progress
-updated: 2026-09-14
+updated: 2026-09-15
 tags:
   - gurumoji/program
   - gurumoji/tests
@@ -26,7 +26,7 @@ Obsidian連携で、利用者のノートを壊さないことを確認するた
 | UIからの保存と移動 | `test_browser_e2e.py:test_comparison_and_unsaved_navigation_regressions` | 実ブラウザーで比較の集計・保存、処理中の条件固定、未保存取消、逆順応答と画面移動後の応答無視 |
 | 準備の更新待ち伝播 | `test_vault_coverage.py:test_preparation_save_invalidates_single_and_comparison_runs_atomically` | 単独・比較履歴のstale、Vault状態への反映、トランザクション取消時の整合 |
 
-以下の対応表は初回調査時点の記録。上表の対象は追加済みとし、残る不足を後続で検証する。
+以下の対応表もコミット`1b8fe41`のテスト実装へ更新した。「あり」は記載範囲の検証があることを示し、機能全体の安全性の保証ではない。全393件成功は収録前の検証記録で、2026-09-15の資料更新では再実行していない。
 
 ## 原則
 
@@ -63,20 +63,20 @@ obsidian-safety-vault/
 | 新規作成：frontmatter・日本語 | `test_obsidian_finishing.py`: `test_recording_is_one_note_and_arbitrary_text_round_trips`、`test_native_properties_blocks_and_legacy_notes_round_trip` | 一部 | 記号や空白を含むタイトル、YAMLで特別な意味を持つ値（`yes`、`null`、`:`） |
 | 新規作成：危険な文字列のエスケープ | `test_analysis_storage.py`: `test_raw_quotes_are_preserved_and_unsafe_markdown_is_escaped`、`test_path_traversal_request_validation_and_formula_safety` | あり | なし |
 | 新規作成：添付 | 議事録のCSV／JSONについては未確認 | 不明 | 同じ名前の添付を上書きしないこと、日本語の添付名 |
-| 更新：必要な部分だけを変更 | `test_obsidian_layout.py`: `test_user_bookmarks_memos_and_workspace_edits_survive_regeneration`、`test_three_interviews_share_only_explicit_theme_and_no_per_utterance_files` | 一部 | テーマノートのYAMLコメント・書式・未知のキー・利用者タグ `graph/custom` の保持（OBS-01、07） |
+| 更新：人のノートを変更しない | `test_obsidian_layout.py`: `test_theme_sync_keeps_all_human_bytes_and_tracks_removed_links`、`test_finishing_sync_does_not_read_or_write_researcher_notes` | あり | 一般的な生成ノートと`.obsidian`の保護は別課題（OBS-03／04） |
 | 競合：外部で編集した生成ノートを上書きしない | `test_four_vaults.py`: `test_human_edits_and_deletions_are_preserved_not_overwritten`、`test_analysis_storage.py`: `test_human_notes_are_never_overwritten_and_retry_never_calls_ai` | あり | ナビゲーションノート（`managed_note`）の、何も通知しないスキップの記録 |
 | 競合：処理中の編集 | `test_obsidian_finishing.py`: `test_edit_during_finishing_is_preserved_and_cannot_be_applied`、`test_source_edit_after_generation_blocks_apply` | あり | なし |
-| 競合：読み込みから書き込みまでの間の編集 | なし | なし | `sync_themes`・`sync_finishing` の読み込み後に外部で書き込むと、アプリが書かないこと（OBS-01、02） |
-| 競合：状態を失った後に作業台を作り直す | なし | なし | `state.json` を削除した状態で `prepare` しても、既存の `I###-全文.md` を上書きしないこと（OBS-05） |
+| 競合：人のノートへの同期書き込み | `test_obsidian_layout.py`のテーマ・仕上げ保護2件 | あり | 人のノートに書かない方式で解決。生成ノート一般のhash照合直後の競合（OBS-04）は未検証 |
+| 競合：状態を失った後に作業台を作り直す | `test_obsidian_finishing.py`: `test_missing_state_never_overwrites_existing_initial_notes`、`test_create_only_write_preserves_a_concurrent_file` | あり | 自動復元ではなく、既存ノートを保持して停止することを検証 |
 | リネーム・移動 | `test_obsidian_finishing.py`: `test_metadata_edits_and_moved_notes_preserve_finishing_and_apply`、`test_ambiguous_moved_note_is_rejected` | あり（仕上げのみ） | 分析ノートを移動した後に再保存しても、再作成・二重作成しないこと。Wikilinkの全形式が移行後も保持されること（`rewrite_links` の単体テストは一部あり） |
 | 削除：復元可能 | `test_vault_coverage.py`: `test_deleted_conversation_keeps_a_marked_ledger` | 一部 | ResearchVaultの状態表示（OBS-11）。メディアをゴミ箱から復元できること（DATA-01。未実装） |
-| 重複：2回処理しても二重に生成しない | `test_analysis_storage.py`（idempotency）、`test_four_vaults.py`: `test_republish_is_byte_stable_and_edits_keep_whisper_settings`、`test_obsidian_finishing.py`: `test_restart_does_not_repeat_latched_command_and_recheck_can_retry`、`test_multiple_commands_never_trigger_ai` | あり | テーマ同期を2回実行しても差分が出ないこと（初回の再シリアライズを含む） |
+| 重複：2回処理しても二重に生成しない | `test_analysis_storage.py`のidempotency、`test_four_vaults.py`の再公開、`test_obsidian_finishing.py`のラッチ、`test_obsidian_layout.py`のテーマ同期 | あり | テーマの別ノートも2回目はバイト一致。元テーマは初回から変更しない |
 | 異常終了：書き込み途中 | `test_analysis_storage.py`: `test_mid_write_failure_retries_deterministically_and_detects_tamper`、`test_interrupted_save_recovers_original_package_after_edit_without_reanalysis`、`test_obsidian_layout.py`: `test_interrupted_migration_resumes_from_same_backup` | 一部 | `VaultRegistry` の `pending` hashからの回復。`os.replace` が失敗したときに一時ファイルが残らないこと |
 | 移行：リンクと引用 | `test_obsidian_layout.py`: `test_migration_updates_catalog_links_and_preserves_literal_quotes_and_backup`、`test_legacy_fences_and_quote_literals_are_never_rewritten` | あり | 利用者が作った空フォルダーを削除しないこと（OBS-13）、Dry Run（OBS-16） |
 | Vaultの誤認：入れ子・書き込み禁止のルート | `test_four_vaults.py`: `test_software_and_research_vaults_are_not_generated_roots` | 一部 | 親フォルダーに `.obsidian` がある場合に停止すること（OBS-10） |
 | `.obsidian` を変更しない | `test_obsidian_layout.py`（ワークスペース編集の保持） | 一部 | 既存Vaultの `core-plugins.json`・`appearance.json` を変更しないこと（OBS-03、ADR-103 の採用後） |
 | ファイル名：禁止文字・末尾・同名・長さ | なし | なし | `register`、`graph_node_path` の規則とパス長の上限（OBS-14） |
-| CSRF：ブラウザー由来のPOST | `test_ui_defaults.py`（`apiFetch` がヘッダーを付けること） | 一部 | Origin／Sec-Fetch-Site を付けた比較POSTの回帰テスト。JSに生の `fetch(` がないことの検査（BUG-01、ADR-107） |
+| CSRF：ブラウザー由来のPOST | `test_interview_comparison.py`: `test_browser_requests_require_csrf_and_save_the_displayed_input_version`、`test_browser_e2e.py`: `test_comparison_and_unsaved_navigation_regressions` | あり | Origin／Sec-Fetchヘッダーと実ブラウザーで比較・保存を検証。`apiFetch`内部の`window.fetch`は許可する |
 | 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops` | 一部 | `recover`・`migrate` が失敗したときに状態として公開されること（OBS-09）、操作ログに本文が含まれないこと（OBS-15） |
 
 ## 追加するテストケース（期待する結果）
@@ -104,7 +104,7 @@ obsidian-safety-vault/
 7. **添付**
    - 操作：同じ議事録を2回保存する。
    - 期待：添付は増えず、既存の添付も変わらない。日本語の添付名が扱える。
-8. **CSRF（BUG-01）**
+8. **CSRF（BUG-01、追加済み）**
    - 操作：`Origin: http://127.0.0.1:7860` と `Sec-Fetch-Site: same-origin` を付けて、比較APIへPOSTする。
    - 期待：ヘッダーがなければ403、`X-Gurumoji-Request: 1` があれば200。あわせて `static/*.js` に `apiFetch` 以外の `fetch(` がないことを検査する。
 9. **削除後の表示（OBS-11）**
@@ -116,11 +116,13 @@ obsidian-safety-vault/
 
 ## 実行方法
 
+リポジトリルートで、プロジェクトの仮想環境を使う。`src`と`tests`は子プロセスにも渡す。
+
 ```powershell
-$env:PYTHONPATH = (Join-Path (Get-Location) 'src')
-python -m unittest tests.test_obsidian_layout tests.test_obsidian_finishing tests.test_analysis_storage tests.test_four_vaults tests.test_vault_coverage -v
+$env:PYTHONPATH = (Join-Path (Get-Location) 'src') + [IO.Path]::PathSeparator + (Join-Path (Get-Location) 'tests')
+& .\.venv\Scripts\python.exe -X utf8 -m unittest test_obsidian_layout test_obsidian_finishing test_analysis_storage test_four_vaults test_vault_coverage -v
 ```
 
-全体の実行は `python -m unittest discover -s tests -p "test_*.py"`。ブラウザーのテスト（`tests/test_browser_e2e.py`）には Edge／Chrome が必要。
+全体の実行は`& .\.venv\Scripts\python.exe -X utf8 -m unittest discover -s tests -p "test_*.py"`。ブラウザーテストにはEdge／Chromeが必要。テストは一時DB・一時Vaultを使用する。アプリの起動を併用する場合は、原則に従い`MOJIOKOSI_DATA_DIR`・`MOJIOKOSI_OUTPUT_DIR`も一時フォルダーへ向ける。
 
 結果を記録するときは、実行日、対象のcommit（または作業ツリー）、成功・失敗・スキップの理由を書く（[[20-Modules/module-map]]）。

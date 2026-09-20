@@ -163,6 +163,19 @@ class AiHttpWorkerTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:1234/v1/chat/completions", completed.stdout)
         self.assertIn("rejected", completed.stdout)
 
+    def test_worker_allows_typesafe_system_one_endpoint(self):
+        worker_path = Path(app.__file__).with_name("ai_http_worker.py")
+        probe = (
+            "import runpy,sys; worker=runpy.run_path(sys.argv[1]); "
+            "print(worker['validate_url']('https://api.typesafe.ai/v1/systemone'))"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", probe, str(worker_path)],
+            capture_output=True, text=True, encoding="utf-8", timeout=5, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("https://api.typesafe.ai/v1/systemone", completed.stdout)
+
     def test_worker_uses_utf8_stdio_in_isolated_real_process(self):
         worker_path = Path(app.__file__).with_name("ai_http_worker.py")
         probe = (

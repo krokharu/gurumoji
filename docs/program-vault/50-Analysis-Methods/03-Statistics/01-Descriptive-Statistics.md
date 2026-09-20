@@ -1,5 +1,6 @@
 ---
 note_id: method-descriptive-statistics
+note_type: analysis-method
 method_id: descriptive_statistics
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -28,3 +29,7 @@ tags: [gurumoji/analysis, gurumoji/statistics, gurumoji/orchestrator]
 ## 査読文献との関係
 
 記述統計は実装上の要約手続きであり、単独の査読論文に依拠する新規手法ではない。後段の群間比較では[Cochran (1952)](https://doi.org/10.1214/aoms/1177729380)のように、分母・期待度数・前提を報告する統計的規律を引き継ぐ。現実装の数値定義と欠測規則が一次資料である。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/descriptive-statistics/01-Expert|記述統計の専門家]]。

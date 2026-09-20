@@ -13,6 +13,8 @@ tags:
 
 以下はこの知識ベースで使う基礎文献。リンク先は出版社、学会の公式論文アーカイブ、またはDOIとし、2026-09-14に書誌情報を確認した。実装固有のライブラリ文書やモデル配布ページは別扱いである。
 
+> 2026-09-16追記：この一覧の「査読文献」は掲載誌の種類による分類で、個別に査読方針を確認したものではない。各文献の査読状態とその根拠、確認範囲（本文・要旨・書誌のみ）、訂正の有無は [[20-Literature/00-Index|文献ノート]] を正とする。Kosaka et al. はCrossrefの発行年が2024年で、題名からは感情を含む音声の音声認識の論文と読める。下の記載の位置づけは未確認（[[20-Literature/LIT-kosaka-2024-emotional-speech-recognition]]）。
+
 ## テキスト・文脈
 
 - **[Salton & Buckley 1988](https://doi.org/10.1016/0306-4573(88)90021-0)**. *Term-weighting approaches in automatic text retrieval*. Information Processing & Management, 24(5), 513–523. TF–IDFの重み付け。

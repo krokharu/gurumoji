@@ -1,5 +1,4 @@
 const form = document.querySelector('#job-form');
-const processedDataHub = document.querySelector('#processed-data-hub');
 const libraryCard = document.querySelector('#library-card');
 const speakerRegistryCard = document.querySelector('#speaker-registry-card');
 const analysisCard = document.querySelector('#analysis-card');
@@ -27,7 +26,6 @@ const cancelButton = document.querySelector('#cancel-button');
 const saveButton = document.querySelector('#save-button');
 const newButton = document.querySelector('#new-button');
 const resultAnalysisButton = document.querySelector('#result-analysis-button');
-const resultContextName = document.querySelector('#result-context-name');
 const resultContextButtons = [...document.querySelectorAll('[data-result-destination]')];
 const meetingMinutesView = document.querySelector('#meeting-minutes-view');
 const meetingCopyJsonButton = document.querySelector('#meeting-copy-json');
@@ -56,27 +54,30 @@ const customVocabulary = document.querySelector('#custom-vocabulary');
 const customVocabularyStatus = document.querySelector('#custom-vocabulary-status');
 const setupReadyState = document.querySelector('#setup-ready-state');
 const setupSummary = document.querySelector('#setup-summary');
-const quickFlowItems = [...document.querySelectorAll('.quick-flow li')];
+const createView = document.querySelector('#create-view');
+const flowStepItems = [...document.querySelectorAll('[data-flow-step]')];
+const flowSections = [...document.querySelectorAll('[data-flow-section]')];
+const settingsPanels = [...document.querySelectorAll('[data-settings-panel]')];
 const mobileStepBack = document.querySelector('#mobile-step-back');
 const mobileStepNext = document.querySelector('#mobile-step-next');
-const mobileStepNumber = document.querySelector('#mobile-step-number');
-const mobileStepTitle = document.querySelector('#mobile-step-title');
-const mobileStepDescription = document.querySelector('#mobile-step-description');
 const mobileNavStep = document.querySelector('#mobile-nav-step');
 const mobileNavLabel = document.querySelector('#mobile-nav-label');
-const mobileStepDots = [...document.querySelectorAll('[data-mobile-dot]')];
-const mobileStepSections = [...document.querySelectorAll('[data-mobile-step]')];
+const jobChip = document.querySelector('#job-chip');
+const jobChipLabel = document.querySelector('#job-chip-label');
+const itemTabButtons = [...document.querySelectorAll('[data-item-tab]')];
+const itemPanels = [...document.querySelectorAll('[data-item-panel]')];
 const mobileWizardMedia = window.matchMedia('(max-width: 959px)');
 const cleanTranscript = document.querySelector('#clean-transcript');
 const detectNames = document.querySelector('#detect-names');
 const createOutline = document.querySelector('#create-outline');
 const finishInObsidian = document.querySelector('#finish-in-obsidian');
+const jevCompare = document.querySelector('#jev-compare');
+const jevConfigStatus = document.querySelector('#jev-config-status');
 const speakerIdentityProvider = document.querySelector('#speaker-identity-provider');
 const rerunSpeakerIdentificationButton = document.querySelector('#rerun-speaker-identification');
 const speakerIdentityStatus = document.querySelector('#speaker-identity-status');
 const showLibraryButton = document.querySelector('#show-library-button');
-const showLibraryListButton = document.querySelector('#show-library-list-button');
-const showLibraryAnalysisButton = document.querySelector('#show-library-analysis-button');
+const showAnalysisButton = document.querySelector('#show-analysis-button');
 const showNewButton = document.querySelector('#show-new-button');
 const showSpeakersButton = document.querySelector('#show-speakers-button');
 const segmentEditor = document.querySelector('#segment-editor');
@@ -101,6 +102,14 @@ let activeAiModelProvider = '';
 
 let currentJobId = null;
 let currentJob = null;
+// The job being polled is separate from the record on screen, so a running
+// job never redirects a save of another record.
+let activeJobId = null;
+let lastProgressJob = null;
+let completedJob = null;
+let activeItemTab = 'transcript';
+let renderedItemId = null;
+let currentRouteHash = '';
 let pollTimer = null;
 let systemActivityTimer = null;
 let systemActivityController = null;
@@ -144,6 +153,7 @@ let analysisCatalog = [];
 let analysisRequestController = null;
 let analysisRequestSequence = 0;
 let analysisSaveInProgress = false;
+let segmentClassificationInProgress = false;
 let analysisMutationGeneration = 0;
 let analysisInitialSectionApplied = false;
 let analysisNavigationFrame = 0;
@@ -160,7 +170,15 @@ const analysisState = {
   automaticScope: 'overall',
   speakerSort: 'speaking_desc',
   speakerAttributeFilter: '',
-  selectedSpeaker: ''
+  selectedSpeaker: '',
+  methods: null
+};
+const dialogueActLabels = {
+  question: '質問・問題提起', answer: '回答・説明', proposal: '提案・選択肢',
+  request: '依頼・要望', confirmation: '確認', agreement: '同意・賛同',
+  reservation: '留保・条件付き', objection: '反対・異論',
+  self_correction: '自己訂正・言い直し', backchannel: '相づち・短い応答',
+  information: '情報・経験の共有', other: 'その他・保留'
 };
 const activeJobStorageKey = 'gurumoji.activeJobId';
 const pendingSubmissionStorageKey = 'gurumoji.pendingSubmission';
@@ -210,10 +228,9 @@ const speakerThemeColors = [
 ];
 
 const mobileStepContent = {
-  1: {title: 'モードとファイルを選ぶ', description: '録音の種類を選び、端末の音声・動画を1つ選択します', label: 'モード・ファイル'},
-  2: {title: '認識を設定', description: 'おすすめ設定を確認し、必要な項目だけ変更します', label: '認識・話者分離'},
-  3: {title: '仕上げを選ぶ', description: 'AI仕上げと感情分析は必要な場合だけ有効にします', label: '仕上げ'},
-  4: {title: '確認して開始', description: '出力形式と設定内容を確認して開始します', label: '開始'},
+  1: {label: 'ファイル', next: '設定へ'},
+  2: {label: '設定', next: '確認へ'},
+  3: {label: '開始', next: '開始'}
 };
 
 const conversationModePresets = {
@@ -540,37 +557,55 @@ function updateBrowseButtonLabel() {
     : (browserFilePickerOnly ? '端末からアップロード' : 'ファイルを選択');
 }
 
+const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+function scrollBehavior() {
+  return reducedMotionMedia.matches ? 'auto' : 'smooth';
+}
+
+// One stepper for every width (UX-05): on a desktop it reports progress and
+// scrolls to the section; on a phone it is the wizard's page indicator.
+function renderFlowSteps() {
+  const hasSource = hasSelectedSource();
+  const mobile = isMobileWizard();
+  flowStepItems.forEach(item => {
+    const step = Number(item.dataset.flowStep);
+    item.classList.remove('active', 'complete', 'ready');
+    if (mobile) {
+      if (step === currentMobileStep) item.classList.add('active');
+      else if (step < currentMobileStep) item.classList.add('complete');
+      else if (step === 3 && hasSource) item.classList.add('ready');
+    } else if (step === 1) {
+      item.classList.add(hasSource ? 'complete' : 'active');
+    } else if (step === 2) {
+      if (hasSource) item.classList.add('active');
+    } else if (hasSource) {
+      item.classList.add('ready');
+    }
+    const button = item.querySelector('[data-flow-jump]');
+    if (button) button.setAttribute('aria-current', item.classList.contains('active') ? 'step' : 'false');
+  });
+}
+
 function renderMobileWizard() {
   if (!form) return;
   const mobile = isMobileWizard();
   form.classList.toggle('mobile-wizard-ready', mobile);
-  [1, 2, 3, 4].forEach(step => form.classList.toggle(`mobile-step-${step}`, step === currentMobileStep));
-  mobileStepSections.forEach(section => {
-    const active = Number(section.dataset.mobileStep) === currentMobileStep;
+  [1, 2, 3].forEach(step => form.classList.toggle(`mobile-step-${step}`, step === currentMobileStep));
+  flowSections.forEach(section => {
+    const active = Number(section.dataset.flowSection) === currentMobileStep;
     section.classList.toggle('mobile-active', active);
     if (mobile) section.toggleAttribute('inert', !active);
     else section.removeAttribute('inert');
   });
-
-  const content = mobileStepContent[currentMobileStep];
-  if (mobileStepNumber) mobileStepNumber.textContent = `STEP ${currentMobileStep} / 4`;
-  if (mobileStepTitle) mobileStepTitle.textContent = content.title;
-  if (mobileStepDescription) mobileStepDescription.textContent = content.description;
-  if (mobileNavStep) mobileNavStep.textContent = `${currentMobileStep} / 4`;
+  const content = mobileStepContent[currentMobileStep] || mobileStepContent[1];
+  if (mobileNavStep) mobileNavStep.textContent = `${currentMobileStep} / 3`;
   if (mobileNavLabel) mobileNavLabel.textContent = content.label;
-  mobileStepDots.forEach(dot => {
-    const step = Number(dot.dataset.mobileDot);
-    dot.classList.toggle('active', step === currentMobileStep);
-    dot.classList.toggle('complete', step < currentMobileStep);
-    if (step === currentMobileStep) dot.setAttribute('aria-current', 'step');
-    else dot.removeAttribute('aria-current');
-  });
-
   if (mobileStepBack) mobileStepBack.disabled = jobRunning || currentMobileStep === 1;
   if (mobileStepNext) {
-    mobileStepNext.disabled = jobRunning || (currentMobileStep === 1 && !hasSelectedSource());
-    mobileStepNext.textContent = currentMobileStep === 3 ? '確認へ' : '次へ';
+    mobileStepNext.disabled = jobRunning || currentMobileStep >= 3 || (currentMobileStep === 1 && !hasSelectedSource());
+    mobileStepNext.textContent = content.next;
   }
+  renderFlowSteps();
 }
 
 function validateMobileStep(step) {
@@ -579,11 +614,13 @@ function validateMobileStep(step) {
     if (fileDropZone) fileDropZone.focus();
     return false;
   }
-  const section = mobileStepSections.find(item => Number(item.dataset.mobileStep) === step);
+  const section = flowSections.find(item => Number(item.dataset.flowSection) === step);
   if (!section) return true;
   const invalid = [...section.querySelectorAll('input, select, textarea')].find(input => !input.checkValidity());
   if (invalid) {
     setAlert(formError, '入力内容を確認してください。', true);
+    const panel = invalid.closest('[data-settings-panel]');
+    if (panel) panel.open = true;
     invalid.reportValidity();
     invalid.focus();
     return false;
@@ -592,20 +629,46 @@ function validateMobileStep(step) {
 }
 
 function setMobileStep(nextStep, {focusHeading = true, validateCurrent = false} = {}) {
-  const target = Math.max(1, Math.min(4, Number(nextStep) || 1));
+  const target = Math.max(1, Math.min(3, Number(nextStep) || 1));
   if (validateCurrent && target > currentMobileStep && !validateMobileStep(currentMobileStep)) return false;
   currentMobileStep = target;
   setAlert(formError, '');
   renderMobileWizard();
   if (focusHeading && isMobileWizard()) {
-    const header = document.querySelector('.mobile-create-header');
-    if (header) header.scrollIntoView({behavior: 'smooth', block: 'start'});
-    if (mobileStepTitle) {
-      mobileStepTitle.setAttribute('tabindex', '-1');
-      window.setTimeout(() => mobileStepTitle.focus({preventScroll: true}), 220);
+    const steps = document.querySelector('#flow-steps');
+    if (steps) steps.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
+    const section = flowSections.find(item => Number(item.dataset.flowSection) === target);
+    const heading = section ? section.querySelector('h2') : null;
+    if (heading) {
+      heading.setAttribute('tabindex', '-1');
+      window.setTimeout(() => heading.focus({preventScroll: true}), 220);
     }
   }
   return true;
+}
+
+function jumpToFlowStep(step) {
+  const target = Math.max(1, Math.min(3, Number(step) || 1));
+  if (isMobileWizard()) {
+    setMobileStep(target, {validateCurrent: target > currentMobileStep});
+    return;
+  }
+  const section = flowSections.find(item => Number(item.dataset.flowSection) === target);
+  if (section) section.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
+}
+
+// Detailed settings stay closed until asked for; "変更" opens exactly one panel.
+function openSettingsPanel(name, {focus = true} = {}) {
+  const panel = settingsPanels.find(item => item.dataset.settingsPanel === name);
+  if (!panel) return;
+  if (isMobileWizard() && currentMobileStep !== 2) setMobileStep(2, {focusHeading: false});
+  panel.open = true;
+  window.requestAnimationFrame(() => {
+    panel.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
+    if (!focus) return;
+    const control = panel.querySelector('input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled)');
+    if (control) window.setTimeout(() => control.focus({preventScroll: true}), 260);
+  });
 }
 
 function selectedConversationMode() {
@@ -657,60 +720,72 @@ function updateCreateSummary() {
   if (fileDropZone) fileDropZone.classList.toggle('has-file', hasSource);
   if (pathDetail) pathDetail.classList.toggle('selected', hasSource);
 
-  quickFlowItems.forEach(item => item.classList.remove('active', 'complete'));
-  if (quickFlowItems.length) {
-    if (hasSource) {
-      quickFlowItems[0].classList.add('complete');
-      quickFlowItems[quickFlowItems.length - 1].classList.add('active');
-    } else {
-      quickFlowItems[0].classList.add('active');
-    }
-  }
-
   const readyMessage = hasSource
     ? '準備できました。文字起こしを開始できます'
     : 'ファイルを選択してください';
   if (setupReadyState) setupReadyState.textContent = readyMessage;
   document.querySelectorAll('[data-setup-ready]').forEach(element => { element.textContent = readyMessage; });
 
-  if (setupSummary) {
-    const modePreset = conversationModePresets[selectedConversationMode()];
-    const mode = modePreset ? modePreset.label : '会議モード';
-    const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
-    const language = selectedOptionText(languageSelect) || '自動判定';
-    const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
-    const recognitionExtras = [];
-    const vocabularyTerms = vocabularyTermsFromInput();
-    if (vocabularyTerms.length) recognitionExtras.push(`単語登録 ${vocabularyTerms.length}語`);
-    const finishExtras = [];
-    if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
-    const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
-    if (finishInObsidian && finishInObsidian.checked) {
-      finishExtras.push('文字起こし後にObsidianで仕上げ');
-    } else if (aiProvider && aiProvider.value !== 'none' && enabledAiOptions) {
-      finishExtras.push(`${selectedOptionText(aiProvider)} AI仕上げ ${enabledAiOptions}項目`);
-    }
-    if (emotionAnalysis && emotionAnalysis.checked) finishExtras.push('感情分析');
-    const outputExtras = [];
-    if (writeSrt && writeSrt.checked) outputExtras.push('SRT');
-    if (burnSubtitledVideo && burnSubtitledVideo.checked) outputExtras.push('字幕付き動画');
-    const extras = [...recognitionExtras, ...finishExtras, ...outputExtras];
-    const summaryText = `${mode} / ${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
-    setupSummary.textContent = summaryText;
-    document.querySelectorAll('[data-setup-summary]').forEach(element => { element.textContent = summaryText; });
-    const selectedFile = inputFile && inputFile.files && inputFile.files[0];
-    const directPath = sourcePath ? sourcePath.value.trim() : '';
-    const sourceLabel = selectedFile
-      ? selectedFile.name
-      : (directPath ? directPath.split(/[\\/]/).pop() : '未選択');
-    document.querySelectorAll('[data-mobile-review-source]').forEach(element => { element.textContent = sourceLabel; });
-    document.querySelectorAll('[data-mobile-review-recognition]').forEach(element => {
-      element.textContent = `${mode} / ${model} / ${language} / ${preprocess}`;
-    });
-    document.querySelectorAll('[data-mobile-review-finish]').forEach(element => {
-      element.textContent = finishExtras.length ? finishExtras.join(' / ') : '追加処理なし';
-    });
+  const modePreset = conversationModePresets[selectedConversationMode()];
+  const mode = modePreset ? modePreset.label : '会議モード';
+  const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
+  const language = selectedOptionText(languageSelect) || '自動判定';
+  const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
+  const vocabularyTerms = vocabularyTermsFromInput();
+  const recognitionParts = [model, language, `前処理: ${preprocess}`];
+  if (boostQuietSpeech && boostQuietSpeech.checked) recognitionParts.push('小さい声対策');
+  if (triplePass && triplePass.checked) recognitionParts.push('詳細処理');
+  const deviceSelect = document.querySelector('#transcription-device');
+  if (deviceSelect) recognitionParts.push(deviceSelect.value === 'cuda' ? 'GPU' : 'CPU');
+  const speakerRange = [minSpeakersInput && minSpeakersInput.value, maxSpeakersInput && maxSpeakersInput.value].filter(Boolean);
+  if (speakerRange.length === 2) recognitionParts.push(`話者 ${speakerRange[0]}〜${speakerRange[1]}名`);
+  const recognitionExtras = [];
+  if (vocabularyTerms.length) recognitionExtras.push(`単語登録 ${vocabularyTerms.length}語`);
+  const finishExtras = [];
+  if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
+  const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
+  const providerLabel = aiProvider && aiProvider.value !== 'none' ? selectedOptionText(aiProvider) : '';
+  let finishingLabel = '使用しない';
+  if (finishInObsidian && finishInObsidian.checked) {
+    finishExtras.push('文字起こし後にObsidianで仕上げ');
+    finishingLabel = providerLabel ? `Obsidianで仕上げ（標準）/ ${providerLabel}` : 'Obsidianで仕上げ（標準）';
+  } else if (providerLabel && enabledAiOptions) {
+    finishExtras.push(`${providerLabel} AI仕上げ ${enabledAiOptions}項目`);
+    finishingLabel = `${providerLabel} / ${enabledAiOptions}項目`;
   }
+  if (jevCompare && jevCompare.checked) finishExtras.push('Jev修正要否比較');
+  const emotionEnabled = Boolean(emotionAnalysis && emotionAnalysis.checked);
+  if (emotionEnabled) finishExtras.push('感情分析');
+  const emotionLabel = emotionEnabled ? (selectedOptionText(emotionModel).split('（')[0] || '実行する') : '実行しない';
+  const outputParts = ['TXT', 'JSON'];
+  const outputExtras = [];
+  if (writeSrt && writeSrt.checked) { outputParts.push('SRT'); outputExtras.push('SRT'); }
+  if (burnSubtitledVideo && burnSubtitledVideo.checked) { outputParts.push('字幕付き動画'); outputExtras.push('字幕付き動画'); }
+  const extras = [...recognitionExtras, ...finishExtras, ...outputExtras];
+  const summaryText = `${mode} / ${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
+  if (setupSummary) setupSummary.textContent = summaryText;
+  document.querySelectorAll('[data-setup-summary]').forEach(element => { element.textContent = summaryText; });
+
+  const selectedFile = inputFile && inputFile.files && inputFile.files[0];
+  const directPath = sourcePath ? sourcePath.value.trim() : '';
+  const sourceLabel = selectedFile
+    ? selectedFile.name
+    : (directPath ? directPath.split(/[\\/]/).pop() : '未選択');
+  const setText = (selector, value) => {
+    document.querySelectorAll(selector).forEach(element => { element.textContent = value; });
+  };
+  setText('[data-settings-value="recognition"]', recognitionParts.join(' / '));
+  setText('[data-settings-value="vocabulary"]', vocabularyTerms.length ? `${vocabularyTerms.length}語を登録` : '未登録');
+  setText('[data-settings-value="finishing"]', finishingLabel);
+  setText('[data-settings-value="emotion"]', emotionLabel);
+  setText('[data-settings-value="output"]', outputParts.join(' / '));
+  setText('[data-review-source]', sourceLabel);
+  setText('[data-review-recognition]', `${mode} / ${model} / ${language} / ${preprocess}`);
+  setText('[data-review-finish]', finishExtras.length ? finishExtras.join(' / ') : '追加処理なし');
+  setText('[data-review-output]', outputParts.join(' / '));
+  setText('[data-flow-detail="1"]', hasSource ? sourceLabel : '未選択');
+  setText('[data-flow-detail="2"]', `${mode} / ${model} / ${language}`);
+  setText('[data-flow-detail="3"]', hasSource ? '開始できます' : 'ファイルを選ぶと開始できます');
 
   if (startButton) startButton.disabled = jobRunning || !hasSource;
   renderMobileWizard();
@@ -810,100 +885,128 @@ function hasUnsavedAnalysisChanges() {
   return Boolean(analysisState.dirty || preparationDirty);
 }
 
-function showProcessedDataSection(section, {force = false, itemId = ''} = {}) {
-  const analysis = section === 'analysis';
-  const requestedItemId = String(itemId || '').trim();
-  const leavingAnalysis = !analysis
-    && analysisCard
-    && !analysisCard.hidden
-    && hasUnsavedAnalysisChanges();
-  if (!force && leavingAnalysis && !window.confirm('分析設定または手動コードに未保存の変更があります。保存せずにデータ一覧へ移動しますか？')) {
-    return false;
-  }
-  const switchingAnalysisItem = analysis
-    && requestedItemId
-    && requestedItemId !== analysisState.itemId
-    && hasUnsavedAnalysisChanges();
-  if (!force && switchingAnalysisItem && !window.confirm('分析設定または手動コードに未保存の変更があります。保存せずに別の処理済みデータを分析しますか？')) {
-    return false;
-  }
-  if (libraryCard) libraryCard.hidden = analysis;
-  if (analysisCard) analysisCard.hidden = !analysis;
-  if (showLibraryListButton) {
-    showLibraryListButton.classList.toggle('active', !analysis);
-    showLibraryListButton.setAttribute('aria-selected', String(!analysis));
-  }
-  if (showLibraryAnalysisButton) {
-    showLibraryAnalysisButton.classList.toggle('active', analysis);
-    showLibraryAnalysisButton.setAttribute('aria-selected', String(analysis));
-  }
-  if (analysis && analysisCard) {
-    if (requestedItemId && analysisCatalogLoaded) {
-      if (requestedItemId !== analysisState.itemId || !analysisState.data) {
-        loadAnalysisItem(requestedItemId, {discardDirty: force || switchingAnalysisItem});
-      } else if (analysisItemSelect) {
-        analysisItemSelect.value = requestedItemId;
-      }
-    } else {
-      if (requestedItemId) {
-        analysisState.itemId = requestedItemId;
-        analysisState.data = null;
-        if (analysisItemSelect) analysisItemSelect.value = requestedItemId;
-      }
-      loadAnalysisCatalog();
-    }
-  }
-  if (!analysis && libraryCard) loadLibrary();
-  return true;
+// ---- Screens and routes (UX-01). Each screen owns one hash so reloads, the
+// browser's back button and bookmarks return to the same place. ----
+const viewRouteHashes = {new: '#/new', library: '#/data', analysis: '#/analysis', speakers: '#/speakers'};
+
+function routeHash(view, id = '') {
+  const encoded = id ? encodeURIComponent(String(id)) : '';
+  if (view === 'item') return `#/data/${encoded}`;
+  if (view === 'analysis' && encoded) return `#/analysis/${encoded}`;
+  return viewRouteHashes[view] || '#/new';
 }
 
-function showView(view, {analysisItemId = ''} = {}) {
-  const leavingCurrentResult = resultCard
-    && !resultCard.hidden
-    && currentJobDirty;
+function parseRouteHash(hash) {
+  const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(part => {
+    try { return decodeURIComponent(part); } catch (_) { return part; }
+  });
+  const [head, id = ''] = parts;
+  if (head === 'data' && id) return {view: 'item', itemId: id};
+  if (head === 'data') return {view: 'library', itemId: ''};
+  if (head === 'analysis') return {view: 'analysis', itemId: id};
+  if (head === 'speakers') return {view: 'speakers', itemId: ''};
+  if (head === 'new') return {view: 'new', itemId: ''};
+  return null;
+}
+
+function syncRouteHash(hash, {replace = false} = {}) {
+  currentRouteHash = hash;
+  if (window.location.hash === hash) return;
+  try {
+    if (replace) window.history.replaceState(null, '', hash);
+    else window.history.pushState(null, '', hash);
+  } catch (_) {
+    // Screens still switch when the history API is unavailable.
+  }
+}
+
+// Every move between screens passes these checks, so unsaved edits are never
+// dropped without asking (UX-30).
+function confirmLeave({target, itemId = '', analysisItemId = ''}) {
+  const resultVisible = resultCard && !resultCard.hidden;
+  const sameItem = target === 'item' && itemId && currentJob && String(currentJob.id) === String(itemId);
+  const leavingCurrentResult = currentJobDirty && !sameItem && (resultVisible || target === 'item');
   if (leavingCurrentResult && !window.confirm('文字起こし、会話プロファイル、または話者連携に未保存の変更があります。保存せずに移動しますか？')) {
     return false;
   }
-  const leavingSpeakerManagement = view !== 'speakers'
+  const leavingSpeakerManagement = target !== 'speakers'
     && speakerRegistryCard
     && !speakerRegistryCard.hidden
     && speakerRegistryDirty;
   if (leavingSpeakerManagement && !window.confirm('話者管理に未保存の変更があります。保存せずに移動しますか？')) {
     return false;
   }
-  const opensProcessedData = view === 'library' || view === 'analysis';
+  const requestedAnalysisId = String(analysisItemId || '').trim();
+  const analysisVisible = analysisCard && !analysisCard.hidden;
+  const switchingAnalysisItem = target === 'analysis' && requestedAnalysisId && requestedAnalysisId !== analysisState.itemId;
   const leavingAnalysis = hasUnsavedAnalysisChanges()
-    && (opensProcessedData || (analysisCard && !analysisCard.hidden));
+    && (switchingAnalysisItem || (analysisVisible && target !== 'analysis'));
   if (leavingAnalysis && !window.confirm('分析設定・手動コード・準備記録に未保存の変更があります。保存せずに移動しますか？')) {
     return false;
   }
+  return true;
+}
+
+function loadAnalysisView(requestedItemId, {discardDirty = false} = {}) {
+  if (!analysisCard) return;
+  if (requestedItemId && analysisCatalogLoaded) {
+    if (requestedItemId !== analysisState.itemId || !analysisState.data) {
+      loadAnalysisItem(requestedItemId, {discardDirty});
+    } else if (analysisItemSelect) {
+      analysisItemSelect.value = requestedItemId;
+    }
+    return;
+  }
+  if (requestedItemId) {
+    analysisState.itemId = requestedItemId;
+    analysisState.data = null;
+    if (analysisItemSelect) analysisItemSelect.value = requestedItemId;
+  }
+  loadAnalysisCatalog();
+}
+
+function setActiveNavigation(view) {
+  [
+    [showNewButton, view === 'new'],
+    [showLibraryButton, view === 'library' || view === 'item'],
+    [showAnalysisButton, view === 'analysis'],
+    [showSpeakersButton, view === 'speakers']
+  ].forEach(([button, active]) => {
+    if (!button) return;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+}
+
+function showView(view, {analysisItemId = '', itemId = '', force = false, replace = false} = {}) {
+  const target = ['new', 'library', 'analysis', 'speakers', 'item'].includes(view) ? view : 'new';
+  const requestedAnalysisId = String(analysisItemId || '').trim();
+  if (target === 'item' && !currentJob) return false;
+  const targetItemId = target === 'item' ? String(itemId || currentJob.id) : '';
+  if (!force && !confirmLeave({target, itemId: targetItemId, analysisItemId: requestedAnalysisId})) return false;
+  const resultVisible = resultCard && !resultCard.hidden;
+  const switchingAnalysisItem = target === 'analysis' && requestedAnalysisId && requestedAnalysisId !== analysisState.itemId;
   resultRequestSequence += 1;
-  if (leavingCurrentResult) setCurrentJobDirty(false);
-  const library = opensProcessedData;
-  const create = view === 'new';
-  const speakers = view === 'speakers';
-  if (processedDataHub) processedDataHub.hidden = !library;
-  if (speakerRegistryCard) speakerRegistryCard.hidden = !speakers;
-  if (form) form.hidden = !create;
-  if (library || create || speakers) {
-    if (mediaPlayer) mediaPlayer.pause();
-    if (resultCard) resultCard.hidden = true;
-    if (progressCard && !jobRunning) progressCard.hidden = true;
+  if (resultVisible && currentJobDirty && target !== 'item') setCurrentJobDirty(false);
+  if (target !== 'item' && mediaPlayer) mediaPlayer.pause();
+  if (createView) createView.hidden = target !== 'new';
+  if (libraryCard) libraryCard.hidden = target !== 'library';
+  if (analysisCard) analysisCard.hidden = target !== 'analysis';
+  if (speakerRegistryCard) speakerRegistryCard.hidden = target !== 'speakers';
+  if (resultCard) resultCard.hidden = target !== 'item';
+  document.body.dataset.view = target;
+  setActiveNavigation(target);
+  if (target === 'analysis') loadAnalysisView(requestedAnalysisId, {discardDirty: force || Boolean(switchingAnalysisItem)});
+  if (target === 'library') loadLibrary();
+  if (target === 'speakers' && speakerRegistryCard) loadSpeakerRegistry();
+  if (target === 'new') {
+    renderMobileWizard();
+    syncCreateViewState();
   }
-  if (showLibraryButton) showLibraryButton.classList.toggle('active', library);
-  if (showNewButton) showNewButton.classList.toggle('active', create);
-  if (showSpeakersButton) showSpeakersButton.classList.toggle('active', speakers);
-  if (showLibraryButton) showLibraryButton.setAttribute('aria-selected', String(library));
-  if (showNewButton) showNewButton.setAttribute('aria-selected', String(create));
-  if (showSpeakersButton) showSpeakersButton.setAttribute('aria-selected', String(speakers));
-  if (library) {
-    showProcessedDataSection(view === 'analysis' ? 'analysis' : 'list', {
-      force: true,
-      itemId: analysisItemId
-    });
-  }
-  if (speakers && speakerRegistryCard) loadSpeakerRegistry();
-  if (create) renderMobileWizard();
+  const hashId = target === 'item'
+    ? targetItemId
+    : (target === 'analysis' ? (requestedAnalysisId || analysisState.itemId) : '');
+  syncRouteHash(routeHash(target, hashId), {replace});
   return true;
 }
 
@@ -932,11 +1035,91 @@ function openResultDestination(destination) {
   return false;
 }
 
+// Tabs inside one record's workspace (UX-02): editing, conversation, summary, files.
+function setItemTab(name) {
+  const target = itemPanels.some(panel => panel.dataset.itemPanel === name) ? name : 'transcript';
+  activeItemTab = target;
+  itemPanels.forEach(panel => { panel.hidden = panel.dataset.itemPanel !== target; });
+  itemTabButtons.forEach(button => {
+    const active = button.dataset.itemTab === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+}
+
+// The header chip is the only job indicator outside the create screen (UX-16).
+function updateJobChip(job) {
+  if (!jobChip || !jobChipLabel) return;
+  const status = job ? String(job.status || '') : '';
+  const active = ['admitting', 'queued', 'running', 'committing'].includes(status);
+  const pendingCompleted = Boolean(completedJob && job && completedJob.id === job.id && status === 'completed');
+  const failed = ['failed', 'cancelled'].includes(status) && Boolean(progressCard && !progressCard.hidden);
+  jobChip.hidden = !(active || pendingCompleted || failed);
+  jobChip.classList.toggle('is-active', active);
+  jobChip.classList.toggle('is-complete', pendingCompleted);
+  jobChip.classList.toggle('has-error', failed);
+  const titles = {admitting: '受付中', queued: '開始待ち', running: '文字起こし中', committing: '結果を保存中', failed: 'エラー', cancelled: '中止しました'};
+  if (active) jobChipLabel.textContent = `${titles[status] || '処理中'} ${Number(job.progress || 0)}%`;
+  else if (pendingCompleted) jobChipLabel.textContent = '文字起こしが完了 — 結果を開く';
+  else jobChipLabel.textContent = titles[status] || '処理状況';
+}
+
+function syncCreateViewState() {
+  const progressVisible = Boolean(progressCard && !progressCard.hidden);
+  if (form) form.hidden = jobRunning && progressVisible;
+  const dismiss = document.querySelector('#progress-dismiss');
+  if (dismiss) dismiss.hidden = jobRunning || !progressVisible;
+  updateJobChip(lastProgressJob);
+}
+
+function showProgressCard({scroll = false} = {}) {
+  if (!progressCard) return;
+  progressCard.hidden = false;
+  syncCreateViewState();
+  if (scroll && createView && !createView.hidden) {
+    progressCard.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
+  }
+}
+
 listen(showLibraryButton, 'click', () => showView('library'));
-listen(showLibraryListButton, 'click', () => showProcessedDataSection('list'));
-listen(showLibraryAnalysisButton, 'click', () => showProcessedDataSection('analysis'));
+listen(showAnalysisButton, 'click', () => showView('analysis'));
 listen(showNewButton, 'click', () => showView('new'));
 listen(showSpeakersButton, 'click', () => showView('speakers'));
+itemTabButtons.forEach(button => listen(button, 'click', () => setItemTab(button.dataset.itemTab)));
+listen(jobChip, 'click', () => {
+  if (completedJob) {
+    const job = completedJob;
+    if (!confirmLeave({target: 'item', itemId: job.id})) return;
+    completedJob = null;
+    renderResult(job);
+    return;
+  }
+  if (showView('new') && progressCard && !progressCard.hidden) {
+    progressCard.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
+  }
+});
+listen(document.querySelector('#progress-dismiss'), 'click', () => {
+  if (jobRunning || !progressCard) return;
+  progressCard.hidden = true;
+  lastProgressJob = null;
+  syncCreateViewState();
+});
+const connectionDialog = document.querySelector('#connection-dialog');
+listen(document.querySelector('#connection-button'), 'click', () => {
+  if (connectionDialog && typeof connectionDialog.showModal === 'function' && !connectionDialog.open) {
+    connectionDialog.showModal();
+  }
+});
+listen(document.querySelector('#analysis-open-item-button'), 'click', () => {
+  const itemId = analysisState.itemId;
+  if (!itemId) return;
+  if (currentJob && String(currentJob.id) === String(itemId)) {
+    showView('item', {itemId});
+    return;
+  }
+  if (!confirmLeave({target: 'item', itemId})) return;
+  openLibraryItem(itemId);
+});
 
 // Tablists follow the WAI-ARIA tabs pattern (UX-23): one Tab stop per list on the
 // selected tab, and arrow/Home/End keys move focus between tabs. Activation stays
@@ -1974,6 +2157,11 @@ function setHardwareLights(kind, available, availableText, unavailableText, titl
   document.querySelectorAll(`[data-hardware="${kind}"]`).forEach(element => {
     setHardwareLight(element, available, availableText, unavailableText, title);
   });
+  document.querySelectorAll(`[data-device-dot="${kind}"]`).forEach(element => {
+    element.classList.remove('checking', 'available', 'unavailable');
+    element.classList.add(available ? 'available' : 'unavailable');
+    element.title = title;
+  });
 }
 
 function applyMachineProfile(machine) {
@@ -2068,6 +2256,7 @@ async function loadConfig() {
       ['hf', 'huggingface', 'Hugging Face'],
       ['openai', 'openai', 'OpenAI'],
       ['google', 'google', 'Google'],
+      ['typesafe', 'typesafe', 'TypeSafe Jev'],
       ['lmstudio', 'lmstudio', localLlmShortLabel]
     ].forEach(([id, key, label]) => {
       // The hero pills are hidden on phones; the mobile header repeats them (UX-10).
@@ -2090,6 +2279,13 @@ async function loadConfig() {
             : `${label} APIキーがtokens.jsonに設定されていません`;
         }
       });
+      document.querySelectorAll(`[data-provider-model="${key}"]`).forEach(element => {
+        element.textContent = String(data[`${key}_model`] || '').trim() || '未設定';
+      });
+      document.querySelectorAll(`[data-connection-dot="${id}"]`).forEach(dot => {
+        dot.classList.toggle('ready', Boolean(data[key]));
+        dot.classList.toggle('missing', !data[key]);
+      });
       if (data[key]) recognized.push(label);
     });
     const outputDir = document.querySelector('#output-dir');
@@ -2098,6 +2294,7 @@ async function loadConfig() {
       ? `利用可能: ${recognized.join(' / ')}。発光している項目を使用できます。`
       : 'トークンを認識できません。tokens.json を確認してください。';
     applyLmStudioDefaults(data);
+    syncAiFields();
   } catch (error) {
     message.textContent = error.name === 'AbortError'
       ? '設定確認がタイムアウトしました。アプリを再起動して http://127.0.0.1:7860 を開き直してください。'
@@ -2223,6 +2420,7 @@ function setRunning(running) {
   syncEmotionFields();
   syncAiFields();
   updateCreateSummary();
+  syncCreateViewState();
 }
 
 function syncQuietFields() {
@@ -2245,6 +2443,18 @@ function syncAiFields() {
     const row = input.closest('.check-row');
     if (row) row.classList.toggle('disabled', disabled);
   });
+  if (jevCompare) {
+    const jevDisabled = disabled || !tokenConfigSnapshot.typesafe;
+    if (jevDisabled) jevCompare.checked = false;
+    jevCompare.disabled = jevDisabled;
+    const row = jevCompare.closest('.check-row');
+    if (row) row.classList.toggle('disabled', jevDisabled);
+    if (jevConfigStatus) {
+      jevConfigStatus.textContent = tokenConfigSnapshot.typesafe
+        ? `TypeSafe ${tokenConfigSnapshot.typesafe_model || 'jev-latest'} を使用できます。`
+        : 'Jev比較には tokens.json の typesafe_api_key が必要です。';
+    }
+  }
   if (typeof syncAiEffortSettings === 'function') syncAiEffortSettings();
 }
 
@@ -2252,6 +2462,7 @@ function selectDefaultAiOptions() {
   if (!aiProvider) return;
   if (aiProvider.value !== 'none') {
     aiOptionInputs.forEach(input => { input.checked = true; });
+    if (jevCompare && tokenConfigSnapshot.typesafe) jevCompare.checked = true;
   }
   syncAiFields();
   updateCreateSummary();
@@ -2291,6 +2502,10 @@ syncFinishingMode();
   listen(input, 'change', updateCreateSummary);
 });
 aiOptionInputs.forEach(input => listen(input, 'change', updateCreateSummary));
+listen(jevCompare, 'change', () => {
+  if (jevCompare.checked && cleanTranscript) cleanTranscript.checked = true;
+  updateCreateSummary();
+});
 applyConversationMode();
 syncEmotionFields();
 syncAiFields();
@@ -2298,8 +2513,14 @@ updateCreateSummary();
 
 listen(mobileStepBack, 'click', () => setMobileStep(currentMobileStep - 1));
 listen(mobileStepNext, 'click', () => setMobileStep(currentMobileStep + 1, {validateCurrent: true}));
-document.querySelectorAll('[data-mobile-edit-step]').forEach(button => {
-  listen(button, 'click', () => setMobileStep(Number(button.dataset.mobileEditStep)));
+document.querySelectorAll('[data-flow-jump]').forEach(button => {
+  listen(button, 'click', () => jumpToFlowStep(Number(button.dataset.flowJump)));
+});
+document.querySelectorAll('[data-open-panel]').forEach(button => {
+  listen(button, 'click', () => openSettingsPanel(button.dataset.openPanel));
+});
+[document.querySelector('#transcription-device'), minSpeakersInput, maxSpeakersInput, boostQuietSpeech].forEach(input => {
+  listen(input, 'change', updateCreateSummary);
 });
 mobileWizardMedia.addEventListener('change', () => {
   updateBrowseButtonLabel();
@@ -2308,10 +2529,12 @@ mobileWizardMedia.addEventListener('change', () => {
 
 if (form) {
   form.addEventListener('invalid', event => {
+    const panel = event.target.closest('[data-settings-panel]');
+    if (panel) panel.open = true;
     if (!isMobileWizard()) return;
     event.preventDefault();
-    const section = event.target.closest('[data-mobile-step]');
-    if (section) currentMobileStep = Number(section.dataset.mobileStep) || currentMobileStep;
+    const section = event.target.closest('[data-flow-section]');
+    if (section) currentMobileStep = Number(section.dataset.flowSection) || currentMobileStep;
     renderMobileWizard();
     setAlert(formError, '入力内容を確認してください。', true);
     window.setTimeout(() => event.target.focus(), 80);
@@ -2335,7 +2558,7 @@ function clearPollTimer() {
 
 function schedulePoll(delay = pollBaseDelayMs) {
   clearPollTimer();
-  if (!currentJobId || !jobRunning) return;
+  if (!activeJobId || !jobRunning) return;
   pollTimer = window.setTimeout(() => {
     pollTimer = null;
     pollJob();
@@ -2363,26 +2586,33 @@ function resumeJob(job, {scroll = false} = {}) {
   if (!job || !job.id) return false;
   const cancellable = ['queued', 'running'].includes(job.status);
   const active = cancellable || ['admitting', 'committing'].includes(job.status);
-  currentJobId = String(job.id);
+  activeJobId = String(job.id);
   storePendingSubmissionId('');
   clearPollTimer();
   renderProgress(job);
-  if (resultCard) resultCard.hidden = true;
-  if (progressCard) {
-    progressCard.hidden = false;
-    if (scroll) progressCard.scrollIntoView({behavior: 'smooth', block: 'start'});
-  }
+  showProgressCard({scroll});
   if (active) {
-    storeActiveJobId(currentJobId);
+    storeActiveJobId(activeJobId);
     setRunning(true);
     if (cancelButton) cancelButton.disabled = !cancellable;
     schedulePoll();
     return true;
   }
   storeActiveJobId('');
+  activeJobId = null;
   setRunning(false);
   if (cancelButton) cancelButton.disabled = true;
-  if (job.status === 'completed') renderResult(job);
+  if (job.status === 'completed') {
+    // Open the result only while the progress screen is on view. Elsewhere the
+    // header chip offers it, so a record being edited is never replaced (UX-16).
+    if (createView && !createView.hidden) {
+      completedJob = null;
+      renderResult(job);
+    } else {
+      completedJob = job;
+      updateJobChip(job);
+    }
+  }
   return true;
 }
 
@@ -2416,10 +2646,10 @@ async function restoreActiveJob() {
       storeActiveJobId('');
     } catch (_) {
       if (restoreGeneration !== jobFlowGeneration) return;
-      currentJobId = storedId;
+      activeJobId = storedId;
       storeActiveJobId(storedId);
       setRunning(true);
-      if (progressCard) progressCard.hidden = false;
+      showProgressCard();
       const message = document.querySelector('#progress-message');
       if (message) message.textContent = '実行中ジョブへ再接続しています…';
       schedulePoll();
@@ -2438,7 +2668,7 @@ async function restoreActiveJob() {
       return;
     }
     setRunning(true);
-    if (progressCard) progressCard.hidden = false;
+    showProgressCard();
     const message = document.querySelector('#progress-message');
     if (message) message.textContent = '送信中だったジョブの受付状況を確認しています…';
     await recoverSubmittedJob(
@@ -2461,7 +2691,7 @@ async function restoreActiveJob() {
     // Older backends may not expose /api/jobs/active yet. Normal startup continues.
   }
   if (restoreGeneration === jobFlowGeneration) {
-    currentJobId = null;
+    activeJobId = null;
     setRunning(false);
     if (cancelButton) cancelButton.disabled = true;
   }
@@ -2514,7 +2744,7 @@ async function recoverSubmittedJob(
   const confirmedAbsent = absenceConfirmed || confirmedAbsentThisAttempt;
   if (attempt + 1 >= submitRecoveryMaxAttempts) {
     storeActiveJobId('');
-    currentJobId = null;
+    activeJobId = null;
     setRunning(false);
     if (progressCard) progressCard.hidden = true;
     if (confirmedAbsent) markPendingSubmissionRetryable(submissionId);
@@ -2554,11 +2784,7 @@ listen(form, 'submit', async event => {
   if (unresolvedSubmissionId && !retryUnacceptedSubmission) {
     const recoveryGeneration = ++jobFlowGeneration;
     setRunning(true);
-    if (resultCard) resultCard.hidden = true;
-    if (progressCard) {
-      progressCard.hidden = false;
-      progressCard.scrollIntoView({behavior: 'smooth', block: 'start'});
-    }
+    showProgressCard({scroll: true});
     if (cancelButton) cancelButton.disabled = true;
     const message = document.querySelector('#progress-message');
     if (message) message.textContent = '前回の送信結果を再確認しています…';
@@ -2593,9 +2819,7 @@ listen(form, 'submit', async event => {
   storePendingSubmissionId(submissionId);
   let responseStatus = null;
   setRunning(true);
-  resultCard.hidden = true;
-  progressCard.hidden = false;
-  progressCard.scrollIntoView({behavior: 'smooth', block: 'start'});
+  showProgressCard({scroll: true});
   try {
     const response = await apiFetch('/api/jobs', {
       method: 'POST',
@@ -2624,7 +2848,7 @@ listen(form, 'submit', async event => {
   } catch (error) {
     if (submissionGeneration !== jobFlowGeneration) return;
     clearPollTimer();
-    currentJobId = null;
+    activeJobId = null;
     if (cancelButton) cancelButton.disabled = true;
     if (responseStatus !== null && responseStatus >= 400 && responseStatus < 500) {
       storePendingSubmissionId('');
@@ -2638,12 +2862,12 @@ listen(form, 'submit', async event => {
 });
 
 async function pollJob() {
-  if (!currentJobId) return;
-  const requestedJobId = currentJobId;
+  if (!activeJobId) return;
+  const requestedJobId = activeJobId;
   try {
     const response = await apiFetch(`/api/jobs/${encodeURIComponent(requestedJobId)}`, {cache: 'no-store'});
     const data = await readJsonResponse(response);
-    if (requestedJobId !== currentJobId) return;
+    if (requestedJobId !== activeJobId) return;
     if (response.status === 404) {
       const persistedJob = await fetchPersistedJob(requestedJobId);
       if (persistedJob) {
@@ -2660,7 +2884,7 @@ async function pollJob() {
       }
       clearPollTimer();
       storeActiveJobId('');
-      currentJobId = null;
+      activeJobId = null;
       setRunning(false);
       if (cancelButton) cancelButton.disabled = true;
       throw new Error(data.error || '実行中ジョブが見つかりません。アプリを再起動した可能性があります。');
@@ -2669,7 +2893,7 @@ async function pollJob() {
     pollFailureCount = 0;
     resumeJob(data);
   } catch (error) {
-    if (!currentJobId || !jobRunning) {
+    if (!activeJobId || !jobRunning) {
       document.querySelector('#progress-message').textContent = error.message;
       return;
     }
@@ -2744,6 +2968,7 @@ function renderAiTokenUsage(rootSelector, rawUsage) {
 }
 
 function renderProgress(job) {
+  lastProgressJob = job;
   if (typeof renderAiFinishingActivity === 'function') renderAiFinishingActivity(job);
   const progress = Number(job.progress || 0);
   const fallbackStage = fallbackProgressStage(job, progress);
@@ -2774,14 +2999,16 @@ function renderProgress(job) {
   const titles = {admitting: '受付中', queued: '開始待ち', running: '文字起こし中', committing: '結果を保存中', completed: '処理完了', failed: 'エラー', cancelled: '中止しました'};
   document.querySelector('#progress-title').textContent = titles[job.status] || '処理中';
   document.querySelector('#progress-message').style.color = ['failed', 'cancelled'].includes(job.status) ? '#913733' : '';
+  updateJobChip(job);
+  syncCreateViewState();
 }
 
 listen(cancelButton, 'click', async () => {
-  if (!currentJobId) return;
+  if (!activeJobId) return;
   if (!window.confirm('実行中の文字起こし・AI処理を中止しますか？\n中止した処理は、この画面から続きを実行できません。')) return;
   cancelButton.disabled = true;
   try {
-    const response = await apiFetch(`/api/jobs/${currentJobId}/cancel`, {method: 'POST'});
+    const response = await apiFetch(`/api/jobs/${activeJobId}/cancel`, {method: 'POST'});
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error);
     document.querySelector('#progress-message').textContent = '中止を要求しました…';
@@ -3555,6 +3782,147 @@ listen(meetingObsidianSaveButton, 'click', async () => {
   }
 });
 
+// The planned agenda next to one time-ordered account of what was discussed.
+// Titles come from the AI agenda where it exists; the rest is named by theme.
+function renderSessionOutline(data, outline) {
+  const box = document.querySelector('#session-outline');
+  const host = document.querySelector('#session-outline-content');
+  const headline = document.querySelector('#session-outline-headline');
+  if (!box || !host) return;
+  host.replaceChildren();
+  const plan = (data && data.plan) || {available: false, items: []};
+  // A freshly finished transcription arrives without the joined block; show the
+  // agenda it does carry rather than claiming there is no result.
+  const sections = outline && Array.isArray(outline.sections) ? outline.sections : [];
+  const fallback = !data && sections.length ? {
+    available: true, outline_available: true, transformer_available: false,
+    rows: sections.map(section => ({
+      start: section.start, end: section.end, title: section.title || '議題',
+      title_source: 'outline', topics: [], segment_count: 0,
+    })),
+  } : null;
+  const result = (data && data.result) || fallback || {available: false, rows: []};
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const planItems = Array.isArray(plan.items) ? plan.items : [];
+  if (headline) {
+    const parts = [plan.available ? `予定 ${plan.item_count}項目` : '予定なし'];
+    if (plan.available && plan.match === 'manual_topics') parts.push(`話された ${plan.discussed_count}項目`);
+    parts.push(rows.length ? `結果 ${rows.length}区間` : '結果なし');
+    headline.textContent = parts.join('・');
+  }
+
+  if (plan.available) {
+    const section = document.createElement('section');
+    section.className = 'session-outline-block';
+    const head = document.createElement('h3');
+    head.textContent = '予定（質問ガイド・議題）';
+    section.append(head);
+    if (plan.match !== 'manual_topics') {
+      const note = document.createElement('p');
+      note.className = 'session-outline-note';
+      note.textContent = '消化状況は未照合です。「分析・可視化」のTransformerテーマ分析で決め方を「手動で定義する」にし、質問ガイドから取り込んで実行すると、項目ごとの発話数が出ます。';
+      section.append(note);
+    }
+    const list = document.createElement('ol');
+    list.className = 'session-outline-plan';
+    planItems.forEach(item => {
+      const entry = document.createElement('li');
+      const text = document.createElement('span');
+      text.className = 'session-outline-plan-text';
+      text.textContent = item.text || '';
+      entry.append(text);
+      const statusLabels = {discussed: '話された', not_discussed: '発話の割当なし', unmatched: '未照合'};
+      const status = document.createElement('span');
+      status.className = `session-outline-status ${item.status || 'unmatched'}`;
+      status.textContent = item.status === 'discussed'
+        ? `${statusLabels.discussed}（${item.segment_count}発話・${item.speaker_count}人）`
+        : statusLabels[item.status] || '未照合';
+      entry.append(status);
+      list.append(entry);
+    });
+    section.append(list);
+    host.append(section);
+  } else {
+    const note = document.createElement('p');
+    note.className = 'session-outline-note';
+    note.textContent = '予定（質問ガイド・議題）は登録されていません。以下は、実際に話された結果と自動アウトラインです。予定は「会話・話者」タブの調査設計で登録できます。';
+    host.append(note);
+  }
+
+  const section = document.createElement('section');
+  section.className = 'session-outline-block';
+  const head = document.createElement('h3');
+  head.textContent = '結果（時間順）';
+  section.append(head);
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.className = 'session-outline-note';
+    empty.textContent = '結果はまだありません。AI仕上げのアウトライン、または「分析・可視化」のTransformerテーマ分析を実行すると、ここに時間順で並びます。';
+    section.append(empty);
+  } else {
+    if (result.transformer_stale) {
+      const stale = document.createElement('p');
+      stale.className = 'session-outline-note warn';
+      stale.textContent = 'テーマは実行時点の結果です。その後に本文・話者・除外が変わっています。';
+      section.append(stale);
+    }
+    const list = document.createElement('ol');
+    list.className = 'session-outline-rows';
+    rows.forEach(row => {
+      const entry = document.createElement('li');
+      const time = document.createElement('span');
+      time.className = 'session-outline-time';
+      time.textContent = `${formatTime(row.start)}–${formatTime(row.end)}`;
+      const body = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = row.title || '議題';
+      const origin = document.createElement('span');
+      origin.className = `session-outline-origin ${row.title_source}`;
+      origin.textContent = row.title_source === 'outline' ? 'AI議題' : 'テーマ';
+      body.append(title, origin);
+      const topics = Array.isArray(row.topics) ? row.topics : [];
+      if (topics.length) {
+        const chips = document.createElement('div');
+        chips.className = 'session-outline-topics';
+        topics.forEach(topic => {
+          const chip = document.createElement('span');
+          chip.textContent = `${topic.label || topic.topic_id}（${topic.segment_count}）`;
+          chips.append(chip);
+        });
+        body.append(chips);
+      } else if (row.title_source === 'outline') {
+        const none = document.createElement('small');
+        none.textContent = result.transformer_available
+          ? 'この区間にテーマ分類された発話はありません'
+          : 'テーマ分析は未実行です';
+        body.append(none);
+      }
+      entry.append(time, body);
+      list.append(entry);
+    });
+    section.append(list);
+    const foot = document.createElement('p');
+    foot.className = 'session-outline-note';
+    foot.textContent = '「AI議題」はAI仕上げが作った議題見出し、「テーマ」は議題のない区間をTransformerの意味クラスタから名付けた候補です。どちらも原文で確認してください。';
+    section.append(foot);
+    if (result.outline_available) {
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      jump.className = 'secondary-button compact-button';
+      jump.textContent = '議題の要点を見る';
+      jump.addEventListener('click', () => {
+        setItemTab('summary');
+        document.querySelector('#outline-view')?.scrollIntoView({block: 'start'});
+      });
+      section.append(jump);
+    }
+  }
+  host.append(section);
+  box.hidden = false;
+  // Nothing to read yet: stay out of the way of the editing screen below.
+  if (!plan.available && !result.available) box.open = false;
+}
+
 function renderOutline(outline) {
   const view = document.querySelector('#outline-view');
   const content = document.querySelector('#outline-content');
@@ -3674,9 +4042,8 @@ function renderResult(job) {
       : '話者名は未反映です。OpenAI、Gemini、またはローカルLLMで話者特定だけを実行できます。';
   }
   currentJobId = job.id;
-  storeActiveJobId('');
+  if (!activeJobId) storeActiveJobId('');
   document.querySelector('#result-title').textContent = job.source_name || '確認・手動編集';
-  if (resultContextName) resultContextName.textContent = job.source_name || '選択中のデータ';
   const outputDirectory = document.querySelector('#result-output-dir');
   if (outputDirectory) {
     outputDirectory.textContent = job.output_dir ? `実行フォルダー　${job.output_dir}` : '';
@@ -3686,6 +4053,7 @@ function renderResult(job) {
   renderAiTokenUsage('#result-ai-usage', job.ai_usage);
   renderMeetingMinutes(currentJob.meeting_minutes, job.id);
   renderOutline(job.outline);
+  renderSessionOutline(job.session_outline, job.outline);
   renderEmotionSummary(job.emotion_analysis);
   renderMedia(job);
   renderSessionProfile();
@@ -3696,21 +4064,15 @@ function renderResult(job) {
   if (job.output_warning) {
     setAlert(document.querySelector('#save-message'), job.output_warning, true);
   }
-  libraryCard.hidden = true;
-  if (processedDataHub) processedDataHub.hidden = true;
-  if (speakerRegistryCard) speakerRegistryCard.hidden = true;
-  if (analysisCard) analysisCard.hidden = true;
-  form.hidden = true;
-  progressCard.hidden = true;
-  resultCard.hidden = false;
-  showLibraryButton.classList.add('active');
-  showNewButton.classList.remove('active');
-  if (showSpeakersButton) showSpeakersButton.classList.remove('active');
-  showLibraryButton.setAttribute('aria-selected', 'true');
-  showNewButton.setAttribute('aria-selected', 'false');
-  if (showSpeakersButton) showSpeakersButton.setAttribute('aria-selected', 'false');
+  const switchingItem = renderedItemId !== String(job.id);
+  renderedItemId = String(job.id);
+  if (progressCard && !jobRunning) progressCard.hidden = true;
   setCurrentJobDirty(false);
-  resultCard.scrollIntoView({behavior: 'smooth', block: 'start'});
+  showView('item', {itemId: job.id, force: true});
+  if (switchingItem) {
+    setItemTab('transcript');
+    window.scrollTo({top: 0, behavior: 'auto'});
+  }
 }
 
 function speakerLabels() {
@@ -3809,6 +4171,7 @@ function ensureConversationSpeakerProfiles() {
     currentJob.speaker_profiles[label] = {
       speaker_label: label,
       global_speaker_id: '',
+      registration_status: currentJob.speaker_names[label] ? 'temporary_single_group' : 'unidentified',
       display_name: currentJob.speaker_names[label] || '',
       theme_color: speakerThemeColors[index % speakerThemeColors.length],
       session_role: 'participant',
@@ -3903,7 +4266,7 @@ function renderSpeakerEditor() {
   const table = document.createElement('table');
   table.className = 'conversation-speaker-sheet';
   const head = document.createElement('thead');
-  head.innerHTML = '<tr><th>音声話者</th><th>表示名</th><th>テーマカラー</th><th>グローバル話者</th><th>会話役割</th><th>組織</th><th>部署</th><th>役職</th><th>参加状態</th><th>会話固有条件</th><th>メモ</th><th>発言量</th></tr>';
+  head.innerHTML = '<tr><th>音声話者</th><th>表示名</th><th>テーマカラー</th><th>話者登録</th><th>グローバル話者</th><th>会話役割</th><th>組織</th><th>部署</th><th>役職</th><th>参加状態</th><th>会話固有条件</th><th>メモ</th><th>発言量</th></tr>';
   table.append(head);
   const body = document.createElement('tbody');
   labels.forEach(label => {
@@ -3943,6 +4306,7 @@ function renderSpeakerEditor() {
       profile.global_speaker_id = globalSelect.value;
       const record = speakerRegistry.find(item => item.id === globalSelect.value);
       if (record) {
+        profile.registration_status = 'registered';
         profile.display_name = record.pseudonym || record.display_name || record.participant_code;
         profile.session_role = record.default_role || 'participant';
         profile.organization = record.organization || '';
@@ -3950,11 +4314,24 @@ function renderSpeakerEditor() {
         profile.job_title = record.job_title || '';
         profile.conditions = attributesToText(record.attributes);
         currentJob.speaker_names[label] = profile.display_name;
+      } else {
+        profile.registration_status = profile.display_name ? 'temporary_single_group' : 'unidentified';
       }
       renderSpeakerEditor();
       updateSpeakerBadges();
       setCurrentJobDirty();
     });
+    const registration = document.createElement('span');
+    const registrationStatus = profile.global_speaker_id
+      ? 'registered'
+      : (profile.registration_status || (profile.display_name ? 'temporary_single_group' : 'unidentified'));
+    registration.className = `speaker-registration ${registrationStatus}`;
+    registration.textContent = registrationStatus === 'registered'
+      ? '登録済み'
+      : registrationStatus === 'temporary_single_group'
+        ? '一時話者（この会話のみ）'
+        : '未特定';
+    appendSheetCell(row, registration);
     appendSheetCell(row, globalSelect);
     appendSheetCell(row, conversationControl('select', profile.session_role, speakerRoleLabels, value => {
       profile.session_role = value;
@@ -4009,10 +4386,76 @@ function occurrenceCount(text, keyword) {
   return String(text || '').toLocaleLowerCase().split(keyword).length - 1;
 }
 
+function segmentReviewAgreement(segment) {
+  const review = segment && segment.jev_review;
+  const comparison = review && typeof review.comparison === 'object' ? review.comparison : null;
+  return comparison ? String(comparison.agreement || '') : '';
+}
+
+function renderJevComparisonSummary() {
+  const host = document.querySelector('#jev-comparison-summary');
+  if (!host || !currentJob) return;
+  const reviewed = currentJob.segments.filter(segment => segmentReviewAgreement(segment));
+  host.replaceChildren();
+  if (!reviewed.length) {
+    host.hidden = true;
+    return;
+  }
+  const labels = {
+    both_flagged: '両方：修正が必要',
+    current_only: '現行AIのみ',
+    jev_only: 'Jevのみ',
+    both_clear: '両方：修正不要'
+  };
+  const counts = Object.fromEntries(Object.keys(labels).map(key => [key, 0]));
+  reviewed.forEach(segment => {
+    const key = segmentReviewAgreement(segment);
+    if (Object.hasOwn(counts, key)) counts[key] += 1;
+  });
+  const agreementCount = counts.both_flagged + counts.both_clear;
+  const heading = document.createElement('div');
+  heading.className = 'jev-comparison-heading';
+  const text = document.createElement('div');
+  const title = document.createElement('h3');
+  title.textContent = '現行AI × Jev　修正要否の比較';
+  const note = document.createElement('p');
+  note.textContent = `判定一致 ${agreementCount} / ${reviewed.length} 発話（${Math.round(agreementCount / reviewed.length * 100)}%）。不一致は原音確認の優先候補です。`;
+  text.append(title, note);
+  const scope = document.createElement('span');
+  scope.textContent = `${reviewed.length}発話を判定`;
+  heading.append(text, scope);
+  const grid = document.createElement('div');
+  grid.className = 'jev-comparison-grid';
+  Object.entries(labels).forEach(([key, label]) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `jev-comparison-card ${key}`;
+    const caption = document.createElement('span');
+    caption.textContent = label;
+    const value = document.createElement('strong');
+    value.textContent = String(counts[key]);
+    const unit = document.createElement('small');
+    unit.textContent = '発話';
+    card.append(caption, value, unit);
+    card.addEventListener('click', () => {
+      const filter = document.querySelector('#segment-jev-filter');
+      if (filter) filter.value = key;
+      renderSegments();
+    });
+    grid.append(card);
+  });
+  const caution = document.createElement('p');
+  caution.className = 'jev-comparison-caution';
+  caution.textContent = 'Jevは音声を聞かず、日本語の文字起こしと会話文脈だけで二択判定します。最終判断は元の音声・動画で確認してください。';
+  host.append(heading, grid, caution);
+  host.hidden = false;
+}
+
 function visibleSegments() {
   const keyword = document.querySelector('#segment-keyword').value.trim().toLocaleLowerCase();
   const speaker = document.querySelector('#segment-speaker-filter').value;
   const emotion = document.querySelector('#segment-emotion-filter').value;
+  const jevFilter = document.querySelector('#segment-jev-filter')?.value || '';
   const sort = document.querySelector('#segment-sort').value;
   const values = currentJob.segments.filter(segment => {
     if (keyword && !String(segment.text || '').toLocaleLowerCase().includes(keyword)) return false;
@@ -4020,6 +4463,7 @@ function visibleSegments() {
     const label = kushinadaEmotion(segment);
     if (emotion === 'none' && label) return false;
     if (emotion && emotion !== 'none' && label !== emotion) return false;
+    if (jevFilter && segmentReviewAgreement(segment) !== jevFilter) return false;
     return true;
   });
   values.sort((a, b) => {
@@ -4042,6 +4486,7 @@ function createField(labelText, control) {
 }
 
 function renderSegments() {
+  renderJevComparisonSummary();
   segmentEditor.replaceChildren();
   const values = visibleSegments();
   document.querySelector('#segment-count').textContent = `表示 ${values.length} / 全 ${currentJob.segments.length} 発話`;
@@ -4073,6 +4518,19 @@ function renderSegments() {
       emotion.className = 'segment-emotion';
       emotion.textContent = emotionText;
       meta.append(emotion);
+    }
+    const agreement = segmentReviewAgreement(segment);
+    if (agreement) {
+      const agreementLabels = {
+        both_flagged: '両方：修正必要',
+        current_only: '現行AIのみ',
+        jev_only: 'Jevのみ',
+        both_clear: '両方：修正不要'
+      };
+      const badge = document.createElement('span');
+      badge.className = `segment-jev-badge ${agreement}`;
+      badge.textContent = agreementLabels[agreement] || 'AI判定比較';
+      meta.append(badge);
     }
     const play = document.createElement('button');
     play.type = 'button';
@@ -4166,6 +4624,27 @@ function renderSegments() {
       review.append(summary, reasons, original, restore);
       body.append(review);
     }
+    if (segment.jev_review && segment.jev_review.comparison) {
+      const jevReview = document.createElement('details');
+      jevReview.className = 'segment-jev-review';
+      const summary = document.createElement('summary');
+      const jevNeedsCorrection = segment.jev_review.decision === 'correction_needed';
+      const probability = Number(segment.jev_review.correction_needed_probability);
+      summary.textContent = `Jev：${jevNeedsCorrection ? '修正が必要' : '修正不要'}${Number.isFinite(probability) ? `（修正必要 ${Math.round(probability * 100)}%）` : ''}`;
+      const comparison = segment.jev_review.comparison;
+      const decisions = document.createElement('p');
+      decisions.textContent = `現行AI：${comparison.current_ai_flagged ? '修正あり' : '修正なし'} ／ Jev：${comparison.jev_flagged ? '修正が必要' : '修正不要'}`;
+      const metadata = document.createElement('p');
+      const confidence = Number(segment.jev_review.confidence);
+      metadata.textContent = [
+        segment.jev_review.model ? `モデル ${segment.jev_review.model}` : '',
+        Number.isFinite(confidence) ? `確信度 ${Math.round(confidence * 100)}%` : ''
+      ].filter(Boolean).join(' ／ ');
+      const original = document.createElement('p');
+      original.textContent = `判定対象（校正前）：${segment.jev_review.original_text || ''}`;
+      jevReview.append(summary, decisions, metadata, original);
+      body.append(jevReview);
+    }
     row.append(meta, body);
     row.addEventListener('click', event => {
       if (!event.target.closest('input, textarea, select, button, details') && currentJob.media_url) playSegment(segment.id);
@@ -4235,7 +4714,7 @@ async function rerunSpeakerIdentification() {
 
 listen(rerunSpeakerIdentificationButton, 'click', rerunSpeakerIdentification);
 
-['#segment-keyword', '#segment-speaker-filter', '#segment-emotion-filter', '#segment-sort'].forEach(selector => {
+['#segment-keyword', '#segment-speaker-filter', '#segment-emotion-filter', '#segment-jev-filter', '#segment-sort'].forEach(selector => {
   const element = document.querySelector(selector);
   if (!element) return;
   element.addEventListener(element.tagName === 'INPUT' ? 'input' : 'change', renderSegments);
@@ -4250,6 +4729,8 @@ listen(document.querySelector('#add-segment-button'), 'click', () => {
   document.querySelector('#segment-keyword').value = '';
   document.querySelector('#segment-speaker-filter').value = '';
   document.querySelector('#segment-emotion-filter').value = '';
+  const jevFilter = document.querySelector('#segment-jev-filter');
+  if (jevFilter) jevFilter.value = '';
   renderSpeakerEditor();
   updateSegmentFilterOptions();
   renderSegments();
@@ -4262,6 +4743,7 @@ function playSegment(segmentId) {
   const segment = currentJob.segments.find(item => item.id === segmentId);
   if (!segment) return;
   selectedSegmentId = segmentId;
+  if (activeItemTab !== 'transcript') setItemTab('transcript');
   const context = Number(document.querySelector('#play-context').value) || 5;
   const start = Math.max(0, Number(segment.start || 0) - context);
   playbackStopAt = Number(segment.end || segment.start || 0) + context;
@@ -4302,7 +4784,11 @@ listen(document.querySelector('#obsidian-finishing-button'), 'click', async () =
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(currentJobId)}/obsidian-finishing`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({provider: aiProvider ? aiProvider.value : 'none', ai_efforts: readAiEfforts()})
+      body: JSON.stringify({
+        provider: aiProvider ? aiProvider.value : 'none',
+        ai_efforts: readAiEfforts(),
+        jev_compare: Boolean(jevCompare && jevCompare.checked)
+      })
     });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '作業ノートを開けませんでした。');
@@ -4481,6 +4967,8 @@ function updateAnalysisTarget() {
   const name = document.querySelector('#analysis-target-name');
   const meta = document.querySelector('#analysis-target-meta');
   if (name) name.textContent = selected ? selected.source_name : '未選択';
+  const openButton = document.querySelector('#analysis-open-item-button');
+  if (openButton) openButton.hidden = !selected;
   if (meta) {
     meta.textContent = selected
       ? `発話 ${selected.segment_count || 0}件 / ${formatTime(selected.duration || 0)} / 更新 ${formatDate(selected.updated_at)}`
@@ -4568,6 +5056,7 @@ async function loadAnalysisItem(itemId, {discardDirty = false} = {}) {
   analysisState.data = null;
   if (analysisItemSelect) analysisItemSelect.value = nextId;
   updateAnalysisTarget();
+  if (analysisCard && !analysisCard.hidden) syncRouteHash(routeHash('analysis', nextId), {replace: true});
   setAnalysisLoading(true);
   setAlert(document.querySelector('#analysis-message'), '');
   try {
@@ -4579,6 +5068,7 @@ async function loadAnalysisItem(itemId, {discardDirty = false} = {}) {
     if (!response.ok) throw new Error(payload.error || '分析データを取得できませんでした。');
     const data = payload.analysis && typeof payload.analysis === 'object' ? payload.analysis : payload;
     analysisState.data = data;
+    invalidateAnalysisMethodOverview();
     analysisState.config = deepCopy(data.config || {});
     analysisState.annotations = deepCopy(data.annotations || {});
     preparationDraft = null;
@@ -4601,8 +5091,14 @@ async function loadAnalysisItem(itemId, {discardDirty = false} = {}) {
 }
 
 function setAnalysisMode(mode) {
-  analysisState.mode = mode === 'manual' ? 'manual' : 'automatic';
+  analysisState.mode = ['manual', 'methods'].includes(mode) ? mode : 'automatic';
   renderAnalysisWorkspace();
+}
+
+function analysisModeContent(compact) {
+  if (analysisState.mode === 'manual') return renderManualAnalysis(compact);
+  if (analysisState.mode === 'methods') return renderMethodAnalysis(compact);
+  return renderAutomaticAnalysis(compact);
 }
 
 function renderAnalysisWorkspace() {
@@ -4615,19 +5111,11 @@ function renderAnalysisWorkspace() {
   updateAnalysisTarget();
   if (analysisDesktopContent) {
     analysisDesktopContent.replaceChildren();
-    analysisDesktopContent.append(
-      analysisState.mode === 'manual'
-        ? renderManualAnalysis(false)
-        : renderAutomaticAnalysis(false)
-    );
+    analysisDesktopContent.append(analysisModeContent(false));
   }
   if (analysisMobileContent) {
     analysisMobileContent.replaceChildren();
-    analysisMobileContent.append(
-      analysisState.mode === 'manual'
-        ? renderManualAnalysis(true)
-        : renderAutomaticAnalysis(true)
-    );
+    analysisMobileContent.append(analysisModeContent(true));
   }
   const shell = document.querySelector('#analysis-shell');
   const empty = document.querySelector('#analysis-empty');
@@ -4654,8 +5142,11 @@ function renderAnalysisWorkspace() {
   }
 }
 
-function analysisCardPanel(titleText, classification, exportDataset = '', wide = false) {
+// methodIds tags a panel with the analysis methods it belongs to, so the method view
+// can collect the same panels the long automatic view builds.
+function analysisCardPanel(titleText, classification, exportDataset = '', wide = false, methodIds = '') {
   const panel = analysisElement('section', `analysis-panel${wide ? ' wide' : ''}`);
+  if (methodIds) panel.dataset.analysisMethod = methodIds;
   const heading = analysisElement('header', 'analysis-panel-heading');
   const titleGroup = analysisElement('div');
   const badgeLabels = {automatic: '自動集計', configured: '要設定', manual: '要確認・解釈'};
@@ -5345,7 +5836,7 @@ function appendResearchAnalysis(grid, compact) {
   const engine = linguistics.engine || {};
   const coverage = linguistics.coverage || {};
 
-  const morphologyPanel = analysisCardPanel('使われた言葉の種類（形態素・品詞）', 'automatic', 'morphemes', true);
+  const morphologyPanel = analysisCardPanel('使われた言葉の種類（形態素・品詞）', 'automatic', 'morphemes', true, 'morphology');
   const engineNotice = analysisElement('div', `analysis-engine-notice ${engine.status || 'fallback'}`);
   engineNotice.append(
     analysisElement('strong', '', `${engine.morphology || '解析器未確認'} / ${engine.syntax || '構文解析未確認'}`),
@@ -5378,7 +5869,7 @@ function appendResearchAnalysis(grid, compact) {
   morphologyPanel.body.append(morphologyExports);
   grid.append(morphologyPanel.panel);
 
-  const termsPanel = analysisCardPanel('よく使われた言葉（TF・DF）', 'automatic', 'term_frequency');
+  const termsPanel = analysisCardPanel('よく使われた言葉（TF・DF）', 'automatic', 'term_frequency', false, 'lexical_frequency');
   const terms = Array.isArray(linguistics.term_frequency) ? linguistics.term_frequency : [];
   const maxTerm = Math.max(1, ...terms.map(item => Number(item.term_frequency) || 0));
   terms.slice(0, compact ? 10 : 15).forEach(item => appendSearchableTermBar(
@@ -5392,7 +5883,7 @@ function appendResearchAnalysis(grid, compact) {
   termsPanel.body.append(analysisElement('p', 'analysis-caption', 'TFは総出現回数、DFはその語を含む発話数です。頻度は重要性を意味しません。'));
   grid.append(termsPanel.panel);
 
-  const cooccurrencePanel = analysisCardPanel('一緒に使われる言葉のつながり（共起）', 'automatic', 'cooccurrence', true);
+  const cooccurrencePanel = analysisCardPanel('一緒に使われる言葉のつながり（共起）', 'automatic', 'cooccurrence', true, 'cooccurrence');
   const cooccurrence = Array.isArray(linguistics.cooccurrence) ? linguistics.cooccurrence : [];
   if (cooccurrence.length) {
     cooccurrencePanel.body.append(buildAnalysisCooccurrenceExplorer(cooccurrence));
@@ -5403,7 +5894,7 @@ function appendResearchAnalysis(grid, compact) {
   grid.append(cooccurrencePanel.panel);
 
   const dependencies = Array.isArray(linguistics.dependency_preview) ? linguistics.dependency_preview : [];
-  const syntaxPanel = analysisCardPanel('文章内の言葉のつながり（係り受け）', 'automatic', 'dependencies', true);
+  const syntaxPanel = analysisCardPanel('文章内の言葉のつながり（係り受け）', 'automatic', 'dependencies', true, 'syntax');
   if (dependencies.length) {
     syntaxPanel.body.append(buildAnalysisDependencyExplorer(dependencies, compact));
     const details = analysisElement('details', 'analysis-table-details');
@@ -5443,7 +5934,7 @@ function appendResearchAnalysis(grid, compact) {
 
   const correlations = Array.isArray(statistics.correlations) ? statistics.correlations : [];
   const computedCorrelations = correlations.filter(item => item.status === 'computed');
-  const correlationPanel = analysisCardPanel('指標どうしの関係（相関）', 'automatic', 'correlations', true);
+  const correlationPanel = analysisCardPanel('指標どうしの関係（相関）', 'automatic', 'correlations', true, 'correlation');
   if (computedCorrelations.length) {
     correlationPanel.body.append(buildAnalysisCorrelationExplorer(correlations));
   } else {
@@ -5453,7 +5944,7 @@ function appendResearchAnalysis(grid, compact) {
 
   const descriptives = (Array.isArray(statistics.descriptives) ? statistics.descriptives : [])
     .filter(item => item.scope === 'overall');
-  const statsPanel = analysisCardPanel('会話データの基本統計', 'automatic', 'descriptives', true);
+  const statsPanel = analysisCardPanel('会話データの基本統計', 'automatic', 'descriptives', true, 'descriptive_statistics');
   if (descriptives.length) {
     const wrap = analysisElement('div', 'analysis-table-wrap');
     const table = analysisElement('table', 'analysis-table');
@@ -5485,7 +5976,7 @@ function appendResearchAnalysis(grid, compact) {
   const tests = Array.isArray(statistics.tests) ? statistics.tests : [];
   const crosstabs = Array.isArray(statistics.crosstabs) ? statistics.crosstabs : [];
   const selectedTerms = Array.isArray(statistics.selected_terms) ? statistics.selected_terms : [];
-  const selectedTermPanel = analysisCardPanel('手動選択単語のクロス集計＋カイ二乗検定', 'configured', 'crosstabs', true);
+  const selectedTermPanel = analysisCardPanel('手動選択単語のクロス集計＋カイ二乗検定', 'configured', 'crosstabs', true, 'group_statistics');
   if (selectedTerms.length) {
     selectedTerms.slice(0, compact ? 8 : 20).forEach(term => {
       const columnVariable = `selected_term:${term}`;
@@ -5533,7 +6024,7 @@ function appendResearchAnalysis(grid, compact) {
   selectedTermPanel.body.append(analysisElement('p', 'analysis-caption', '発話単位の探索的検定です。同じ話者の発話は独立でない可能性があり、多重検定補正も行っていません。'));
   grid.append(selectedTermPanel.panel);
 
-  const testsPanel = analysisCardPanel('グループ間の違いと効果の大きさ', 'automatic', 'statistical_tests', true);
+  const testsPanel = analysisCardPanel('グループ間の違いと効果の大きさ', 'automatic', 'statistical_tests', true, 'group_statistics');
   const computedTests = tests.filter(item => item.status === 'computed');
   if (computedTests.length) {
     const wrap = analysisElement('div', 'analysis-table-wrap');
@@ -5563,7 +6054,7 @@ function appendResearchAnalysis(grid, compact) {
   testsPanel.body.append(analysisElement('p', 'analysis-caption', `発話の独立性を仮定しにくいため探索的な値です。p値だけで結論を出さず、効果量・標本数・前提条件を確認してください。未計算 ${unavailableCount}件。`));
   grid.append(testsPanel.panel);
 
-  const crosstabsPanel = analysisCardPanel('項目の組み合わせ比較（クロス集計）', 'automatic', 'crosstabs', true);
+  const crosstabsPanel = analysisCardPanel('項目の組み合わせ比較（クロス集計）', 'automatic', 'crosstabs', true, 'group_statistics');
   if (crosstabs.length) {
     const wrap = analysisElement('div', 'analysis-table-wrap');
     const table = analysisElement('table', 'analysis-table');
@@ -6016,6 +6507,346 @@ function renderSpeakerAnalysis(compact) {
   return fragment;
 }
 
+// The expert's own account of a method: scope, conditions, procedure and literature.
+function buildExpertDetails(expert, {open = false} = {}) {
+  const box = analysisElement('details', 'analysis-expert');
+  box.open = open;
+  box.append(analysisElement('summary', '',
+    `${expert.role || ''}の専門家：${expert.title || expert.method_id || '不明'}（${expert.status_label || ''}・${expert.selection_label || ''}）`));
+  const school = (expert.school || {}).default || {};
+  if (school.label) {
+    box.append(analysisElement('p', 'analysis-caption', `採用する流派：${school.label} / 分析単位：${expert.analysis_unit || '—'}`));
+  }
+  const appendList = (heading, rows, ordered) => {
+    if (!rows.length) return;
+    const list = analysisElement(ordered ? 'ol' : 'ul', 'analysis-inline-list');
+    rows.forEach(text => list.append(analysisElement('li', '', text)));
+    box.append(analysisElement('strong', '', heading), list);
+  };
+  appendList('この手法で扱う範囲', expert.scope || []);
+  appendList('担当外（引き継ぎ先）', (expert.out_of_scope || [])
+    .map(item => item.handoff ? `${item.text}（${item.handoff}）` : item.text));
+  appendList('満たさない・判定できない条件', (expert.checks || [])
+    .filter(check => check.result === 'fail' || check.result === 'not_evaluable')
+    .map(check => `${check.severity === 'block' && check.result === 'fail' ? '分析を始めない' : '要確認'}：${check.message}`));
+  appendList('研究者が確認する項目', (expert.quality_checks || [])
+    .filter(check => check.result === 'human').map(check => check.message));
+  appendList('手順と担当', (expert.procedure || []).map(step => `${step.title}（${step.actor_label}）`), true);
+  appendList('示してはいけない結論', expert.prohibited_conclusions || []);
+  const references = (expert.references || []).map(item => item.id).join('、');
+  if (references) {
+    box.append(analysisElement('p', 'analysis-caption',
+      `方法論の根拠：${references}（${expert.definition_note} 第${expert.definition_version}版、知識の確認日 ${expert.knowledge_verified}）`));
+  }
+  if ((expert.missing_references || []).length) {
+    box.append(analysisElement('p', 'analysis-caption', `見つからない文献ノート：${expert.missing_references.join('、')}`));
+  }
+  if ((expert.open_issues || []).length) {
+    box.append(analysisElement('p', 'analysis-caption', `専門家定義の未解決事項：${expert.open_issues.length}件`));
+  }
+  return box;
+}
+
+// Result panels are built by the existing views and tagged with their method, so the
+// method view shows the same panels without a second implementation.
+const METHOD_PANEL_SOURCES = {qualitative_coding: 'manual'};
+const METHOD_EXTERNAL_NOTES = {
+  outline: '議題・アウトラインの作成と編集は文字起こし画面で行います。',
+  ai_finishing: 'AI仕上げの実行と変更記録の確認は文字起こし画面で行います。',
+  kwic: '「自動分析」の文脈検索で語を検索すると、この手法の結果が出ます。'
+};
+
+function analysisMethodState() {
+  if (!analysisState.methods || analysisState.methods.itemId !== analysisState.itemId) {
+    analysisState.methods = {itemId: analysisState.itemId, loading: false, error: '', data: null, selected: ''};
+  }
+  return analysisState.methods;
+}
+
+function invalidateAnalysisMethodOverview() {
+  const state = analysisMethodState();
+  state.data = null;
+  state.error = '';
+}
+
+async function loadAnalysisMethodOverview() {
+  const state = analysisMethodState();
+  const itemId = analysisState.itemId;
+  if (!itemId || state.loading || state.data) return;
+  state.loading = true;
+  state.error = '';
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/methods`, {cache: 'no-store'});
+    const payload = await readJsonResponse(response);
+    if (!response.ok) throw new Error(payload.error || '手法別の分析状態を取得できませんでした。');
+    if (analysisState.itemId !== itemId) return;
+    state.data = payload;
+    const methods = Array.isArray(payload.methods) ? payload.methods : [];
+    if (!methods.some(method => method.method_id === state.selected)) {
+      state.selected = ((methods.find(method => method.produced) || methods[0] || {}).method_id) || '';
+    }
+  } catch (error) {
+    state.error = error.message;
+  } finally {
+    state.loading = false;
+    if (analysisState.itemId === itemId && analysisState.mode === 'methods') renderAnalysisWorkspace();
+  }
+}
+
+function methodResultPanels(methodId, compact) {
+  const scope = analysisState.automaticScope;
+  analysisState.automaticScope = 'overall';
+  try {
+    const source = METHOD_PANEL_SOURCES[methodId] === 'manual'
+      ? renderManualAnalysis(compact)
+      : renderAutomaticAnalysis(compact);
+    return [...source.querySelectorAll(`[data-analysis-method~="${methodId}"]`)];
+  } finally {
+    analysisState.automaticScope = scope;
+  }
+}
+
+function buildMethodDetail(method, overview, compact) {
+  const nodes = [];
+  const header = analysisElement('div', `analysis-method-header ${method.verdict}`);
+  header.append(
+    analysisElement('h3', '', method.title),
+    analysisElement('p', 'analysis-method-verdict', `${method.verdict_label}（結果の状態：${method.status_label}）`)
+  );
+  if (method.verdict_reason) header.append(analysisElement('p', 'analysis-section-help', method.verdict_reason));
+  const counts = Object.entries(method.result_counts || {});
+  if (counts.length) {
+    const metrics = analysisElement('div', 'analysis-mini-metrics');
+    counts.forEach(([dataset, total]) => appendAnalysisMetric(metrics, dataset, `${total}件`));
+    header.append(metrics);
+  }
+  header.append(analysisElement('p', 'analysis-caption', `分析単位：${method.analysis_unit || '—'}`));
+  nodes.push(header);
+
+  const expert = (overview.experts || {})[method.expert_id];
+  if (expert) {
+    if (method.expert_scope === 'preconditions') {
+      nodes.push(analysisElement('p', 'analysis-section-help',
+        'この手法の結果がないため、結果に対する判定ではなく、実行前に満たす条件を表示しています。'));
+    }
+    nodes.push(buildExpertDetails(expert, {open: true}));
+  } else if (method.expert_note) {
+    nodes.push(analysisElement('p', 'analysis-section-help', method.expert_note));
+  }
+  if (METHOD_EXTERNAL_NOTES[method.method_id]) {
+    nodes.push(analysisElement('p', 'analysis-section-help', METHOD_EXTERNAL_NOTES[method.method_id]));
+  }
+
+  const panels = methodResultPanels(method.method_id, compact);
+  if (panels.length) nodes.push(...panels);
+  else if (method.produced) nodes.push(analysisElement('p', 'analysis-no-data', 'この手法の結果は保存記録とCSVで確認します。'));
+  else nodes.push(analysisElement('p', 'analysis-no-data', 'まだ結果がありません。上の条件を確認してから実行してください。'));
+
+  if ((method.limitations || []).length) {
+    const details = analysisElement('details', 'analysis-cautions');
+    details.append(analysisElement('summary', '', '限界と追加確認'));
+    const list = analysisElement('ul');
+    method.limitations.forEach(value => list.append(analysisElement('li', '', value)));
+    details.append(list);
+    nodes.push(details);
+  }
+  const exportBox = analysisElement('div', 'analysis-inline-exports');
+  (method.datasets || []).forEach(dataset => {
+    const link = analysisExportLink(`${dataset} CSV`, dataset, 'analysis-inline-export');
+    if (link) exportBox.append(link);
+  });
+  if (exportBox.childNodes.length) nodes.push(exportBox);
+  return nodes;
+}
+
+function renderMethodAnalysis(compact) {
+  const fragment = document.createDocumentFragment();
+  const state = analysisMethodState();
+  const intro = analysisElement('div', 'analysis-result-intro');
+  intro.append(
+    analysisElement('span', 'analysis-kind automatic', '手法別'),
+    analysisElement('h2', '', '分析手法ごとの結果と担当専門家'),
+    analysisElement('p', '', '手法ごとに、結果が出ているか、担当の専門家が示す適用条件を満たしているかを確認します。判定は保存済みのデータに対するもので、解釈の妥当性を保証しません。')
+  );
+  const refresh = analysisElement('button', 'secondary-button compact-button', '↻ 手法別の状態を再取得');
+  refresh.type = 'button';
+  refresh.dataset.analysisMethodsRefresh = 'true';
+  intro.append(refresh);
+  fragment.append(intro);
+
+  if (state.error) {
+    fragment.append(analysisElement('p', 'content-inline-notice', state.error));
+    return fragment;
+  }
+  if (!state.data) {
+    loadAnalysisMethodOverview();
+    fragment.append(analysisElement('p', 'analysis-section-help', '手法別の状態を読み込んでいます…'));
+    return fragment;
+  }
+
+  const overview = state.data;
+  const methods = new Map((overview.methods || []).map(method => [method.method_id, method]));
+  const summary = analysisElement('div', 'analysis-method-summary');
+  [
+    ['ok', '結果あり・条件を満たす'], ['check', '結果あり・要確認'], ['stop', '結果あり・この条件では使わない'],
+    ['no_expert', '結果あり・担当専門家なし'], ['none', '結果なし']
+  ].forEach(([key, label]) => {
+    const chip = analysisElement('span', `analysis-method-chip ${key}`);
+    chip.append(
+      analysisElement('strong', '', String((overview.summary || {})[key] || 0)),
+      analysisElement('small', '', label)
+    );
+    summary.append(chip);
+  });
+  fragment.append(summary);
+
+  const layout = analysisElement('div', 'analysis-method-layout');
+  const list = analysisElement('nav', 'analysis-method-list');
+  list.setAttribute('aria-label', '分析手法の選択');
+  (overview.groups || []).forEach(group => {
+    const section = analysisElement('section', 'analysis-method-group');
+    section.append(analysisElement('h3', '', group.title));
+    (group.method_ids || []).forEach(methodId => {
+      const method = methods.get(methodId);
+      if (!method) return;
+      const button = analysisElement('button', `analysis-method-button ${method.verdict}`);
+      button.type = 'button';
+      button.dataset.analysisMethodSelect = methodId;
+      if (methodId === state.selected) {
+        button.classList.add('active');
+        button.setAttribute('aria-current', 'true');
+      }
+      button.append(
+        analysisElement('strong', '', method.title),
+        analysisElement('span', 'analysis-method-verdict', method.verdict_label),
+        analysisElement('small', '', method.verdict_reason || method.status_label)
+      );
+      section.append(button);
+    });
+    list.append(section);
+  });
+  layout.append(list);
+
+  const detail = analysisElement('div', 'analysis-method-detail');
+  const selected = methods.get(state.selected) || (overview.methods || [])[0];
+  if (selected) buildMethodDetail(selected, overview, compact).forEach(node => detail.append(node));
+  else detail.append(analysisElement('p', 'analysis-no-data', '表示できる手法がありません。'));
+  layout.append(detail);
+  fragment.append(layout);
+  return fragment;
+}
+
+function buildSegmentClassificationPanel(compact) {
+  const state = (analysisState.data || {}).segment_classification || {};
+  const result = state.result || null;
+  const summary = state.summary || {};
+  const panel = analysisCardPanel(
+    '発話種別・重要度・要確認・機密らしさ', 'automatic',
+    'segment_classifications', true, 'segment_classification'
+  );
+  panel.body.append(analysisElement(
+    'p', 'analysis-section-help',
+    'テンプレート規則、Jev（LLM）、既存Transformer話題を別々の提案として比較します。自動値は手動確定値を上書きしません。'
+  ));
+  if (state.stale) panel.body.append(analysisElement(
+    'p', 'analysis-orphan-warning', '文字起こし、コードブック、手動分析、またはTransformer結果が変わったため再実行が必要です。'
+  ));
+  const metrics = analysisElement('div', 'analysis-mini-metrics');
+  appendAnalysisMetric(metrics, '対象', `${summary.segment_count || 0}発話`);
+  appendAnalysisMetric(metrics, '手動確認済み', `${summary.manual_reviewed_count || 0}件`);
+  appendAnalysisMetric(metrics, 'Jev重要度 高', `${summary.high_importance_count || 0}件`);
+  appendAnalysisMetric(metrics, 'Jev要確認 高', `${summary.high_review_count || 0}件`);
+  appendAnalysisMetric(metrics, 'Jev機密らしさ 高', `${summary.high_sensitivity_count || 0}件`);
+  panel.body.append(metrics);
+
+  const actions = analysisElement('div', 'segment-classification-actions');
+  const run = analysisElement(
+    'button', 'primary-button small',
+    segmentClassificationInProgress ? 'Jevで判定中…' : 'テンプレート＋Jev＋Transformerで判定'
+  );
+  run.type = 'button';
+  run.disabled = segmentClassificationInProgress || analysisState.dirty;
+  run.dataset.runSegmentClassification = 'true';
+  actions.append(run);
+  if (analysisState.dirty) actions.append(analysisElement('small', '', '手動変更を保存してから実行してください。'));
+  panel.body.append(actions);
+
+  const rows = result && Array.isArray(result.segments) ? result.segments : [];
+  if (!rows.length) {
+    panel.body.append(analysisElement('p', 'analysis-no-data', '分類結果はまだありません。上のボタンで435発話を一括判定できます。'));
+  } else {
+    const ranked = [...rows].sort((a, b) => {
+      const score = row => Math.max(
+        Number((row.llm || {}).importance_score) || 0,
+        Number((row.llm || {}).review_score) || 0,
+        Number((row.llm || {}).sensitivity_score) || 0
+      );
+      return score(b) - score(a) || Number(a.utterance_order || 0) - Number(b.utterance_order || 0);
+    }).slice(0, compact ? 8 : 20);
+    const wrap = analysisElement('div', 'analysis-table-wrap');
+    const table = analysisElement('table', 'analysis-table');
+    const head = analysisElement('thead');
+    const headRow = analysisElement('tr');
+    ['発話', '話者', 'テンプレート', 'Jev', 'Transformer話題', '重要', '要確認', '機密'].forEach(value => headRow.append(analysisElement('th', '', value)));
+    head.append(headRow);
+    const body = analysisElement('tbody');
+    ranked.forEach(value => {
+      const row = analysisElement('tr');
+      row.append(
+        analysisElement('td', '', `#${value.utterance_order || '—'}`),
+        analysisElement('td', '', value.speaker_name || value.speaker || '—'),
+        analysisElement('td', '', (value.template || {}).dialogue_act_label || '—'),
+        analysisElement('td', '', (value.llm || {}).dialogue_act_label || '—'),
+        analysisElement('td', '', (value.transformer || {}).topic_label || '—'),
+        analysisElement('td', '', (value.llm || {}).importance_score ?? '—'),
+        analysisElement('td', '', (value.llm || {}).review_score ?? '—'),
+        analysisElement('td', '', (value.llm || {}).sensitivity_score ?? '—')
+      );
+      body.append(row);
+    });
+    table.append(head, body);
+    wrap.append(table);
+    panel.body.append(wrap, analysisElement('p', 'analysis-caption', '表は3スコアの高い順に表示。全件とクロス集計はCSVで出力できます。'));
+  }
+  const exports = analysisElement('div', 'segment-classification-actions');
+  const rowsLink = analysisExportLink('全発話の比較CSV', 'segment_classifications', 'analysis-inline-export');
+  const crossLink = analysisExportLink('クロス集計CSV', 'segment_classification_crosstabs', 'analysis-inline-export');
+  if (rowsLink) exports.append(rowsLink);
+  if (crossLink) exports.append(crossLink);
+  panel.body.append(exports);
+  return panel.panel;
+}
+
+async function runSegmentClassification() {
+  if (!analysisState.itemId || !analysisState.data || segmentClassificationInProgress || analysisState.dirty) return;
+  segmentClassificationInProgress = true;
+  renderAnalysisWorkspace();
+  setAlert(document.querySelector('#analysis-message'), 'Jevへ発話本文と短い前後文脈を送り、分類候補を作成しています。');
+  try {
+    const item = analysisState.data.item || {};
+    const response = await apiFetch(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/classifications`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        request_id: createSubmissionId(),
+        source_revision: Number(item.revision_count || 0),
+        analysis_revision: Number(item.analysis_revision || 0),
+        use_jev: true
+      })
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok) throw new Error(payload.error || '発話分類を実行できませんでした。');
+    analysisState.data.segment_classification = payload.segment_classification;
+    invalidateAnalysisMethodOverview();
+    const warning = payload.archive_warning ? ` ${payload.archive_warning}` : '';
+    setAlert(document.querySelector('#analysis-message'), `発話分類を保存しました。${warning}`, Boolean(payload.archive_warning));
+  } catch (error) {
+    setAlert(document.querySelector('#analysis-message'), error.message, true);
+  } finally {
+    segmentClassificationInProgress = false;
+    renderAnalysisWorkspace();
+  }
+}
+
 function renderAutomaticAnalysis(compact) {
   const fragment = document.createDocumentFragment();
   const data = analysisState.data || {};
@@ -6040,7 +6871,7 @@ function renderAutomaticAnalysis(compact) {
     return fragment;
   }
 
-  fragment.append(buildInsightSummary(), buildTransformerAnalysisPanel(), buildAnalysisStorage(), buildContentExplorer());
+  fragment.append(buildInsightSummary(), buildSegmentClassificationPanel(compact), buildTransformerAnalysisPanel(), buildAnalysisStorage(), buildContentExplorer());
 
   const metrics = analysisElement('div', 'analysis-overview');
   appendAnalysisMetric(metrics, '会話時間', formatTime(overview.session_duration || 0));
@@ -6070,13 +6901,13 @@ function renderAutomaticAnalysis(compact) {
     'まず時間推移と話者別の参加量を見て、次に話者交替・無音・重なりの候補を確認します。'
   ));
   const speakers = Array.isArray(automatic.speaker_metrics) ? automatic.speaker_metrics : [];
-  const timelinePanel = analysisCardPanel('発話量の変化（時間別）', 'automatic', 'timeline', true);
+  const timelinePanel = analysisCardPanel('発話量の変化（時間別）', 'automatic', 'timeline', true, 'participation');
   const bins = Array.isArray(automatic.time_bins) ? automatic.time_bins : [];
   if (bins.length) timelinePanel.body.append(buildAnalysisTimelineChart(bins, speakers));
   else timelinePanel.body.append(analysisElement('p', 'analysis-no-data', '時間推移を表示できる発話がありません。'));
   grid.append(timelinePanel.panel);
 
-  const speakerPanel = analysisCardPanel('話者ごとの発話量', 'automatic', 'speakers', true);
+  const speakerPanel = analysisCardPanel('話者ごとの発話量', 'automatic', 'speakers', true, 'participation');
   if (!speakers.length) {
     speakerPanel.body.append(analysisElement('p', 'analysis-no-data', '発話データがありません。'));
   } else {
@@ -6092,7 +6923,7 @@ function renderAutomaticAnalysis(compact) {
   }
   grid.append(speakerPanel.panel);
 
-  const balancePanel = analysisCardPanel('参加者の発言バランス', 'automatic');
+  const balancePanel = analysisCardPanel('参加者の発言バランス', 'automatic', '', false, 'participation');
   const balance = automatic.balance || {};
   const balanceMetrics = analysisElement('div', 'analysis-mini-metrics');
   appendAnalysisMetric(balanceMetrics, '均等度', analysisNumberText((Number(balance.normalized_evenness) || 0) * 100, 1, '%'), '100%に近いほど均等');
@@ -6101,7 +6932,7 @@ function renderAutomaticAnalysis(compact) {
   balancePanel.body.append(balanceMetrics, analysisElement('p', 'analysis-caption', '発言量の偏りを示す記述値です。発言の重要性や場への影響力は表しません。'));
   grid.append(balancePanel.panel);
 
-  const moderatorPanel = analysisCardPanel('司会者と参加者の発言関係', 'automatic');
+  const moderatorPanel = analysisCardPanel('司会者と参加者の発言関係', 'automatic', '', false, 'participation');
   const moderator = automatic.moderator || {};
   const moderatorMetrics = analysisElement('div', 'analysis-mini-metrics');
   appendAnalysisMetric(moderatorMetrics, '司会発話比率', moderator.assigned ? analysisNumberText(moderator.speaking_percent, 1, '%') : '役割未設定');
@@ -6111,7 +6942,7 @@ function renderAutomaticAnalysis(compact) {
   moderatorPanel.body.append(moderatorMetrics, analysisElement('p', 'analysis-caption', '質問・応答は表記と話者遷移からの候補です。進行品質の評価ではありません。'));
   grid.append(moderatorPanel.panel);
 
-  const transitionsPanel = analysisCardPanel('発言者の交替パターン', 'automatic', 'transitions', true);
+  const transitionsPanel = analysisCardPanel('発言者の交替パターン', 'automatic', 'transitions', true, 'conversation_dynamics');
   const transitions = Array.isArray(automatic.transitions) ? automatic.transitions : [];
   if (transitions.length) {
     const tableWrap = analysisElement('div', 'analysis-table-wrap');
@@ -6138,7 +6969,7 @@ function renderAutomaticAnalysis(compact) {
   } else transitionsPanel.body.append(analysisElement('p', 'analysis-no-data', '話者交替のデータがありません。'));
   grid.append(transitionsPanel.panel);
 
-  const gapsPanel = analysisCardPanel('沈黙・同時発話の候補', 'automatic', 'gaps');
+  const gapsPanel = analysisCardPanel('沈黙・同時発話の候補', 'automatic', 'gaps', false, 'conversation_dynamics');
   const longGaps = Array.isArray(automatic.long_gaps) ? automatic.long_gaps : [];
   const overlaps = Array.isArray(automatic.overlap_candidates) ? automatic.overlap_candidates : [];
   const gapSummary = analysisElement('div', 'analysis-mini-metrics');
@@ -6150,7 +6981,7 @@ function renderAutomaticAnalysis(compact) {
   gapsPanel.body.append(analysisElement('p', 'analysis-caption', '沈黙・遮り・熱意などの意味は音声と文脈を確認して判断してください。'));
   grid.append(gapsPanel.panel);
 
-  const emotionPanel = analysisCardPanel('声から推定した感情の分布', 'automatic', 'emotions');
+  const emotionPanel = analysisCardPanel('声から推定した感情の分布', 'automatic', 'emotions', false, 'audio_emotion');
   const emotions = Array.isArray(automatic.emotions) ? automatic.emotions : [];
   if (emotions.length) {
     emotions.slice(0, compact ? 10 : 20).forEach(item => {
@@ -6172,7 +7003,7 @@ function renderAutomaticAnalysis(compact) {
 
   const groups = Array.isArray(automatic.groups) ? automatic.groups : [];
   if (groups.length) {
-    const groupsPanel = analysisCardPanel('話者グループの比較', 'configured', 'groups');
+    const groupsPanel = analysisCardPanel('話者グループの比較', 'configured', 'groups', false, 'participation');
     groups.forEach(item => appendAnalysisBar(
       groupsPanel.body, item.group || '未設定', item.speaking_percent,
       `${item.speaker_count || 0}人 / ${item.turn_count || 0}回 / ${formatTime(item.speaking_seconds || 0)}`,
@@ -6185,7 +7016,7 @@ function renderAutomaticAnalysis(compact) {
     'language', '02 / LANGUAGE STRUCTURE', '語と構文を探索する',
     '特徴語から全体像をつかみ、形態素・共起関係・文ごとの係り受けへ段階的に掘り下げます。'
   ));
-  const keywordsPanel = analysisCardPanel('会話でよく使われた特徴語', 'automatic', 'keywords');
+  const keywordsPanel = analysisCardPanel('会話でよく使われた特徴語', 'automatic', 'keywords', false, 'lexical_frequency');
   const keywords = Array.isArray(automatic.keywords) ? automatic.keywords : [];
   const maxKeyword = Math.max(1, ...keywords.map(item => Number(item.count) || 0));
   if (keywords.length) {
@@ -6405,6 +7236,8 @@ function analysisAnnotation(segmentId) {
   if (!analysisState.annotations[segmentId] || typeof analysisState.annotations[segmentId] !== 'object') {
     analysisState.annotations[segmentId] = {
       codes: [], interaction_tags: [], elicitation: 'unknown', interaction_links: [],
+      dialogue_act: '', importance_score: null, review_score: null, sensitivity_score: null,
+      classification_status: 'unreviewed', classification_note: '',
       memo: '', important: false, excluded: false
     };
   }
@@ -6420,6 +7253,12 @@ function analysisSegmentMatches(segment) {
     || annotation.elicitation && annotation.elicitation !== 'unknown'
     || (annotation.interaction_links || []).length
     || annotation.memo
+    || annotation.dialogue_act
+    || annotation.importance_score !== undefined && annotation.importance_score !== null
+    || annotation.review_score !== undefined && annotation.review_score !== null
+    || annotation.sensitivity_score !== undefined && annotation.sensitivity_score !== null
+    || annotation.classification_status && annotation.classification_status !== 'unreviewed'
+    || annotation.classification_note
     || annotation.important
     || annotation.excluded
   );
@@ -6442,9 +7281,13 @@ function renderAnalysisSegmentItems(list, compact) {
   }
   const codebook = Array.isArray(analysisState.config.codebook) ? analysisState.config.codebook : [];
   const interactionTags = ((analysisState.data.manual || {}).interaction_tags || []);
+  const classificationResult = ((analysisState.data.segment_classification || {}).result || {});
+  const proposalById = new Map((classificationResult.segments || []).map(row => [String(row.segment_id), row]));
   visible.slice(0, limit).forEach(segment => {
     const annotation = analysisState.annotations[segment.id] || {
       codes: [], interaction_tags: [], elicitation: 'unknown', interaction_links: [],
+      dialogue_act: '', importance_score: null, review_score: null, sensitivity_score: null,
+      classification_status: 'unreviewed', classification_note: '',
       memo: '', important: false, excluded: false
     };
     const card = analysisElement('article', 'analysis-segment-card');
@@ -6464,6 +7307,70 @@ function renderAnalysisSegmentItems(list, compact) {
     header.append(meta, status);
     const quote = analysisElement('p', 'analysis-segment-text', segment.text || '（本文なし）');
     card.append(header, quote);
+
+    const proposal = proposalById.get(String(segment.id));
+    if (proposal) {
+      const proposalGrid = analysisElement('div', 'segment-proposal-grid');
+      const proposalCard = (label, value, source) => {
+        const item = analysisElement('article');
+        item.append(analysisElement('strong', '', label), analysisElement('span', '', value || '提案なし'));
+        if (source && source.dialogue_act) {
+          const apply = analysisElement('button', 'secondary-button small', '手動欄へ反映');
+          apply.type = 'button';
+          apply.dataset.applyClassificationProposal = source === proposal.llm ? 'llm' : 'template';
+          apply.dataset.analysisSegmentId = segment.id;
+          item.append(apply);
+        }
+        return item;
+      };
+      const scoreText = source => source && source.dialogue_act_label
+        ? `${source.dialogue_act_label} / 重要${source.importance_score ?? '—'}・要確認${source.review_score ?? '—'}・機密${source.sensitivity_score ?? '—'}`
+        : '';
+      proposalGrid.append(
+        proposalCard('テンプレート', scoreText(proposal.template), proposal.template),
+        proposalCard('Jev', scoreText(proposal.llm), proposal.llm),
+        proposalCard('Transformer話題', (proposal.transformer || {}).topic_label || '', null)
+      );
+      card.append(proposalGrid);
+    }
+
+    const classificationControls = analysisElement('div', 'segment-manual-classification');
+    const dialogueAct = document.createElement('select');
+    dialogueAct.add(new Option('未確定', ''));
+    Object.entries(dialogueActLabels).forEach(([value, label]) => dialogueAct.add(new Option(label, value)));
+    dialogueAct.value = annotation.dialogue_act || '';
+    dialogueAct.dataset.analysisSegmentId = segment.id;
+    dialogueAct.dataset.analysisAnnotationField = 'dialogue_act';
+    classificationControls.append(analysisField('手動：発話種別', dialogueAct));
+    [
+      ['importance_score', '手動：重要度'],
+      ['review_score', '手動：要確認度'],
+      ['sensitivity_score', '手動：機密らしさ']
+    ].forEach(([field, label]) => {
+      const input = document.createElement('input');
+      input.type = 'number'; input.min = '0'; input.max = '100'; input.step = '1';
+      input.value = annotation[field] === undefined || annotation[field] === null ? '' : String(annotation[field]);
+      input.dataset.analysisSegmentId = segment.id;
+      input.dataset.analysisAnnotationField = field;
+      classificationControls.append(analysisField(label, input, '0〜100。空欄は未確定。'));
+    });
+    const classificationStatus = document.createElement('select');
+    [['unreviewed', '未確認'], ['draft', '確認途中'], ['reviewed', '確認済み']]
+      .forEach(([value, label]) => classificationStatus.add(new Option(label, value)));
+    classificationStatus.value = annotation.classification_status || 'unreviewed';
+    classificationStatus.dataset.analysisSegmentId = segment.id;
+    classificationStatus.dataset.analysisAnnotationField = 'classification_status';
+    classificationControls.append(analysisField('判定状態', classificationStatus));
+    card.append(classificationControls);
+
+    const classificationNote = document.createElement('textarea');
+    classificationNote.rows = 2;
+    classificationNote.maxLength = 5000;
+    classificationNote.value = annotation.classification_note || '';
+    classificationNote.placeholder = '自動提案を採用・修正・保留した根拠';
+    classificationNote.dataset.analysisSegmentId = segment.id;
+    classificationNote.dataset.analysisAnnotationField = 'classification_note';
+    card.append(analysisField('分類確認メモ', classificationNote));
 
     const codeGroup = analysisElement('fieldset', 'analysis-chip-group');
     codeGroup.append(analysisElement('legend', '', 'テーマコード'));
@@ -6806,7 +7713,7 @@ function qualitativeEvidenceDetails(segments, {continuous = false} = {}) {
 }
 
 function renderInteractionTimeline() {
-  const panel = analysisCardPanel('相互作用と意見変化の発言順タイムライン', 'manual', 'interaction_links', true);
+  const panel = analysisCardPanel('相互作用と意見変化の発言順タイムライン', 'manual', 'interaction_links', true, 'qualitative_coding');
   panel.panel.dataset.interactionTimeline = '';
   const data = analysisState.data;
   const manual = data.manual || {};
@@ -6923,13 +7830,23 @@ function renderManualSummary(container, compact) {
     methods.forEach(item => planPanel.body.append(analysisElement(
       'p', 'analysis-list-row', `${item.role}：${item.method}（データ充足: ${item.data_sufficiency}）`
     )));
+    const expertBlock = analysisState.data.experts || {};
+    if (expertBlock.status === 'unavailable') {
+      planPanel.body.append(analysisElement('p', 'analysis-section-help', expertBlock.message || '専門家定義を読み込めません。'));
+    }
+    (Array.isArray(expertBlock.experts) ? expertBlock.experts : []).forEach(expert => {
+      planPanel.body.append(buildExpertDetails(expert));
+    });
+    if (expertBlock.ai && expertBlock.ai.mode === 'blocked') {
+      planPanel.body.append(analysisElement('p', 'analysis-section-help', `AI見解：${expertBlock.ai.reason}`));
+    }
     container.append(planPanel.panel);
   }
 
   const codeMetrics = Array.isArray(manual.code_metrics) ? manual.code_metrics : [];
   const interactionSummary = Array.isArray(manual.interaction_summary) ? manual.interaction_summary : [];
   if (codeMetrics.length || interactionSummary.some(item => item.count)) {
-    const summary = analysisCardPanel('手動コードの集計', 'manual', 'codes', true);
+    const summary = analysisCardPanel('手動コードの集計', 'manual', 'codes', true, 'qualitative_coding');
     if (codeMetrics.length) {
       const maximum = codeMetrics.reduce((max, item) => Math.max(max, qualitativeCount(item.segment_count)), 0);
       summary.body.append(analysisElement('p', 'analysis-caption',
@@ -6955,7 +7872,7 @@ function renderManualSummary(container, compact) {
   const matrix = Array.isArray(manual.case_code_matrix) ? manual.case_code_matrix : [];
   const codebook = Array.isArray(manual.codebook) ? manual.codebook : [];
   if (matrix.length && codebook.length) {
-    const matrixPanel = analysisCardPanel('話者×コード（発言件数）', 'manual', 'case_matrix', true);
+    const matrixPanel = analysisCardPanel('話者×コード（発言件数）', 'manual', 'case_matrix', true, 'qualitative_coding');
     const wrap = analysisElement('div', 'analysis-table-wrap');
     wrap.tabIndex = 0;
     wrap.setAttribute('role', 'region');
@@ -7042,7 +7959,7 @@ function renderManualAnalysis(compact) {
     return annotation.important && !annotation.excluded;
   });
   if (importantQuotes.length) {
-    const quotesPanel = analysisCardPanel('重要引用', 'manual', 'important_quotes', true);
+    const quotesPanel = analysisCardPanel('重要引用', 'manual', 'important_quotes', true, 'qualitative_coding');
     importantQuotes.slice(0, compact ? 5 : 12).forEach(segment => {
       const quote = analysisElement('blockquote', 'analysis-important-quote');
       quote.append(
@@ -7126,7 +8043,7 @@ function renderManualAnalysis(compact) {
   settingsPanel.body.append(speakerExclusions);
   fragment.append(settingsPanel.panel);
 
-  const codebookPanel = analysisCardPanel('コードブック', 'configured', '', true);
+  const codebookPanel = analysisCardPanel('コードブック', 'configured', '', true, 'qualitative_coding');
   codebookPanel.body.append(
     analysisElement('p', 'analysis-section-help', 'コードの意味と含む／含まない例、カテゴリー、テーマを先に定義すると、複数人でも判断を揃えやすくなります。'),
     analysisField('今回のコードブック変更理由', analysisConfigControl('codebook_change_reason', 'textarea'), '追加・修正・削除の理由を記入します。変更時に履歴へ保存されます。'),
@@ -7134,7 +8051,7 @@ function renderManualAnalysis(compact) {
   );
   fragment.append(codebookPanel.panel);
 
-  const codingPanel = analysisCardPanel('発話ごとのコード・相互作用・メモ', 'manual', 'coded_segments', true);
+  const codingPanel = analysisCardPanel('発話ごとのコード・相互作用・メモ', 'manual', 'coded_segments', true, 'qualitative_coding');
   codingPanel.body.append(
     analysisElement('p', 'analysis-section-help', 'タグは観察記録です。合意や発言抑制などの意味は、前後の発話や音声を確認して設定してください。'),
     analysisCodingWorkspace(compact)
@@ -7220,6 +8137,10 @@ function updateAnalysisAnnotationFromControl(control) {
       ? [...new Set([...values, itemValue])]
       : values.filter(value => value !== itemValue);
   } else if (field === 'important' || field === 'excluded') annotation[field] = control.checked;
+  else if (['importance_score', 'review_score', 'sensitivity_score'].includes(field)) {
+    const number = control.value === '' ? null : Number(control.value);
+    annotation[field] = Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
+  }
   else annotation[field] = control.value;
   syncAnalysisControls(control, '[data-analysis-annotation-field]', peer => (
     peer.dataset.analysisSegmentId === segmentId
@@ -7263,6 +8184,7 @@ async function saveAnalysis() {
       && analysisMutationGeneration !== saveGeneration;
     if (analysisState.itemId === savedItemId && !hasLaterChanges) {
       analysisState.data = data;
+      invalidateAnalysisMethodOverview();
       analysisState.config = deepCopy(data.config || {});
       analysisState.annotations = deepCopy(data.annotations || {});
       if (analysisTermRunRequested) analysisState.mode = 'automatic';
@@ -7296,6 +8218,29 @@ listen(document.querySelector('#analysis-refresh-button'), 'click', () => {
 });
 
 listen(analysisCard, 'click', event => {
+  const runClassification = event.target.closest('[data-run-segment-classification]');
+  if (runClassification) {
+    runSegmentClassification();
+    return;
+  }
+  const applyClassification = event.target.closest('[data-apply-classification-proposal]');
+  if (applyClassification) {
+    const segmentId = applyClassification.dataset.analysisSegmentId;
+    const result = ((analysisState.data || {}).segment_classification || {}).result || {};
+    const row = (result.segments || []).find(value => String(value.segment_id) === String(segmentId));
+    const source = row && row[applyClassification.dataset.applyClassificationProposal];
+    if (source) {
+      const annotation = analysisAnnotation(segmentId);
+      annotation.dialogue_act = source.dialogue_act || '';
+      annotation.importance_score = source.importance_score ?? null;
+      annotation.review_score = source.review_score ?? null;
+      annotation.sensitivity_score = source.sensitivity_score ?? null;
+      annotation.classification_status = 'draft';
+      setAnalysisDirty(true);
+      renderAnalysisWorkspace();
+    }
+    return;
+  }
   const scope = event.target.closest('[data-analysis-scope]');
   if (scope) {
     analysisState.automaticScope = scope.dataset.analysisScope === 'speakers' ? 'speakers' : 'overall';
@@ -7335,6 +8280,17 @@ listen(analysisCard, 'click', event => {
   const mode = event.target.closest('[data-analysis-mode]');
   if (mode) {
     setAnalysisMode(mode.dataset.analysisMode);
+    return;
+  }
+  const methodSelect = event.target.closest('[data-analysis-method-select]');
+  if (methodSelect) {
+    analysisMethodState().selected = methodSelect.dataset.analysisMethodSelect;
+    renderAnalysisWorkspace();
+    return;
+  }
+  if (event.target.closest('[data-analysis-methods-refresh]')) {
+    invalidateAnalysisMethodOverview();
+    renderAnalysisWorkspace();
     return;
   }
   const save = event.target.closest('[data-analysis-save]');
@@ -7470,8 +8426,38 @@ window.addEventListener('scroll', scheduleAnalysisNavigationSync, {passive: true
 window.addEventListener('resize', scheduleAnalysisNavigationSync, {passive: true});
 
 const requestedParameters = new URLSearchParams(window.location.search);
-const requestedView = requestedParameters.get('view');
 const requestedSectionValue = requestedParameters.get('section');
 const requestedAnalysisSection = ['overview', 'content', 'conversation', 'language', 'statistics', 'exports'].includes(requestedSectionValue)
   ? requestedSectionValue : '';
+
+// `?view=` and `?item=` links (Vault links, older bookmarks) still work: they
+// resolve to the matching hash route on first load.
+function applyRouteFromLocation({fromHistory = false, initial = false} = {}) {
+  let route = parseRouteHash(window.location.hash);
+  if (!route && initial) {
+    const requestedView = requestedParameters.get('view');
+    const view = ['new', 'library', 'speakers', 'analysis'].includes(requestedView) ? requestedView : 'new';
+    route = {view, itemId: view === 'analysis' ? String(requestedParameters.get('item') || '') : ''};
+  }
+  if (!route) route = {view: 'new', itemId: ''};
+  if (route.view === 'item') {
+    if (currentJob && String(currentJob.id) === route.itemId) {
+      if (!showView('item', {itemId: route.itemId, replace: initial}) && fromHistory) syncRouteHash(currentRouteHash);
+      return;
+    }
+    if (!confirmLeave({target: 'item', itemId: route.itemId})) {
+      if (fromHistory) syncRouteHash(currentRouteHash);
+      return;
+    }
+    openLibraryItem(route.itemId).then(() => {
+      if (!currentJob || String(currentJob.id) !== route.itemId) showView('library', {replace: true});
+    });
+    return;
+  }
+  const opened = showView(route.view, {analysisItemId: route.view === 'analysis' ? route.itemId : '', replace: initial});
+  if (!opened && fromHistory) syncRouteHash(currentRouteHash);
+}
+
+window.addEventListener('popstate', () => applyRouteFromLocation({fromHistory: true}));
+applyRouteFromLocation({initial: true});
 showView(['new', 'library', 'speakers', 'analysis'].includes(requestedView) ? requestedView : 'new');

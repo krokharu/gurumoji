@@ -1,5 +1,6 @@
 ---
 note_id: method-audio-emotion
+note_type: analysis-method
 method_id: audio_emotion
 method_version: text-analysis-store-2
 algorithm_version: per-model-repository-and-fold
@@ -32,3 +33,7 @@ tags: [gurumoji/analysis, gurumoji/audio, gurumoji/orchestrator]
 - [Kosaka et al. (2023)](https://doi.org/10.1587/transinf.2023HCP0010) はJTESを用いた日本語感情音声認識を報告する。
 
 モデル配布とセットアップは[[../../../EMOTION_ANALYSIS|音声感情分析の設定]]を参照。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/speech-emotion-recognition/01-Expert|音声感情推定の専門家]]。上のKosaka et al.の年と位置づけは2026-09-16の調査で確認できていない（[[50-Analysis-Methods/20-Literature/LIT-kosaka-2024-emotional-speech-recognition]]）。

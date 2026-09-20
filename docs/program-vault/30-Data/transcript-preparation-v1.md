@@ -2,8 +2,13 @@
 note_id: transcript-preparation-v1
 note_type: data-contract
 title: 逐語録の分析準備・版と確認状態
+summary: 逐語録を分析用に準備する際の版、確認状態、根拠、匿名化の契約を定める。
 status: current
+feature: transcript-preparation
 updated: 2026-09-14
+tags:
+  - gurumoji/program
+  - gurumoji/analysis
 ---
 
 # 逐語録の分析準備

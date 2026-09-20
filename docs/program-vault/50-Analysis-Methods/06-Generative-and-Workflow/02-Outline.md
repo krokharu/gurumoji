@@ -1,5 +1,6 @@
 ---
 note_id: method-outline
+note_type: analysis-method
 method_id: outline
 method_version: text-analysis-store-2
 algorithm_version: ai-finishing-3
@@ -28,3 +29,7 @@ tags: [gurumoji/analysis, gurumoji/generative-ai, gurumoji/orchestrator]
 ## 査読文献との関係
 
 アウトライン生成そのものに対応する固定の査読済み分析法はない。[Gilardi et al. (2023)](https://doi.org/10.1073/pnas.2305016120)のようなLLM注釈評価は補助利用の可能性を示すに留まる。人の編集、根拠照合、版管理がこの機能の妥当性の中心である。
+
+## 専門家定義との関係
+
+アウトラインは会話のナビゲーションと編集のための中間成果物で、分析手法ではないため、専用の専門家を置かない（[[50-Analysis-Methods/10-Experts/00-Index]]）。

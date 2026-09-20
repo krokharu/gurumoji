@@ -1,5 +1,6 @@
 ---
 note_id: method-conversation-dynamics
+note_type: analysis-method
 method_id: conversation_dynamics
 method_version: text-analysis-store-2
 algorithm_version: focus-group-local-1
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/conversation, gurumoji/orchestrator]
 
 - [Sacks, Schegloff & Jefferson (1974)](https://doi.org/10.2307/412243) は会話のターン交替の組織を定式化した。
 - [Heldner & Edlund (2010)](https://doi.org/10.1016/j.wocn.2010.08.002) は複数コーパスのポーズ、間、重なりの分布と、閾値・統計処理の方法論的問題を報告した。現行の0.2秒／3秒は実装上の確認用しきい値で、普遍的な意味境界ではない。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/conversation-timing/01-Expert|会話の時間構造の専門家]]。結果の解釈の適用条件・手順・禁止事項と、文献の確認範囲は専門家定義を参照する。上のHeldner & Edlund（2010）についての記述は、2026-09-16の調査では要旨の一部しか確認できず、裏付けていない（[[50-Analysis-Methods/20-Literature/LIT-heldner-edlund-2010-pauses]]）。

@@ -375,11 +375,27 @@ class AnalysisStore:
         artifacts = {a["name"]: a for a in self.artifacts(run_id)}
         return tuple(json.loads(self.read_artifact(artifacts[name]["id"])[1]) for name in ("input.json", "result.json"))
 
+    def follow_moves(self, item_id: str) -> None:
+        """Apply interview folder moves detected by ObsidianLayout to the SQLite catalog."""
+        self.layout.follow(item_id)
+        record = self.layout.load()["interviews"].get(item_id) or {}
+        if not record.get("moved_from"):
+            return
+        with self.connect() as conn:
+            for old in record["moved_from"]:
+                prefix = old + "/"
+                # substr from the "/" keeps the remainder of the path under the new folder.
+                conn.execute("UPDATE OR IGNORE obsidian_notes SET path=?||substr(path,?) WHERE substr(path,1,?)=?",
+                             (record["folder"], len(prefix), len(prefix), prefix))
+                conn.execute("UPDATE analysis_runs SET note_path=?||substr(note_path,?) WHERE substr(note_path,1,?)=?",
+                             (record["folder"], len(prefix), len(prefix), prefix))
+
     def write_note(self, relative: str, note_id: str, item_id: str, content: str,
                    *, graph_kind: str = "analysis", graph_scope: str | None = None) -> None:
         if item_id:
             content = self.layout.decorate(content, item_id, graph_kind,
                 graph_scope or ("detail" if relative.endswith("-分析まとめ.md") else "history"))
+            self.follow_moves(item_id)
         target = safe_path(self.vault, relative)
         encoded = content.encode("utf-8")
         new_hash = hashlib.sha256(encoded).hexdigest()
@@ -674,6 +690,7 @@ class AnalysisStore:
 
     def _publish_index(self, item_id: str) -> None:
         from .obsidian_layout import ANALYSIS_INDEX, link, method_table
+        self.follow_moves(item_id)
         with self.connect() as conn:
             runs = [dict(r) for r in conn.execute("""SELECT * FROM analysis_runs
                 WHERE item_id=? AND status='completed' AND note_path!=''

@@ -101,16 +101,21 @@ set "PROJECT_FFMPEG=%VENV_DIR%\Scripts\ffmpeg.exe"
 if not exist "%PROJECT_FFMPEG%" (
   echo Installing project-local FFmpeg ...
   set "PACKAGED_FFMPEG="
-  for /f "usebackq delims=" %%F in (`"%PYTHON%" -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"`) do set "PACKAGED_FFMPEG=%%F"
+  rem Do not use FOR /F command substitution here.  CMD misparses a quoted
+  rem executable path in that context on some Windows installations.
+  set "FFMPEG_PATH_FILE=%VENV_DIR%\.imageio-ffmpeg-path.txt"
+  "%PYTHON%" -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" > "!FFMPEG_PATH_FILE!" || goto :error
+  set /p "PACKAGED_FFMPEG=" < "!FFMPEG_PATH_FILE!"
+  del /q "!FFMPEG_PATH_FILE!" >nul 2>nul
   if not defined PACKAGED_FFMPEG (
     echo Could not obtain the FFmpeg executable from imageio-ffmpeg.
     goto :error
   )
-  if not exist "%PACKAGED_FFMPEG%" (
-    echo The packaged FFmpeg executable was not found: %PACKAGED_FFMPEG%
+  if not exist "!PACKAGED_FFMPEG!" (
+    echo The packaged FFmpeg executable was not found: !PACKAGED_FFMPEG!
     goto :error
   )
-  copy /y "%PACKAGED_FFMPEG%" "%PROJECT_FFMPEG%" >nul || goto :error
+  copy /y "!PACKAGED_FFMPEG!" "%PROJECT_FFMPEG%" >nul || goto :error
 )
 set "PATH=%VENV_DIR%\Scripts;%VENV_DIR%\Lib\site-packages\torch\lib;%PATH%"
 where ffmpeg >nul 2>nul || (

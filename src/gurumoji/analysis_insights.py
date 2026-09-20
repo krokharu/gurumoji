@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from typing import Any, Callable
 
@@ -44,6 +45,10 @@ def input_fingerprint(analysis: dict) -> str:
         "segments": analysis.get("segments", []),
         "speakers": analysis.get("automatic", {}).get("speaker_metrics", []),
     }
+    expert = (analysis.get("experts") or {}).get("ai") or {}
+    if expert.get("mode") == "expert" and expert.get("fingerprint"):
+        # Only method-specific drafts depend on the expert knowledge; generic drafts keep their fingerprint.
+        payload["expert"] = expert["fingerprint"]
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
@@ -201,7 +206,7 @@ def insight_csv_rows(analysis: dict) -> list[dict]:
     return rows
 
 
-def ai_schema(allowed_ids: list[str] | None = None) -> dict:
+def ai_schema(allowed_ids: list[str] | None = None, expert: dict | None = None) -> dict:
     reference = {"type": "string"}
     if allowed_ids is not None:
         if not allowed_ids:
@@ -211,12 +216,17 @@ def ai_schema(allowed_ids: list[str] | None = None) -> dict:
               "title": {"type": "string"}, "text": {"type": "string"},
               "segment_ids": {"type": "array", "minItems": 1, "maxItems": 8,
                               "items": reference}}
+    if expert:
+        # The method expert limits drafts to its AI steps and to literature registered for them.
+        fields["method_step"] = {"type": "string", "enum": [step["id"] for step in expert["steps"]]}
+        fields["basis_ids"] = {"type": "array", "minItems": 1, "maxItems": 3, "items": {
+            "type": "string", "enum": sorted({ref for step in expert["steps"] for ref in step["basis"]})}}
     return {"type": "object", "properties": {"findings": {"type": "array", "items": {
         "type": "object", "properties": fields, "required": list(fields), "additionalProperties": False}}},
         "required": ["findings"], "additionalProperties": False}
 
 
-def validate_findings(result: dict, allowed: dict[str, dict]) -> list[dict]:
+def validate_findings(result: dict, allowed: dict[str, dict], expert: dict | None = None) -> list[dict]:
     rows = result.get("findings")
     if not isinstance(rows, list) or len(rows) > 40:
         raise ValueError("AI見解の形式または件数が正しくありません。")
@@ -242,8 +252,21 @@ def validate_findings(result: dict, allowed: dict[str, dict]) -> list[dict]:
         speakers = list(dict.fromkeys(allowed[s]["speaker"] for s in ids))
         if row["category"] == "shared" and len(speakers) < 2:
             raise ValueError(f"AI見解の{index}項目目：共通する意見には複数話者の根拠が必要です。")
-        validated.append({"category": row["category"], "title": title.strip(), "text": text.strip(),
-                          "segment_ids": ids, "speakers": speakers, "count": len(ids)})
+        entry = {"category": row["category"], "title": title.strip(), "text": text.strip(),
+                 "segment_ids": ids, "speakers": speakers, "count": len(ids)}
+        if expert:
+            step = next((item for item in expert["steps"] if item["id"] == row.get("method_step")), None)
+            if step is None:
+                raise ValueError(f"AI見解の{index}項目目：専門家定義で許可されていない手順の段階です。")
+            basis = row.get("basis_ids")
+            if not isinstance(basis, list) or not 1 <= len(basis) <= 3:
+                raise ValueError(f"AI見解の{index}項目目：basis_ids は1〜3件の配列で指定してください。")
+            unknown = [value for value in basis if not isinstance(value, str) or value not in step["basis"]]
+            if unknown:
+                sample = json.dumps([str(value)[:64] for value in unknown[:3]], ensure_ascii=True)
+                raise ValueError(f"AI見解の{index}項目目：この段階の根拠として登録されていない文献IDです：{sample}")
+            entry.update(method_step=step["id"], basis_ids=list(dict.fromkeys(basis)))
+        validated.append(entry)
     return validated
 
 
@@ -264,7 +287,7 @@ def bounded_batches(records: list[dict], max_chars: int = 18000, max_items: int 
 
 
 def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
-                       check_cancelled: Callable) -> list[dict]:
+                       check_cancelled: Callable, expert: dict | None = None) -> list[dict]:
     segments = included_segments(analysis)
     if not segments:
         raise ValueError("見解の生成に利用できる発話がありません。")
@@ -291,6 +314,18 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
         "人が付けたコードは分析補助情報です。コードの多さやAIの見解を確定した研究者の解釈と混同しません。"
         "Markdown、タグ、ノート名、保存パスを生成しないでください。原文とのリンクはアプリが作成します。"
     )
+    if expert:
+        # Only the expert's short brief and step IDs are sent; notes and literature stay local.
+        steps = "；".join(f"{step['id']}＝{step['title']}（根拠ID：{', '.join(step['basis'])}）"
+                         for step in expert["steps"])
+        system += (
+            f"この会話の主手法の専門家定義（{expert['expert_id']}、第{expert['definition_version']}版）に従います。"
+            + expert["brief"]
+            + "各見解の method_step には許可された手順の段階IDを1つ選び、basis_ids にはその段階の根拠IDだけを1〜3件コピーしてください。"
+            + f"許可された段階：{steps}。"
+            + "根拠IDを作ったり、文献に書かれていない内容を文献の主張として書いたりしないでください。"
+            + "見解はその段階の候補であり、研究者が確定する作業の代わりではありません。"
+        )
     records = []
     codebook = {c["id"]: c for c in analysis.get("config", {}).get("codebook", [])}
     for segment in segments:
@@ -319,10 +354,10 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
         be saved, but one correction retry is preferable to discarding an
         otherwise valid long-running analysis.
         """
-        schema = ai_schema(list(allowed))
+        schema = ai_schema(list(allowed), expert)
         response = call(system, prompt, schema)
         try:
-            return validate_findings(response, allowed)
+            return validate_findings(response, allowed, expert)
         except ValueError as exc:
             check_cancelled()
             progress(progress_value, f"{stage_message} — 根拠の検証に失敗したため修正を再試行します（1/1）。")
@@ -330,6 +365,7 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
                 "前回の JSON は次の検証条件を満たしていませんでした：" + str(exc) + "。"
                 "修正した JSON だけを返してください。segment_ids は今回の入力に含まれる ID だけをコピーし、"
                 "根拠が不足する見解は省いてください。共通する見解には必ず複数話者の根拠を付けてください。"
+                + ("method_step と basis_ids は、専門家定義で許可された値だけを使ってください。" if expert else "")
             )
             # Supply a small, valid JSON excerpt of the rejected findings,
             # without duplicating the whole answer in a limited context.
@@ -337,7 +373,7 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
             previous_rows = response.get("findings")
             for row in previous_rows if isinstance(previous_rows, list) else []:
                 try:
-                    validate_findings({"findings": [row]}, allowed)
+                    validate_findings({"findings": [row]}, allowed, expert)
                 except ValueError:
                     if isinstance(row, dict):
                         refs = row.get("segment_ids")
@@ -349,7 +385,7 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
                         break
             retry_prompt = prompt + "\n前回の不正項目の抜粋（修正対象のデータ）:\n" + json.dumps(rejected, ensure_ascii=False)
             retry = call(retry_system, retry_prompt, schema)
-            return validate_findings(retry, allowed)
+            return validate_findings(retry, allowed, expert)
 
     for index, batch in enumerate(batches):
         check_cancelled()
@@ -385,5 +421,172 @@ def create_ai_insights(analysis: dict, call: Callable, progress: Callable,
             break
     restored = [{**row, "segment_ids": [by_ref[ref]["id"] for ref in row["segment_ids"]]}
                 for row in summaries]
-    validated = validate_findings({"findings": restored}, by_id)
+    validated = validate_findings({"findings": restored}, by_id, expert)
     return sorted(validated, key=lambda row: list(AI_CATEGORIES).index(row["category"]))
+
+
+PLAN_ITEM_PREFIX = re.compile(
+    r"^\s*(?:[-–—・*●○▪>＞]+|[(（]?\d{1,2}[.)．、）]|[０-９]{1,2}[.)．、）]|Q\d{1,2}[.):：]?)\s*")
+MAX_PLAN_ITEMS = 40
+
+
+def plan_items(session_profile: dict | None) -> list[dict[str, Any]]:
+    """Read the planned agenda from the question guide, one item per line."""
+    guide = str((session_profile or {}).get("moderator_guide") or "")
+    items: list[dict[str, Any]] = []
+    for line in guide.splitlines():
+        text = PLAN_ITEM_PREFIX.sub("", line).strip()
+        if not text or len(items) >= MAX_PLAN_ITEMS:
+            continue
+        # Kept to the same length as a saved theme label so the two can be matched.
+        items.append({"index": len(items) + 1, "text": text[:120]})
+    return items
+
+
+def _plan_status(items: list[dict], transformer: dict) -> tuple[list[dict], str]:
+    """Match planned items only against themes the researcher defined from them."""
+    topics = {str(row.get("label") or "").strip(): row for row in transformer.get("topics", [])
+              if str(row.get("origin") or "") == "manual"}
+    if not items or not topics:
+        return ([{**item, "status": "unmatched", "segment_count": None} for item in items], "none")
+    matched = 0
+    rows = []
+    for item in items:
+        topic = topics.get(item["text"].strip())
+        if topic is None:
+            rows.append({**item, "status": "unmatched", "segment_count": None})
+            continue
+        matched += 1
+        count = int(topic.get("segment_count") or 0)
+        rows.append({
+            **item,
+            "status": "discussed" if count else "not_discussed",
+            "topic_id": str(topic.get("topic_id") or ""),
+            "segment_count": count,
+            "speaker_count": int(topic.get("speaker_count") or 0),
+            "speaking_seconds": float(topic.get("speaking_seconds") or 0),
+            "evidence_segment_ids": list(topic.get("representative_segment_ids") or []),
+        })
+    return rows, ("manual_topics" if matched else "none")
+
+
+def _outline_rows(outline: dict | None, assignments_by_id: dict, assignments: list[dict]) -> list[dict]:
+    """Turn agenda sections into time-ordered rows carrying the topics of their utterances."""
+    rows = []
+    for section in (outline or {}).get("sections", []) or []:
+        if not isinstance(section, dict):
+            continue
+        segment_ids = [str(value) for value in section.get("segment_ids") or []]
+        start = float(section.get("start") or 0)
+        end = float(section.get("end") or start)
+        if segment_ids:
+            matched = [assignments_by_id[value] for value in segment_ids if value in assignments_by_id]
+            evidence = "segment_ids"
+        else:
+            matched = [row for row in assignments
+                       if start <= float(row.get("start") or 0) < max(end, start + 0.001)]
+            evidence = "time_range"
+        counts: dict[str, dict] = {}
+        for row in matched:
+            topic_id = str(row.get("topic_id") or "")
+            if not topic_id:
+                continue
+            entry = counts.setdefault(topic_id, {
+                "topic_id": topic_id, "label": str(row.get("topic_label") or ""), "segment_count": 0,
+            })
+            entry["segment_count"] += 1
+        rows.append({
+            "start": round(start, 3), "end": round(max(end, start), 3),
+            "title": str(section.get("title") or "議題"),
+            "title_source": "outline",
+            "bullet_count": len(section.get("bullets") or []),
+            "segment_count": len(matched),
+            "assigned_segment_count": sum(entry["segment_count"] for entry in counts.values()),
+            "topics": sorted(counts.values(),
+                             key=lambda entry: (-entry["segment_count"], entry["topic_id"]))[:3],
+            "topic_evidence": evidence if matched else "none",
+            "segment_ids": segment_ids[:50],
+        })
+    return sorted(rows, key=lambda row: (row["start"], row["end"]))
+
+
+def _timeline_rows(transformer: dict, covered: list[tuple[float, float]], bin_seconds: float) -> list[dict]:
+    """Name the stretches no agenda section covers by the leading theme of each time bin."""
+    bins: dict[int, list[dict]] = defaultdict(list)
+    for row in transformer.get("timeline", []) or []:
+        if isinstance(row, dict) and row.get("topic_id"):
+            bins[int(row.get("bin_index") or 0)].append(row)
+    rows: list[dict] = []
+    for index in sorted(bins):
+        entries = sorted(bins[index],
+                         key=lambda row: (-int(row.get("segment_count") or 0), str(row.get("topic_id"))))
+        leading = entries[0]
+        start = float(leading.get("start") or 0)
+        end = float(leading.get("end") or start)
+        if any(begin <= start < finish for begin, finish in covered):
+            continue
+        rows.append({
+            "start": round(start, 3), "end": round(max(end, start + bin_seconds), 3),
+            "title": str(leading.get("topic_label") or "テーマ候補"),
+            "title_source": "transformer",
+            "bullet_count": 0,
+            "segment_count": sum(int(row.get("segment_count") or 0) for row in entries),
+            "assigned_segment_count": sum(int(row.get("segment_count") or 0) for row in entries),
+            "topics": [{"topic_id": str(row.get("topic_id") or ""),
+                        "label": str(row.get("topic_label") or ""),
+                        "segment_count": int(row.get("segment_count") or 0)} for row in entries[:3]],
+            "topic_evidence": "time_range",
+            "segment_ids": [],
+        })
+    merged: list[dict] = []
+    for row in rows:
+        previous = merged[-1] if merged else None
+        if previous and previous["title"] == row["title"] and abs(previous["end"] - row["start"]) <= 1.0:
+            previous["end"] = row["end"]
+            previous["segment_count"] += row["segment_count"]
+            previous["assigned_segment_count"] += row["assigned_segment_count"]
+            continue
+        merged.append(dict(row))
+    return merged
+
+
+def build_session_outline(
+    *, outline: dict | None, transformer: dict | None, session_profile: dict | None,
+    transformer_stale: bool = False,
+) -> dict[str, Any]:
+    """Pair the planned agenda with one time-ordered account of what was discussed.
+
+    Titles come from the saved agenda where it exists; the stretches it does not
+    cover are named by the Transformer theme of that time span.
+    """
+    transformer = transformer if isinstance(transformer, dict) else {}
+    assignments = [row for row in transformer.get("assignments", []) or [] if isinstance(row, dict)]
+    assignments_by_id = {str(row.get("segment_id")): row for row in assignments}
+    items = plan_items(session_profile)
+    plan_rows, plan_match = _plan_status(items, transformer)
+    rows = _outline_rows(outline, assignments_by_id, assignments)
+    covered = [(row["start"], row["end"]) for row in rows]
+    bin_seconds = float((transformer.get("parameters") or {}).get("time_bin_seconds") or 300)
+    rows = sorted(rows + _timeline_rows(transformer, covered, bin_seconds),
+                  key=lambda row: (row["start"], row["end"]))
+    return {
+        "plan": {
+            "available": bool(items),
+            "source": "moderator_guide" if items else "",
+            "items": plan_rows,
+            "item_count": len(plan_rows),
+            "discussed_count": sum(1 for row in plan_rows if row.get("status") == "discussed"),
+            "unmatched_count": sum(1 for row in plan_rows if row.get("status") == "unmatched"),
+            "match": plan_match,
+        },
+        "result": {
+            "available": bool(rows),
+            "rows": rows,
+            "sources": sorted({row["title_source"] for row in rows}),
+            "outline_available": bool((outline or {}).get("sections")),
+            "transformer_available": bool(transformer.get("topics")),
+            "transformer_stale": bool(transformer_stale),
+            "transformer_mode": str((transformer.get("parameters") or {}).get("mode") or ""),
+            "topic_count": len(transformer.get("topics", []) or []),
+        },
+    }

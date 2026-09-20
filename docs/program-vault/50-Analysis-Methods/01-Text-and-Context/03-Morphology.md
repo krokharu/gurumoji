@@ -1,5 +1,6 @@
 ---
 note_id: method-morphology
+note_type: analysis-method
 method_id: morphology
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -29,3 +30,7 @@ GiNZAが利用可能ならSudachi由来の表層形、lemma、正規形、読み
 
 - [Kudo, Yamamoto & Matsumoto (2004)](https://aclanthology.org/W04-3230/) は、日本語で語境界が自明でないことを前提に形態素解析を評価したEMNLP論文。
 - [Nivre et al. (2020)](https://aclanthology.org/2020.lrec-1.497/) は、lemma・UPOS・形態特徴を含むUDの形態層を説明する。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/japanese-text-preprocessing/01-Expert|日本語テキストの前処理の専門家]]（係り受けと共通）。

@@ -18,22 +18,29 @@ from importlib import metadata
 from typing import Any, Callable
 
 
-TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-7"
+TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-8"
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_MAX_TOPICS = 8
 DEFAULT_MIN_TOPIC_SIZE = 2
 MAX_SEGMENTS = 5000
 MAX_TEXT_CHARACTERS = 6000
+TOPIC_MODES = ("auto", "candidate", "manual")
+MAX_MANUAL_TOPICS = 12
+# The researcher picks the cut-off; 0 keeps every utterance on its nearest theme.
+DEFAULT_MANUAL_MIN_SIMILARITY = 0.0
+# Two themes within this cosine distance of each other decide the assignment by noise.
+LOW_MARGIN_LIMIT = 0.01
 
 TRANSFORMER_CSV_FIELDS = {
     "transformer_topics": [
-        "topic_id", "label", "keywords", "segment_count", "speaker_count",
+        "topic_id", "label", "origin", "keywords", "segment_count", "speaker_count",
         "participant_segment_count", "facilitator_segment_count",
         "backchannel_count", "speaking_seconds", "average_similarity", "representative_segment_ids",
     ],
     "transformer_assignments": [
         "segment_id", "topic_id", "topic_label", "speaker", "speaker_name",
-        "speaker_group", "start", "end", "duration", "similarity", "outlier_score", "text",
+        "speaker_group", "start", "end", "duration", "similarity", "margin",
+        "outlier_score", "text",
     ],
     "transformer_speakers": [
         "topic_id", "topic_label", "speaker", "speaker_name", "segment_count",
@@ -693,13 +700,16 @@ def _choose_labels(
     from sklearn.metrics import silhouette_score
 
     count = len(vectors)
-    if count < max(4, min_topic_size * 2):
+    if count < max(4, min_topic_size * 2) and topic_count is None:
         return np.zeros(count, dtype=int), None, []
     maximum = min(max_topics, count // min_topic_size, count - 1)
-    if maximum < 2:
+    if maximum < 2 and topic_count is None:
         return np.zeros(count, dtype=int), None, []
-    candidates = [topic_count] if topic_count is not None else list(range(2, maximum + 1))
+    # Every candidate is scored even when one count is requested, so the researcher
+    # keeps seeing the list the choice came from.
+    candidates = sorted({*range(2, maximum + 1), *([topic_count] if topic_count else [])})
     best_labels, best_score = None, -2.0
+    chosen_labels, chosen_score = None, None
     scores: list[dict[str, Any]] = []
     for clusters in candidates:
         if clusters is None or not 2 <= clusters < count:
@@ -713,11 +723,95 @@ def _choose_labels(
             vectors, labels, metric="cosine", sample_size=min(1000, count), random_state=42,
         ))
         scores.append({"topic_count": int(clusters), "silhouette_cosine": round(score, 6)})
+        if clusters == topic_count:
+            chosen_labels, chosen_score = labels, score
         # Prefer the simpler solution when scores are effectively equal.
         if score > best_score + 0.005:
             best_labels, best_score = labels, score
+    if topic_count is not None:
+        if chosen_labels is None:
+            raise ValueError(
+                "指定したテーマ数ではクラスタを作れませんでした。テーマ数を減らすか、対象の発話を増やしてください。"
+            )
+        return chosen_labels, chosen_score, scores
     return (best_labels if best_labels is not None else np.zeros(count, dtype=int),
             best_score if best_labels is not None else None, scores)
+
+
+def _manual_theme_vectors(
+    manual_topics: list[dict], segments: list[dict], vectors: Any, *,
+    model_name: str, revision: str,
+    progress: Callable[[int, str], None] | None = None,
+    check_cancelled: Callable[[], None] | None = None,
+) -> tuple[Any, list[int], dict[str, Any] | None]:
+    """Build one vector per researcher-defined theme from its wording and seed utterances."""
+    import numpy as np
+
+    position = {str(row["id"]): index for index, row in enumerate(segments)}
+    descriptors: list[str] = []
+    descriptor_rows: dict[int, int] = {}
+    for index, topic in enumerate(manual_topics):
+        cues = " ".join(str(value) for value in (topic.get("cues") or []))
+        text = " ".join(part for part in (str(topic.get("label") or ""), cues) if part).strip()
+        if text:
+            descriptor_rows[index] = len(descriptors)
+            descriptors.append(text)
+    descriptor_vectors, engine = None, None
+    if descriptors:
+        descriptor_vectors, engine = encode_texts(
+            descriptors, model_name=model_name, revision=revision, kind="query",
+            progress=progress, check_cancelled=check_cancelled,
+        )
+        if descriptor_vectors.shape[1] != vectors.shape[1]:
+            raise ValueError("テーマの説明文と発話の意味ベクトルの次元が一致しません。")
+    theme_vectors = np.zeros((len(manual_topics), vectors.shape[1]), dtype="float32")
+    seed_counts: list[int] = []
+    for index, topic in enumerate(manual_topics):
+        parts = []
+        if index in descriptor_rows:
+            parts.append(descriptor_vectors[descriptor_rows[index]])
+        seeds = [position[str(value)] for value in (topic.get("seed_segment_ids") or [])
+                 if str(value) in position]
+        seed_counts.append(len(seeds))
+        if seeds:
+            parts.append(vectors[seeds].mean(axis=0))
+        if not parts:
+            name = topic.get("label") or index + 1
+            raise ValueError(
+                f"テーマ「{name}」のシード発話IDが分析対象に見つかりません。手がかり語を入れるか、"
+                "分析対象の発話IDを指定してください。"
+                if topic.get("seed_segment_ids") else
+                f"テーマ「{name}」に手がかり語もシード発話もありません。"
+            )
+        vector = np.asarray(parts, dtype="float32").mean(axis=0)
+        theme_vectors[index] = vector / max(float(np.linalg.norm(vector)), 1e-9)
+    return theme_vectors, seed_counts, engine
+
+
+def _manual_labels(vectors: Any, theme_vectors: Any, min_similarity: float) -> Any:
+    """Put every utterance on its nearest researcher-defined theme, or leave it unassigned."""
+    import numpy as np
+
+    similarity = vectors @ theme_vectors.T
+    best = similarity.argmax(axis=1)
+    best_score = similarity[np.arange(len(vectors)), best]
+    return np.where(best_score >= float(min_similarity), best, -1).astype(int)
+
+
+def _assignment_silhouette(vectors: Any, labels: Any) -> float | None:
+    """Describe how separated the assigned groups are; never a check on their meaning."""
+    import numpy as np
+    from sklearn.metrics import silhouette_score
+
+    mask = labels >= 0
+    assigned = vectors[mask]
+    values = labels[mask]
+    distinct = len(set(int(value) for value in values))
+    if len(assigned) < 4 or not 2 <= distinct <= len(assigned) - 1:
+        return None
+    return float(silhouette_score(
+        assigned, values, metric="cosine", sample_size=min(1000, len(assigned)), random_state=42,
+    ))
 
 
 def _topic_terms(segment_ids: set[str], morphemes: list[dict], total_segments: int) -> list[str]:
@@ -812,20 +906,59 @@ def _unpack_vectors(payload: dict) -> Any:
     return vectors / np.maximum(norms, 1e-9)
 
 
+def saved_embeddings(
+    saved: Any, analysis: dict, *, model: str = DEFAULT_MODEL,
+) -> tuple[Any, list[str], dict[str, Any]] | None:
+    """Return stored vectors when they still describe the current input, else None."""
+    if not isinstance(saved, dict) or not isinstance(saved.get("vectors"), dict):
+        return None
+    engine = saved.get("engine") if isinstance(saved.get("engine"), dict) else {}
+    if str(engine.get("name") or model) != model:
+        return None
+    if str(saved.get("fingerprint") or "") != transformer_input_fingerprint(analysis, model=model):
+        return None
+    try:
+        vectors = _unpack_vectors(saved["vectors"])
+    except (ValueError, TypeError):
+        return None
+    segment_ids = [str(value) for value in (saved["vectors"].get("segment_ids") or [])]
+    if len(segment_ids) != len(vectors):
+        return None
+    return vectors, segment_ids, {**engine, "vector_source": "saved-int8"}
+
+
 def analyze_transformer_topics(
     analysis: dict, morphemes: list[dict], *, model_name: str = DEFAULT_MODEL,
     revision: str = "", max_topics: int = DEFAULT_MAX_TOPICS,
     min_topic_size: int = DEFAULT_MIN_TOPIC_SIZE, topic_count: int | None = None,
+    mode: str = "auto", manual_topics: list[dict] | None = None,
+    manual_min_similarity: float = DEFAULT_MANUAL_MIN_SIMILARITY,
     embeddings: Any | None = None,
+    embedding_segment_ids: list[str] | None = None,
     engine: dict[str, Any] | None = None,
+    previous_candidates: list[dict] | None = None,
     progress: Callable[[int, str], None] | None = None,
     check_cancelled: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
-    """Cluster utterance embeddings and retain traceable evidence."""
+    """Group utterances by mode—automatic, a chosen candidate count, or researcher themes."""
     import numpy as np
 
     max_topics = min(12, max(2, int(max_topics)))
     min_topic_size = min(20, max(2, int(min_topic_size)))
+    mode = str(mode or "auto")
+    if mode not in TOPIC_MODES:
+        raise ValueError("テーマの決め方は自動・候補・手動のいずれかで指定してください。")
+    manual_topics = [row for row in (manual_topics or []) if isinstance(row, dict)]
+    manual_min_similarity = min(0.95, max(0.0, float(manual_min_similarity)))
+    if mode == "manual":
+        if not 2 <= len(manual_topics) <= MAX_MANUAL_TOPICS:
+            raise ValueError(f"手動のテーマは2〜{MAX_MANUAL_TOPICS}件で定義してください。")
+        topic_count = None
+    elif topic_count is not None:
+        # A requested count is the researcher's choice, whatever the caller named the mode.
+        mode = "candidate"
+    elif mode == "candidate":
+        raise ValueError("候補から選ぶときは、テーマ数を指定してください。")
     if topic_count is not None:
         topic_count = int(topic_count)
         if not 2 <= topic_count <= 12:
@@ -851,6 +984,10 @@ def analyze_transformer_topics(
     if topic_count is not None and topic_count >= len(segments):
         raise ValueError("固定するテーマ数は分析対象発話数より少なくしてください。")
     texts, context_expanded_count = _contextual_texts(source_segments, source_indices)
+    reused_embeddings = embeddings is not None
+    if embedding_segment_ids is not None:
+        if list(embedding_segment_ids) != [str(row["id"]) for row in segments]:
+            raise ValueError("保存済み意味ベクトルの対象発話が現在の対象と一致しません。")
     if embeddings is None:
         embeddings, engine = encode_texts(
             texts, model_name=model_name, revision=revision, kind="passage",
@@ -866,26 +1003,45 @@ def analyze_transformer_topics(
     if np.any(norms <= 1e-9) or not np.all(np.isfinite(vectors)):
         raise ValueError("意味ベクトルに解析できない値があります。")
     vectors = vectors / norms
-    if progress:
-        progress(65, "テーマ候補をクラスタリングしています。")
-    sample_weights = _speaker_weights(segments)
-    labels, silhouette, cluster_candidates = _choose_labels(
-        vectors, max_topics, min_topic_size, topic_count=topic_count,
-        sample_weights=sample_weights,
-    )
-    counts = Counter(int(value) for value in labels)
-    retained = (set(counts) if topic_count is not None
-                else {label for label, count in counts.items() if count >= min_topic_size})
-    if not retained:
-        retained = {counts.most_common(1)[0][0]}
-    cluster_order = sorted(retained, key=lambda label: (-counts[label], label))
+    theme_vectors = None
+    seed_counts: list[int] = []
+    if mode == "manual":
+        if progress:
+            progress(65, "研究者が定義したテーマへ発話を割り当てています。")
+        theme_vectors, seed_counts, descriptor_engine = _manual_theme_vectors(
+            manual_topics, segments, vectors, model_name=model_name, revision=revision,
+            check_cancelled=check_cancelled,
+        )
+        engine = engine or descriptor_engine
+        labels = _manual_labels(vectors, theme_vectors, manual_min_similarity)
+        silhouette = _assignment_silhouette(vectors, labels)
+        cluster_candidates = [row for row in (previous_candidates or []) if isinstance(row, dict)]
+        cluster_order = list(range(len(manual_topics)))
+    else:
+        if progress:
+            progress(65, "テーマ候補をクラスタリングしています。")
+        sample_weights = _speaker_weights(segments)
+        labels, silhouette, cluster_candidates = _choose_labels(
+            vectors, max_topics, min_topic_size, topic_count=topic_count,
+            sample_weights=sample_weights,
+        )
+        counts = Counter(int(value) for value in labels)
+        retained = (set(counts) if topic_count is not None
+                    else {label for label, count in counts.items() if count >= min_topic_size})
+        if not retained:
+            retained = {counts.most_common(1)[0][0]}
+        cluster_order = sorted(retained, key=lambda label: (-counts[label], label))
     topic_ids = {label: f"T{index:02d}" for index, label in enumerate(cluster_order, 1)}
+    unassigned_label = "どのテーマにも近くない" if mode == "manual" else "小規模クラスタ候補"
     dominant_speaker, dominant_share = _dominant_speaker(segments)
     topic_data: dict[int, dict[str, Any]] = {}
     for label in cluster_order:
         indices = np.where(labels == label)[0]
-        centroid = vectors[indices].mean(axis=0)
-        centroid /= max(float(np.linalg.norm(centroid)), 1e-9)
+        if mode == "manual":
+            centroid = theme_vectors[label]
+        else:
+            centroid = vectors[indices].mean(axis=0)
+            centroid /= max(float(np.linalg.norm(centroid)), 1e-9)
         similarities = vectors[indices] @ centroid
         segment_ids = {str(segments[index]["id"]) for index in indices}
         participant_segment_ids = {
@@ -898,12 +1054,19 @@ def analyze_transformer_topics(
                                else segment_ids)
         keywords = _topic_terms(keyword_segment_ids, morphemes, len(segments))
         similarity_map = {int(index): float(score) for index, score in zip(indices, similarities)}
+        manual_topic = manual_topics[label] if mode == "manual" else {}
+        manual_cues = [str(value) for value in (manual_topic.get("cues") or [])]
         topic_data[label] = {
             "id": topic_ids[label], "indices": indices, "centroid": centroid,
             "similarities": similarity_map,
             "representatives": _representative_indices(indices, similarity_map, segments, dominant_speaker),
-            "keywords": keywords,
-            "label": "・".join(keywords[:3]) if keywords else f"テーマ候補 {topic_ids[label][1:]}",
+            "keywords": manual_cues or keywords,
+            "origin": "manual" if mode == "manual" else "kmeans",
+            "label": (str(manual_topic.get("label") or "").strip()
+                      or ("・".join(keywords[:3]) if keywords
+                          else f"テーマ候補 {topic_ids[label][1:]}")),
+            "seed_segment_count": seed_counts[label] if mode == "manual" else 0,
+            "auto_keywords": keywords,
         }
 
     assignments = []
@@ -917,14 +1080,19 @@ def analyze_transformer_topics(
         group_counts = Counter(_speaker_group(segments[index], dominant_speaker) for index in indices)
         topic_seconds = sum(max(0.0, float(segments[index].get("end") or 0) - float(segments[index].get("start") or 0)) for index in indices)
         topic_rows.append({
-            "topic_id": data["id"], "label": data["label"], "keywords": data["keywords"],
+            "topic_id": data["id"], "label": data["label"], "origin": data["origin"],
+            "keywords": data["keywords"],
             "segment_count": len(indices), "speaker_count": len(speaker_counts),
             "participant_segment_count": group_counts["participant"],
             "facilitator_segment_count": (group_counts["facilitator"]
                                            + group_counts["facilitator_candidate"]),
             "speaking_seconds": round(topic_seconds, 3),
-            "average_similarity": round(float(np.mean([data["similarities"][int(index)] for index in indices])), 6),
+            "average_similarity": (
+                round(float(np.mean([data["similarities"][int(index)] for index in indices])), 6)
+                if len(indices) else None),
             "representative_segment_ids": [str(segments[index]["id"]) for index in data["representatives"]],
+            "seed_segment_count": data["seed_segment_count"],
+            "auto_keywords": data["auto_keywords"],
         })
         for speaker, count in speaker_counts.most_common():
             speaker_indices = [int(index) for index in indices if str(segments[index].get("speaker") or "UNKNOWN") == speaker]
@@ -955,18 +1123,34 @@ def analyze_transformer_topics(
             "nearest_similarity": round(float(nearest[index]), 6), "text": str(segment.get("text") or ""),
         })
 
+    # How much closer the chosen theme is than the next one: a small margin means the
+    # assignment could have gone either way.
+    centroids = (np.stack([topic_data[label]["centroid"] for label in cluster_order])
+                 if cluster_order else np.zeros((0, vectors.shape[1]), dtype="float32"))
+    centroid_similarity = vectors @ centroids.T if len(centroids) else None
+    centroid_position = {label: position for position, label in enumerate(cluster_order)}
+    low_margin_count = 0
     for index, segment in enumerate(segments):
         label = int(labels[index])
         topic = topic_data.get(label)
+        margin = None
+        if topic is not None and centroid_similarity is not None and len(cluster_order) > 1:
+            row = centroid_similarity[index].copy()
+            own = float(row[centroid_position[label]])
+            row[centroid_position[label]] = -2.0
+            margin = round(own - float(row.max()), 6)
+            if margin < LOW_MARGIN_LIMIT:
+                low_margin_count += 1
         start, end = float(segment.get("start") or 0), float(segment.get("end") or 0)
         assignment = {
             "segment_id": str(segment["id"]), "topic_id": topic["id"] if topic else "",
-            "topic_label": topic["label"] if topic else "小規模クラスタ候補",
+            "topic_label": topic["label"] if topic else unassigned_label,
             "speaker": str(segment.get("speaker") or "UNKNOWN"),
             "speaker_name": str(segment.get("speaker_name") or segment.get("speaker") or "UNKNOWN"),
             "speaker_group": _speaker_group(segment, dominant_speaker),
             "start": round(start, 3), "end": round(end, 3), "duration": round(max(0, end - start), 3),
             "similarity": round(topic["similarities"][index], 6) if topic else None,
+            "margin": margin,
             "outlier_score": round(float(outlier_scores[index]), 6), "text": str(segment.get("text") or ""),
         }
         assignments.append(assignment)
@@ -1026,13 +1210,49 @@ def analyze_transformer_topics(
                 for row in sorted(bins.values(), key=lambda value: (value["bin_index"], value["topic_id"]))]
     if progress:
         progress(90, "テーマ候補と根拠発話を整理しています。")
+    limitations = [
+        ("テーマ名は研究者が定義した見出しで、発話の割り当ては意味の近さによる候補です。"
+         if mode == "manual" else
+         "テーマ名はクラスタ内の特徴語から付けた候補であり、研究者が原文と照合して確定します。"),
+        "短い相づちはテーマ分類と意味検索から外し、話者・対象テーマ別に別集計します。",
+        "相づちの対象テーマは時系列上で近い別話者の発話から推定し、賛同とは断定しません。",
+        "相づち応答率の分母は他者の有意味発話数であり、実際に聞いていた機会を完全には表しません。",
+        "相づちの検定は同一話者内の反復と期待度数の小ささを伴うため探索的に扱います。",
+        "話者別リザルトは本人が明示した変化・維持・気づき・支持表現だけを抽出し、表現がない場合は未判定とします。",
+        "話者別リザルトは会議前調査との比較ではなく、会議中の発話に基づく観察結果です。",
+        "意味的な近さは賛成・反対、合意、因果関係、重要性を意味しません。",
+        "例外候補は他の発話との埋め込み類似度が低い発話であり、少数意見とは限りません。",
+        f"1発話が{MAX_TEXT_CHARACTERS}文字を超える場合、埋め込み入力は先頭部分に制限します。",
+    ]
+    if mode == "manual":
+        limitations[1:1] = [
+            "手動のテーマは、見出し・手がかり語・シード発話から作ったベクトルへの最近傍割り当てです。テーマの妥当性を検証した結果ではありません。",
+            f"割り当てのしきい値{manual_min_similarity:.2f}は実装上の目安で、文献に基づく基準ではありません。",
+            f"上位2テーマの差が{LOW_MARGIN_LIMIT}未満の発話は、どちらのテーマにも入りうる境界例です。",
+        ]
+        if silhouette is not None:
+            limitations.insert(4, "シルエット係数は割り当て後の幾何的なまとまりの記述で、研究者のテーマの妥当性ではありません。")
+    else:
+        limitations.insert(
+            7, "話者ごとの発話量を重み付けして、司会者など一人の発話量による偏りを抑えます。")
+    if mode == "candidate":
+        limitations.insert(1, "テーマ数は研究者が候補一覧から選んだ値で、silhouetteの最大値とは限りません。")
+    if reused_embeddings:
+        limitations.append(
+            "この実行は保存済みの意味ベクトル（int8で量子化）を再利用しており、埋め込みの再計算は行っていません。")
     return {
         "schema_version": 5, "algorithm_version": TRANSFORMER_ANALYSIS_VERSION,
         "analysis_unit": "文脈付き発話", "fingerprint": transformer_input_fingerprint(analysis, model=model_name),
         "engine": engine or {"name": model_name, "framework": "test", "dimensions": int(vectors.shape[1])},
-        "parameters": {"max_topics": max_topics, "min_topic_size": min_topic_size,
+        "parameters": {"mode": mode, "max_topics": max_topics, "min_topic_size": min_topic_size,
                        "topic_count": topic_count, "time_bin_seconds": bin_seconds,
-                       "speaker_balancing": True},
+                       "speaker_balancing": mode != "manual",
+                       "manual_min_similarity": manual_min_similarity if mode == "manual" else None,
+                       "manual_topics": [
+                           {"id": str(row.get("id") or ""), "label": str(row.get("label") or ""),
+                            "cues": [str(value) for value in (row.get("cues") or [])],
+                            "seed_segment_ids": [str(value) for value in (row.get("seed_segment_ids") or [])]}
+                           for row in manual_topics]},
         "coverage": {"segment_count": len(segments), "source_segment_count": len(source_segments),
                      "ignored_noise_segment_count": len(ignored_segments),
                      "backchannel_segment_count": len(backchannel_segments),
@@ -1043,9 +1263,14 @@ def analyze_transformer_topics(
                      "context_expanded_segment_count": context_expanded_count,
                      "topic_count": len(topic_rows),
                      "truncated_segment_count": sum(len(value) > MAX_TEXT_CHARACTERS for value in texts),
-                     "small_cluster_segment_count": sum(1 for row in assignments if not row["topic_id"])},
+                     "small_cluster_segment_count": sum(1 for row in assignments if not row["topic_id"]),
+                     "unassigned_segment_count": (sum(1 for row in assignments if not row["topic_id"])
+                                                  if mode == "manual" else 0),
+                     "low_margin_segment_count": low_margin_count,
+                     "reused_embeddings": bool(reused_embeddings)},
         "quality": {"silhouette_cosine": round(float(silhouette), 6) if silhouette is not None else None,
                     "cluster_candidates": cluster_candidates,
+                    "topic_mode": mode,
                     "dominant_speaker": dominant_speaker,
                     "dominant_speaker_percent": round(100 * dominant_share, 3)},
         "topics": topic_rows, "assignments": assignments, "speaker_topics": speaker_rows,
@@ -1054,19 +1279,7 @@ def analyze_transformer_topics(
         "speaker_results": speaker_results,
         "timeline": timeline, "outliers": outlier_rows, "evidence": evidence,
         "vectors": _pack_vectors(vectors, [str(row["id"]) for row in segments]),
-        "limitations": [
-            "テーマ名はクラスタ内の特徴語から付けた候補であり、研究者が原文と照合して確定します。",
-            "短い相づちはテーマ分類と意味検索から外し、話者・対象テーマ別に別集計します。",
-            "相づちの対象テーマは時系列上で近い別話者の発話から推定し、賛同とは断定しません。",
-            "相づち応答率の分母は他者の有意味発話数であり、実際に聞いていた機会を完全には表しません。",
-            "相づちの検定は同一話者内の反復と期待度数の小ささを伴うため探索的に扱います。",
-            "話者別リザルトは本人が明示した変化・維持・気づき・支持表現だけを抽出し、表現がない場合は未判定とします。",
-            "話者別リザルトは会議前調査との比較ではなく、会議中の発話に基づく観察結果です。",
-            "話者ごとの発話量を重み付けして、司会者など一人の発話量による偏りを抑えます。",
-            "意味的な近さは賛成・反対、合意、因果関係、重要性を意味しません。",
-            "例外候補は他の発話との埋め込み類似度が低い発話であり、少数意見とは限りません。",
-            f"1発話が{MAX_TEXT_CHARACTERS}文字を超える場合、埋め込み入力は先頭部分に制限します。",
-        ],
+        "limitations": limitations,
     }
 
 

@@ -18,7 +18,8 @@ function contentAnalysisState() {
       loading: false, error: '', sequence: 0, controller: null,
       provider: 'openai', run: null, aiError: '', pollError: '', starting: false, fingerprint: '',
       transformerRun: null, transformerStarting: false, transformerError: '', transformerPollError: '',
-      maxTopics: 8, minTopicSize: 2, topicCount: 0, semanticQuery: '', semanticHits: null,
+      maxTopics: 8, minTopicSize: 2, topicCount: 0, transformerMode: 'auto',
+      manualMinSimilarity: 0, semanticQuery: '', semanticHits: null,
       semanticLoading: false, semanticError: ''
     });
   }
@@ -145,7 +146,7 @@ function appendSearchableTermBar(container, term, value, detail, color = '#1C6B5
 }
 
 function buildInsightSummary() {
-  const panel = analysisCardPanel('分析結果の見解', 'automatic', 'insights', true);
+  const panel = analysisCardPanel('分析結果の見解', 'automatic', 'insights', true, 'local_insights ai_insights');
   panel.panel.classList.add('content-insight-summary');
   const local = analysisState.data?.insights?.local || [];
   panel.body.append(analysisElement('p', 'analysis-caption',
@@ -198,7 +199,7 @@ function buildInsightSummary() {
 function buildContentExplorer() {
   const container = analysisElement('section', 'content-explorer');
   container.dataset.analysisAnchor = 'content';
-  const panel = analysisCardPanel('言葉を前後の文脈で読む', 'automatic', '', true);
+  const panel = analysisCardPanel('言葉を前後の文脈で読む', 'automatic', '', true, 'kwic');
   const state = contentAnalysisState();
   const form = analysisElement('form', 'content-kwic-form');
   const queryLabel = analysisElement('label', 'field');
@@ -232,7 +233,7 @@ function buildContentExplorer() {
   panel.body.append(form, results);
   container.append(panel.panel);
 
-  const comparison = analysisCardPanel('話者別の特徴語比較', 'automatic', 'characteristic_terms', true);
+  const comparison = analysisCardPanel('話者別の特徴語比較', 'automatic', 'characteristic_terms', true, 'speaker_characteristics');
   comparison.body.append(analysisElement('p', 'analysis-caption', 'その話者と他の話者の「語を含む発話の割合」の差を比較します。分母は本文のある対象発話です。少数の発話では差が大きく出るため、件数と原文も確認してください。'));
   const rows = analysisState.data?.research?.content?.characteristic_terms || [];
   if (!rows.length) comparison.body.append(analysisElement('p', 'analysis-no-data', '比較できる話者や、出現率に差のある語がありません。'));
@@ -284,26 +285,217 @@ function transformerExportLinks() {
   return wrap;
 }
 
+function transformerModeValue(state) {
+  return ['auto', 'candidate', 'manual'].includes(state.transformerMode) ? state.transformerMode : 'auto';
+}
+
+function transformerCandidates(result) {
+  const rows = result && result.quality ? result.quality.cluster_candidates : null;
+  return Array.isArray(rows) ? rows.filter(row => row && Number(row.topic_count) >= 2) : [];
+}
+
+function suggestedCandidateCount(result) {
+  const rows = transformerCandidates(result);
+  if (!rows.length) return 0;
+  return Number(result?.coverage?.topic_count) || Number(rows[0].topic_count) || 0;
+}
+
+// The researcher's own theme definitions live in the saved analysis config.
+function manualTransformerTopics(fromServer = false) {
+  const source = fromServer ? analysisState.data?.config : analysisState.config;
+  const rows = source ? source.transformer_topics : null;
+  return Array.isArray(rows) ? rows : [];
+}
+
+function buildTransformerCandidateList(result, state) {
+  const box = analysisElement('div', 'transformer-candidates');
+  const rows = transformerCandidates(result);
+  if (!rows.length) {
+    box.append(analysisElement('p', 'analysis-caption',
+      '候補一覧はまだありません。「自動でまとめる」で1回実行すると、テーマ数ごとのsilhouetteが出ます。ここで件数を選んで実行すると、その件数で作り直したうえで候補一覧も作ります。'));
+    return box;
+  }
+  const best = rows.reduce(
+    (left, right) => (Number(right.silhouette_cosine) > Number(left.silhouette_cosine) ? right : left),
+    rows[0]);
+  box.append(analysisElement('p', 'analysis-caption',
+    'テーマ数ごとのsilhouette（cosine）です。まとまりの幾何的な指標であり、テーマの意味の妥当性ではありません。選んで実行すると、保存済みの意味ベクトルを再利用して作り直します。'));
+  const wrap = analysisElement('div', 'analysis-table-wrap');
+  const table = analysisElement('table', 'analysis-table');
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  ['テーマ数', 'silhouette', '選択'].forEach(label => headRow.append(analysisElement('th', '', label)));
+  head.append(headRow);
+  const body = document.createElement('tbody');
+  rows.forEach(row => {
+    const count = Number(row.topic_count);
+    const line = document.createElement('tr');
+    line.dataset.transformerCandidate = String(count);
+    if (count === Number(state.topicCount)) line.classList.add('selected');
+    const countCell = analysisElement('td', '', `${count}件`);
+    if (count === Number(best.topic_count)) countCell.append(analysisElement('small', '', ' / 自動の選択'));
+    const scoreCell = analysisElement('td', '',
+      row.silhouette_cosine == null ? '—' : Number(row.silhouette_cosine).toFixed(3));
+    const pickCell = analysisElement('td');
+    const pick = contentButton('選ぶ', () => {
+      state.topicCount = count;
+      document.querySelectorAll('[data-transformer-topic-count]').forEach(peer => { peer.value = String(count); });
+      document.querySelectorAll('[data-transformer-candidate]').forEach(peer => {
+        peer.classList.toggle('selected', Number(peer.dataset.transformerCandidate) === count);
+      });
+      refreshTransformerControls();
+    });
+    pick.dataset.transformerCandidatePick = String(count);
+    pickCell.append(pick);
+    line.append(countCell, scoreCell, pickCell);
+    body.append(line);
+  });
+  table.append(head, body);
+  wrap.append(table);
+  box.append(wrap);
+  return box;
+}
+
+function buildTransformerManualTopics(state) {
+  const box = analysisElement('div', 'transformer-manual-topics');
+  box.append(analysisElement('p', 'analysis-caption',
+    '研究者が定義したテーマへ、意味が最も近い発話を割り当てます。テーマ名だけでも実行できますが、手がかり語やシード発話IDを足すほど割り当ては安定します。編集後は「設定とコードを保存」を押してから実行します。割り当ては候補であり、テーマの妥当性を確かめた結果ではありません。'));
+  const topics = manualTransformerTopics();
+  if (!topics.length) {
+    box.append(analysisElement('p', 'analysis-no-data', 'テーマが定義されていません。2件以上を追加してください。'));
+  }
+  topics.forEach((topic, index) => {
+    const row = analysisElement('article', 'transformer-manual-topic');
+    const labelField = analysisElement('label', 'field');
+    labelField.append(analysisElement('span', '', `テーマ${index + 1}の名前`));
+    const label = analysisElement('input');
+    label.type = 'text';
+    label.maxLength = 120;
+    label.value = topic.label || '';
+    label.addEventListener('input', () => {
+      topic.label = label.value;
+      setAnalysisDirty(true);
+      refreshTransformerControls();
+    });
+    labelField.append(label);
+    const cueField = analysisElement('label', 'field');
+    cueField.append(analysisElement('span', '', '手がかり語（読点・カンマ区切り）'));
+    const cues = analysisElement('input');
+    cues.type = 'text';
+    cues.maxLength = 400;
+    cues.value = (topic.cues || []).join('、');
+    cues.placeholder = '例：価格、費用、予算';
+    cues.addEventListener('input', () => {
+      topic.cues = cues.value.split(/[,、;\s]+/).map(value => value.trim()).filter(Boolean).slice(0, 20);
+      setAnalysisDirty(true);
+      refreshTransformerControls();
+    });
+    cueField.append(cues);
+    const seedField = analysisElement('label', 'field');
+    seedField.append(analysisElement('span', '', 'シード発話ID（任意・区切り入力）'));
+    const seeds = analysisElement('input');
+    seeds.type = 'text';
+    seeds.maxLength = 800;
+    seeds.value = (topic.seed_segment_ids || []).join(' ');
+    seeds.placeholder = '根拠の発話IDを貼り付け';
+    seeds.addEventListener('input', () => {
+      topic.seed_segment_ids = seeds.value.split(/[,、;\s]+/)
+        .map(value => value.trim()).filter(Boolean).slice(0, 50);
+      setAnalysisDirty(true);
+      refreshTransformerControls();
+    });
+    seedField.append(seeds);
+    const remove = contentButton('このテーマを削除', () => {
+      analysisState.config.transformer_topics = manualTransformerTopics()
+        .filter((_, position) => position !== index);
+      setAnalysisDirty(true);
+      renderAnalysisWorkspace();
+    });
+    row.append(labelField, cueField, seedField, remove);
+    box.append(row);
+  });
+  const planned = Array.isArray(analysisState.data?.plan_items) ? analysisState.data.plan_items : [];
+  if (planned.length) {
+    const labels = new Set(topics.map(topic => String(topic.label || '').trim()));
+    const missing = planned.filter(item => !labels.has(String(item.text || '').trim()));
+    const importPlan = contentButton(
+      `質問ガイドから取り込む（未取り込み ${missing.length}／${planned.length}項目）`,
+      () => {
+        const rows = manualTransformerTopics();
+        missing.slice(0, Math.max(0, 12 - rows.length)).forEach(item => {
+          const id = self.crypto && self.crypto.randomUUID
+            ? `topic_${self.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`
+            : `topic_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+          rows.push({id, label: item.text, cues: [], seed_segment_ids: [], memo: '質問ガイドから取り込み'});
+        });
+        analysisState.config.transformer_topics = rows;
+        setAnalysisDirty(true);
+        renderAnalysisWorkspace();
+      }, 'secondary-button small');
+    importPlan.disabled = !missing.length || topics.length >= 12;
+    box.append(importPlan);
+    box.append(analysisElement('p', 'analysis-caption',
+      '予定した議題をそのままテーマにすると、項目ごとに「話された発話数」が出ます。見出しだけでも実行できますが、手がかり語を足すほど割り当ては安定します。'));
+  }
+  const add = contentButton('テーマを追加', () => {
+    const rows = manualTransformerTopics();
+    if (rows.length >= 12) return;
+    const id = self.crypto && self.crypto.randomUUID
+      ? `topic_${self.crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`
+      : `topic_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+    rows.push({id, label: `テーマ ${rows.length + 1}`, cues: [], seed_segment_ids: [], memo: ''});
+    analysisState.config.transformer_topics = rows;
+    setAnalysisDirty(true);
+    renderAnalysisWorkspace();
+  }, 'secondary-button small');
+  add.disabled = topics.length >= 12;
+  box.append(add);
+  return box;
+}
+
 function buildTransformerAnalysisPanel() {
-  const panel = analysisCardPanel('Transformerテーマ分析', 'configured', 'transformer_topics', true);
+  const panel = analysisCardPanel('Transformerテーマ分析', 'configured', 'transformer_topics', true, 'transformer_topics');
   panel.panel.classList.add('transformer-analysis-panel');
   const state = contentAnalysisState();
   const transformer = analysisState.data?.transformer || {};
   const result = transformer.result;
   panel.body.append(analysisElement('p', 'analysis-caption',
-    '短い相づちを除き、前後の文脈と話者量の偏りを補正して、多言語E5でテーマ候補をまとめます。初回はモデルをダウンロードします。意味の近さは賛否・合意・重要性を示しません。'));
+    '短い相づちを除き、前後の文脈と話者量の偏りを補正して、多言語E5で発話をまとめます。テーマの決め方は、自動・候補から選ぶ・研究者が定義したテーマへの割り当ての3つです。初回はモデルをダウンロードします。意味の近さは賛否・合意・重要性を示しません。'));
 
   const toolbar = analysisElement('div', 'transformer-toolbar');
+  const modeLabel = analysisElement('label', 'field');
+  modeLabel.append(analysisElement('span', '', 'テーマの決め方'));
+  const modeSelect = analysisElement('select');
+  [['auto', '自動でまとめる'], ['candidate', '候補から選ぶ'], ['manual', '手動で定義する']]
+    .forEach(([value, label]) => modeSelect.add(new Option(label, value)));
+  modeSelect.value = transformerModeValue(state);
+  modeSelect.dataset.transformerMode = 'true';
+  modeSelect.addEventListener('change', () => {
+    state.transformerMode = modeSelect.value;
+    if (state.transformerMode === 'candidate' && !state.topicCount) {
+      state.topicCount = suggestedCandidateCount(result) || 4;
+    }
+    if (state.transformerMode !== 'candidate') state.topicCount = 0;
+    renderAnalysisWorkspace();
+  });
+  modeLabel.append(modeSelect);
+  toolbar.append(modeLabel);
   const countLabel = analysisElement('label', 'field');
   countLabel.append(analysisElement('span', '', 'テーマ数'));
   const countSelect = analysisElement('select');
-  [[0, '自動'], [2, '2件'], [3, '3件'], [4, '4件'], [5, '5件'], [6, '6件'],
-    [8, '8件'], [10, '10件'], [12, '12件']].forEach(([value, label]) => countSelect.add(new Option(label, String(value))));
-  countSelect.value = String(state.topicCount);
+  // Every count the candidate list can offer is selectable here as well.
+  Array.from({length: 11}, (_, index) => index + 2)
+    .forEach(value => countSelect.add(new Option(`${value}件`, String(value))));
+  countSelect.value = String(state.topicCount || 4);
+  // Keep the request in step with what the control shows.
+  if (transformerModeValue(state) === 'candidate') state.topicCount = Number(countSelect.value);
   countSelect.dataset.transformerTopicCount = 'true';
   countSelect.addEventListener('change', () => {
     state.topicCount = Number(countSelect.value);
     document.querySelectorAll('[data-transformer-topic-count]').forEach(peer => { peer.value = countSelect.value; });
+    document.querySelectorAll('[data-transformer-candidate]').forEach(row => {
+      row.classList.toggle('selected', Number(row.dataset.transformerCandidate) === state.topicCount);
+    });
     refreshTransformerControls();
   });
   countLabel.append(countSelect);
@@ -329,12 +521,37 @@ function buildTransformerAnalysisPanel() {
     document.querySelectorAll('[data-transformer-min-topic-size]').forEach(peer => { peer.value = minSelect.value; });
   });
   minLabel.append(minSelect);
-  const run = contentButton(result ? 'テーマ分析を再実行' : 'テーマ分析を実行', startTransformerAnalysis, 'primary-button small');
+  const similarityLabel = analysisElement('label', 'field');
+  similarityLabel.append(analysisElement('span', '', '未割当のしきい値'));
+  const similaritySelect = analysisElement('select');
+  [[0, 'なし（最も近いテーマへ）'], [0.7, '0.70'], [0.75, '0.75'], [0.8, '0.80'], [0.85, '0.85']]
+    .forEach(([value, label]) => similaritySelect.add(new Option(label, String(value))));
+  similaritySelect.value = String(state.manualMinSimilarity);
+  similaritySelect.dataset.transformerMinSimilarity = 'true';
+  similaritySelect.addEventListener('change', () => {
+    state.manualMinSimilarity = Number(similaritySelect.value);
+    document.querySelectorAll('[data-transformer-min-similarity]').forEach(peer => {
+      peer.value = similaritySelect.value;
+    });
+  });
+  similarityLabel.append(similaritySelect);
+  const mode = transformerModeValue(state);
+  const runLabels = {
+    auto: result ? 'テーマ分析を再実行' : 'テーマ分析を実行',
+    candidate: 'このテーマ数で作り直す',
+    manual: '定義したテーマへ割り当てる'
+  };
+  const run = contentButton(runLabels[mode], startTransformerAnalysis, 'primary-button small');
   run.dataset.transformerRun = 'true';
   const cancel = contentButton('分析を中止', cancelTransformerAnalysis);
   cancel.dataset.transformerCancel = 'true';
-  toolbar.append(countLabel, maxLabel, minLabel, run, cancel);
+  if (mode === 'auto') toolbar.append(maxLabel, minLabel);
+  if (mode === 'candidate') toolbar.append(countLabel);
+  if (mode === 'manual') toolbar.append(similarityLabel);
+  toolbar.append(run, cancel);
   panel.body.append(toolbar);
+  if (mode === 'candidate') panel.body.append(buildTransformerCandidateList(result, state));
+  if (mode === 'manual') panel.body.append(buildTransformerManualTopics(state));
   const status = analysisElement('p', 'content-ai-status');
   status.dataset.transformerStatus = 'true';
   status.setAttribute('role', 'status');
@@ -350,8 +567,34 @@ function buildTransformerAnalysisPanel() {
     const quality = result.quality || {};
     const analyzedCount = coverage.segment_count || 0;
     const sourceCount = coverage.source_segment_count || analyzedCount;
+    const modeLabels = {auto: '自動', candidate: '候補から選択', manual: '手動で定義'};
+    const resultMode = (result.parameters || {}).mode || quality.topic_mode || 'auto';
     output.append(analysisElement('p', 'content-ai-meta',
-      `${engine.name || 'Transformer'} / ${engine.device || '実行装置不明'} / ${analyzedCount}/${sourceCount}発話を分析 / ${coverage.topic_count || 0}テーマ候補${quality.silhouette_cosine == null ? '' : ` / silhouette ${Number(quality.silhouette_cosine).toFixed(3)}`}`));
+      `テーマの決め方：${modeLabels[resultMode] || resultMode}`
+      + `${resultMode === 'candidate' ? `（${(result.parameters || {}).topic_count || coverage.topic_count || 0}件を指定）` : ''}`
+      + ` / ${engine.name || 'Transformer'}`
+      + `${engine.revision ? ` @${String(engine.revision).slice(0, 12)}` : ''}`
+      + `${engine.dimensions ? ` / ${engine.dimensions}次元` : ''}`
+      + ` / ${engine.device || '実行装置不明'} / seed 42`
+      + ` / ${analyzedCount}/${sourceCount}発話を分析 / ${coverage.topic_count || 0}テーマ`
+      + `${quality.silhouette_cosine == null ? '' : ` / silhouette ${Number(quality.silhouette_cosine).toFixed(3)}`}`));
+    if (coverage.reused_embeddings) output.append(analysisElement('p', 'analysis-caption',
+      '保存済みの意味ベクトル（int8）を再利用しました。埋め込みの再計算はしていません。'));
+    if (resultMode === 'manual') {
+      const threshold = (result.parameters || {}).manual_min_similarity;
+      output.append(analysisElement('p', 'analysis-caption',
+        `研究者が定義した${((result.parameters || {}).manual_topics || []).length}テーマへの割り当てです。`
+        + `未割当 ${coverage.unassigned_segment_count || 0}件`
+        + `（しきい値 ${threshold ? Number(threshold).toFixed(2) : 'なし'}）。`
+        + '割り当ては意味の近さによる候補で、テーマの妥当性を検証した結果ではありません。'));
+    }
+    if (coverage.low_margin_segment_count) output.append(analysisElement('p', 'analysis-caption',
+      `上位2テーマの差が小さい境界例が${coverage.low_margin_segment_count}件あります。どちらのテーマにも入りうる発話です。`));
+    if (coverage.context_expanded_segment_count) output.append(analysisElement('p', 'analysis-caption',
+      `短い発話${coverage.context_expanded_segment_count}件は、同じ話者の隣接発話を文脈として足して意味ベクトル化しました。`));
+    if (coverage.small_cluster_segment_count && resultMode !== 'manual') output.append(
+      analysisElement('p', 'analysis-caption',
+        `最小発話数に満たないまとまりの${coverage.small_cluster_segment_count}件は、テーマに含めていません。`));
     if (coverage.ignored_noise_segment_count) output.append(analysisElement('p', 'analysis-caption',
       `記号・短い認識断片 ${coverage.ignored_noise_segment_count}件をテーマ分類と意味検索から除外しました。`));
     if (coverage.backchannel_segment_count) output.append(analysisElement('p', 'analysis-caption',
@@ -453,8 +696,19 @@ function buildTransformerAnalysisPanel() {
       const roleBreakdown = topic.facilitator_segment_count == null ? ''
         : ` / 参加者 ${topic.participant_segment_count || 0}・進行役 ${topic.facilitator_segment_count || 0}`;
       const backchannelBreakdown = topic.backchannel_count == null ? '' : ` / 相づち ${topic.backchannel_count || 0}`;
+      const originNote = topic.origin === 'manual'
+        ? `研究者が定義${topic.seed_segment_count ? `・シード${topic.seed_segment_count}件` : ''} / ` : '';
       article.append(heading, analysisElement('p', 'transformer-topic-meta',
-        `${topic.segment_count}発話${roleBreakdown}${backchannelBreakdown} / ${topic.speaker_count}人 / ${formatTime(topic.speaking_seconds || 0)} / 中心類似度 ${Number(topic.average_similarity || 0).toFixed(3)}`));
+        `${originNote}${topic.segment_count}発話${roleBreakdown}${backchannelBreakdown} / ${topic.speaker_count}人 / ${formatTime(topic.speaking_seconds || 0)}`
+        + ` / 中心類似度 ${topic.average_similarity == null ? '—' : Number(topic.average_similarity).toFixed(3)}`));
+      if (topic.origin === 'manual' && (topic.auto_keywords || []).length) {
+        article.append(analysisElement('p', 'analysis-caption',
+          `このテーマに集まった発話の特徴語：${topic.auto_keywords.join('・')}`));
+      }
+      if (!topic.segment_count) {
+        article.append(analysisElement('p', 'analysis-no-data',
+          'このテーマに割り当てられた発話はありません。手がかり語やシード発話、しきい値を見直してください。'));
+      }
       const speakerRows = (result.speaker_topics || []).filter(row => row.topic_id === topic.topic_id);
       if (speakerRows.length) {
         const distribution = analysisElement('div', 'transformer-speaker-distribution');
@@ -539,26 +793,41 @@ function refreshTransformerControls() {
   if (!analysisState.data) return;
   const state = contentAnalysisState();
   const busy = state.transformerStarting || transformerRunActive(state.transformerRun);
+  const mode = transformerModeValue(state);
+  const savedTopics = manualTransformerTopics(true);
+  const manualBlocked = mode === 'manual' && savedTopics.length < 2;
+  const runLabels = {
+    auto: analysisState.data.transformer?.result ? 'テーマ分析を再実行' : 'テーマ分析を実行',
+    candidate: 'このテーマ数で作り直す',
+    manual: '定義したテーマへ割り当てる'
+  };
   document.querySelectorAll('[data-transformer-run]').forEach(button => {
-    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress);
-    button.textContent = state.transformerStarting ? '開始しています…'
-      : analysisState.data.transformer?.result ? 'テーマ分析を再実行' : 'テーマ分析を実行';
+    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress || manualBlocked);
+    button.textContent = state.transformerStarting ? '開始しています…' : runLabels[mode];
   });
   document.querySelectorAll('[data-transformer-cancel]').forEach(button => {
     button.hidden = !transformerRunActive(state.transformerRun);
     button.disabled = state.transformerRun?.status === 'cancelling';
   });
-  document.querySelectorAll('[data-transformer-topic-count], [data-transformer-min-topic-size]').forEach(select => {
-    select.disabled = Boolean(busy);
-  });
+  document.querySelectorAll(
+    '[data-transformer-mode], [data-transformer-topic-count], [data-transformer-min-topic-size],'
+    + ' [data-transformer-min-similarity]'
+  ).forEach(select => { select.disabled = Boolean(busy); });
   document.querySelectorAll('[data-transformer-max-topics]').forEach(select => {
-    select.disabled = Boolean(busy || state.topicCount);
+    select.disabled = Boolean(busy || mode !== 'auto');
   });
+  const modeHints = {
+    auto: 'silhouetteが最も高いテーマ数を選びます。ボタンを押したときだけローカルで実行します。会話本文を外部AI APIへ送信しません。',
+    candidate: '選んだテーマ数で作り直します。保存済みの意味ベクトルがあれば再利用し、モデルの再実行はしません。',
+    manual: '定義したテーマへ、意味が最も近い発話を割り当てます。テーマの妥当性を確かめた結果ではありません。'
+  };
   document.querySelectorAll('[data-transformer-status]').forEach(host => {
     host.textContent = analysisState.dirty ? '未保存の変更があります。保存してから実行してください。'
-      : state.transformerError || state.transformerPollError
-        || (state.transformerRun ? `${state.transformerRun.message} ${state.transformerRun.progress}%`
-          : 'ボタンを押したときだけローカルで実行します。会話本文を外部AI APIへ送信しません。');
+      : manualBlocked
+        ? '手動で割り当てるには、テーマを2件以上定義して保存してください。'
+        : state.transformerError || state.transformerPollError
+          || (state.transformerRun ? `${state.transformerRun.message} ${state.transformerRun.progress}%`
+            : modeHints[mode]);
   });
 }
 
@@ -569,12 +838,17 @@ async function startTransformerAnalysis() {
   const item = analysisState.data.item;
   let pending = null;
   try { pending = JSON.parse(sessionStorage.getItem(transformerPendingKey(itemId)) || 'null'); } catch (_) { /* unavailable */ }
+  const mode = transformerModeValue(state);
+  const topicCount = mode === 'candidate' ? Number(state.topicCount) || 0 : 0;
+  const minSimilarity = mode === 'manual' ? Number(state.manualMinSimilarity) || 0 : 0;
   if (!pending || pending.source_revision !== item.revision_count || pending.analysis_revision !== item.analysis_revision
     || pending.max_topics !== state.maxTopics || pending.min_topic_size !== state.minTopicSize
-    || pending.topic_count !== state.topicCount) {
+    || pending.topic_count !== topicCount || pending.mode !== mode
+    || pending.min_similarity !== minSimilarity) {
     pending = {request_id: crypto.randomUUID(), source_revision: item.revision_count,
       analysis_revision: item.analysis_revision, max_topics: state.maxTopics,
-      min_topic_size: state.minTopicSize, topic_count: state.topicCount};
+      min_topic_size: state.minTopicSize, topic_count: topicCount,
+      mode, min_similarity: minSimilarity};
   }
   try { sessionStorage.setItem(transformerPendingKey(itemId), JSON.stringify(pending)); } catch (_) { /* in memory only */ }
   state.transformerStarting = true; state.transformerError = ''; refreshTransformerControls();

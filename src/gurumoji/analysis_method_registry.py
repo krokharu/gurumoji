@@ -1,7 +1,7 @@
 """Versioned output contracts for saved text-analysis results."""
 from __future__ import annotations
 
-REGISTRY_VERSION = "text-analysis-store-5"
+REGISTRY_VERSION = "text-analysis-store-8"
 
 COMMON_EXPORT_FIELDS = {
     "schema_version", "item_id", "source_name", "revision_count", "analysis_revision",
@@ -10,8 +10,16 @@ COMMON_EXPORT_FIELDS = {
 }
 
 PREVIEW_FIELD_PRIORITIES = {
+    "segment_classifications": [
+        "utterance_order", "speaker_name", "manual_dialogue_act_label",
+        "template_dialogue_act_label", "llm_dialogue_act_label",
+        "llm_importance_score", "llm_review_score", "llm_sensitivity_score",
+    ],
+    "segment_classification_crosstabs": [
+        "table_label", "row_value", "column_value", "count",
+    ],
     "transformer_topics": [
-        "topic_id", "label", "keywords", "segment_count", "speaker_count",
+        "topic_id", "label", "origin", "keywords", "segment_count", "speaker_count",
         "backchannel_count", "average_similarity", "representative_segment_ids",
     ],
     "transformer_assignments": [
@@ -61,12 +69,13 @@ METHODS = [
     ("audio_emotion", "音声感情推定", ["emotions"]),
     ("outline", "議題・アウトライン", []),
     ("kwic", "文脈検索", ["kwic"]),
-    ("ai_finishing", "AI仕上げ・変更記録", ["ai_changes"]),
+    ("ai_finishing", "AI仕上げ・変更記録", ["ai_changes", "ai_jev_comparison"]),
+    ("segment_classification", "発話種別・重要度・要確認・機密らしさ", ["segment_classifications", "segment_classification_crosstabs"]),
     # Saved as their own runs: never mixed into a single conversation's text analysis.
     ("meeting_minutes", "会議議事録・タスク候補", ["meeting_tasks", "meeting_decisions", "meeting_speaker_activity"]),
     ("interview_comparison", "グループインタビュー比較", ["comparison_interviews", "comparison_common_terms", "comparison_characteristic_terms", "comparison_codes", "comparison_emotions"]),
 ]
-SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison"}
+SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_classification"}
 
 # Navigation categories describe the implemented methods, not external engines.
 METHOD_GROUPS = [
@@ -84,7 +93,7 @@ METHOD_GROUPS = [
      ("descriptive_statistics", "group_statistics", "correlation")),
     ("conversation", "会話構造・参加バランス",
      "発話量、話者交替、間、重なりなど会話の構造を確認します。",
-     ("participation", "conversation_dynamics")),
+     ("participation", "conversation_dynamics", "segment_classification")),
     ("qualitative", "質的分析・コード・引用",
      "手動コードと重要引用を、元の発言や文脈と合わせて確認します。",
      ("qualitative_coding",)),
@@ -112,13 +121,31 @@ def transformer_note_content(result: dict) -> tuple[list[dict], list[dict]]:
     """Create searchable summaries and evidence-linked findings for the Vault note."""
     findings: list[dict] = []
     summaries: list[dict] = []
+    mode = str(result.get("parameters", {}).get("mode") or "auto")
+    mode_labels = {"auto": "自動（silhouetteで選択）", "candidate": "候補から研究者が選択",
+                   "manual": "研究者が定義したテーマへの割り当て"}
+    coverage = result.get("coverage", {})
+    summaries.append({
+        "title": "テーマの決め方",
+        "text": (
+            f"{mode_labels.get(mode, mode)}。テーマ{coverage.get('topic_count', 0)}件、"
+            f"対象{coverage.get('segment_count', 0)}発話。"
+            + (f"未割当{coverage.get('unassigned_segment_count', 0)}件、"
+               f"上位2テーマの差が小さい境界例{coverage.get('low_margin_segment_count', 0)}件。"
+               "割り当ては意味の近さによる候補で、テーマの妥当性を確かめた結果ではありません。"
+               if mode == "manual" else "")
+        ),
+    })
     for topic in result.get("topics", []):
         segment_ids = [str(value) for value in topic.get("representative_segment_ids", []) if value]
         if segment_ids:
+            origin = ("研究者が定義したテーマ" if topic.get("origin") == "manual"
+                      else "特徴語による仮ラベル")
             findings.append({
                 "title": f"テーマ {topic.get('topic_id', '')}：{topic.get('label', '')}",
                 "text": (
-                    f"{topic.get('segment_count', 0)}発話、{topic.get('speaker_count', 0)}話者、"
+                    f"{origin}。{topic.get('segment_count', 0)}発話、"
+                    f"{topic.get('speaker_count', 0)}話者、"
                     f"相づち{topic.get('backchannel_count', 0)}件。"
                 ),
                 "segment_ids": segment_ids,
@@ -175,13 +202,14 @@ def transformer_note_content(result: dict) -> tuple[list[dict], list[dict]]:
 
 def method_results(analysis: dict, datasets: dict, *, outline: dict | None = None,
                    finishing: dict | None = None, kwic: dict | None = None,
-                   meeting: dict | None = None, comparison: dict | None = None) -> list[dict]:
+                   meeting: dict | None = None, comparison: dict | None = None,
+                   classification: dict | None = None) -> list[dict]:
     research = analysis.get("research", {})
     engine = research.get("linguistics", {}).get("engine", {})
     insights = analysis.get("insights", {})
     results = []
     optional = {"kwic": kwic, "ai_finishing": finishing, "meeting_minutes": meeting,
-                "interview_comparison": comparison}
+                "interview_comparison": comparison, "segment_classification": classification}
     for key, title, tables in METHODS:
         if key in optional and optional[key] is None:
             continue
@@ -207,6 +235,16 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
             summaries = [{"title": "比較の種類", "text": (
                 ("同じ比較グループの比較" if details.get("same_content") else "異なる内容を含む探索的比較")
                 + f"。{len(details.get('interviews', []))}回を比較。")}]
+        if key == "segment_classification":
+            details = classification or {}
+            counts = details.get("summary", {}) if isinstance(details, dict) else {}
+            summaries = [{"title": "分類・確認候補", "text": (
+                f"対象{counts.get('segment_count', 0)}発話、手動確認済み"
+                f"{counts.get('manual_reviewed_count', 0)}件、Jev重要度高"
+                f"{counts.get('high_importance_count', 0)}件、要確認高"
+                f"{counts.get('high_review_count', 0)}件、機密らしさ高"
+                f"{counts.get('high_sensitivity_count', 0)}件。"
+            )}]
         selected = [name for name in tables if name in datasets]
         count = sum(len(datasets[name][1]) for name in selected)
         state = "completed" if count or findings or details else "empty"
@@ -219,6 +257,8 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
                 state = "stale"
             if details.get("result"):
                 findings, summaries = transformer_note_content(details["result"])
+        if key == "segment_classification" and not details:
+            state = "not_run"
         if key == "ai_insights" and insights.get("stale"): state = "stale"
         if key == "outline" and details.get("evidence"):
             current = {s['id']: s for s in analysis.get('segments', []) if not s.get('excluded')}
@@ -246,6 +286,15 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
             limitations = list(details.get("cautions", []))
         if key == "transformer_topics" and details.get("result"):
             unit = details["result"].get("analysis_unit", unit)
+        if key == "segment_classification":
+            unit = "発話"
+            result = details.get("result") or {}
+            method_engine = {
+                "template": "deterministic-rules",
+                "llm": (result.get("sources") or {}).get("llm", {}),
+                "transformer": (result.get("sources") or {}).get("transformer", {}),
+            }
+            limitations = list(result.get("limitations", limitations))
         previews = [{"dataset": name, "fields": preview_fields(name, datasets[name][0]),
                      "rows": datasets[name][1][:10], "total": len(datasets[name][1])}
                     for name in selected if datasets[name][1] and key not in {"local_insights", "ai_insights", "kwic", "ai_finishing"}]

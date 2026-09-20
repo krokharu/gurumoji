@@ -37,6 +37,26 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         self.assertEqual(self.workbench.load('recording')['ai_efforts']['name_verify'], 'low')
         self.assertEqual(read_text(self.workbench.note_path(self.state['work'])), original)
 
+    def test_jev_comparison_option_is_written_and_parsed(self):
+        workbench = ObsidianWorkbench(Path(self.temporary.name) / 'jev.sqlite3')
+        state = workbench.prepare(
+            'jev-recording', '会議.wav', self.segments, revision=0,
+            provider='openai', jev_compare=True,
+        )
+        control = read_text(workbench.note_path(state['control']))
+        self.assertIn('[x] Jevでも修正要否を判定し、現行AIと比較する', control)
+
+        captured = {}
+        def engine(action, current, segments, context, provider, check):
+            check()
+            captured['jev_compare'] = current.get('jev_compare')
+            return {'segments': segments, 'names': {}, 'outline': context}
+
+        control = re.sub(r'^- \[ \](.*gurumoji-command:finish -->)$', r'- [x]\1', control, flags=re.M)
+        workbench.note(state['control'], control)
+        workbench.poll_once(engine)
+        self.assertTrue(captured['jev_compare'])
+
     def engine(self, action, state, segments, context, provider, check):
         check()
         self.calls.append((action, copy.deepcopy(segments), copy.deepcopy(context)))
@@ -111,6 +131,32 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         path.rename(path.with_name('移動した会話.md'))
         path.with_name('複製した会話.md').write_text(body, encoding='utf-8')
         with self.assertRaises(ValueError):
+            self.workbench.refresh_paths(self.state)
+
+    def test_deleted_note_is_reported_once_and_recovers_when_restored(self):
+        path = self.workbench.note_path(self.state['work'])
+        body = path.read_bytes()
+        path.unlink()
+        self.workbench.poll_once(self.engine)
+        state = self.workbench.load('recording')
+        self.assertEqual(state['status'], 'error')
+        status = self.workbench.note_path(state['status_note'])
+        before = status.read_bytes()
+        with patch('gurumoji.obsidian_finishing.write_atomic') as write:
+            self.workbench.poll_once(self.engine)
+        write.assert_not_called()
+        self.assertEqual(status.read_bytes(), before)
+        path.write_bytes(body)
+        self.workbench.poll_once(self.engine)
+        self.assertEqual(self.workbench.load('recording')['status'], 'ready')
+        self.assertEqual(self.calls, [])
+
+    def test_note_in_obsidian_trash_is_not_treated_as_moved(self):
+        path = self.workbench.note_path(self.state['work'])
+        trash = self.workbench.vault / '.trash' / path.name
+        trash.parent.mkdir()
+        path.rename(trash)
+        with self.assertRaisesRegex(ValueError, 'ゴミ箱'):
             self.workbench.refresh_paths(self.state)
 
     def test_default_pipeline_uses_obsidian(self):

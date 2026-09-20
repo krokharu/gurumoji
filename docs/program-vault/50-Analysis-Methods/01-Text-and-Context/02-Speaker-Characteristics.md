@@ -1,5 +1,6 @@
 ---
 note_id: method-speaker-characteristics
+note_type: analysis-method
 method_id: speaker_characteristics
 method_version: text-analysis-store-2
 algorithm_version: content-insights-2
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/text, gurumoji/orchestrator]
 
 - [Kilgarriff (2001), *Comparing Corpora*](https://kilgarriff.co.uk/Publications/2001-K-CompCorpIJCL.pdf) はコーパス間の頻度比較を扱う。現実装は同論文の検定手順を実装していないため、比率差を有意差と読まない。
 - [Salton & Buckley (1988)](https://doi.org/10.1016/0306-4573(88)90021-0) は単語重み付けの基礎を示す。現実装の話者比較はTF–IDFではなく発話率差である。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/quantitative-text-analysis/01-Expert|計量テキスト分析の専門家]]。

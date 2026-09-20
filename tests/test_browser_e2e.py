@@ -196,7 +196,10 @@ window.addEventListener('DOMContentLoaded', () => {
       id: 'review-test', speaker: 'A', start: 0, end: 1, text: '校正後の本文',
       ai_review: {original_text: '元の本文', noise_candidate: true, fragments: [
         {reason: '候補理由 <img src=x onerror=window.reviewInjected=1>'}
-      ]}
+      ]},
+      jev_review: {original_text: '元の本文', decision: 'correction_needed',
+        correction_needed_probability: 0.88, confidence: 0.76, model: 'jev-test',
+        comparison: {current_ai_flagged: true, jev_flagged: true, agreement: 'both_flagged'}}
     }]};
     setCurrentJobDirty(false);
     renderSegments();
@@ -204,6 +207,14 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!panel || !panel.textContent.includes('ノイズ候補') || !panel.textContent.includes('候補理由'))
       throw new Error('review or reason missing');
     if (panel.querySelector('img') || window.reviewInjected) throw new Error('unsafe reason rendering');
+    const jevSummary = document.querySelector('#jev-comparison-summary');
+    const jevPanel = segmentEditor.querySelector('.segment-jev-review');
+    if (!jevSummary || jevSummary.hidden || !jevSummary.textContent.includes('判定一致 1 / 1') ||
+        !jevSummary.textContent.includes('両方：修正が必要'))
+      throw new Error('Jev comparison summary missing');
+    if (!jevPanel || !jevPanel.textContent.includes('Jev：修正が必要') ||
+        !jevPanel.textContent.includes('現行AI：修正あり'))
+      throw new Error('Jev segment comparison missing');
     panel.querySelector('button').click();
     if (currentJob.segments[0].text !== '元の本文' || segmentEditor.querySelector('textarea').value !== '元の本文')
       throw new Error('restore failed');
@@ -440,6 +451,225 @@ window.addEventListener('DOMContentLoaded', async () => {
         self.assertIn('class="speaker-survey-table participant"', completed.stdout)
         self.assertIn("満足度", completed.stdout)
         self.assertIn("年齢層", completed.stdout)
+
+    def test_registered_ui_ux_fixes_work_in_a_real_browser(self):
+        browser = browser_executable()
+        if browser is None:
+            self.skipTest('Chrome, Edge, or Chromium is required')
+        driver = r"""
+window.addEventListener('DOMContentLoaded', async () => {
+  const checks = [];
+  const pause = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+  const expect = (name, value, detail = '') => {
+    if (!value) throw new Error(name + (detail ? ': ' + detail : ''));
+    checks.push(name);
+  };
+  const waitFor = async (predicate, name) => {
+    for (let i = 0; i < 60; i += 1) { if (predicate()) return; await pause(50); }
+    throw new Error('timeout: ' + name);
+  };
+  try {
+    const mobile = window.innerWidth <= 540;
+    const byId = id => document.getElementById(id);
+
+    // UX-14: a hand-edited value survives a mode switch; reset restores the preset.
+    const maxSpeakers = document.querySelector('[name="max_speakers"]');
+    const minSpeakers = document.querySelector('[name="min_speakers"]');
+    setRunning(false);
+    expect('UX-14 meeting preset applied', maxSpeakers.value === '10', maxSpeakers.value);
+    maxSpeakers.value = '5';
+    maxSpeakers.dispatchEvent(new Event('input', {bubbles: true}));
+    const groupMode = document.querySelector('input[name="conversation_mode"][value="group_interview"]');
+    groupMode.click();
+    expect('UX-14 unedited field follows new mode', minSpeakers.value === '3',
+      `min=${minSpeakers.value} checked=${groupMode.checked} disabled=${groupMode.matches(':disabled')}`);
+    expect('UX-14 edited field kept', maxSpeakers.value === '5', maxSpeakers.value);
+    expect('UX-14 hint names kept field', byId('conversation-mode-hint').textContent.includes('最多話者数'));
+    const reset = byId('conversation-mode-reset');
+    expect('UX-14 reset offered', !reset.hidden);
+    reset.click();
+    expect('UX-14 reset restores preset', maxSpeakers.value === '12' && reset.hidden, maxSpeakers.value);
+
+    // UX-12: cancelling asks first; declining sends nothing.
+    const cancelCalls = [];
+    const realFetch = window.fetch;
+    window.fetch = (input, options) => {
+      if (String(input).includes('/cancel')) {
+        cancelCalls.push(String(input));
+        return Promise.resolve(new Response('{"ok": true}', {status: 200, headers: {'Content-Type': 'application/json'}}));
+      }
+      return realFetch(input, options);
+    };
+    const realConfirm = window.confirm;
+    let confirmAnswer = false;
+    let confirmCount = 0;
+    window.confirm = () => { confirmCount += 1; return confirmAnswer; };
+    activeJobId = 'ux-cancel-job';
+    cancelButton.disabled = false;
+    cancelButton.click();
+    await pause(50);
+    expect('UX-12 declined cancel sends no request', confirmCount === 1 && cancelCalls.length === 0);
+    confirmAnswer = true;
+    activeJobId = 'ux-cancel-job';
+    cancelButton.disabled = false;
+    cancelButton.click();
+    await pause(50);
+    expect('UX-12 confirmed cancel sends request', confirmCount === 2 && cancelCalls.length === 1,
+      `confirms=${confirmCount} calls=${cancelCalls.join()} job=${activeJobId}`);
+    window.fetch = realFetch;
+    window.confirm = realConfirm;
+    activeJobId = null;
+
+    // UX-23: one Tab stop per tablist; arrows, Home and End move focus.
+    const tabs = ['show-new-button', 'show-library-button', 'show-analysis-button', 'show-speakers-button'].map(byId);
+    const key = name => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: name, bubbles: true}));
+    expect('UX-23 roving tabindex', tabs.map(tab => tab.getAttribute('tabindex')).join() === '0,-1,-1,-1',
+      tabs.map(tab => tab.getAttribute('tabindex')).join());
+    tabs[0].focus();
+    key('ArrowRight');
+    expect('UX-23 ArrowRight', document.activeElement === tabs[1], document.activeElement.id);
+    key('End');
+    expect('UX-23 End', document.activeElement === tabs[3], document.activeElement.id);
+    key('Home');
+    expect('UX-23 Home', document.activeElement === tabs[0], document.activeElement.id);
+    key('ArrowLeft');
+    expect('UX-23 ArrowLeft wraps', document.activeElement === tabs[3], document.activeElement.id);
+    expect('UX-23 arrows do not switch view', !byId('create-view').hidden);
+    showView('speakers');
+    await pause(0);
+    expect('UX-23 Tab stop follows selection', tabs[3].getAttribute('tabindex') === '0' && tabs[0].getAttribute('tabindex') === '-1');
+    expect('UX-01 route follows the screen', window.location.hash === '#/speakers', window.location.hash);
+    showView('new');
+    await pause(0);
+    expect('UX-01 route returns to create', window.location.hash === '#/new', window.location.hash);
+
+    // UX-24 / UX-17: inspect the loaded stylesheet itself.
+    const sheet = [...document.styleSheets].find(item => item.href && item.href.includes('style.css'));
+    const rules = [];
+    const walk = list => [...list].forEach(rule => { rules.push(rule); if (rule.cssRules) walk(rule.cssRules); });
+    walk(sheet.cssRules);
+    expect('UX-24 focus ring is a top-level rule', rules.some(rule => rule.parentRule === null
+      && String(rule.selectorText || '').includes(':focus-visible') && String(rule.selectorText || '').includes(':is(')));
+    const probe = document.createElement('label');
+    probe.className = 'field';
+    probe.innerHTML = '<input type="text">';
+    document.body.append(probe);
+    probe.querySelector('input').focus();
+    if (probe.querySelector('input').matches(':focus-visible')) {
+      expect('UX-24 outline on .field input', getComputedStyle(probe.querySelector('input')).outlineStyle === 'solid');
+    }
+    probe.remove();
+    const tiny = rules.filter(rule => rule.style && /rem$/.test(rule.style.fontSize) && parseFloat(rule.style.fontSize) < 0.7)
+      .map(rule => rule.selectorText + ' ' + rule.style.fontSize);
+    expect('UX-17 no font size below .7rem', tiny.length === 0, tiny.slice(0, 3).join(' | '));
+    expect('UX-17 token resolves', getComputedStyle(document.documentElement).getPropertyValue('--text-min').trim() === '.7rem');
+    const smallest = [...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.textContent.trim())
+      .reduce((min, el) => Math.min(min, parseFloat(getComputedStyle(el).fontSize)), 99);
+    expect('UX-17 smallest visible text >= 11px', smallest >= 11, String(smallest));
+
+    // UX-11: delete sits outside the sticky bar; the phone bar keeps two buttons.
+    const deleteButton = byId('delete-record-button');
+    expect('UX-11 delete outside sticky bar', !deleteButton.closest('.sticky-actions') && !!deleteButton.closest('.result-danger-zone'));
+    if (mobile) {
+      const sticky = document.querySelector('.sticky-actions');
+      const shown = [...sticky.children].filter(button => getComputedStyle(button).display !== 'none');
+      expect('UX-11 phone sticky bar has two buttons', getComputedStyle(sticky).display === 'grid' && shown.length === 2,
+        shown.map(button => button.id).join());
+    }
+
+    // UX-10: the connection dialog shows token status at every width and opens the model flow.
+    await waitFor(() => !document.querySelector('[data-status-provider="openai"]').classList.contains('loading'), 'config');
+    const dialogPill = document.querySelector('[data-status-provider="openai"]');
+    expect('UX-10 dialog pill mirrors header pill', dialogPill.className === byId('status-openai').className, dialogPill.className);
+    expect('UX-10 dialog closed until asked', dialogPill.getBoundingClientRect().width === 0);
+    byId('connection-button').click();
+    await pause(50);
+    expect('UX-10 dialog opens', byId('connection-dialog').open && dialogPill.getBoundingClientRect().width > 0);
+    let alerted = '';
+    const realAlert = window.alert;
+    window.alert = message => { alerted = String(message); };
+    byId('connection-dialog').querySelector('[data-model-provider="openai"]').click();
+    await pause(50);
+    window.alert = realAlert;
+    expect('UX-10 model flow opens from the dialog', alerted.includes('OpenAI') || aiModelDialog.open, alerted);
+    if (aiModelDialog.open) aiModelDialog.close();
+    byId('connection-dialog').close();
+    if (mobile) {
+      expect('UX-10 header pills hidden on phones', byId('status-openai').getBoundingClientRect().width === 0);
+    } else {
+      expect('UX-10 header pills visible on desktop', byId('status-openai').getBoundingClientRect().width > 0);
+    }
+    expect('UX-09 no horizontal overflow', document.documentElement.scrollWidth <= window.innerWidth + 2,
+      String(document.documentElement.scrollWidth));
+
+    // Detailed settings stay closed until "変更" opens exactly one panel.
+    const panels = [...document.querySelectorAll('[data-settings-panel]')];
+    expect('settings panels closed by default', panels.every(panel => !panel.open), panels.filter(p => p.open).map(p => p.id).join());
+    document.querySelector('[data-open-panel="finishing"]').click();
+    await pause(400);
+    expect('変更 opens one panel', byId('panel-finishing').open && panels.filter(panel => panel.open).length === 1);
+    byId('panel-finishing').open = false;
+
+    // UX-06 / UX-07: the main task is placed first.
+    const follows = (first, second) => Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect('UX-06 comparison after analysis', follows(byId('analysis-shell'), byId('interview-comparison-card'))
+      && !byId('interview-comparison-details').open);
+    expect('UX-07 survey after table', follows(document.querySelector('.spreadsheet-shell'), byId('speaker-survey-analysis')));
+
+    // UX-08: the splash shows once per session and is skipped afterwards.
+    expect('UX-08 session flag stored', window.sessionStorage.getItem('gurumoji.bootSplashSeen') === '1');
+    await waitFor(() => bootSplash.hidden, 'first splash');
+    bootSplash.hidden = false;
+    document.body.classList.add('booting');
+    startBootSequence();
+    expect('UX-08 repeat visit skips splash', bootSplash.hidden && !document.body.classList.contains('booting')
+      && document.body.classList.contains('boot-skipped'));
+
+    document.body.dataset.uxFixesTest = 'passed';
+  } catch (error) {
+    document.body.dataset.uxFixesTest = 'failed: ' + error.message;
+  }
+  document.body.dataset.uxFixesChecks = String(checks.length);
+});
+"""
+        original_render = app.render_template
+        original_static = app.app.send_static_file
+
+        def render(*args, **kwargs):
+            return original_render(*args, **kwargs).replace(
+                '</body>', '<script src="/static/ux-fixes-test.js" defer></script></body>')
+
+        def static(filename):
+            if filename == 'ux-fixes-test.js':
+                return app.app.response_class(driver, mimetype='text/javascript')
+            return original_static(filename)
+
+        for width, expected_checks in (("1440,1000", 33), ("390,844", 33)):
+            with self.subTest(window=width):
+                server = make_server('127.0.0.1', 0, app.app, threaded=True)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with patch.object(app, 'render_template', side_effect=render), \
+                            patch.object(app.app, 'send_static_file', side_effect=static), \
+                            patch.object(app, 'get_machine_profile', return_value={}), \
+                            patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
+                        result = subprocess.run([
+                            browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
+                            '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
+                            f'--window-size={width}', f'--user-data-dir={self.root / ("ux-profile-" + width.split(",")[0])}',
+                            '--virtual-time-budget=10000', '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
+                        ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+                status = re.search(r'data-ux-fixes-test="([^"]+)"', result.stdout)
+                self.assertIsNotNone(status, result.stderr[-2000:])
+                self.assertEqual(status.group(1), 'passed')
+                checks = re.search(r'data-ux-fixes-checks="(\d+)"', result.stdout)
+                self.assertGreaterEqual(int(checks.group(1)), expected_checks - 1)
 
 
 if __name__ == "__main__":

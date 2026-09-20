@@ -2,8 +2,10 @@
 note_id: program-four-vaults-v1
 note_type: data-model
 title: 4 Vault の保存契約 v1
+summary: Software・Input・Visualization・Orchestratorの役割、ResearchVaultとの境界、保存経路を定める。
 status: current
-verified: 2026-09-14
+feature: obsidian-storage
+verified: 2026-09-15
 schema_version: 1
 tags:
   - gurumoji/program
@@ -15,6 +17,8 @@ tags:
 Whisperの文字起こしと各分析の保存結果を、役割の異なる4つの独立したObsidian Vaultへ書き出す。Vault同士は内部リンクでつながず、`conversation_id`・`input_snapshot_id`・`run_id`・`artifact_id`・`note_id` で対応付ける。正本はこれまでどおりSQLite・`analysis_store` のJSON／CSV・メディアで、Vaultのノートは台帳・仕様・来歴の要約である。
 
 ## 構成
+
+「4 Vault」はSoftware・Input・Visualization・Orchestratorの役割分担を指す。既存のResearchVaultも併用するため、物理的な保管庫は計5つ。ResearchVaultは4つのどれかの別名ではない。確認版はコミット`1b8fe41`。
 
 | Vault | ルート | アプリの書き込み | 置くもの |
 | --- | --- | --- | --- |
@@ -36,7 +40,7 @@ Whisperの文字起こしと各分析の保存結果を、役割の異なる4つ
 | 分析の固定保存（全件分析、KWIC、AI見解、Transformer、AI仕上げ） | `AnalysisStore.publish` → `publish_vaults` → `VaultRegistry.publish_analysis` | Inputスナップショット、Orchestratorの手法カードと実行記録、表を持つ手法のVisualization仕様 |
 | 会議議事録（別の実行 `meeting_minutes`） | ジョブ完了時と「議事録をObsidianへ保存」: `archive_meeting_minutes` | 会話1件の独立した実行。タスク候補・決定事項候補・発話量の表、Orchestrator・Visualization・ResearchVault |
 | グループインタビュー比較（別の実行 `interview_comparison`） | `POST /api/library/interview-comparison/runs`: `archive_interview_comparison`（一覧は同じパスのGET） | 複数会話の実行。構成会話は `analysis_run_members`。Inputは比較入力（構成会話と各revision）、ResearchVaultは `40-研究/インタビュー比較/` |
-| 入力・分析条件・話者台帳の変更 | `AnalysisStore.publish_index` → `refresh_vaults` | 実行記録と図表仕様を `status: stale` で再出力。その会話を含む比較も対象 |
+| 入力・分析条件・分析準備・話者台帳の変更 | 準備は`transcript_preparation.initialize`のトリガーでDBのstaleを更新。`AnalysisStore.publish_index` → `refresh_vaults`で書き出し | 実行記録と図表仕様を `status: stale` で再出力。その会話を含む比較も対象 |
 
 同じ条件で再保存すると、まだ4 Vaultに出ていない既存の実行（4 Vault導入前の保存）も出力する。保存済みデータのない会話は、編集保存・分析保存・取り込みまで台帳を作らない。会議議事録と比較は、会話ごとの全件分析に混ぜず、それぞれ独立した実行・手法（`meeting_minutes`、`interview_comparison`）として保存する。
 
@@ -53,6 +57,8 @@ Whisperの文字起こしと各分析の保存結果を、役割の異なる4つ
 - AI呼び出し・再分析。書き出しと stale の反映は保存済みの成果物だけで行う
 
 ## 検証と未実装
+
+比較保存は集計時の`input_fingerprints`を要求し、版不一致は409で再集計を案内する。詳しくは[[30-Data/analysis-storage-v1#APIと拡張手順]]。生成3 Vaultの書き出し失敗を保存APIの状態へ集約する処理は未実装（OBS-18）。`vault_status=completed`だけで全Vaultの出力完了を保証しない。
 
 検証先：`tests/test_four_vaults.py`（Whisper台帳・秘密情報の除外・再出力の不変・手動編集の保持・分析の3 Vault分割・stale反映）、`tests/test_vault_coverage.py`（Whisper設定、AI話者特定・Obsidian反映・取り込み・削除の台帳、再保存時の出力、会議議事録と比較の独立保存・比較のstale）、既存の `tests/test_analysis_storage.py`、`tests/test_obsidian_layout.py`。
 

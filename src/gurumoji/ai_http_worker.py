@@ -1,7 +1,7 @@
 """Isolated JSON client used by the cancellable transcription worker.
 
 Request secrets arrive only through stdin.  This process deliberately accepts
-requests for the configured cloud AI hosts and LM Studio on the local loopback
+requests for the configured cloud AI hosts, TypeSafe Jev, and LM Studio on the local loopback
 interface, and never echoes request headers or payloads to stdout/stderr.
 """
 
@@ -16,7 +16,11 @@ import urllib.request
 from typing import Any
 
 
-ALLOWED_HOSTS = frozenset({"api.openai.com", "generativelanguage.googleapis.com"})
+ALLOWED_HOSTS = frozenset({
+    "api.openai.com",
+    "generativelanguage.googleapis.com",
+    "api.typesafe.ai",
+})
 LMSTUDIO_LOOPBACK_PATH = "/v1/chat/completions"
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024

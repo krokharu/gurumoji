@@ -16,8 +16,8 @@ class UiDefaultsTests(unittest.TestCase):
             "複数回処理やエフェクトを加えて精度を上げます。注意：処理時間が増えます",
             page,
         )
-        self.assertIn("<h2>AI仕上げ <em>任意</em></h2>", page)
-        self.assertIn("<p>TXT は常に作成</p>", page)
+        self.assertIn("AI仕上げ <em>任意</em>", page)
+        self.assertIn("TXT は常に作成", page)
         self.assertNotIn("JSON（常時）", page)
 
     def test_new_job_form_exposes_guided_defaults_and_advanced_settings(self):
@@ -25,12 +25,19 @@ class UiDefaultsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         page = response.data.decode("utf-8")
-        self.assertIn("<h2>新しい文字起こし</h2>", page)
+        self.assertIn("新しい文字起こし", page)
         self.assertIn('id="file-drop-zone"', page)
         self.assertIn("ここへドラッグ＆ドロップ", page)
         self.assertIn("パスと保存先を指定", page)
-        self.assertIn("処理装置・話者数・無音判定を手動調整", page)
+        self.assertIn("処理装置・話者数・無音判定", page)
         self.assertIn('id="setup-ready-state"', page)
+        # Detailed settings are summarised and start closed; "変更" opens one panel.
+        self.assertIn('id="settings-summary"', page)
+        for panel in ("recognition", "vocabulary", "finishing", "emotion", "output"):
+            self.assertIn(f'data-open-panel="{panel}"', page)
+            self.assertRegex(page, rf'<details[^>]*data-settings-panel="{panel}"')
+        self.assertNotRegex(page, r'<details[^>]*data-settings-panel="[^"]+"[^>]*\bopen\b')
+        self.assertIn('id="flow-steps"', page)
         self.assertIn('class="primary-button launch-button"', page)
         self.assertRegex(page, r'id="finish-in-obsidian"[^>]*checked')
         self.assertIn('id="obsidian-finishing-button"', page)
@@ -82,20 +89,22 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function loadMeetingObsidianStatus", script)
         self.assertIn("/meeting-obsidian`, {method: 'POST'}", script)
 
-    def test_desktop_and_mobile_creation_interfaces_are_separate(self):
+    def test_create_flow_uses_one_stepper_for_desktop_and_phone(self):
         response = app.app.test_client().get("/")
 
         self.assertEqual(response.status_code, 200)
         page = response.data.decode("utf-8")
         self.assertEqual(page.count('id="job-form"'), 1)
-        self.assertIn('class="desktop-create-sidebar desktop-only"', page)
-        self.assertIn('class="mobile-create-header mobile-only"', page)
+        self.assertEqual(page.count('id="flow-steps"'), 1)
+        for step in ("1", "2", "3"):
+            self.assertEqual(page.count(f'data-flow-step="{step}"'), 1)
+            self.assertEqual(page.count(f'data-flow-section="{step}"'), 1)
+        self.assertNotIn('data-flow-section="4"', page)
         self.assertIn('id="mobile-wizard-nav"', page)
-        self.assertIn('data-mobile-step="1"', page)
-        self.assertIn('data-mobile-step="2"', page)
-        self.assertEqual(page.count('data-mobile-step="3"'), 2)
-        self.assertIn('data-mobile-step="4"', page)
-        self.assertIn('data-mobile-review-source', page)
+        self.assertIn('data-review-source', page)
+        self.assertNotIn("desktop-create-sidebar", page)
+        self.assertNotIn("mobile-create-header", page)
+        self.assertNotIn("quick-flow", page)
         ids = re.findall(r'\bid="([^"]+)"', page)
         self.assertEqual(len(ids), len(set(ids)))
 
@@ -108,6 +117,7 @@ class UiDefaultsTests(unittest.TestCase):
             script,
         )
         self.assertIn("aiOptionInputs.forEach(input => { input.checked = true; });", script)
+        self.assertIn("if (jevCompare && tokenConfigSnapshot.typesafe) jevCompare.checked = true;", script)
         self.assertIn("if (aiProvider.value === 'none') input.checked = false;", script)
         self.assertIn("function applyLmStudioDefaults(config)", script)
         self.assertIn("config.lmstudio || !String(config.lmstudio_model || '').trim()", script)
@@ -123,7 +133,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function setMobileStep(", script)
 
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
-        self.assertIn("width: min(calc(100% - 24px), 700px);", styles)
+        self.assertIn("--app-bar-height", styles)
         self.assertIn("@media (min-width: 960px)", styles)
         self.assertIn("@media (max-width: 959px)", styles)
 
@@ -163,10 +173,10 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function speakerSurveyCorrelation(", script)
         self.assertIn("function analysisGroupByOptions()", script)
         self.assertIn("事前アンケート：", script)
-        self.assertIn("function showProcessedDataSection(", script)
+        self.assertIn("function showView(", script)
         self.assertIn("async function rerunSpeakerIdentification()", script)
         self.assertIn("/speaker-identification`, {", script)
-        self.assertIn("listen(showLibraryAnalysisButton, 'click'", script)
+        self.assertIn("listen(showAnalysisButton, 'click'", script)
         self.assertIn("function openAnalysisForItem(itemId)", script)
         self.assertIn("showView('analysis', {analysisItemId: targetItemId})", script)
         self.assertIn("function openResultDestination(destination)", script)
@@ -193,8 +203,8 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn(".library-card-open", styles)
         self.assertIn(".library-card-open:focus-visible", styles)
         self.assertIn(".library-analysis-button", styles)
-        self.assertIn(".result-context-nav", styles)
-        self.assertIn(".result-context-actions", styles)
+        self.assertIn(".item-tabs", styles)
+        self.assertIn(".item-actions", styles)
         self.assertIn(".speaker-survey-analysis", styles)
         self.assertIn(".speaker-survey-table", styles)
         self.assertIn(".speaker-survey-completeness", styles)
@@ -208,20 +218,20 @@ class UiDefaultsTests(unittest.TestCase):
         page = response.data.decode("utf-8")
         self.assertEqual(
             len(re.findall(r'class="[^"]*\bview-tab\b[^"]*"', page)),
-            3,
+            4,
         )
-        self.assertNotIn('id="show-analysis-button"', page)
-        self.assertIn('id="processed-data-hub"', page)
-        self.assertIn('id="show-library-analysis-button"', page)
+        self.assertIn('id="show-analysis-button"', page)
+        self.assertNotIn('id="processed-data-hub"', page)
+        self.assertNotIn('id="show-library-analysis-button"', page)
         self.assertIn('id="analysis-card"', page)
         self.assertIn('id="result-analysis-button"', page)
-        self.assertIn("このデータを分析・可視化", page)
-        self.assertIn('class="result-context-nav"', page)
-        self.assertIn('id="result-context-name"', page)
-        self.assertIn('data-result-destination="library"', page)
-        self.assertIn('data-result-destination="analysis"', page)
+        self.assertIn('id="analysis-open-item-button"', page)
+        self.assertIn('class="item-tabs"', page)
+        for tab in ("transcript", "conversation", "summary", "files"):
+            self.assertEqual(page.count(f'data-item-tab="{tab}"'), 1)
+            self.assertEqual(page.count(f'data-item-panel="{tab}"'), 1)
         self.assertIn('data-result-destination="speakers"', page)
-        self.assertIn('<h2 id="analysis-title">会話データの分析結果</h2>', page)
+        self.assertIn('<h1 id="analysis-title">会話データの分析結果</h1>', page)
         self.assertIn('class="analysis-desktop-layout desktop-only"', page)
         self.assertIn('class="analysis-mobile-layout mobile-only"', page)
         self.assertIn("自動集計", page)
@@ -258,6 +268,11 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("const requestedAnalysisSection", script)
         self.assertIn("function renderManualAnalysis(", script)
         self.assertIn("async function saveAnalysis(", script)
+        self.assertIn("function buildSegmentClassificationPanel(", script)
+        self.assertIn("async function runSegmentClassification(", script)
+        self.assertIn("data-analysis-annotation-field", script)
+        self.assertIn("importance_score", script)
+        self.assertIn("segment_classification_crosstabs", script)
         self.assertIn("source_revision:", script)
         self.assertIn("analysis_revision:", script)
         self.assertIn("['coded_segments', 'コード済み発話 CSV']", script)
@@ -270,7 +285,7 @@ class UiDefaultsTests(unittest.TestCase):
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".analysis-desktop-layout", styles)
         self.assertIn(".analysis-mobile-layout", styles)
-        self.assertIn(".processed-data-tabs", styles)
+        self.assertIn(".item-tabs", styles)
         self.assertIn("grid-template-columns: 1fr 1fr", styles)
         self.assertIn(".analysis-save-bar", styles)
         self.assertIn(".analysis-cooccurrence-chart", styles)
@@ -284,6 +299,8 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn(".analysis-dependency-tree", styles)
         self.assertIn(".analysis-correlation-table", styles)
         self.assertIn(".analysis-engine-notice", styles)
+        self.assertIn(".segment-proposal-grid", styles)
+        self.assertIn(".segment-manual-classification", styles)
 
     def test_transcript_edits_are_guarded_and_running_jobs_can_reconnect(self):
         response = app.app.test_client().get("/")
@@ -402,6 +419,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('"%PYTHON%" -m pip check', run_script)
         self.assertIn('-File "%~dp0scripts\\run_launcher.ps1"', run_script)
         self.assertIn("MOJIOKOSI_SKIP_UPDATE_CHECK", launcher_script)
+        self.assertIn("ensure_visualization_shortcut.ps1", launcher_script)
         self.assertIn("MOJIOKOSI_SKIP_LIBRARY_UPDATE", run_script)
         self.assertIn("--upgrade-strategy only-if-needed", run_script)
         self.assertIn("imageio_ffmpeg.get_ffmpeg_exe()", run_script)
@@ -482,6 +500,37 @@ class UiDefaultsTests(unittest.TestCase):
         }
         self.assertEqual(job.public()["ai_usage"]["total_tokens"], 120)
 
+    def test_processed_item_opens_with_the_plan_and_result_outline(self):
+        page = app.app.test_client().get("/").data.decode("utf-8")
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+
+        # The block comes before the workspace tabs, so it is the first thing in view.
+        self.assertLess(page.index('id="session-outline"'), page.index('class="item-tabs"'))
+        self.assertIn('id="session-outline-content"', page)
+        self.assertIn("アウトライン（予定と結果）", page)
+        self.assertIn("function renderSessionOutline(data, outline)", script)
+        self.assertIn("renderSessionOutline(job.session_outline, job.outline);", script)
+        # Without a guide the block says so and still shows the result and agenda titles.
+        self.assertIn("予定（質問ガイド・議題）は登録されていません。", script)
+        self.assertIn("結果（時間順）", script)
+        self.assertIn("'AI議題'", script)
+
+    def test_transformer_panel_offers_auto_candidate_and_manual_themes(self):
+        script = (app.APP_DIRECTORY / "static" / "analysis-content.js").read_text(encoding="utf-8")
+
+        # The three ways of deciding themes are one control, with their own inputs.
+        self.assertIn("['auto', '自動でまとめる'], ['candidate', '候補から選ぶ'], ['manual', '手動で定義する']", script)
+        self.assertIn("data-transformer-mode", script.replace("dataset.transformerMode", "data-transformer-mode"))
+        self.assertIn("function buildTransformerCandidateList", script)
+        self.assertIn("function buildTransformerManualTopics", script)
+        # Candidate counts come from the saved run, and the request carries the mode.
+        self.assertIn("quality ? result.quality.cluster_candidates : null", script)
+        self.assertIn("mode, min_similarity: minSimilarity", script)
+        # Manual themes are researcher-owned config, so editing them asks for a save first.
+        self.assertIn("analysisState.config.transformer_topics", script)
+        self.assertIn("手動で割り当てるには、テーマを2件以上定義して保存してください。", script)
+        self.assertIn("テーマの妥当性を確かめた結果ではありません", script)
+
     def test_registered_ui_ux_fixes_stay_in_place(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
@@ -494,7 +543,7 @@ class UiDefaultsTests(unittest.TestCase):
         # UX-12: cancelling a job asks first.
         self.assertRegex(
             script,
-            r"listen\(cancelButton, 'click', async \(\) => \{\s*if \(!currentJobId\) return;\s*if \(!window\.confirm\(",
+            r"listen\(cancelButton, 'click', async \(\) => \{\s*if \(!activeJobId\) return;\s*if \(!window\.confirm\(",
         )
         # UX-14: a mode switch keeps values the user changed by hand.
         self.assertIn("const manuallyEditedModeFields = new Set();", script)
@@ -518,13 +567,53 @@ class UiDefaultsTests(unittest.TestCase):
         # UX-08: the splash no longer claims an update check and shows once per session.
         self.assertNotIn("CHECKING FOR UPDATES", page)
         self.assertIn("gurumoji.bootSplashSeen", script)
-        # UX-10: phones can see token status and open the model dialog.
-        self.assertEqual(page.count("data-status-provider="), 3)
+        # UX-10: the connection dialog shows token status at every width.
+        self.assertEqual(page.count("data-status-provider="), 5)
+        self.assertIn('id="connection-dialog"', page)
         self.assertIn('[data-status-provider="${id}"]', script)
         # UX-04: one name per concept.
         for text in (page, script):
             self.assertNotIn("ライブラリ", text)
             self.assertNotIn("認識と話者分離", text)
+
+    def test_redesigned_navigation_routes_and_item_workspace(self):
+        page = app.app.test_client().get("/").data.decode("utf-8")
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+
+        # UX-01: every screen has a hash route and the back button works.
+        self.assertIn("function routeHash(view, id = '')", script)
+        self.assertIn("function parseRouteHash(hash)", script)
+        self.assertIn("window.addEventListener('popstate'", script)
+        self.assertIn("window.history.pushState(null, '', hash)", script)
+        self.assertIn("applyRouteFromLocation({initial: true});", script)
+        # UX-02 / UX-03: one record workspace with tabs; moves live in the header only.
+        self.assertIn("function setItemTab(name)", script)
+        self.assertNotIn("result-context-nav", page)
+        sticky = re.search(r'<div class="sticky-actions">(.*?)</div>', page, re.S).group(1)
+        self.assertNotIn("result-analysis-button", sticky)
+        self.assertNotIn("new-button", sticky)
+        # UX-05: one stepper drives both widths.
+        self.assertIn("function renderFlowSteps()", script)
+        self.assertNotIn("mobileStepContent[currentMobileStep].title", script)
+        # UX-09: compact app bar instead of the hero; hardware lights once per place.
+        self.assertIn('class="app-bar"', page)
+        self.assertNotIn('class="hero"', page)
+        self.assertEqual(page.count('data-hardware="cpu"'), 2)
+        self.assertIn('data-device-dot="cpu"', page)
+        # UX-16: the progress card belongs to the create screen; the header chip is global.
+        self.assertIn('id="job-chip"', page)
+        self.assertIn("function updateJobChip(job)", script)
+        self.assertIn("let activeJobId = null;", script)
+        # UX-18 / UX-27: shared palette and content-width buttons by default.
+        effort_styles = (app.APP_DIRECTORY / "static" / "ai-effort.css").read_text(encoding="utf-8")
+        self.assertNotIn("#315ed0", effort_styles)
+        self.assertNotIn("var(--bg", effort_styles)
+        self.assertIn(".primary-button { width: auto; margin: 0;", styles)
+        # UX-21 / UX-22: no decorative English labels on every card.
+        self.assertNotIn('class="eyebrow"', page)
+        # Detailed settings only open on request.
+        self.assertIn("function openSettingsPanel(name", script)
 
 
 if __name__ == "__main__":

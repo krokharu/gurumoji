@@ -3,7 +3,7 @@ note_id: design-obsidian-sync-contract
 note_type: interface-design
 title: ID・更新・取り込み・APIの契約
 status: proposed
-updated: 2026-09-13
+updated: 2026-09-15
 schema_version: 1
 tags:
   - gurumoji/design
@@ -14,7 +14,7 @@ tags:
 
 2026-09-13更新：組み込み手法の固定保存・AI仕上げの変更記録・Vault生成は実装済みです。現行API・テーブル・登録契約は [[30-Data/analysis-storage-v1]] を参照してください。この文書は差分取り込み・外部手法等の後続計画も含みます。
 
-本ノートのDB追加、API、保存パッケージは提案仕様であり、まだ実装されていない。現在のAPIは [[20-Modules/module-map]] を参照する。
+本ノートは将来案を含む設計資料で、すべてが未実装という意味ではない。`analysis_runs`・`analysis_artifacts`・入力スナップショット・固定保存／再試行APIは実装済み。現行のAPI名・保存先・schemaは[[30-Data/analysis-storage-v1]]、4 Vaultは[[30-Data/four-vaults-v1]]、分析準備は[[30-Data/transcript-preparation-v1]]を正本とする。以下の命名例・旧フォルダー名・拡張案を現行仕様として実装し直さない。
 
 ## 識別子と版
 

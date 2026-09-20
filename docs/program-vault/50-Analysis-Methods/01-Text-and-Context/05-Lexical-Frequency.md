@@ -1,5 +1,6 @@
 ---
 note_id: method-lexical-frequency
+note_type: analysis-method
 method_id: lexical_frequency
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -29,3 +30,7 @@ tags: [gurumoji/analysis, gurumoji/text, gurumoji/orchestrator]
 
 - [Salton & Buckley (1988)](https://doi.org/10.1016/0306-4573(88)90021-0) は単語重み付けとTF–IDF系の情報検索上の基礎を提示する。
 - [Kilgarriff (2001)](https://kilgarriff.co.uk/Publications/2001-K-CompCorpIJCL.pdf) は頻度差を比較する際の標本量と統計的解釈の注意を扱う。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/quantitative-text-analysis/01-Expert|計量テキスト分析の専門家]]。

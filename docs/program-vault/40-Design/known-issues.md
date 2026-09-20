@@ -2,8 +2,10 @@
 note_id: design-known-issues
 note_type: issue-register
 title: 既知の問題点と改善方法（収束フェーズ）
+summary: 現行の課題ID、根拠、優先度、対応状態を管理する台帳。
 status: current
-verified: 2026-09-14
+feature: project-status
+verified: 2026-09-15
 tags:
   - gurumoji/program
   - gurumoji/design
@@ -11,6 +13,10 @@ tags:
 ---
 
 # 既知の問題点と改善方法（収束フェーズ）
+
+**現在の状態（2026-09-15）：** コミット`1b8fe41`に8件の対応を収録し、プッシュ済み。43件中、対応済み8件・一部対応1件（DOC-03）・未対応34件。元の問題・根拠・改善案は調査時点の記録で、採用した修正は「状態」のリンクを参照する。全体の集計は[[40-Design/convergence-plan#プッシュ済みの対応状況（2026-09-15）]]。
+
+**Obsidian追加調査（2026-09-15）：** [[40-Design/known-issues#追加調査：Obsidian連携（2026-09-15）|未記載だった6件]]を追記し、すべて対応済み（未コミット）。上の件数には含めていない。
 
 **追加調査：** [[40-Design/known-issues#追加調査：プログラム全体（2026-09-14）|未記載だった4件]] を追記し、登録は計43件。UI/UXの追加5件は [[40-Design/ui-ux-issues#追加調査：UI・UX（2026-09-14）]]。前回39件の選別は履歴として維持する。
 
@@ -106,7 +112,7 @@ tags:
 | --- | --- | --- | --- | --- | --- | --- |
 | DOC-01 | 中 | 同じ説明を別々の場所で管理している | `README.md`（約53KB）、`docs/*.md`（利用者向けの手順）、このVault（仕様） | 役割を決める。READMEは導入の入口、`docs/` は操作手順、Vaultは仕様・設計・問題点。同じ説明は書かずにリンクする | 未対応 | 統合 → DATA-02 |
 | DOC-02 | 低中 | 一部が実装済みなのに `proposed` のままのノートがある | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]（提案API `/api/obsidian/settings` などは未実装） | 実装済みの部分を `30-Data` へ移し、提案部分だけを残す | 未対応 | 統合 → DATA-02 |
-| DOC-03 | 中 | AI向けの開発ルールがリポジトリにない | `AGENTS.md`・`CONTRIBUTING.md` がない | [[40-Design/ai-development-rules]] を作成済み。AIツールが自動で読む `AGENTS.md` には、このノートへの参照と要点だけを置く（まだ作成していない） | 一部対応 | 保留：今回の選別に自動読込ルール追加は不要 |
+| DOC-03 | 中 | AI向けの開発ルールがリポジトリにない | `AGENTS.md`・`CONTRIBUTING.md` がない | 2026-09-16にルート `AGENTS.md` を追加し、日常作業用の短い優先順位・探索・検証ルールを置いた。詳細は [[40-Design/ai-development-rules]] に分離した | 対応済み（未コミット） | 今回のAI運用ルール監査で対応 |
 
 ## DEV：開発時の残骸
 
@@ -120,7 +126,7 @@ tags:
 | --- | --- | --- | --- | --- | --- |
 | UI-01 | 中 | Obsidian関連の入口が5か所に分かれている：新規作成のチェック、結果画面「Obsidianで仕上げ」、議事録パネル「Obsidianに保存」、分析「分析結果をObsidianに保存」、比較「比較結果を保存」 | 「保存・Obsidian」の操作を、会話ごとの1パネル（状態表示と操作）に集約する | 未対応 | 保留：異なる保存対象の一律集約案は不採用 |
 | UI-02 | 中 | 「保存」の意味が複数ある：編集内容の保存、話者管理の保存、分析設定の保存、分析の固定保存、Obsidianへの保存 | ボタン名を「編集を保存」「分析条件を保存」「結果を記録（固定）」のように対象で区別する | 未対応 | 統合 → UX-04 |
-| UI-03 | 中 | 移動の導線が重複し、URLにも反映されない（UX-01〜03） | [[40-Design/ui-ux-issues]] の推奨順に従う | 未対応 | 統合 → UX-01／UX-03 |
+| UI-03 | 中 | 移動の導線が重複し、URLにも反映されない（UX-01〜03） | [[40-Design/ui-ux-issues]] の推奨順に従う | 対応済み（UX-01／UX-03、UI再設計 2026-09-16、未コミット。[[20-Modules/ui-screens]]） | 統合 → UX-01／UX-03 |
 
 ## 追加調査：プログラム全体（2026-09-14）
 
@@ -132,3 +138,18 @@ tags:
 | DATA-04 | 中 | 分析準備のrevision変更が、保存済み実行のDB上の`stale`へ伝播しない | `transcript_preparation.py:save/write_state`は準備テーブルだけを更新。`analysis_store.py:initialize_store`のstale用triggerに準備テーブルがなく、`refresh_vaults`はDBのstaleだけを参照。`app.py:archive_source_stamp`は準備revisionを含むが、`list_interview_comparison_runs`はfingerprintを再検証しない | 準備状態を含む固定成果物が古くなっても、比較一覧・Orchestratorの更新要否に反映されない。単一会話の履歴APIはfingerprintで補正するため、表示先によって判定が違う | 準備更新と同じトランザクションで当該会話・構成比較の実行をstaleにするか、同じ版照合を各経路で共有する。一時DBで準備revision更新後のfingerprint変化と、一覧再生成後も比較APIのstaleが0のままであることを再現。通常の準備保存APIを通すE2Eは未実施 | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | P1：優先 |
 | OBS-18 | 中 | Input・Visualization・Orchestratorへの書き出し失敗が、保存結果APIの状態へ集約されない | `AnalysisStore.publish_vaults`は例外をwarningに記録し、`VaultRegistry.publish_analysis`の戻り値も利用しない。その後`publish`はResearchVault成功時に`vault_status=completed,error=''`とする。`public`には生成3Vaultの同期結果がない。`VaultRegistry.run_status`は内容のcurrent/staleを返し、同期のconflict/missingとは異なる | 生成Vaultが欠けてもUIでは「Vaultを保存しました」となり、再試行ボタンの条件も満たさない。OBS-09のwatcher停止やOBS-04の書き込み所有判定とは異なる、保存APIの結果集約漏れ | 正本保存の成功は維持したまま、Vaultごとの書き出し状態・理由をAPIで返し、未完了の出力を再試行できるようにする。一時Vaultで生成側の書き込み例外を注入し、ResearchVault成功後もAPIに公開する値がcompleted・空errorであることを再現 | 未対応（障害注入再現） | P1：優先 |
 | PERF-01 | 中 | 会話一覧APIがページ分割なしで全会話・全発話JSONを読み込む | `app.py:list_library`の`SELECT * FROM library_items`→`fetchall`→各行の`row_segments`→全候補の`library_public`。検索語が空でも全文を展開する。`static/app.js:loadLibrary/loadAnalysisCatalog`と`interview-comparison.js:loadCatalog`が同じ一覧を要求する | 会話・発話が増えるほど、一覧表示や検索のたびに処理量とメモリー使用量が増える構造。Obsidian監視のI/O負荷（OBS-08）とは別。実環境で遅延が発生する件数・秒数は未計測 | まず100会話×各1万発話等のfixtureで時間・メモリー・応答サイズを測定。絞り込み用メタデータの索引、一覧用の軽い取得、ページ分割を検討し、検索・話者・感情facetの意味を保つ。負荷測定前に性能改善を断定しない | 未対応（構造確認・負荷未計測） | P2：測定後に判断 |
+
+## 追加調査：Obsidian連携（2026-09-15）
+
+- **確認元：** コードと、実環境の `runtime/data/obsidian/ResearchVault` を確認した。OBS-19は実環境のノート、OBS-20〜23とOBS-24の①は一時Vaultで再現した。
+- **テスト：** 修正に合わせて回帰テストを追加した（`tests/test_obsidian_layout.py`、`tests/test_obsidian_finishing.py`、`tests/test_analysis_storage.py`）。
+- **未確認：** OBS-24の④は、Obsidianが独自キーを消すかどうかを確かめていない。
+
+| ID | 重要度 | 問題 | 根拠 | 影響 | 改善方法・受け入れ条件 | 状態 | 選別（追加調査） |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| OBS-19 | 中 | 手法別の表の中で、リンクの別名の区切り（縦棒）をエスケープしていない | `obsidian_layout.method_table`。実環境の `40-研究/分析手法/ai.md`・`I001-分析まとめ.md` に出ている | Obsidianで表の列がずれる | 表の中では縦棒をバックスラッシュでエスケープする（`vault_registry` と同じ書き方） | 対応済み（未コミット） | P0：最優先 |
+| OBS-20 | 中高 | 作業ノートを削除すると、2秒ごとに状態ノート・`state.json`・`interviews.json`・ナビゲーションを書き直す | `ObsidianWorkbench.poll_once` は、ラッチ前の `refresh_paths` で例外が出た場合も毎回、公開処理を行う。一時Vaultで、状態ノートのhashが毎回変わることを再現 | 同期ソフトの負荷が上がる。メッセージは「一意に確認できません」で、削除が原因だと分からない | ラッチ前の同じエラーは1回だけ公開する。ノートが戻れば `ready` に戻す。見つからない場合と重複の場合で文言を分ける | 対応済み（未コミット） | P0：最優先 |
+| OBS-21 | 中 | Obsidianのゴミ箱（`.trash`）にあるノートを、移動先として使う | `locate_note` がVault全体を `rglob` し、隠しフォルダーを除外していない。一時Vaultで、`work` が `.trash/…` に変わり、状態が `ready` のままになることを再現 | 削除したノートを入力にして、AI仕上げ・反映が進む | `.obsidian`・`.trash` などの隠しフォルダーを除外する（`obsidian_layout.find_notes` に集約） | 対応済み（未コミット） | P0：最優先 |
+| OBS-22 | 中 | インタビューのフォルダーをObsidianで移動・改名すると、元の場所に概要と研究メモを作り直す | `ObsidianLayout.register` はパスを固定で記録する。`update` は研究メモを作成し、`managed_note` は概要を作り直す。テーマ同期も元のフォルダーだけを読む。一時Vaultで再現 | フォルダーが二重になる。移動した研究メモのテーマリンクが無視される。分析の保存で、`obsidian_notes` のパスと食い違って競合になる | 概要ノートの `note_id` で移動先を探し、`interviews.json` の folder・hub・links・managed を更新して `moved_from` を記録する。`AnalysisStore.follow_moves` が `obsidian_notes`・`analysis_runs.note_path` の接頭辞を同じように書き換える。見つからない（削除された）場合は従来どおり作り直し、再探索は60秒に1回までにする | 対応済み（未コミット） | P1：優先 |
+| OBS-23 | 中 | 短い形式のテーマリンク（例：`[[働き方]]`）を認識しない | `sync_themes` の正規表現は `20-テーマ/` から始まるリンクだけを拾う。Obsidianの既定の新規リンク形式は「最短パス」。一時Vaultで再現 | 入力補完でリンクした研究メモが、テーマ関連に反映されない | Obsidianと同じく、Vault内（隠しフォルダーを除く）で名前が1つに決まり、`20-テーマ` 配下にある場合だけ解決する | 対応済み（未コミット） | P1：優先 |
+| OBS-24 | 低 | 監視処理の小さな問題：①変化がなくても `interviews.json` を保存する ②テーマ関連の警告が10秒ごとに出る ③`.obsidian` のJSONが壊れているか型が違うと、例外でナビゲーションの生成全体が止まる ④ブックマークの独自キー `gurumoji` が消えると、グループが重複しうる | `managed_note`、`sync_themes`、`configure` | 不要な書き込み、ログの肥大、設定の重複 | ①hashが変わったときだけ保存する ②同じ警告は1回だけ出す ③読めない・型が違う設定は書き換えずに警告する ④キーがなくても、先頭がホームの「Gurumoji」グループなら置き換える | 対応済み（未コミット） | P2：後続 |

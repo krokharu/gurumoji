@@ -2,7 +2,9 @@
 note_id: program-obsidian-integration
 note_type: module
 title: Obsidian連携の現状構造と安全性
+summary: ResearchVaultと生成4 Vaultの書き込み経路、所有情報、競合・移行の現行実装を示す。
 status: current
+feature: obsidian-storage
 verified: 2026-09-14
 tags:
   - gurumoji/program

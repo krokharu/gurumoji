@@ -54,6 +54,20 @@ class AnalysisStorageTests(unittest.TestCase):
         self.assertIn('graph_kind: analysis_result', notes)
         self.assertIn('先頭10行まで', notes)
 
+    def test_moved_interview_folder_keeps_catalog_ownership(self):
+        run = self.save().get_json()['run']
+        self.assertEqual(run['vault_status'], 'completed', run)
+        record = self.store.layout.register('content', '')
+        old = self.store.vault / record['folder']
+        old.rename(old.with_name(old.name + '-移動後'))
+        self.store.publish_index('content')
+        moved = self.store.layout.load()['interviews']['content']
+        self.assertEqual(moved['folder'], record['folder'] + '-移動後')
+        self.assertFalse(old.exists())
+        with self.store.connect() as conn:
+            note_path = conn.execute('SELECT note_path FROM analysis_runs WHERE id=?', (run['id'],)).fetchone()[0]
+        self.assertTrue(note_path.startswith(moved['folder'] + '/'), note_path)
+
     def test_transformer_note_keeps_searchable_results_stats_and_domain_columns(self):
         evidence = {
             'a1': {'id': 'a1', 'speaker': 'A', 'speaker_name': '参加者A',
@@ -317,24 +331,40 @@ class AnalysisStorageTests(unittest.TestCase):
             'fragments': [{'offset': 0, 'original_text': original[0]['text'],
                            'noise_candidate': True, 'reason': '雑音の誤認識が疑われる'}],
         }
+        revised[0]['jev_review'] = {
+            'review_version': app.JEV_REVIEW_VERSION, 'model': 'jev-test',
+            'original_text': original[0]['text'], 'decision': 'correction_needed',
+            'correction_needed_probability': 0.88, 'confidence': 0.76, 'flagged': True,
+            'fragments': [],
+            'comparison': {'current_ai_flagged': True, 'jev_flagged': True,
+                           'agreement': 'both_flagged'},
+        }
         normalized = app.normalize_edited_segments('content', revised)
         self.assertEqual(normalized[0]['ai_review'], revised[0]['ai_review'])
+        self.assertEqual(normalized[0]['jev_review'], revised[0]['jev_review'])
         with app.database_connection() as connection:
             connection.execute("UPDATE library_items SET segments_json=? WHERE id='content'",
                                (json.dumps(normalized),))
         context = {'sections': [{'title': '参照用議題', 'bullets': ['会話全体の要点']}]}
         run = app.archive_ai_finishing(app.library_row('content'), original,
             {'outline_context': 'completed', 'cleanup': 'completed'}, 'openai', 'mock', {},
-            context_outline=context)
+            context_outline=context,
+            jev_usage={'provider': 'typesafe', 'model': 'jev-test', 'input_tokens': 12})
         self.assertEqual(run['vault_status'], 'completed', run)
         public = self.store.public(run)
         details = json.loads(self.artifact(public, 'result.json'))['finishing']
         self.assertEqual(details['context_outline'], context)
         self.assertEqual(details['changes'][0]['ai_review'], revised[0]['ai_review'])
+        self.assertEqual(details['jev_comparison']['reviewed_segment_count'], 1)
+        self.assertEqual(details['jev_comparison']['agreement_counts']['both_flagged'], 1)
         rows = list(csv.DictReader(io.StringIO(
             self.artifact(public, 'tables/ai_changes.csv').decode('utf-8-sig'))))
         self.assertEqual(rows[0]['noise_candidate'], 'True')
         self.assertIn('雑音', rows[0]['review_reason'])
+        jev_rows = list(csv.DictReader(io.StringIO(
+            self.artifact(public, 'tables/ai_jev_comparison.csv').decode('utf-8-sig'))))
+        self.assertEqual(jev_rows[0]['agreement'], 'both_flagged')
+        self.assertEqual(jev_rows[0]['jev_decision'], 'correction_needed')
 
     def test_path_traversal_request_validation_and_formula_safety(self):
         for value in ('../outside', 'C:/outside', 'nested\\file', '/outside'):

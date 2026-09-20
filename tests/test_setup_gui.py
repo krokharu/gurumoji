@@ -27,11 +27,14 @@ class SetupGuiTests(unittest.TestCase):
         self.assertNotIn("Gyan.FFmpeg", script)
         self.assertIn("MOJIOKOSI_SETUP_ONLY", script)
         self.assertIn("lmstudio_base_url", script)
+        self.assertIn("typesafe_api_key", script)
+        self.assertIn("typesafe_model", script)
         self.assertIn("Normalize-LmStudioUrl", script)
         self.assertIn("127.0.0.1", script)
         self.assertIn("UseSystemPasswordChar", script)
         self.assertIn("秘密鍵は画面上で伏せて表示し、ログには書き込みません", script)
         self.assertIn('setup_gui.ps1', launcher)
+        self.assertIn('ensure_visualization_shortcut.ps1', script)
 
     def test_official_python_installer_is_verified_before_running(self):
         installer = (app.PROJECT_DIRECTORY / "scripts" / "install_python.ps1").read_text(encoding="utf-8-sig")
@@ -43,6 +46,19 @@ class SetupGuiTests(unittest.TestCase):
         self.assertIn("InstallAllUsers=0", installer)
         self.assertIn("GURUMOJI_SETUP_ERROR", installer)
         self.assertIn("Get-InstallFailureCode", installer)
+
+    def test_visualization_obsidian_shortcut_uses_the_local_visualization_vault(self):
+        root = app.PROJECT_DIRECTORY
+        shortcut = (root / "scripts" / "ensure_visualization_shortcut.ps1").read_text(encoding="utf-8")
+        launcher = (root / "open_visualization_obsidian.bat").read_text(encoding="utf-8")
+        opener = (root / "scripts" / "open_visualization_obsidian.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("可視化用Obsidianを開く.lnk", shortcut)
+        self.assertIn("Obsidian.exe", shortcut)
+        self.assertIn("open_visualization_obsidian.bat", shortcut)
+        self.assertIn("open_visualization_obsidian.ps1", launcher)
+        self.assertIn("VisualizationVault", opener)
+        self.assertIn("obsidian://open?path=", opener)
 
     def test_setup_explains_managed_pc_failures_without_disabling_security_checks(self):
         setup = (app.PROJECT_DIRECTORY / "scripts" / "setup_gui.ps1").read_text(encoding="utf-8-sig")

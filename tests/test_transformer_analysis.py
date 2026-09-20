@@ -176,6 +176,88 @@ class TransformerAnalysisTests(unittest.TestCase):
         )
         self.assertNotEqual(hits[0]["segment_id"], "s1")
 
+    def test_candidate_mode_keeps_the_whole_candidate_list(self):
+        analysis, morphemes, embeddings = fixture()
+        result = subject.analyze_transformer_topics(
+            analysis, morphemes, embeddings=embeddings,
+            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            mode="candidate", topic_count=2,
+        )
+        self.assertEqual(result["parameters"]["mode"], "candidate")
+        self.assertEqual(result["coverage"]["topic_count"], 2)
+        self.assertEqual(
+            {row["topic_count"] for row in result["quality"]["cluster_candidates"]}, {2, 3}
+        )
+        self.assertTrue(all(row["origin"] == "kmeans" for row in result["topics"]))
+
+    def test_manual_mode_assigns_to_researcher_themes(self):
+        analysis, morphemes, embeddings = fixture()
+        manual_topics = [
+            {"id": "topic_price", "label": "価格の話", "cues": ["価格", "料金"], "seed_segment_ids": ["s1"]},
+            {"id": "topic_ui", "label": "操作の話", "cues": ["操作"], "seed_segment_ids": []},
+        ]
+
+        def fake_encode(texts, **kwargs):
+            vectors = np.asarray([[1, 0, 0], [0, 1, 0]][:len(texts)], dtype="float32")
+            return vectors, {"name": "fixture", "dimensions": 3, "device": "cpu"}
+
+        with patch.object(subject, "encode_texts", side_effect=fake_encode):
+            result = subject.analyze_transformer_topics(
+                analysis, morphemes, embeddings=embeddings,
+                engine={"name": "fixture", "dimensions": 3}, mode="manual",
+                manual_topics=manual_topics, manual_min_similarity=0.5,
+            )
+        self.assertEqual(result["parameters"]["mode"], "manual")
+        self.assertEqual(result["parameters"]["manual_min_similarity"], 0.5)
+        self.assertEqual([row["label"] for row in result["topics"]], ["価格の話", "操作の話"])
+        self.assertTrue(all(row["origin"] == "manual" for row in result["topics"]))
+        self.assertEqual(result["topics"][0]["keywords"], ["価格", "料金"])
+        self.assertEqual(result["topics"][0]["seed_segment_count"], 1)
+        assigned = {row["segment_id"]: row["topic_label"] for row in result["assignments"]}
+        self.assertEqual(assigned["s1"], "価格の話")
+        self.assertEqual(assigned["s2"], "価格の話")
+        self.assertEqual(assigned["s3"], "操作の話")
+        self.assertEqual(assigned["s4"], "操作の話")
+        # The two utterances about paper handouts match neither theme above the cut-off.
+        self.assertEqual(assigned["s5"], "どのテーマにも近くない")
+        self.assertEqual(result["coverage"]["unassigned_segment_count"], 2)
+        self.assertTrue(any("しきい値" in line for line in result["limitations"]))
+
+    def test_manual_mode_rejects_a_theme_without_cue_or_seed(self):
+        analysis, morphemes, embeddings = fixture()
+        with self.assertRaises(ValueError):
+            subject.analyze_transformer_topics(
+                analysis, morphemes, embeddings=embeddings,
+                engine={"name": "fixture", "dimensions": 3}, mode="manual",
+                manual_topics=[{"label": "空のテーマ"}],
+            )
+
+    def test_saved_vectors_are_reused_only_for_the_same_input(self):
+        analysis, morphemes, embeddings = fixture()
+        result = subject.analyze_transformer_topics(
+            analysis, morphemes, embeddings=embeddings, model_name="fixture",
+            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+        )
+        reuse = subject.saved_embeddings(result, analysis, model="fixture")
+        self.assertIsNotNone(reuse)
+        vectors, segment_ids, engine = reuse
+        self.assertEqual(segment_ids, [f"s{i}" for i in range(1, 7)])
+        self.assertEqual(engine["vector_source"], "saved-int8")
+        self.assertIsNone(subject.saved_embeddings(result, analysis, model="other-model"))
+        changed = copy.deepcopy(analysis)
+        changed["segments"][0]["text"] += "。"
+        self.assertIsNone(subject.saved_embeddings(result, changed, model="fixture"))
+        reused = subject.analyze_transformer_topics(
+            analysis, morphemes, embeddings=vectors, embedding_segment_ids=segment_ids,
+            engine=engine, mode="candidate", topic_count=3, max_topics=3, min_topic_size=2,
+        )
+        self.assertTrue(reused["coverage"]["reused_embeddings"])
+        with self.assertRaises(ValueError):
+            subject.analyze_transformer_topics(
+                analysis, morphemes, embeddings=vectors,
+                embedding_segment_ids=["s9"] + segment_ids[1:], engine=engine,
+            )
+
     def test_dominant_default_participant_is_reported_as_facilitator_candidate(self):
         segment = {"speaker": "moderator-like", "role": "participant"}
         self.assertEqual(
@@ -273,6 +355,92 @@ class TransformerApiTests(unittest.TestCase):
         saved = factory.return_value.save.call_args.kwargs["result"]
         self.assertEqual(saved["parameters"]["transformer"]["topic_count"], 6)
         self.assertEqual(saved["algorithms"]["transformer"], "transformer-topics-test")
+
+    def save_manual_topics(self, topics):
+        data = self.client.get(self.url).get_json()
+        response = self.client.put(self.url, json={
+            "source_revision": data["item"]["revision_count"],
+            "analysis_revision": data["item"]["analysis_revision"],
+            "config": {**data["config"], "transformer_topics": topics},
+            "annotations": {},
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()
+
+    def test_manual_mode_needs_saved_themes_and_passes_them_to_the_worker(self):
+        blocked = self.client.post(self.url + "/transformer", json={
+            **self.payload("transformer-manual-without-themes"), "mode": "manual"})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("2", blocked.get_json()["error"])
+        # A heading alone is a usable descriptor, so a theme without cues is accepted.
+        self.save_manual_topics([
+            {"label": "価格の話", "cues": ["価格", "料金"]},
+            {"label": "操作の話", "cues": ["操作"], "seed_segment_ids": ["s3"]},
+        ])
+        with patch.object(app.threading, "Thread") as thread:
+            started = self.client.post(self.url + "/transformer", json={
+                **self.payload("transformer-manual-ready-request"), "mode": "manual", "min_similarity": 0.75})
+            options = thread.call_args.kwargs["kwargs"]
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.get_json()["run"]["mode"], "manual")
+        self.assertEqual(options["mode"], "manual")
+        self.assertEqual(options["min_similarity"], 0.75)
+        self.assertEqual([topic["label"] for topic in options["manual_topics"]], ["価格の話", "操作の話"])
+        self.assertEqual(options["manual_topics"][1]["seed_segment_ids"], ["s3"])
+
+    def test_manual_worker_stores_researcher_themes_and_exports_origin(self):
+        self.save_manual_topics([
+            {"label": "価格の話", "cues": ["価格", "料金"]},
+            {"label": "操作の話", "cues": ["操作", "画面"]},
+        ])
+        with patch.object(app.threading, "Thread") as thread:
+            response = self.client.post(self.url + "/transformer", json={
+                **self.payload("transformer-manual-worker-run"), "mode": "manual"})
+            args = thread.call_args.kwargs["args"]
+            options = thread.call_args.kwargs["kwargs"]
+        self.assertEqual(response.status_code, 202)
+
+        def fake_encode(texts, **kwargs):
+            groups = (("価格", "料金", "予算"), ("操作", "画面", "方法"), ("紙", "資料", "説明書"))
+            vectors = []
+            for text in texts:
+                vector = [0.0, 0.0, 0.0]
+                for index, words in enumerate(groups):
+                    if any(word in text for word in words):
+                        vector[index] = 1.0
+                vectors.append(vector or [1.0, 0.0, 0.0])
+            return np.asarray(vectors, dtype="float32"), {
+                "name": kwargs.get("model_name", "fixture"), "dimensions": 3, "device": "cpu"}
+
+        with patch.object(app, "build_research_analysis", return_value={"linguistics": {"morphemes": self.morphemes}}), \
+             patch.object(subject, "encode_texts", side_effect=fake_encode), \
+             patch.object(app, "archive_group_analysis", return_value={"id": "archive-2", "vault_status": "saved"}):
+            app.run_transformer_analysis_job(*args, **options)
+
+        status = self.client.get(self.url + "/transformer").get_json()
+        self.assertEqual(status["run"]["status"], "completed", status["run"]["message"])
+        result = status["transformer"]["result"]
+        self.assertEqual(result["parameters"]["mode"], "manual")
+        self.assertEqual([row["label"] for row in result["topics"]], ["価格の話", "操作の話"])
+        self.assertEqual(
+            [topic["label"] for topic in result["parameters"]["manual_topics"]], ["価格の話", "操作の話"])
+        exported = self.client.get(self.url + "/export.csv?dataset=transformer_topics")
+        self.assertEqual(exported.status_code, 200)
+        lines = exported.data.decode("utf-8-sig").splitlines()
+        self.assertIn("origin", lines[0])
+        self.assertTrue(any("manual" in line for line in lines[1:]))
+
+    def test_candidate_mode_requires_a_topic_count(self):
+        missing = self.client.post(self.url + "/transformer", json={
+            **self.payload("transformer-candidate-no-count"), "mode": "candidate"})
+        self.assertEqual(missing.status_code, 400)
+        with patch.object(app.threading, "Thread") as thread:
+            started = self.client.post(self.url + "/transformer", json={
+                **self.payload("transformer-candidate-ready-req"), "mode": "candidate", "topic_count": 3})
+            options = thread.call_args.kwargs["kwargs"]
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(options["mode"], "candidate")
+        self.assertEqual(started.get_json()["run"]["topic_count"], 3)
 
     def test_validation_duplicate_cancel_and_interrupted_state(self):
         self.assertEqual(self.client.post(self.url + "/transformer", json={}).status_code, 400)

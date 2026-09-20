@@ -1,5 +1,6 @@
 ---
 note_id: method-group-statistics
+note_type: analysis-method
 method_id: group_statistics
 method_version: text-analysis-store-2
 algorithm_version: research-ja-3
@@ -32,3 +33,7 @@ tags: [gurumoji/analysis, gurumoji/statistics, gurumoji/orchestrator]
 - [Kruskal & Wallis (1952)](https://doi.org/10.1080/01621459.1952.10483441) は一要因の順位に基づく分布比較を提案した。
 
 ANOVA、Cramér's V、η²、ε²の計算はSciPy実装へ委ねている。論文報告ではライブラリ版と検定の前提確認も併記する。
+
+## 担当専門家
+
+[[50-Analysis-Methods/10-Experts/group-comparison-statistics/01-Expert|群間比較の専門家]]。結果の解釈の適用条件・手順・禁止事項と、文献の確認範囲は専門家定義を参照する。
