@@ -14427,6 +14427,7 @@ def analysis_queries() -> AnalysisQueries:
         database_connection=database_connection,
         build_analysis=group_analysis_for_row,
         public_insight_request=public_insight_request,
+        public_transformer_request=public_transformer_request,
         expose_local_paths=local_path_access_allowed(),
     )
 
@@ -14459,6 +14460,8 @@ def analysis_commands() -> AnalysisCommands:
         update_library_item_locked=_update_library_from_payload_locked,
         start_insights=start_analysis_insights_command,
         cancel_insights=cancel_analysis_insights_command,
+        start_transformer=start_transformer_analysis_command,
+        cancel_transformer=cancel_transformer_analysis_command,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
     )
@@ -14902,34 +14905,16 @@ def run_transformer_analysis_job(
             transformer_cancel_events.pop(request_id, None)
 
 
-@app.get("/api/library/<item_id>/analysis/transformer")
-def get_transformer_analysis(item_id: str):
-    try:
-        with database_connection() as connection:
-            connection.execute("BEGIN")
-            row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
-            if row is None:
-                return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-            run = connection.execute("""
-                SELECT * FROM transformer_analysis_requests
-                WHERE item_id=? ORDER BY created_at DESC LIMIT 1
-            """, (item_id,)).fetchone()
-        analysis = group_analysis_for_row(row)
-        return jsonify({"transformer": analysis["transformer"], "run": public_transformer_request(run)})
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "Transformer分析の状態を取得できませんでした。"}), 500
-
-
-@app.post("/api/library/<item_id>/analysis/transformer")
-def start_transformer_analysis(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "Transformer分析の指定はJSONオブジェクトで送信してください。"}), 400
+def start_transformer_analysis_command(
+    item_id: str, payload: dict[str, Any], *, app_url: str
+) -> tuple[dict[str, Any], int]:
     request_id = payload.get("request_id")
     if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        return jsonify({"error": "リクエストIDが正しくありません。"}), 400
+        raise AnalysisCommandRequestError("リクエストIDが正しくありません。", 400)
     if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
-        return jsonify({"error": "元データと分析のrevisionを指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "元データと分析のrevisionを指定してください。", 400
+        )
     try:
         max_topics = int(payload.get("max_topics", 8))
         min_topic_size = int(payload.get("min_topic_size", 2))
@@ -14938,27 +14923,41 @@ def start_transformer_analysis(item_id: str):
                 or topic_count not in {0, *range(2, 13)}):
             raise ValueError
     except (TypeError, ValueError):
-        return jsonify({"error": "テーマ上限・固定数は2〜12、最小発話数は2〜20で指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "テーマ上限・固定数は2〜12、最小発話数は2〜20で指定してください。",
+            400,
+        )
     mode = str(payload.get("mode") or "auto")
     if mode not in TOPIC_MODES:
-        return jsonify({"error": "テーマの決め方は自動・候補・手動のいずれかで指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "テーマの決め方は自動・候補・手動のいずれかで指定してください。",
+            400,
+        )
     try:
         min_similarity = float(payload.get("min_similarity", DEFAULT_MANUAL_MIN_SIMILARITY))
         if not 0.0 <= min_similarity <= 0.95:
             raise ValueError
     except (TypeError, ValueError):
-        return jsonify({"error": "割り当てのしきい値は0〜0.95で指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "割り当てのしきい値は0〜0.95で指定してください。", 400
+        )
     if mode == "candidate" and topic_count < 2:
-        return jsonify({"error": "候補から選ぶときは、テーマ数を指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "候補から選ぶときは、テーマ数を指定してください。", 400
+        )
     if mode == "auto":
         topic_count = 0
     model = str(os.environ.get("MOJIOKOSI_TRANSFORMER_MODEL", DEFAULT_TRANSFORMER_MODEL)).strip()
     if not model or len(model) > 200:
-        return jsonify({"error": "Transformerモデルの設定が正しくありません。"}), 400
+        raise AnalysisCommandRequestError(
+            "Transformerモデルの設定が正しくありません。", 400
+        )
     with transformer_jobs_lock:
         row = library_row(item_id)
         if row is None:
-            return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+            raise AnalysisCommandRequestError(
+                "処理済みデータが見つかりません。", 404
+            )
         with database_connection() as connection:
             previous = connection.execute(
                 "SELECT * FROM transformer_analysis_requests WHERE request_id=?", (request_id,)
@@ -14972,27 +14971,38 @@ def start_transformer_analysis(item_id: str):
                     "topic_count": topic_count, "mode": mode,
                 }
                 if any(previous[key] != value for key, value in expected.items()):
-                    return jsonify({"error": "リクエストIDが別の指定に使われています。"}), 409
-                return jsonify({"run": public_transformer_request(previous)}), 200
+                    raise AnalysisCommandRequestError(
+                        "リクエストIDが別の指定に使われています。", 409
+                    )
+                return {"run": public_transformer_request(previous)}, 200
             active = connection.execute("""
                 SELECT * FROM transformer_analysis_requests WHERE item_id=?
                     AND status IN ('queued','running','cancelling') LIMIT 1
             """, (item_id,)).fetchone()
             if active:
-                return jsonify({"error": "この会話のTransformer分析は実行中です。",
-                                "run": public_transformer_request(active)}), 409
+                raise AnalysisCommandRequestError(
+                    "この会話のTransformer分析は実行中です。",
+                    409,
+                    details={"run": public_transformer_request(active)},
+                )
         if (payload["source_revision"] != int(row["revision_count"])
                 or payload["analysis_revision"] != int(row["analysis_revision"])):
-            return jsonify({"error": "データが更新されています。分析を再読み込みしてください。",
-                            "conflict": True}), 409
+            raise AnalysisCommandRequestError(
+                "データが更新されています。分析を再読み込みしてください。",
+                409,
+                details={"conflict": True},
+            )
         analysis = group_analysis_for_row(row)
         if not included_segments(analysis):
-            return jsonify({"error": "Transformer分析に利用できる発話がありません。"}), 400
+            raise AnalysisCommandRequestError(
+                "Transformer分析に利用できる発話がありません。", 400
+            )
         manual_topics = list(analysis.get("config", {}).get("transformer_topics") or [])
         if mode == "manual" and not 2 <= len(manual_topics) <= MAX_MANUAL_TOPICS:
-            return jsonify({"error": (
-                f"手動で割り当てるには、テーマを2〜{MAX_MANUAL_TOPICS}件定義して保存してください。"
-            )}), 400
+            raise AnalysisCommandRequestError(
+                f"手動で割り当てるには、テーマを2〜{MAX_MANUAL_TOPICS}件定義して保存してください。",
+                400,
+            )
         saved_result = json_load(row["transformer_analysis_json"], {}) \
             if "transformer_analysis_json" in row.keys() else {}
         fingerprint = transformer_input_fingerprint(analysis, model=model)
@@ -15016,7 +15026,7 @@ def start_transformer_analysis(item_id: str):
             threading.Thread(
                 target=run_transformer_analysis_job,
                 args=(request_id, analysis, model, max_topics, min_topic_size,
-                      topic_count, event, request.url_root),
+                      topic_count, event, app_url),
                 kwargs={"mode": mode, "manual_topics": manual_topics,
                         "min_similarity": min_similarity,
                         "saved_result": saved_result if isinstance(saved_result, dict) else {}},
@@ -15025,21 +15035,23 @@ def start_transformer_analysis(item_id: str):
         except RuntimeError:
             transformer_cancel_events.pop(request_id, None)
             update_transformer_request(request_id, "failed", 0, "分析処理を開始できませんでした。")
-            return jsonify({"error": "分析処理を開始できませんでした。"}), 503
-        return jsonify({"run": public_transformer_request(run)}), 202
+            raise AnalysisCommandRequestError(
+                "分析処理を開始できませんでした。", 503
+            )
+        return {"run": public_transformer_request(run)}, 202
 
 
-@app.post("/api/library/<item_id>/analysis/transformer/cancel")
-def cancel_transformer_analysis(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("request_id"), str):
-        return jsonify({"error": "中止するリクエストIDを指定してください。"}), 400
+def cancel_transformer_analysis_command(
+    item_id: str, request_id: str
+) -> dict[str, Any]:
     with transformer_jobs_lock, database_connection() as connection:
         row = connection.execute("""
             SELECT * FROM transformer_analysis_requests WHERE item_id=? AND request_id=?
-        """, (item_id, payload["request_id"])).fetchone()
+        """, (item_id, request_id)).fetchone()
         if row is None:
-            return jsonify({"error": "Transformer分析処理が見つかりません。"}), 404
+            raise AnalysisCommandRequestError(
+                "Transformer分析処理が見つかりません。", 404
+            )
         if row["status"] in {"queued", "running", "cancelling"}:
             event = transformer_cancel_events.get(row["request_id"])
             if event:
@@ -15048,7 +15060,7 @@ def cancel_transformer_analysis(item_id: str):
                 UPDATE transformer_analysis_requests SET status='cancelling',
                     message='中止しています。' WHERE request_id=?
             """, (row["request_id"],))
-        return jsonify({"ok": True})
+        return {"ok": True}
 
 
 @app.get("/api/library/<item_id>/analysis/semantic-search")

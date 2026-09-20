@@ -58,6 +58,8 @@ class AnalysisCommands:
         update_library_item_locked: Callable[[str, Any], dict[str, Any]],
         start_insights: Callable[..., tuple[dict[str, Any], int]],
         cancel_insights: Callable[[str, str], dict[str, Any]],
+        start_transformer: Callable[..., tuple[dict[str, Any], int]],
+        cancel_transformer: Callable[[str, str], dict[str, Any]],
         write_lock: Any,
         expose_local_paths: bool,
     ) -> None:
@@ -79,6 +81,8 @@ class AnalysisCommands:
         self._update_library_item_locked = update_library_item_locked
         self._start_insights = start_insights
         self._cancel_insights = cancel_insights
+        self._start_transformer = start_transformer
+        self._cancel_transformer = cancel_transformer
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -173,6 +177,14 @@ class AnalysisCommands:
 
     def cancel_insight(self, item_id: str, request_id: str) -> dict[str, Any]:
         return self._cancel_insights(item_id, request_id)
+
+    def start_transformer(
+        self, item_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> tuple[dict[str, Any], int]:
+        return self._start_transformer(item_id, payload, app_url=app_url)
+
+    def cancel_transformer(self, item_id: str, request_id: str) -> dict[str, Any]:
+        return self._cancel_transformer(item_id, request_id)
 
     def save_comparison(
         self,

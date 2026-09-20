@@ -61,6 +61,8 @@ class FakeInsightConnection:
             return FakeInsightResult(self.item)
         if "FROM analysis_insight_requests" in statement:
             return FakeInsightResult({"request_id": "insight-1"})
+        if "FROM transformer_analysis_requests" in statement:
+            return FakeInsightResult({"request_id": "transformer-1"})
         return FakeInsightResult(None)
 
 
@@ -78,9 +80,11 @@ class AnalysisQueryHandlerTests(unittest.TestCase):
             source_fingerprint=lambda _item: "current",
             database_connection=lambda: connection,
             build_analysis=lambda item: {
-                "insights": {"fingerprint": "fp", "item": item["id"]}
+                "insights": {"fingerprint": "fp", "item": item["id"]},
+                "transformer": {"stale": False, "item": item["id"]},
             },
             public_insight_request=lambda row: dict(row) if row else None,
+            public_transformer_request=lambda row: dict(row) if row else None,
             expose_local_paths=local,
         )
 
@@ -109,6 +113,11 @@ class AnalysisQueryHandlerTests(unittest.TestCase):
         self.assertEqual(result["run"]["request_id"], "insight-1")
         with self.assertRaises(AnalysisQueryNotFound):
             self.queries(insight_item=None).insights("missing")
+
+    def test_transformer_status_uses_one_snapshot_without_flask(self):
+        result = self.queries().transformer("item-1")
+        self.assertFalse(result["transformer"]["stale"])
+        self.assertEqual(result["run"]["request_id"], "transformer-1")
 
 
 class TrackingLock:
@@ -246,6 +255,12 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             cancel_insights=lambda item_id, request_id: {
                 "ok": True, "item_id": item_id, "request_id": request_id
             },
+            start_transformer=lambda item_id, payload, **options: (
+                {"item_id": item_id, "payload": payload, **options}, 202
+            ),
+            cancel_transformer=lambda item_id, request_id: {
+                "ok": True, "item_id": item_id, "request_id": request_id
+            },
             write_lock=self.lock,
             expose_local_paths=False,
         )
@@ -349,6 +364,18 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             {"ok": True, "item_id": "item-1", "request_id": "insight-request-1"},
         )
 
+    def test_transformer_start_and_cancel_are_framework_independent(self):
+        body, status = self.commands.start_transformer(
+            "item-1", {"request_id": "transformer-request-1"},
+            app_url="http://test/",
+        )
+        self.assertEqual((status, body["app_url"]), (202, "http://test/"))
+        self.assertTrue(
+            self.commands.cancel_transformer(
+                "item-1", "transformer-request-1"
+            )["ok"]
+        )
+
 
 class AnalysisRouteStructureTests(unittest.TestCase):
     def test_three_read_routes_are_registered_once_with_expected_methods(self):
@@ -357,6 +384,7 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/library/<item_id>/analysis/runs",
             "/api/analysis/artifacts/<artifact_id>",
             "/api/library/<item_id>/analysis/insights",
+            "/api/library/<item_id>/analysis/transformer",
         }
         rules = [rule for rule in app.app.url_map.iter_rules()
                  if str(rule.rule) in expected and "GET" in rule.methods]
@@ -374,6 +402,8 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/library/<item_id>",
             "/api/library/<item_id>/analysis/insights",
             "/api/library/<item_id>/analysis/insights/cancel",
+            "/api/library/<item_id>/analysis/transformer",
+            "/api/library/<item_id>/analysis/transformer/cancel",
         }
         writes = {
             str(rule.rule): rule for rule in app.app.url_map.iter_rules()

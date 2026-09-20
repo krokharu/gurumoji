@@ -105,6 +105,46 @@ def register_analysis_routes(
         except AnalysisCommandRequestError as exc:
             return jsonify({"error": str(exc), **exc.details}), exc.status
 
+    @blueprint.get("/api/library/<item_id>/analysis/transformer")
+    def get_transformer_analysis(item_id: str):
+        try:
+            return jsonify(queries().transformer(item_id))
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (ValueError, TypeError, OverflowError, sqlite3.Error):
+            return jsonify({
+                "error": "Transformer分析の状態を取得できませんでした。"
+            }), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/transformer")
+    def start_transformer_analysis(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({
+                "error": "Transformer分析の指定はJSONオブジェクトで送信してください。"
+            }), 400
+        try:
+            body, status = commands().start_transformer(
+                item_id, payload, app_url=request.url_root
+            )
+            return jsonify(body), status
+        except AnalysisCommandRequestError as exc:
+            return jsonify({"error": str(exc), **exc.details}), exc.status
+
+    @blueprint.post("/api/library/<item_id>/analysis/transformer/cancel")
+    def cancel_transformer_analysis(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("request_id"), str
+        ):
+            return jsonify({"error": "中止するリクエストIDを指定してください。"}), 400
+        try:
+            return jsonify(commands().cancel_transformer(
+                item_id, payload["request_id"]
+            ))
+        except AnalysisCommandRequestError as exc:
+            return jsonify({"error": str(exc), **exc.details}), exc.status
+
     @blueprint.post("/api/library/<item_id>/analysis/runs")
     def save_analysis_run(item_id: str):
         payload = request.get_json(silent=True)
