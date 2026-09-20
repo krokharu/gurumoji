@@ -13,6 +13,7 @@ from flask import Blueprint, Flask, jsonify, request, send_file
 from .. import transcript_preparation as preparation
 from ..analysis_store import StoreConflict
 from ..handlers.analysis_commands import (
+    AnalysisCommandRequestError,
     AnalysisCommands,
     AnalysisCommandNotFound,
     ComparisonRequestError,
@@ -25,6 +26,7 @@ def register_analysis_routes(
     app: Flask,
     queries: Callable[[], AnalysisQueries],
     commands: Callable[[], AnalysisCommands],
+    ai_providers: frozenset[str] | set[str],
 ) -> None:
     blueprint = Blueprint("analysis_queries", __name__)
 
@@ -62,6 +64,46 @@ def register_analysis_routes(
             return jsonify({"error": str(exc)}), 404
         except (ValueError, TypeError, OverflowError, sqlite3.Error):
             return jsonify({"error": "見解の生成状態を取得できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/insights")
+    def start_analysis_insights(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({
+                "error": "見解生成の指定はJSONオブジェクトで送信してください。"
+            }), 400
+        provider, request_id = payload.get("provider"), payload.get("request_id")
+        if not isinstance(provider, str) or provider not in ai_providers:
+            return jsonify({
+                "error": "OpenAI、Google Gemini、またはローカルLLMを選択してください。"
+            }), 400
+        if not isinstance(request_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{16,100}", request_id
+        ):
+            return jsonify({"error": "リクエストIDが正しくありません。"}), 400
+        if any(type(payload.get(key)) is not int for key in (
+            "source_revision", "analysis_revision"
+        )):
+            return jsonify({"error": "元データと分析のrevisionを指定してください。"}), 400
+        try:
+            body, status = commands().start_insight(
+                item_id, payload, app_url=request.url_root
+            )
+            return jsonify(body), status
+        except AnalysisCommandRequestError as exc:
+            return jsonify({"error": str(exc), **exc.details}), exc.status
+
+    @blueprint.post("/api/library/<item_id>/analysis/insights/cancel")
+    def cancel_analysis_insights(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("request_id"), str
+        ):
+            return jsonify({"error": "中止するリクエストIDを指定してください。"}), 400
+        try:
+            return jsonify(commands().cancel_insight(item_id, payload["request_id"]))
+        except AnalysisCommandRequestError as exc:
+            return jsonify({"error": str(exc), **exc.details}), exc.status
 
     @blueprint.post("/api/library/<item_id>/analysis/runs")
     def save_analysis_run(item_id: str):

@@ -105,6 +105,7 @@ from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, 
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
 from .handlers.analysis_commands import (
+    AnalysisCommandRequestError,
     AnalysisCommands,
     ComparisonRequestError,
     TranscriptConflictError,
@@ -14456,6 +14457,8 @@ def analysis_commands() -> AnalysisCommands:
         refresh_archive_index=refresh_archive_index,
         publish_input_vault=publish_input_vault,
         update_library_item_locked=_update_library_from_payload_locked,
+        start_insights=start_analysis_insights_command,
+        cancel_insights=cancel_analysis_insights_command,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
     )
@@ -14476,7 +14479,9 @@ def speaker_identification_handler() -> SpeakerIdentificationHandler:
     return SpeakerIdentificationHandler(identify_library_speakers)
 
 
-register_analysis_routes(app, analysis_queries, analysis_commands)
+register_analysis_routes(
+    app, analysis_queries, analysis_commands, AI_MODEL_PROVIDERS
+)
 register_speaker_routes(
     app,
     speaker_registry_handler,
@@ -14674,22 +14679,16 @@ def get_analysis_kwic(item_id: str):
         return jsonify({"error": "文脈検索に失敗しました。"}), 500
 
 
-@app.post("/api/library/<item_id>/analysis/insights")
-def start_analysis_insights(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "見解生成の指定はJSONオブジェクトで送信してください。"}), 400
+def start_analysis_insights_command(
+    item_id: str, payload: dict[str, Any], *, app_url: str
+) -> tuple[dict[str, Any], int]:
     provider, request_id = payload.get("provider"), payload.get("request_id")
-    if not isinstance(provider, str) or provider not in AI_MODEL_PROVIDERS:
-        return jsonify({"error": "OpenAI、Google Gemini、またはローカルLLMを選択してください。"}), 400
-    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        return jsonify({"error": "リクエストIDが正しくありません。"}), 400
-    if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
-        return jsonify({"error": "元データと分析のrevisionを指定してください。"}), 400
     with insight_jobs_lock:
         row = library_row(item_id)
         if row is None:
-            return jsonify({"error": "処理済みデータが見つかりません。"}), 404
+            raise AnalysisCommandRequestError(
+                "処理済みデータが見つかりません。", 404
+            )
         with database_connection() as connection:
             previous = connection.execute("SELECT * FROM analysis_insight_requests WHERE request_id=?",
                                           (request_id,)).fetchone()
@@ -14699,22 +14698,36 @@ def start_analysis_insights(item_id: str):
                     "source_revision": payload["source_revision"],
                     "analysis_revision": payload["analysis_revision"],
                 }.items()):
-                    return jsonify({"error": "リクエストIDが別の指定に使われています。"}), 409
-                return jsonify({"run": public_insight_request(previous)}), 200
+                    raise AnalysisCommandRequestError(
+                        "リクエストIDが別の指定に使われています。", 409
+                    )
+                return {"run": public_insight_request(previous)}, 200
             active = connection.execute("""
                 SELECT * FROM analysis_insight_requests WHERE item_id=?
                     AND status IN ('queued','running','cancelling') LIMIT 1
             """, (item_id,)).fetchone()
             if active:
-                return jsonify({"error": "この会話のAI見解は生成中です。", "run": public_insight_request(active)}), 409
+                raise AnalysisCommandRequestError(
+                    "この会話のAI見解は生成中です。",
+                    409,
+                    details={"run": public_insight_request(active)},
+                )
         if payload["source_revision"] != int(row["revision_count"]) or payload["analysis_revision"] != int(row["analysis_revision"]):
-            return jsonify({"error": "データが更新されています。分析を再読み込みしてください。", "conflict": True}), 409
+            raise AnalysisCommandRequestError(
+                "データが更新されています。分析を再読み込みしてください。",
+                409,
+                details={"conflict": True},
+            )
         analysis = group_analysis_for_row(row)
         blocked = method_experts.ai_block_reason(analysis.get("experts"))
         if blocked:
-            return jsonify({"error": blocked, "expert_blocked": True}), 409
+            raise AnalysisCommandRequestError(
+                blocked, 409, details={"expert_blocked": True}
+            )
         if not included_segments(analysis):
-            return jsonify({"error": "見解の生成に利用できる発話がありません。"}), 400
+            raise AnalysisCommandRequestError(
+                "見解の生成に利用できる発話がありません。", 400
+            )
         try:
             ai_efforts = normalize_efforts(payload.get("ai_efforts"))
             config = load_token_config()
@@ -14725,7 +14738,7 @@ def start_analysis_insights(item_id: str):
             if not model:
                 raise ValueError(local_llm_model_required_message())
         except (ValueError, RuntimeError) as exc:
-            return jsonify({"error": str(exc)}), 400
+            raise AnalysisCommandRequestError(str(exc), 400) from exc
         now = utc_now_iso()
         with database_connection() as connection:
             connection.execute("""
@@ -14740,32 +14753,32 @@ def start_analysis_insights(item_id: str):
         try:
             threading.Thread(target=run_analysis_insight_job,
                              args=(request_id, analysis, provider, api_key, model, event, base_url,
-                                   request.url_root, ai_efforts),
+                                   app_url, ai_efforts),
                              name=f"insights-{item_id}", daemon=True).start()
         except RuntimeError:
             insight_cancel_events.pop(request_id, None)
             update_insight_request(request_id, "failed", 0, "生成処理を開始できませんでした。", {})
-            return jsonify({"error": "生成処理を開始できませんでした。"}), 503
-        return jsonify({"run": public_insight_request(run)}), 202
+            raise AnalysisCommandRequestError(
+                "生成処理を開始できませんでした。", 503
+            )
+        return {"run": public_insight_request(run)}, 202
 
 
-@app.post("/api/library/<item_id>/analysis/insights/cancel")
-def cancel_analysis_insights(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("request_id"), str):
-        return jsonify({"error": "中止するリクエストIDを指定してください。"}), 400
+def cancel_analysis_insights_command(
+    item_id: str, request_id: str
+) -> dict[str, Any]:
     with insight_jobs_lock, database_connection() as connection:
         row = connection.execute("SELECT * FROM analysis_insight_requests WHERE item_id=? AND request_id=?",
-                                 (item_id, payload["request_id"])).fetchone()
+                                 (item_id, request_id)).fetchone()
         if row is None:
-            return jsonify({"error": "生成処理が見つかりません。"}), 404
+            raise AnalysisCommandRequestError("生成処理が見つかりません。", 404)
         if row["status"] in {"queued", "running", "cancelling"}:
             event = insight_cancel_events.get(row["request_id"])
             if event:
                 event.set()
             connection.execute("UPDATE analysis_insight_requests SET status='cancelling', message='中止しています。' WHERE request_id=?",
                                (row["request_id"],))
-        return jsonify({"ok": True})
+        return {"ok": True}
 
 
 def public_transformer_request(row) -> dict[str, Any] | None:

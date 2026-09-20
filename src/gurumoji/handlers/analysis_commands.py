@@ -25,6 +25,15 @@ class ComparisonRequestError(ValueError):
         self.status = status
 
 
+class AnalysisCommandRequestError(RuntimeError):
+    def __init__(
+        self, message: str, status: int, *, details: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.details = details or {}
+
+
 class AnalysisCommands:
     """Coordinate fixed-result saves without changing store ownership rules."""
 
@@ -47,6 +56,8 @@ class AnalysisCommands:
         refresh_archive_index: Callable[[str], None],
         publish_input_vault: Callable[[Any], None],
         update_library_item_locked: Callable[[str, Any], dict[str, Any]],
+        start_insights: Callable[..., tuple[dict[str, Any], int]],
+        cancel_insights: Callable[[str, str], dict[str, Any]],
         write_lock: Any,
         expose_local_paths: bool,
     ) -> None:
@@ -66,6 +77,8 @@ class AnalysisCommands:
         self._refresh_archive_index = refresh_archive_index
         self._publish_input_vault = publish_input_vault
         self._update_library_item_locked = update_library_item_locked
+        self._start_insights = start_insights
+        self._cancel_insights = cancel_insights
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -152,6 +165,14 @@ class AnalysisCommands:
             self._refresh_archive_index(item_id)
             self._publish_input_vault(self._find_item(item_id))
             return result
+
+    def start_insight(
+        self, item_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> tuple[dict[str, Any], int]:
+        return self._start_insights(item_id, payload, app_url=app_url)
+
+    def cancel_insight(self, item_id: str, request_id: str) -> dict[str, Any]:
+        return self._cancel_insights(item_id, request_id)
 
     def save_comparison(
         self,

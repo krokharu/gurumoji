@@ -240,6 +240,12 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             refresh_archive_index=refresh_archive_index,
             publish_input_vault=publish_input_vault,
             update_library_item_locked=update_library_item_locked,
+            start_insights=lambda item_id, payload, **options: (
+                {"item_id": item_id, "payload": payload, **options}, 202
+            ),
+            cancel_insights=lambda item_id, request_id: {
+                "ok": True, "item_id": item_id, "request_id": request_id
+            },
             write_lock=self.lock,
             expose_local_paths=False,
         )
@@ -332,6 +338,17 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
         ])
         self.assertFalse(self.lock.active)
 
+    def test_insight_start_and_cancel_are_framework_independent(self):
+        body, status = self.commands.start_insight(
+            "item-1", {"request_id": "insight-request-1"}, app_url="http://test/"
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(body["app_url"], "http://test/")
+        self.assertEqual(
+            self.commands.cancel_insight("item-1", "insight-request-1"),
+            {"ok": True, "item_id": "item-1", "request_id": "insight-request-1"},
+        )
+
 
 class AnalysisRouteStructureTests(unittest.TestCase):
     def test_three_read_routes_are_registered_once_with_expected_methods(self):
@@ -355,6 +372,8 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/library/interview-comparison/runs",
             "/api/library/<item_id>/preparation",
             "/api/library/<item_id>",
+            "/api/library/<item_id>/analysis/insights",
+            "/api/library/<item_id>/analysis/insights/cancel",
         }
         writes = {
             str(rule.rule): rule for rule in app.app.url_map.iter_rules()
