@@ -111,6 +111,7 @@ from .handlers.analysis_commands import (
     TranscriptConflictError,
 )
 from .handlers.analysis_queries import AnalysisQueries
+from .handlers.application_lifecycle import ApplicationLifecycle
 from .handlers.jobs import JobHandler, JobRequestError
 from .handlers.speaker_registry import (
     SpeakerIdentificationHandler,
@@ -13228,22 +13229,7 @@ def reconcile_edit_transactions_before_delete(
 
 
 def initialize_application() -> None:
-    if not acquire_instance_lock():
-        raise RuntimeError("Another Gurumoji process is already using this data directory.")
-    try:
-        initialize_library(repair_provenance=False)
-        for recovery_warning in recover_edit_transactions():
-            print(f'Edit recovery warning: {recovery_warning}', file=sys.stderr)
-        with database_connection() as connection:
-            repair_output_import_provenance(connection)
-        for recovery_warning in recover_delete_quarantines():
-            print(f"Delete recovery warning: {recovery_warning}", file=sys.stderr)
-        repair_training_artifacts()
-        cleanup_orphaned_uploads()
-        import_existing_outputs()
-    except Exception:
-        release_instance_lock()
-        raise
+    application_lifecycle().initialize()
 
 
 @app.get("/")
@@ -14098,7 +14084,7 @@ def obsidian_finishing_status_route(item_id: str):
         return jsonify({"error": str(exc)}), 400
 
 
-def start_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
+def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     stop = threading.Event()
     def watch():
         try:
@@ -14122,6 +14108,41 @@ def start_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     worker = threading.Thread(target=watch, name="obsidian-finishing", daemon=True)
     worker.start()
     return stop, worker
+
+
+_application_lifecycle: ApplicationLifecycle | None = None
+
+
+def application_lifecycle() -> ApplicationLifecycle:
+    global _application_lifecycle
+    if _application_lifecycle is None:
+        def repair_provenance() -> None:
+            with database_connection() as connection:
+                repair_output_import_provenance(connection)
+
+        _application_lifecycle = ApplicationLifecycle(
+            acquire_instance_lock=lambda: acquire_instance_lock(),
+            release_instance_lock=lambda: release_instance_lock(),
+            initialize_library=lambda: initialize_library(repair_provenance=False),
+            recover_edits=lambda: recover_edit_transactions(),
+            repair_provenance=repair_provenance,
+            recover_deletes=lambda: recover_delete_quarantines(),
+            repair_training=lambda: repair_training_artifacts(),
+            cleanup_uploads=lambda: cleanup_orphaned_uploads(),
+            import_outputs=lambda: import_existing_outputs(),
+            report_edit_warning=lambda warning: print(
+                f"Edit recovery warning: {warning}", file=sys.stderr
+            ),
+            report_delete_warning=lambda warning: print(
+                f"Delete recovery warning: {warning}", file=sys.stderr
+            ),
+            spawn_watcher=lambda: _spawn_obsidian_watcher(),
+        )
+    return _application_lifecycle
+
+
+def start_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
+    return application_lifecycle().start_watcher()
 
 
 def analysis_archive_store() -> AnalysisStore:
@@ -16166,7 +16187,7 @@ def main() -> int:
     try:
         return _run_initialized_application(host, port)
     finally:
-        release_instance_lock()
+        application_lifecycle().shutdown()
 
 
 def _run_initialized_application(host: str, port: int) -> int:
@@ -16196,12 +16217,11 @@ def _run_initialized_application(host: str, port: int) -> int:
     print("終了するにはこのウィンドウで Ctrl+C を押してください。")
     if os.environ.get("MOJIOKOSI_NO_BROWSER") != "1":
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    obsidian_stop, obsidian_worker = start_obsidian_watcher()
+    start_obsidian_watcher()
     try:
         app.run(host=host, port=port, threaded=True, use_reloader=False)
     finally:
-        obsidian_stop.set()
-        obsidian_worker.join(timeout=2)
+        application_lifecycle().stop_watcher()
     return 0
 
 

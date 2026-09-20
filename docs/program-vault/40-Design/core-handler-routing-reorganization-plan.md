@@ -1455,6 +1455,8 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 順序3は文字起こしジョブの受付、状態取得、取消、完了後編集、ジョブ所有ファイル取得を`JobHandler`と専用Routingへ移した。話者台帳のCSV取込も既存の`SpeakerRegistryHandler`保存処理を使うRoutingへ統合した。`create_job`と`import_speaker_registry`を含むendpoint名は共通security hookと互換入口のため維持し、submission IDの再送、同時受付予約、メディア／CSVのmultipart上限、`after_request`での予約解放を既存hookへ残した。文字起こしフォーム検証から作業・出力ディレクトリ確保、worker開始、開始失敗時のジョブ登録・upload・出力の後始末は1つのFlask非依存コマンドとして維持し、`committing`以降を取消不可とする状態境界も変えていない。
 
+順序4はinstance lock取得からライブラリ初期化、編集回復、取込来歴修復、削除回復、学習成果物修復、孤立upload掃除、既存出力取込までを`ApplicationLifecycle`の明示的な順序へ移した。途中失敗時はlockを解放し、Obsidian watcherは同じLifecycleが単一instanceとして所有して二重起動を避け、停止event・thread join後にinstance lockを解放する。watcher内の作業状態回復、Vault移行、操作ノートpoll、theme同期と例外時の停止条件は変更していない。
+
 ### Phase 4：互換入口と不要な橋渡しを整理
 
 - 移行済み機能の一時的な橋渡しだけを削除し、設定・依存を組み立て側で明示する。`src/app.py`による`import app`と`gurumoji.app`の同一モジュール性を保つ。
