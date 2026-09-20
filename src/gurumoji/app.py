@@ -104,7 +104,11 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
-from .handlers.analysis_commands import AnalysisCommands, ComparisonRequestError
+from .handlers.analysis_commands import (
+    AnalysisCommands,
+    ComparisonRequestError,
+    TranscriptConflictError,
+)
 from .handlers.analysis_queries import AnalysisQueries
 from .web.analysis_routes import register_analysis_routes
 from . import transcript_preparation as preparation
@@ -416,12 +420,6 @@ ANALYSIS_MAX_TIME_BINS = 5000
 
 class AnalysisConflictError(RuntimeError):
     pass
-
-
-class TranscriptConflictError(RuntimeError):
-    def __init__(self, current_revision: int):
-        super().__init__("The transcript was changed by another editor. Reload before saving again.")
-        self.current_revision = current_revision
 
 
 class SpeakerRegistryConflictError(RuntimeError):
@@ -12296,11 +12294,7 @@ def record_training_corrections(
 
 
 def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
-    with library_write_lock:
-        result = _update_library_from_payload_locked(item_id, payload)
-        refresh_archive_index(item_id)
-        publish_input_vault(library_row(item_id))
-        return result
+    return analysis_commands().update_item(item_id, payload)
 
 
 def vault_registry():
@@ -14515,6 +14509,7 @@ def analysis_commands() -> AnalysisCommands:
         segments_for_item=row_segments,
         refresh_archive_index=refresh_archive_index,
         publish_input_vault=publish_input_vault,
+        update_library_item_locked=_update_library_from_payload_locked,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
     )
@@ -15591,24 +15586,6 @@ def library_thumbnail(item_id: str):
         )
     except OSError as exc:
         return jsonify({"error": f"ワードクラウドを作成できません: {exc}"}), 500
-
-
-@app.put("/api/library/<item_id>")
-def update_library_item_route(item_id: str):
-    try:
-        return jsonify(update_library_from_payload(item_id, request.get_json(silent=True)))
-    except TranscriptConflictError as exc:
-        return jsonify({
-            "error": str(exc),
-            "conflict": True,
-            "current_revision": exc.current_revision,
-        }), 409
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
-        return jsonify({"error": f"保存できません: {exc}"}), 500
 
 
 @app.delete("/api/library/<item_id>")

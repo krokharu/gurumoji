@@ -11,6 +11,14 @@ class AnalysisCommandNotFound(LookupError):
     """The requested conversation or saved run does not exist."""
 
 
+class TranscriptConflictError(RuntimeError):
+    def __init__(self, current_revision: int):
+        super().__init__(
+            "The transcript was changed by another editor. Reload before saving again."
+        )
+        self.current_revision = current_revision
+
+
 class ComparisonRequestError(ValueError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
@@ -38,6 +46,7 @@ class AnalysisCommands:
         segments_for_item: Callable[[Any], list[dict[str, Any]]],
         refresh_archive_index: Callable[[str], None],
         publish_input_vault: Callable[[Any], None],
+        update_library_item_locked: Callable[[str, Any], dict[str, Any]],
         write_lock: Any,
         expose_local_paths: bool,
     ) -> None:
@@ -56,6 +65,7 @@ class AnalysisCommands:
         self._segments_for_item = segments_for_item
         self._refresh_archive_index = refresh_archive_index
         self._publish_input_vault = publish_input_vault
+        self._update_library_item_locked = update_library_item_locked
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -134,6 +144,14 @@ class AnalysisCommands:
         self._refresh_archive_index(item_id)
         self._publish_input_vault(self._find_item(item_id))
         return result
+
+    def update_item(self, item_id: str, payload: Any) -> dict[str, Any]:
+        """Commit a transcript edit and publish its derived indexes under one lock."""
+        with self._write_lock:
+            result = self._update_library_item_locked(item_id, payload)
+            self._refresh_archive_index(item_id)
+            self._publish_input_vault(self._find_item(item_id))
+            return result
 
     def save_comparison(
         self,

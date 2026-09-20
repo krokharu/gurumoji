@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import re
 import sqlite3
+import subprocess
 from typing import Callable
 
 from flask import Blueprint, Flask, jsonify, request, send_file
@@ -15,6 +16,7 @@ from ..handlers.analysis_commands import (
     AnalysisCommands,
     AnalysisCommandNotFound,
     ComparisonRequestError,
+    TranscriptConflictError,
 )
 from ..handlers.analysis_queries import AnalysisQueries, AnalysisQueryNotFound
 
@@ -148,5 +150,26 @@ def register_analysis_routes(
             return jsonify({"error": str(exc), "conflict": True}), 409
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+
+    @blueprint.put("/api/library/<item_id>")
+    def update_library_item(item_id: str):
+        try:
+            return jsonify(commands().update_item(
+                item_id, request.get_json(silent=True)
+            ))
+        except TranscriptConflictError as exc:
+            return jsonify({
+                "error": str(exc),
+                "conflict": True,
+                "current_revision": exc.current_revision,
+            }), 409
+        except AnalysisCommandNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except (OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
+            return jsonify({"error": f"保存できません: {exc}"}), 500
 
     app.register_blueprint(blueprint)

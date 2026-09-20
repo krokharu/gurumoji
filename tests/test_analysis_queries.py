@@ -130,6 +130,7 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
         self.comparisons = []
         self.stale = []
         self.preparation_publications = []
+        self.item_updates = []
         self.preparation_connection = FakePreparationConnection(self.item)
         self.build_count = 0
 
@@ -155,13 +156,19 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             return {"item": item["id"], "segments": segments, "payload": payload}
 
         def refresh_archive_index(item_id):
-            self.assertFalse(self.lock.active)
-            self.assertTrue(self.preparation_connection.committed)
-            self.preparation_publications.append(("archive", item_id))
+            self.preparation_publications.append(
+                ("archive", item_id, self.lock.active)
+            )
 
         def publish_input_vault(item):
-            self.assertFalse(self.lock.active)
-            self.preparation_publications.append(("input", item["id"]))
+            self.preparation_publications.append(
+                ("input", item["id"], self.lock.active)
+            )
+
+        def update_library_item_locked(item_id, payload):
+            self.assertTrue(self.lock.active)
+            self.item_updates.append((item_id, payload))
+            return {"id": item_id, "revision_count": 3}
 
         self.commands = AnalysisCommands(
             store=self.store,
@@ -185,6 +192,7 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             segments_for_item=lambda _item: [{"id": "segment-1"}],
             refresh_archive_index=refresh_archive_index,
             publish_input_vault=publish_input_vault,
+            update_library_item_locked=update_library_item_locked,
             write_lock=self.lock,
             expose_local_paths=False,
         )
@@ -254,8 +262,9 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.preparation_publications, [
-            ("archive", "item-1"), ("input", "item-1")
+            ("archive", "item-1", False), ("input", "item-1", False)
         ])
+        self.assertTrue(self.preparation_connection.committed)
 
     def test_missing_preparation_item_rolls_back_without_publication(self):
         self.preparation_connection.row = None
@@ -263,6 +272,17 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             self.commands.save_preparation("missing", {})
         self.assertTrue(self.preparation_connection.rolled_back)
         self.assertEqual(self.preparation_publications, [])
+        self.assertFalse(self.lock.active)
+
+    def test_item_update_keeps_commit_and_publication_under_shared_lock(self):
+        result = self.commands.update_item("item-1", {"revision_count": 2})
+        self.assertEqual(result, {"id": "item-1", "revision_count": 3})
+        self.assertEqual(self.item_updates, [
+            ("item-1", {"revision_count": 2})
+        ])
+        self.assertEqual(self.preparation_publications, [
+            ("archive", "item-1", True), ("input", "item-1", True)
+        ])
         self.assertFalse(self.lock.active)
 
 
@@ -286,6 +306,7 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/analysis/runs/<run_id>/vault",
             "/api/library/interview-comparison/runs",
             "/api/library/<item_id>/preparation",
+            "/api/library/<item_id>",
         }
         writes = {
             str(rule.rule): rule for rule in app.app.url_map.iter_rules()
