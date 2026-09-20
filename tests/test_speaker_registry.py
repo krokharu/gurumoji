@@ -5,6 +5,79 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from gurumoji.handlers.speaker_registry import SpeakerRegistryHandler
+
+
+class TrackingLock:
+    def __init__(self):
+        self.active = False
+
+    def __enter__(self):
+        self.active = True
+
+    def __exit__(self, *_args):
+        self.active = False
+
+
+class CompletedRunConnection:
+    def __init__(self, item_ids):
+        self.item_ids = item_ids
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        return self
+
+    def fetchall(self):
+        return [(item_id,) for item_id in self.item_ids]
+
+
+class SpeakerRegistryHandlerTests(unittest.TestCase):
+    def test_save_and_archive_refresh_stay_under_shared_lock(self):
+        lock = TrackingLock()
+        connection = CompletedRunConnection(["item-1", "item-2"])
+        saves = []
+        refreshes = []
+
+        def save_records(records, **options):
+            self.assertTrue(lock.active)
+            saves.append((records, options))
+            return ([{"id": "speaker-1"}], 4)
+
+        def refresh(item_id):
+            self.assertTrue(lock.active)
+            refreshes.append(item_id)
+
+        handler = SpeakerRegistryHandler(
+            snapshot=lambda **_options: ([{"id": "speaker-1"}], 3),
+            save_records_locked=save_records,
+            database_connection=lambda: connection,
+            refresh_archive_index=refresh,
+            write_lock=lock,
+        )
+
+        self.assertEqual(handler.list(), {
+            "speakers": [{"id": "speaker-1"}],
+            "total": 1,
+            "registry_revision": 3,
+        })
+        self.assertEqual(
+            handler.save(
+                [{"id": "speaker-1"}],
+                delete_ids=["speaker-old"],
+                expected_revision=3,
+            ),
+            ([{"id": "speaker-1"}], 4),
+        )
+        self.assertEqual(refreshes, ["item-1", "item-2"])
+        self.assertEqual(saves[0][1]["expected_revision"], 3)
+        self.assertFalse(lock.active)
 
 
 class SpeakerRegistryApiTests(unittest.TestCase):
@@ -47,6 +120,17 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertEqual(record["participant_code"], "P-001")
         self.assertEqual(record["attributes"]["年齢層"], "40代")
         self.assertEqual(record["recording_consent"], "granted")
+
+    def test_registry_routes_are_registered_once_in_the_blueprint(self):
+        rules = [
+            rule for rule in app.app.url_map.iter_rules()
+            if str(rule.rule) == "/api/speakers"
+        ]
+        self.assertEqual(sum("GET" in rule.methods for rule in rules), 1)
+        self.assertEqual(sum("PUT" in rule.methods for rule in rules), 1)
+        self.assertTrue(all(
+            rule.endpoint.startswith("speaker_registry.") for rule in rules
+        ))
 
     def test_identified_speakers_link_only_to_a_unique_registered_name(self):
         profiles = app.normalize_conversation_speaker_profiles(

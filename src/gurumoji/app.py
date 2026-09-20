@@ -110,7 +110,13 @@ from .handlers.analysis_commands import (
     TranscriptConflictError,
 )
 from .handlers.analysis_queries import AnalysisQueries
+from .handlers.speaker_registry import (
+    SpeakerRegistryConflictError,
+    SpeakerRegistryHandler,
+    parse_registry_revision,
+)
 from .web.analysis_routes import register_analysis_routes
+from .web.speaker_routes import register_speaker_routes
 from . import transcript_preparation as preparation
 from . import method_experts
 
@@ -420,12 +426,6 @@ ANALYSIS_MAX_TIME_BINS = 5000
 
 class AnalysisConflictError(RuntimeError):
     pass
-
-
-class SpeakerRegistryConflictError(RuntimeError):
-    def __init__(self, current_revision: int):
-        super().__init__("The speaker registry was changed in another tab. Reload before saving again.")
-        self.current_revision = current_revision
 
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -1950,20 +1950,6 @@ def speaker_registry_revision(connection: sqlite3.Connection) -> int:
     return revision
 
 
-def parse_registry_revision(value: Any) -> int:
-    if isinstance(value, bool):
-        raise ValueError("registry_revision must be a non-negative integer.")
-    if isinstance(value, int):
-        revision = value
-    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
-        revision = int(value.strip())
-    else:
-        raise ValueError("registry_revision must be a non-negative integer.")
-    if revision < 0:
-        raise ValueError("registry_revision must be a non-negative integer.")
-    return revision
-
-
 def speaker_registry_rows(
     connection: sqlite3.Connection,
     *,
@@ -1998,13 +1984,12 @@ def save_speaker_registry_records(
     expected_revision: int | None = None,
     merge_by_participant_code: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    with library_write_lock:
-        result = _save_speaker_registry_records_locked(raw_records, delete_ids=delete_ids,
-            expected_revision=expected_revision, merge_by_participant_code=merge_by_participant_code)
-        with database_connection() as connection:
-            items = connection.execute("SELECT DISTINCT item_id FROM analysis_runs WHERE status='completed'").fetchall()
-        for item in items: refresh_archive_index(item[0])
-        return result
+    return speaker_registry_handler().save(
+        raw_records,
+        delete_ids=delete_ids,
+        expected_revision=expected_revision,
+        merge_by_participant_code=merge_by_participant_code,
+    )
 
 
 def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any = None,
@@ -13364,46 +13349,6 @@ def api_system_activity():
     return jsonify({"ok": True, **system_activity_snapshot()})
 
 
-@app.get("/api/speakers")
-def get_speaker_registry():
-    include_inactive = request.args.get("include_inactive", "1") != "0"
-    records, revision = speaker_registry_snapshot(include_inactive=include_inactive)
-    return jsonify({
-        "speakers": records,
-        "total": len(records),
-        "registry_revision": revision,
-    })
-
-
-@app.put("/api/speakers")
-def update_speaker_registry():
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "話者管理の編集内容がJSONではありません。"}), 400
-    try:
-        expected_revision = parse_registry_revision(payload.get("registry_revision"))
-        records, revision = save_speaker_registry_records(
-            payload.get("speakers"),
-            delete_ids=payload.get("delete_ids"),
-            expected_revision=expected_revision,
-        )
-        return jsonify({
-            "speakers": records,
-            "total": len(records),
-            "registry_revision": revision,
-        })
-    except SpeakerRegistryConflictError as exc:
-        return jsonify({
-            "error": str(exc),
-            "conflict": True,
-            "current_revision": exc.current_revision,
-        }), 409
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except sqlite3.Error as exc:
-        return jsonify({"error": f"話者管理データを保存できません: {exc}"}), 500
-
-
 @app.post("/api/speakers/import")
 def import_speaker_registry():
     upload = request.files.get("csv_file")
@@ -14515,7 +14460,19 @@ def analysis_commands() -> AnalysisCommands:
     )
 
 
+def speaker_registry_handler() -> SpeakerRegistryHandler:
+    """Build request-time speaker dependencies so patched settings stay effective."""
+    return SpeakerRegistryHandler(
+        snapshot=speaker_registry_snapshot,
+        save_records_locked=_save_speaker_registry_records_locked,
+        database_connection=database_connection,
+        refresh_archive_index=refresh_archive_index,
+        write_lock=library_write_lock,
+    )
+
+
 register_analysis_routes(app, analysis_queries, analysis_commands)
+register_speaker_routes(app, speaker_registry_handler)
 
 
 @app.get("/api/analysis/experts")
