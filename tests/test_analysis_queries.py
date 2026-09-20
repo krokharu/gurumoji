@@ -75,6 +75,35 @@ class TrackingLock:
         self.active = False
 
 
+class FakePreparationResult:
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        return self.row
+
+
+class FakePreparationConnection:
+    def __init__(self, row):
+        self.row = row
+        self.statements = []
+        self.committed = False
+        self.rolled_back = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *_args):
+        self.committed = exc_type is None
+        self.rolled_back = exc_type is not None
+
+    def execute(self, statement, parameters=()):
+        self.statements.append((statement, parameters))
+        return FakePreparationResult(
+            self.row if statement.startswith("SELECT * FROM library_items") else None
+        )
+
+
 class FakeCommandStore(FakeStore):
     def __init__(self):
         super().__init__()
@@ -98,7 +127,10 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
         self.store = FakeCommandStore()
         self.lock = TrackingLock()
         self.archived = []
+        self.comparisons = []
         self.stale = []
+        self.preparation_publications = []
+        self.preparation_connection = FakePreparationConnection(self.item)
         self.build_count = 0
 
         def build(_item):
@@ -111,6 +143,26 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             self.archived.append((item, analysis, request_id, options))
             return self.store.run
 
+        def archive_comparison(items, comparison, request_id, **options):
+            self.assertTrue(self.lock.active)
+            self.assertIs(options["store"], self.store)
+            self.comparisons.append((items, comparison, request_id, options))
+            return self.store.run
+
+        def save_preparation_state(connection, item, segments, payload):
+            self.assertTrue(self.lock.active)
+            self.assertIs(connection, self.preparation_connection)
+            return {"item": item["id"], "segments": segments, "payload": payload}
+
+        def refresh_archive_index(item_id):
+            self.assertFalse(self.lock.active)
+            self.assertTrue(self.preparation_connection.committed)
+            self.preparation_publications.append(("archive", item_id))
+
+        def publish_input_vault(item):
+            self.assertFalse(self.lock.active)
+            self.preparation_publications.append(("input", item["id"]))
+
         self.commands = AnalysisCommands(
             store=self.store,
             find_item=lambda item_id: self.item if item_id == "item-1" else None,
@@ -120,6 +172,19 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             archive_analysis=archive,
             source_fingerprint=lambda _item: "current",
             mark_stale=self.stale.append,
+            load_comparison_items=lambda _payload: ([
+                self.item,
+                {"id": "item-2", "revision_count": 1, "analysis_revision": 0},
+            ], False),
+            build_comparison=lambda items, **options: {
+                "ids": [item["id"] for item in items], **options
+            },
+            archive_comparison=archive_comparison,
+            database_connection=lambda: self.preparation_connection,
+            save_preparation_state=save_preparation_state,
+            segments_for_item=lambda _item: [{"id": "segment-1"}],
+            refresh_archive_index=refresh_archive_index,
+            publish_input_vault=publish_input_vault,
             write_lock=self.lock,
             expose_local_paths=False,
         )
@@ -154,6 +219,52 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             self.commands.retry_vault("missing")
         self.assertFalse(self.lock.active)
 
+    def test_comparison_save_recomputes_only_for_displayed_input_versions(self):
+        result = self.commands.save_comparison(
+            {"item_ids": ["item-1", "item-2"]},
+            request_id="comparison-request-0001",
+            input_fingerprints={"item-1": "current", "item-2": "current"},
+            app_url="http://127.0.0.1:7860/",
+        )
+        self.assertEqual(result["id"], "run-1")
+        self.assertEqual(len(self.comparisons), 1)
+        self.assertFalse(self.lock.active)
+
+        with self.assertRaises(StoreConflict):
+            self.commands.save_comparison(
+                {"item_ids": ["item-1", "item-2"]},
+                request_id="comparison-request-0002",
+                input_fingerprints={"item-1": "old", "item-2": "current"},
+                app_url="http://127.0.0.1:7860/",
+            )
+        self.assertEqual(len(self.comparisons), 1)
+
+    def test_preparation_save_commits_before_vault_publication(self):
+        result = self.commands.save_preparation("item-1", {"revision": 4})
+        self.assertEqual(result, {
+            "item": "item-1",
+            "segments": [{"id": "segment-1"}],
+            "payload": {"revision": 4},
+        })
+        self.assertEqual(
+            self.preparation_connection.statements,
+            [
+                ("BEGIN IMMEDIATE", ()),
+                ("SELECT * FROM library_items WHERE id=?", ("item-1",)),
+            ],
+        )
+        self.assertEqual(self.preparation_publications, [
+            ("archive", "item-1"), ("input", "item-1")
+        ])
+
+    def test_missing_preparation_item_rolls_back_without_publication(self):
+        self.preparation_connection.row = None
+        with self.assertRaises(AnalysisCommandNotFound):
+            self.commands.save_preparation("missing", {})
+        self.assertTrue(self.preparation_connection.rolled_back)
+        self.assertEqual(self.preparation_publications, [])
+        self.assertFalse(self.lock.active)
+
 
 class AnalysisRouteStructureTests(unittest.TestCase):
     def test_three_read_routes_are_registered_once_with_expected_methods(self):
@@ -170,14 +281,17 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             self.assertEqual(rule.methods, {"GET", "HEAD", "OPTIONS"})
             self.assertTrue(rule.endpoint.startswith("analysis_queries."))
 
+        expected_writes = {
+            "/api/library/<item_id>/analysis/runs",
+            "/api/analysis/runs/<run_id>/vault",
+            "/api/library/interview-comparison/runs",
+            "/api/library/<item_id>/preparation",
+        }
         writes = {
             str(rule.rule): rule for rule in app.app.url_map.iter_rules()
-            if "POST" in rule.methods and str(rule.rule) in {
-                "/api/library/<item_id>/analysis/runs",
-                "/api/analysis/runs/<run_id>/vault",
-            }
+            if ({"POST", "PUT"} & rule.methods) and str(rule.rule) in expected_writes
         }
-        self.assertEqual(len(writes), 2)
+        self.assertEqual(set(writes), expected_writes)
         self.assertTrue(all(rule.endpoint.startswith("analysis_queries.")
                             for rule in writes.values()))
 

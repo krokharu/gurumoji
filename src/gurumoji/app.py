@@ -104,7 +104,7 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
-from .handlers.analysis_commands import AnalysisCommands
+from .handlers.analysis_commands import AnalysisCommands, ComparisonRequestError
 from .handlers.analysis_queries import AnalysisQueries
 from .web.analysis_routes import register_analysis_routes
 from . import transcript_preparation as preparation
@@ -13760,12 +13760,6 @@ def build_interview_comparison(
     }
 
 
-class ComparisonRequestError(ValueError):
-    def __init__(self, message: str, status: int = 400):
-        super().__init__(message)
-        self.status = status
-
-
 def interview_comparison_request(payload: Any) -> tuple[list[sqlite3.Row], bool]:
     """Validate a 2-8 interview selection and read the rows in the selected order."""
     if not isinstance(payload, dict) or not isinstance(payload.get("item_ids"), list):
@@ -13809,36 +13803,6 @@ def compare_group_interviews():
     except (OverflowError, sqlite3.Error):
         return jsonify({"error": "インタビュー比較を生成できません。"}), 500
     return jsonify(result)
-
-
-@app.post("/api/library/interview-comparison/runs")
-def save_interview_comparison_run():
-    """Save a comparison as its own run. The server recomputes it; a client result is never stored."""
-    if request.content_length and request.content_length > 64 * 1024:
-        return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
-    payload = request.get_json(silent=True)
-    request_id = payload.get("request_id") if isinstance(payload, dict) else None
-    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        return jsonify({"error": "リクエストIDを指定してください。"}), 400
-    if not isinstance(payload.get("input_fingerprints"), dict):
-        return jsonify({"error": "表示時の入力版が必要です。比較を再集計してください。"}), 400
-    try:
-        with library_write_lock:
-            rows, allow_different = interview_comparison_request(payload)
-            current = {str(row["id"]): archive_source_stamp(row) for row in rows}
-            if payload["input_fingerprints"] != current:
-                raise StoreConflict("比較対象が更新されています。比較を再集計してから保存してください。")
-            comparison = build_interview_comparison(rows, allow_different_content=allow_different)
-            run = archive_interview_comparison(rows, comparison, request_id, app_url=request.url_root)
-        return jsonify({"run": analysis_archive_store().public(run, local=local_path_access_allowed())})
-    except ComparisonRequestError as exc:
-        return jsonify({"error": str(exc)}), exc.status
-    except StoreConflict as exc:
-        return jsonify({"error": str(exc), "conflict": True}), 409
-    except (TypeError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 409
-    except (OSError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "インタビュー比較を保存できませんでした。元データは保持されています。"}), 500
 
 
 @app.get("/api/library/interview-comparison/runs")
@@ -14479,7 +14443,7 @@ def interview_comparison_datasets(comparison: dict[str, Any]) -> dict[str, tuple
 
 
 def archive_interview_comparison(rows: list, comparison: dict[str, Any], request_id: str, *,
-                                 app_url: str) -> dict:
+                                 app_url: str, store: AnalysisStore | None = None) -> dict:
     """Save a group-interview comparison as one multi-conversation run, apart from each interview's runs."""
     item_ids = [str(row["id"]) for row in rows]
     group_id = "comparison-" + hashlib.sha256("\n".join(sorted(item_ids)).encode("utf-8")).hexdigest()[:24]
@@ -14501,7 +14465,7 @@ def archive_interview_comparison(rows: list, comparison: dict[str, Any], request
               "parameters": {"item_ids": item_ids, "allow_different_content": allow_different},
               "algorithms": {"interview_comparison": comparison.get("schema_version", 1), "experts": expert_hashes},
               "comparison": comparison}
-    return analysis_archive_store().save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,
+    return (store or analysis_archive_store()).save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,
         result=result, datasets=datasets, request_id=request_id,
         input_fingerprint=archive_digest([member["input_fingerprint"] for member in members]),
         source_revision=0, analysis_revision=0, app_url=app_url, member_ids=item_ids)
@@ -14543,6 +14507,14 @@ def analysis_commands() -> AnalysisCommands:
         archive_analysis=archive_group_analysis,
         source_fingerprint=archive_source_stamp,
         mark_stale=mark_analysis_run_stale,
+        load_comparison_items=interview_comparison_request,
+        build_comparison=build_interview_comparison,
+        archive_comparison=archive_interview_comparison,
+        database_connection=database_connection,
+        save_preparation_state=preparation.save,
+        segments_for_item=row_segments,
+        refresh_archive_index=refresh_archive_index,
+        publish_input_vault=publish_input_vault,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
     )
@@ -15297,26 +15269,6 @@ def update_library_analysis(item_id: str):
         return jsonify({"error": str(exc), "conflict": True}), 409
     except sqlite3.Error:
         return jsonify({"error": "分析設定を保存できません。"}), 500
-
-
-@app.put("/api/library/<item_id>/preparation")
-def update_transcript_preparation(item_id: str):
-    if request.content_length and request.content_length > 16 * 1024 * 1024:
-        return jsonify({"error": "準備データが大きすぎます。"}), 413
-    try:
-        with library_write_lock, database_connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
-            if row is None:
-                return jsonify({"error": "データが見つかりません。"}), 404
-            result = preparation.save(connection, row, row_segments(row), request.get_json(silent=True))
-        refresh_archive_index(item_id)
-        publish_input_vault(library_row(item_id))
-        return jsonify(result)
-    except preparation.Conflict as exc:
-        return jsonify({"error": str(exc), "conflict": True}), 409
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
 
 
 @app.get("/api/library/<item_id>/preparation/export.json")

@@ -9,8 +9,13 @@ from typing import Callable
 
 from flask import Blueprint, Flask, jsonify, request, send_file
 
+from .. import transcript_preparation as preparation
 from ..analysis_store import StoreConflict
-from ..handlers.analysis_commands import AnalysisCommands, AnalysisCommandNotFound
+from ..handlers.analysis_commands import (
+    AnalysisCommands,
+    AnalysisCommandNotFound,
+    ComparisonRequestError,
+)
 from ..handlers.analysis_queries import AnalysisQueries, AnalysisQueryNotFound
 
 
@@ -94,5 +99,54 @@ def register_analysis_routes(
             return jsonify({"error": str(exc)}), 404
         except (OSError, ValueError, LookupError, sqlite3.Error):
             return jsonify({"error": "Vaultへの再保存に失敗しました。"}), 409
+
+    @blueprint.post("/api/library/interview-comparison/runs")
+    def save_interview_comparison_run():
+        if request.content_length and request.content_length > 64 * 1024:
+            return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
+        payload = request.get_json(silent=True)
+        request_id = payload.get("request_id") if isinstance(payload, dict) else None
+        if not isinstance(request_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{16,100}", request_id
+        ):
+            return jsonify({"error": "リクエストIDを指定してください。"}), 400
+        input_fingerprints = payload.get("input_fingerprints")
+        if not isinstance(input_fingerprints, dict):
+            return jsonify({
+                "error": "表示時の入力版が必要です。比較を再集計してください。"
+            }), 400
+        try:
+            run = commands().save_comparison(
+                payload,
+                request_id=request_id,
+                input_fingerprints=input_fingerprints,
+                app_url=request.url_root,
+            )
+            return jsonify({"run": run})
+        except ComparisonRequestError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        except StoreConflict as exc:
+            return jsonify({"error": str(exc), "conflict": True}), 409
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 409
+        except (OSError, OverflowError, sqlite3.Error):
+            return jsonify({
+                "error": "インタビュー比較を保存できませんでした。元データは保持されています。"
+            }), 500
+
+    @blueprint.put("/api/library/<item_id>/preparation")
+    def update_transcript_preparation(item_id: str):
+        if request.content_length and request.content_length > 16 * 1024 * 1024:
+            return jsonify({"error": "準備データが大きすぎます。"}), 413
+        try:
+            return jsonify(commands().save_preparation(
+                item_id, request.get_json(silent=True)
+            ))
+        except AnalysisCommandNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except preparation.Conflict as exc:
+            return jsonify({"error": str(exc), "conflict": True}), 409
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     app.register_blueprint(blueprint)

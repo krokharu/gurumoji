@@ -11,6 +11,12 @@ class AnalysisCommandNotFound(LookupError):
     """The requested conversation or saved run does not exist."""
 
 
+class ComparisonRequestError(ValueError):
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
 class AnalysisCommands:
     """Coordinate fixed-result saves without changing store ownership rules."""
 
@@ -24,6 +30,14 @@ class AnalysisCommands:
         archive_analysis: Callable[..., dict[str, Any]],
         source_fingerprint: Callable[[Any], str],
         mark_stale: Callable[[str], None],
+        load_comparison_items: Callable[[dict[str, Any]], tuple[list[Any], bool]],
+        build_comparison: Callable[..., dict[str, Any]],
+        archive_comparison: Callable[..., dict[str, Any]],
+        database_connection: Callable[[], Any],
+        save_preparation_state: Callable[..., dict[str, Any]],
+        segments_for_item: Callable[[Any], list[dict[str, Any]]],
+        refresh_archive_index: Callable[[str], None],
+        publish_input_vault: Callable[[Any], None],
         write_lock: Any,
         expose_local_paths: bool,
     ) -> None:
@@ -34,6 +48,14 @@ class AnalysisCommands:
         self._archive_analysis = archive_analysis
         self._source_fingerprint = source_fingerprint
         self._mark_stale = mark_stale
+        self._load_comparison_items = load_comparison_items
+        self._build_comparison = build_comparison
+        self._archive_comparison = archive_comparison
+        self._database_connection = database_connection
+        self._save_preparation_state = save_preparation_state
+        self._segments_for_item = segments_for_item
+        self._refresh_archive_index = refresh_archive_index
+        self._publish_input_vault = publish_input_vault
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -93,3 +115,52 @@ class AnalysisCommands:
                 self._mark_stale(run_id)
             result = self._store.retry(run_id)
         return self._store.public(result, local=self._expose_local_paths)
+
+    def save_preparation(
+        self, item_id: str, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Save reviewed transcript state and publish only its derived Vault index."""
+        with self._write_lock, self._database_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            item = connection.execute(
+                "SELECT * FROM library_items WHERE id=?", (item_id,)
+            ).fetchone()
+            if item is None:
+                raise AnalysisCommandNotFound("データが見つかりません。")
+            result = self._save_preparation_state(
+                connection, item, self._segments_for_item(item), payload
+            )
+
+        self._refresh_archive_index(item_id)
+        self._publish_input_vault(self._find_item(item_id))
+        return result
+
+    def save_comparison(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+        input_fingerprints: dict[str, Any],
+        app_url: str,
+    ) -> dict[str, Any]:
+        """Recompute and save a comparison only for the displayed input versions."""
+        with self._write_lock:
+            items, allow_different = self._load_comparison_items(payload)
+            current = {
+                str(item["id"]): self._source_fingerprint(item) for item in items
+            }
+            if input_fingerprints != current:
+                raise StoreConflict(
+                    "比較対象が更新されています。比較を再集計してから保存してください。"
+                )
+            comparison = self._build_comparison(
+                items, allow_different_content=allow_different
+            )
+            run = self._archive_comparison(
+                items,
+                comparison,
+                request_id,
+                app_url=app_url,
+                store=self._store,
+            )
+        return self._store.public(run, local=self._expose_local_paths)
