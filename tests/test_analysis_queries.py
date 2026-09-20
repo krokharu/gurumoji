@@ -36,11 +36,51 @@ class FakeStore:
         return {"id": run_id, "item_id": "item-1"}
 
 
+class FakeInsightResult:
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        return self.row
+
+
+class FakeInsightConnection:
+    def __init__(self, item):
+        self.item = item
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def execute(self, statement, parameters=()):
+        self.statements.append((" ".join(statement.split()), parameters))
+        if "FROM library_items" in statement:
+            return FakeInsightResult(self.item)
+        if "FROM analysis_insight_requests" in statement:
+            return FakeInsightResult({"request_id": "insight-1"})
+        return FakeInsightResult(None)
+
+
 class AnalysisQueryHandlerTests(unittest.TestCase):
-    def queries(self, *, local=False, find_item=lambda item_id: {"id": item_id}):
+    def queries(
+        self,
+        *,
+        local=False,
+        find_item=lambda item_id: {"id": item_id},
+        insight_item={"id": "item-1"},
+    ):
+        connection = FakeInsightConnection(insight_item)
         return AnalysisQueries(
             store=FakeStore(), find_item=find_item,
             source_fingerprint=lambda _item: "current",
+            database_connection=lambda: connection,
+            build_analysis=lambda item: {
+                "insights": {"fingerprint": "fp", "item": item["id"]}
+            },
+            public_insight_request=lambda row: dict(row) if row else None,
             expose_local_paths=local,
         )
 
@@ -62,6 +102,13 @@ class AnalysisQueryHandlerTests(unittest.TestCase):
         artifact = self.queries().artifact("artifact-1")
         self.assertEqual((artifact.data, artifact.media_type, artifact.download_name),
                          (b"{}", "application/json", "result.json"))
+
+    def test_insight_status_uses_one_snapshot_without_flask(self):
+        result = self.queries().insights("item-1")
+        self.assertEqual(result["insights"]["fingerprint"], "fp")
+        self.assertEqual(result["run"]["request_id"], "insight-1")
+        with self.assertRaises(AnalysisQueryNotFound):
+            self.queries(insight_item=None).insights("missing")
 
 
 class TrackingLock:
@@ -292,6 +339,7 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/analysis/methods",
             "/api/library/<item_id>/analysis/runs",
             "/api/analysis/artifacts/<artifact_id>",
+            "/api/library/<item_id>/analysis/insights",
         }
         rules = [rule for rule in app.app.url_map.iter_rules()
                  if str(rule.rule) in expected and "GET" in rule.methods]
@@ -337,6 +385,10 @@ class AnalysisReadRouteContractTests(unittest.TestCase):
         )
         self.assertEqual(
             self.client.get("/api/analysis/artifacts/missing").status_code, 404
+        )
+        self.assertEqual(
+            self.client.get("/api/library/missing/analysis/insights").status_code,
+            404,
         )
 
         payload = self.fixture.payload("query-route-contract-0001")

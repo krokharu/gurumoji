@@ -54,6 +54,15 @@ def register_analysis_routes(
         except (OSError, ValueError):
             return jsonify({"error": "保存ファイルが移動または変更されています。"}), 409
 
+    @blueprint.get("/api/library/<item_id>/analysis/insights")
+    def get_analysis_insights(item_id: str):
+        try:
+            return jsonify(queries().insights(item_id))
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (ValueError, TypeError, OverflowError, sqlite3.Error):
+            return jsonify({"error": "見解の生成状態を取得できませんでした。"}), 500
+
     @blueprint.post("/api/library/<item_id>/analysis/runs")
     def save_analysis_run(item_id: str):
         payload = request.get_json(silent=True)

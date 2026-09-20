@@ -14423,6 +14423,9 @@ def analysis_queries() -> AnalysisQueries:
         store=analysis_archive_store(),
         find_item=library_row,
         source_fingerprint=archive_source_stamp,
+        database_connection=database_connection,
+        build_analysis=group_analysis_for_row,
+        public_insight_request=public_insight_request,
         expose_local_paths=local_path_access_allowed(),
     )
 
@@ -14669,25 +14672,6 @@ def get_analysis_kwic(item_id: str):
         return jsonify({"error": str(exc)}), 400
     except (TypeError, OverflowError, sqlite3.Error):
         return jsonify({"error": "文脈検索に失敗しました。"}), 500
-
-
-@app.get("/api/library/<item_id>/analysis/insights")
-def get_analysis_insights(item_id: str):
-    try:
-        # Read status and saved output from one SQLite snapshot. Otherwise a
-        # worker can finish between the reads and report completed with old text.
-        with database_connection() as connection:
-            connection.execute("BEGIN")
-            row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
-            if row is None:
-                return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-            run = connection.execute("""
-                SELECT * FROM analysis_insight_requests WHERE item_id=? ORDER BY created_at DESC LIMIT 1
-            """, (item_id,)).fetchone()
-        analysis = group_analysis_for_row(row)
-        return jsonify({"insights": analysis["insights"], "run": public_insight_request(run)})
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "見解の生成状態を取得できませんでした。"}), 500
 
 
 @app.post("/api/library/<item_id>/analysis/insights")

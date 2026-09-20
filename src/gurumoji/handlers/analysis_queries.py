@@ -29,11 +29,17 @@ class AnalysisQueries:
         store: Any,
         find_item: Callable[[str], Any],
         source_fingerprint: Callable[[Any], str],
+        database_connection: Callable[[], Any],
+        build_analysis: Callable[[Any], dict[str, Any]],
+        public_insight_request: Callable[[Any], dict[str, Any] | None],
         expose_local_paths: bool,
     ) -> None:
         self._store = store
         self._find_item = find_item
         self._source_fingerprint = source_fingerprint
+        self._database_connection = database_connection
+        self._build_analysis = build_analysis
+        self._public_insight_request = public_insight_request
         self._expose_local_paths = expose_local_paths
 
     def methods(self) -> dict[str, Any]:
@@ -81,3 +87,23 @@ class AnalysisQueries:
             media_type=metadata["media_type"],
             download_name=Path(metadata["name"]).name,
         )
+
+    def insights(self, item_id: str) -> dict[str, Any]:
+        """Read the latest request and saved insight from one SQLite snapshot."""
+        with self._database_connection() as connection:
+            connection.execute("BEGIN")
+            item = connection.execute(
+                "SELECT * FROM library_items WHERE id=?", (item_id,)
+            ).fetchone()
+            if item is None:
+                raise AnalysisQueryNotFound("処理済みデータが見つかりません。")
+            run = connection.execute(
+                "SELECT * FROM analysis_insight_requests WHERE item_id=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (item_id,),
+            ).fetchone()
+        analysis = self._build_analysis(item)
+        return {
+            "insights": analysis["insights"],
+            "run": self._public_insight_request(run),
+        }

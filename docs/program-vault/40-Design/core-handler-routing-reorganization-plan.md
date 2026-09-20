@@ -1451,6 +1451,8 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 **実装状態（2026-09-20）：進行中。** 順序1のうち比較の固定保存、分析準備の保存、通常の会話編集（話者名・会話内話者プロファイルを含む）を`AnalysisCommands`と共通Blueprintへ移した。比較は表示時の複数入力fingerprint照合、サーバー側の再集計、専用run・member保存、stale伝播、Vault公開を確認した。分析準備は`BEGIN IMMEDIATE`からrevision・本文版更新・stale伝播までの単一トランザクション、commit後の索引更新、InputVaultへ本文を出さない契約を確認した。通常編集は共有lock内の確定、revision競合、編集manifest・回復、学習用差分、索引とInputVaultの更新を既存テストで確認した。グローバル話者台帳のGET／PUTとCSV取込から共用する保存処理も`SpeakerRegistryHandler`と専用Blueprintへ移し、台帳revision競合、削除、保存後の分析索引更新を確認した。AI話者再同定は送信内容・provider規則を変えず、資格情報解決、同期AI実行、実行後revision照合、利用量保存、話者修復とInputVault更新をFlask非依存のユースケースとHandlerへ分離した。
 
+順序2はAI見解の状態取得から着手した。保存済み見解と最新requestを1つのSQLite snapshotで読む契約を`AnalysisQueries.insights`へ移し、取得操作でAIを再実行しない境界を維持した。開始・取消・worker確定、Transformer、分類は未移行。
+
 ### Phase 4：互換入口と不要な橋渡しを整理
 
 - 移行済み機能の一時的な橋渡しだけを削除し、設定・依存を組み立て側で明示する。`src/app.py`による`import app`と`gurumoji.app`の同一モジュール性を保つ。
