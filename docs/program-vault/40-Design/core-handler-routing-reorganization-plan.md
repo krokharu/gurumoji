@@ -1451,7 +1451,7 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 **実装状態（2026-09-20）：進行中。** 順序1のうち比較の固定保存、分析準備の保存、通常の会話編集（話者名・会話内話者プロファイルを含む）を`AnalysisCommands`と共通Blueprintへ移した。比較は表示時の複数入力fingerprint照合、サーバー側の再集計、専用run・member保存、stale伝播、Vault公開を確認した。分析準備は`BEGIN IMMEDIATE`からrevision・本文版更新・stale伝播までの単一トランザクション、commit後の索引更新、InputVaultへ本文を出さない契約を確認した。通常編集は共有lock内の確定、revision競合、編集manifest・回復、学習用差分、索引とInputVaultの更新を既存テストで確認した。グローバル話者台帳のGET／PUTとCSV取込から共用する保存処理も`SpeakerRegistryHandler`と専用Blueprintへ移し、台帳revision競合、削除、保存後の分析索引更新を確認した。AI話者再同定は送信内容・provider規則を変えず、資格情報解決、同期AI実行、実行後revision照合、利用量保存、話者修復とInputVault更新をFlask非依存のユースケースとHandlerへ分離した。
 
-順序2はAI見解とTransformerの取得・開始・取消を`AnalysisQueries`／`AnalysisCommands`と共通Blueprintへ移した。状態取得は保存済み結果と最新requestを1つのSQLite snapshotで読み、取得操作でAI・Transformerを再実行しない。開始・取消はrequest ID再送、同時実行拒否、revision照合、AI見解の専門家ゲート、Transformerの自動／候補／手動条件、thread開始失敗時の後始末、取消eventを既存の共有lockとDB状態のまま保持した。両workerは既存のFlask非依存関数を継続利用する。分類は未移行。
+順序2はAI見解、Transformer、発話分類の取得・実行境界を`AnalysisQueries`／`AnalysisCommands`と共通Blueprintへ移した。状態取得は保存済み結果と最新requestをSQLite snapshotから読み、取得操作でAI・Transformer・Jevを再実行しない。AI見解とTransformerの開始・取消はrequest ID再送、同時実行拒否、revision照合、AI見解の専門家ゲート、Transformerの自動／候補／手動条件、thread開始失敗時の後始末、取消eventを既存の共有lockとDB状態のまま保持した。発話分類は同期実行のまま、Jev利用指定、実行前後のrevision照合、手動・ルール・Jev・Transformer値の分離、SQLite確定後の固定履歴作成とVault失敗時の警告を維持した。非同期workerは既存のFlask非依存関数を継続利用する。
 
 ### Phase 4：互換入口と不要な橋渡しを整理
 

@@ -14462,6 +14462,7 @@ def analysis_commands() -> AnalysisCommands:
         cancel_insights=cancel_analysis_insights_command,
         start_transformer=start_transformer_analysis_command,
         cancel_transformer=cancel_transformer_analysis_command,
+        run_classification=run_segment_classifications_command,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
     )
@@ -15103,46 +15104,39 @@ def get_library_analysis(item_id: str):
         return jsonify({"error": "分析データを生成できません。元データを確認してください。"}), 500
 
 
-@app.get("/api/library/<item_id>/analysis/classifications")
-def get_segment_classifications(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
-    try:
-        analysis = group_analysis_for_row(row)
-        return jsonify({"segment_classification": analysis["segment_classification"]})
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "発話分類の状態を取得できませんでした。"}), 500
-
-
-@app.post("/api/library/<item_id>/analysis/classifications")
-def run_segment_classifications(item_id: str):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "実行条件をJSONオブジェクトで送信してください。"}), 400
+def run_segment_classifications_command(
+    item_id: str, payload: dict[str, Any], *, app_url: str
+) -> dict[str, Any]:
     if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
-        return jsonify({"error": "元データと分析のrevisionを指定してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "元データと分析のrevisionを指定してください。", 400
+        )
     if "use_jev" not in payload or not isinstance(payload.get("use_jev"), bool):
-        return jsonify({"error": "Jevへ発話を送信するか use_jev で明示してください。"}), 400
+        raise AnalysisCommandRequestError(
+            "Jevへ発話を送信するか use_jev で明示してください。", 400
+        )
     request_id = str(payload.get("request_id") or uuid.uuid4().hex)
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        return jsonify({"error": "リクエストIDが正しくありません。"}), 400
+        raise AnalysisCommandRequestError("リクエストIDが正しくありません。", 400)
 
     row = library_row(item_id)
     if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
+        raise AnalysisCommandRequestError("データが見つかりません。", 404)
     source_revision = int(row["revision_count"] or 0)
     analysis_revision = int(row["analysis_revision"] or 0)
     if (payload["source_revision"] != source_revision
             or payload["analysis_revision"] != analysis_revision):
-        return jsonify({"error": "データが更新されています。分析を再読み込みしてください。",
-                        "conflict": True}), 409
+        raise AnalysisCommandRequestError(
+            "データが更新されています。分析を再読み込みしてください。",
+            409,
+            details={"conflict": True},
+        )
 
     try:
         analysis = group_analysis_for_row(row)
         segments = analysis["segments"]
         if not segments:
-            return jsonify({"error": "分類できる発話がありません。"}), 400
+            raise AnalysisCommandRequestError("分類できる発話がありません。", 400)
         transformer_state = analysis.get("transformer", {})
         transformer_result = (
             transformer_state.get("result") if not transformer_state.get("stale") else None
@@ -15170,11 +15164,14 @@ def run_segment_classifications(item_id: str):
         with library_write_lock:
             latest = library_row(item_id)
             if latest is None:
-                return jsonify({"error": "データが削除されています。"}), 404
+                raise AnalysisCommandRequestError("データが削除されています。", 404)
             if (int(latest["revision_count"] or 0) != source_revision
                     or int(latest["analysis_revision"] or 0) != analysis_revision):
-                return jsonify({"error": "実行中にデータが更新されました。もう一度実行してください。",
-                                "conflict": True}), 409
+                raise AnalysisCommandRequestError(
+                    "実行中にデータが更新されました。もう一度実行してください。",
+                    409,
+                    details={"conflict": True},
+                )
             with database_connection() as connection:
                 cursor = connection.execute(
                     """UPDATE library_items SET segment_classification_json=?
@@ -15193,7 +15190,7 @@ def run_segment_classifications(item_id: str):
         try:
             archived = archive_segment_classification(
                 latest, refreshed, result, "segment-classification-" + request_id,
-                app_url=request.url_root,
+                app_url=app_url,
             )
             public_run = analysis_archive_store().public(
                 archived, local=local_path_access_allowed()
@@ -15210,17 +15207,26 @@ def run_segment_classifications(item_id: str):
                 "分類結果は保存しましたが、固定分析履歴の作成に失敗しました: "
                 + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]
             )
-        return jsonify({
+        return {
             "segment_classification": refreshed["segment_classification"],
             "run": public_run, "archive_warning": archive_warning,
-        })
+        }
+    except AnalysisCommandRequestError:
+        raise
     except AnalysisConflictError as exc:
-        return jsonify({"error": str(exc), "conflict": True}), 409
+        raise AnalysisCommandRequestError(
+            str(exc), 409, details={"conflict": True}
+        ) from exc
     except (ValueError, RuntimeError) as exc:
-        return jsonify({"error": public_diagnostic_text(str(exc), reveal_local_paths=False)[:700]}), 400
+        raise AnalysisCommandRequestError(
+            public_diagnostic_text(str(exc), reveal_local_paths=False)[:700], 400
+        ) from exc
     except (OSError, urllib.error.URLError, sqlite3.Error) as exc:
-        return jsonify({"error": "発話分類を実行できませんでした: "
-                        + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]}), 500
+        raise AnalysisCommandRequestError(
+            "発話分類を実行できませんでした: "
+            + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500],
+            500,
+        ) from exc
 
 
 @app.put("/api/library/<item_id>/analysis")

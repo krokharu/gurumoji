@@ -60,6 +60,7 @@ class AnalysisCommands:
         cancel_insights: Callable[[str, str], dict[str, Any]],
         start_transformer: Callable[..., tuple[dict[str, Any], int]],
         cancel_transformer: Callable[[str, str], dict[str, Any]],
+        run_classification: Callable[..., dict[str, Any]],
         write_lock: Any,
         expose_local_paths: bool,
     ) -> None:
@@ -83,6 +84,7 @@ class AnalysisCommands:
         self._cancel_insights = cancel_insights
         self._start_transformer = start_transformer
         self._cancel_transformer = cancel_transformer
+        self._run_classification = run_classification
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -185,6 +187,11 @@ class AnalysisCommands:
 
     def cancel_transformer(self, item_id: str, request_id: str) -> dict[str, Any]:
         return self._cancel_transformer(item_id, request_id)
+
+    def run_classification(
+        self, item_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> dict[str, Any]:
+        return self._run_classification(item_id, payload, app_url=app_url)
 
     def save_comparison(
         self,

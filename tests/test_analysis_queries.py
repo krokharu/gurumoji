@@ -82,6 +82,7 @@ class AnalysisQueryHandlerTests(unittest.TestCase):
             build_analysis=lambda item: {
                 "insights": {"fingerprint": "fp", "item": item["id"]},
                 "transformer": {"stale": False, "item": item["id"]},
+                "segment_classification": {"item": item["id"]},
             },
             public_insight_request=lambda row: dict(row) if row else None,
             public_transformer_request=lambda row: dict(row) if row else None,
@@ -118,6 +119,10 @@ class AnalysisQueryHandlerTests(unittest.TestCase):
         result = self.queries().transformer("item-1")
         self.assertFalse(result["transformer"]["stale"])
         self.assertEqual(result["run"]["request_id"], "transformer-1")
+
+    def test_classification_status_uses_one_snapshot_without_flask(self):
+        result = self.queries().classifications("item-1")
+        self.assertEqual(result["segment_classification"]["item"], "item-1")
 
 
 class TrackingLock:
@@ -261,6 +266,9 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             cancel_transformer=lambda item_id, request_id: {
                 "ok": True, "item_id": item_id, "request_id": request_id
             },
+            run_classification=lambda item_id, payload, **options: {
+                "item_id": item_id, "payload": payload, **options
+            },
             write_lock=self.lock,
             expose_local_paths=False,
         )
@@ -376,6 +384,14 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
             )["ok"]
         )
 
+    def test_classification_run_is_framework_independent(self):
+        result = self.commands.run_classification(
+            "item-1", {"request_id": "classification-request-1"},
+            app_url="http://test/",
+        )
+        self.assertEqual(result["item_id"], "item-1")
+        self.assertEqual(result["app_url"], "http://test/")
+
 
 class AnalysisRouteStructureTests(unittest.TestCase):
     def test_three_read_routes_are_registered_once_with_expected_methods(self):
@@ -385,6 +401,7 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/analysis/artifacts/<artifact_id>",
             "/api/library/<item_id>/analysis/insights",
             "/api/library/<item_id>/analysis/transformer",
+            "/api/library/<item_id>/analysis/classifications",
         }
         rules = [rule for rule in app.app.url_map.iter_rules()
                  if str(rule.rule) in expected and "GET" in rule.methods]
@@ -404,6 +421,7 @@ class AnalysisRouteStructureTests(unittest.TestCase):
             "/api/library/<item_id>/analysis/insights/cancel",
             "/api/library/<item_id>/analysis/transformer",
             "/api/library/<item_id>/analysis/transformer/cancel",
+            "/api/library/<item_id>/analysis/classifications",
         }
         writes = {
             str(rule.rule): rule for rule in app.app.url_map.iter_rules()

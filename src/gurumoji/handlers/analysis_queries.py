@@ -128,3 +128,14 @@ class AnalysisQueries:
             "transformer": analysis["transformer"],
             "run": self._public_transformer_request(run),
         }
+
+    def classifications(self, item_id: str) -> dict[str, Any]:
+        with self._database_connection() as connection:
+            connection.execute("BEGIN")
+            item = connection.execute(
+                "SELECT * FROM library_items WHERE id=?", (item_id,)
+            ).fetchone()
+            if item is None:
+                raise AnalysisQueryNotFound("データが見つかりません。")
+        analysis = self._build_analysis(item)
+        return {"segment_classification": analysis["segment_classification"]}

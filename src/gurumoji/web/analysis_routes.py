@@ -145,6 +145,29 @@ def register_analysis_routes(
         except AnalysisCommandRequestError as exc:
             return jsonify({"error": str(exc), **exc.details}), exc.status
 
+    @blueprint.get("/api/library/<item_id>/analysis/classifications")
+    def get_segment_classifications(item_id: str):
+        try:
+            return jsonify(queries().classifications(item_id))
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (ValueError, TypeError, OverflowError, sqlite3.Error):
+            return jsonify({"error": "発話分類の状態を取得できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/classifications")
+    def run_segment_classifications(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({
+                "error": "実行条件をJSONオブジェクトで送信してください。"
+            }), 400
+        try:
+            return jsonify(commands().run_classification(
+                item_id, payload, app_url=request.url_root
+            ))
+        except AnalysisCommandRequestError as exc:
+            return jsonify({"error": str(exc), **exc.details}), exc.status
+
     @blueprint.post("/api/library/<item_id>/analysis/runs")
     def save_analysis_run(item_id: str):
         payload = request.get_json(silent=True)
