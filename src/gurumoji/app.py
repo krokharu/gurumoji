@@ -104,6 +104,7 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
+from .handlers.analysis_commands import AnalysisCommands
 from .handlers.analysis_queries import AnalysisQueries
 from .web.analysis_routes import register_analysis_routes
 from . import transcript_preparation as preparation
@@ -14276,7 +14277,8 @@ def archive_snapshot(row, analysis: dict) -> dict:
 
 def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = "text_analysis",
                            kwic: dict | None = None, app_url: str = "http://127.0.0.1:7860",
-                           check_cancelled: Callable[[], None] = lambda: None) -> dict:
+                           check_cancelled: Callable[[], None] = lambda: None,
+                           store: AnalysisStore | None = None) -> dict:
     datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
     if kwic is not None:
         datasets = {"kwic": (KWIC_FIELDS, kwic["hits"])}
@@ -14302,7 +14304,7 @@ def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = 
               "algorithms": algorithms,
               "ai_request_id": ai.get("request_id", ""), "methods": methods,
               "analysis": analysis if kwic is None else {"kwic": kwic}}
-    return analysis_archive_store().save(item_id=str(row["id"]), kind=kind,
+    return (store or analysis_archive_store()).save(item_id=str(row["id"]), kind=kind,
         snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
         request_id=request_id, input_fingerprint=archive_source_stamp(row),
         source_revision=int(row["revision_count"]), analysis_revision=int(row["analysis_revision"]),
@@ -14524,7 +14526,29 @@ def analysis_queries() -> AnalysisQueries:
     )
 
 
-register_analysis_routes(app, analysis_queries)
+def mark_analysis_run_stale(run_id: str) -> None:
+    with database_connection() as connection:
+        connection.execute("UPDATE analysis_runs SET stale=1 WHERE id=?", (run_id,))
+
+
+def analysis_commands() -> AnalysisCommands:
+    """Build save dependencies at request time so patched settings stay effective."""
+    return AnalysisCommands(
+        store=analysis_archive_store(),
+        find_item=library_row,
+        build_analysis=lambda row: group_analysis_for_row(
+            row, include_research_rows=True
+        ),
+        search_kwic=search_kwic,
+        archive_analysis=archive_group_analysis,
+        source_fingerprint=archive_source_stamp,
+        mark_stale=mark_analysis_run_stale,
+        write_lock=library_write_lock,
+        expose_local_paths=local_path_access_allowed(),
+    )
+
+
+register_analysis_routes(app, analysis_queries, analysis_commands)
 
 
 @app.get("/api/analysis/experts")
@@ -14575,52 +14599,6 @@ def get_analysis_method_overview(item_id: str):
         return jsonify(overview)
     except (ValueError, TypeError, OverflowError, sqlite3.Error):
         return jsonify({"error": "手法別の分析状態を取得できませんでした。"}), 500
-
-
-@app.post("/api/library/<item_id>/analysis/runs")
-def save_analysis_run(item_id: str):
-    payload = request.get_json(silent=True)
-    if (not isinstance(payload, dict) or not isinstance(payload.get("request_id"), str)
-            or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", payload["request_id"])
-            or any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision"))):
-        return jsonify({"error": "リクエストIDと保存済みデータのrevisionを指定してください。"}), 400
-    try:
-        with library_write_lock:
-            row = library_row(item_id)
-            if row is None: return jsonify({"error": "対象の会話が見つかりません。"}), 404
-            if payload["source_revision"] != row["revision_count"] or payload["analysis_revision"] != row["analysis_revision"]:
-                raise StoreConflict("元データまたは分析条件が更新されています。再集計してください。")
-            analysis = group_analysis_for_row(row, include_research_rows=True)
-            query = payload.get("kwic")
-            kwic = None
-            if query is not None:
-                if not isinstance(query, dict): raise ValueError("検索条件が正しくありません。")
-                kwic = search_kwic(analysis, analysis["research"]["linguistics"]["morphemes"],
-                                   query.get("q", ""), mode=query.get("mode", "literal"),
-                                   speaker=query.get("speaker", ""), limit=None)
-            run = archive_group_analysis(row, analysis, payload["request_id"], kwic=kwic,
-                                         kind="kwic" if kwic is not None else "text_analysis", app_url=request.url_root)
-        return jsonify({"run": analysis_archive_store().public(run, local=local_path_access_allowed())})
-    except StoreConflict as exc: return jsonify({"error": str(exc), "conflict": True}), 409
-    except (ValueError, TypeError) as exc: return jsonify({"error": str(exc)}), 400
-    except (OSError, sqlite3.Error): return jsonify({"error": "分析結果を保存できませんでした。元データは保持されています。"}), 500
-
-
-@app.post("/api/analysis/runs/<run_id>/vault")
-def retry_analysis_vault(run_id: str):
-    store = analysis_archive_store()
-    run = store.get(run_id)
-    if not run or library_row(run["item_id"]) is None: return jsonify({"error": "保存結果が見つかりません。"}), 404
-    try:
-        with library_write_lock:
-            row = library_row(run["item_id"])
-            if row is None: return jsonify({"error": "対象の会話が見つかりません。"}), 404
-            if run["input_fingerprint"] != archive_source_stamp(row):
-                with database_connection() as connection:
-                    connection.execute("UPDATE analysis_runs SET stale=1 WHERE id=?", (run_id,))
-            result = store.retry(run_id)
-        return jsonify({"run": store.public(result, local=local_path_access_allowed())})
-    except (OSError, ValueError, LookupError, sqlite3.Error): return jsonify({"error": "Vaultへの再保存に失敗しました。"}), 409
 
 
 def public_insight_request(row) -> dict[str, Any] | None:
