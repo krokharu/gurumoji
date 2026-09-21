@@ -1390,6 +1390,10 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertIn("ai_usage_json", columns)
                 self.assertIn("original_segments_json", columns)
                 self.assertIn("original_segments_status", columns)
+                self.assertIn("group_id", columns)
+                self.assertIsNotNone(connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'library_groups'"
+                ).fetchone())
                 migrated = connection.execute(
                     """
                     SELECT analysis_config_json, analysis_annotations_json,

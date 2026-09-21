@@ -19,6 +19,114 @@ class AiFinishingTests(unittest.TestCase):
         return {'items': [{'id': r['id'], 'text': r['text'], 'noise_candidate': False, 'reason': ''}
                           for r in json.loads(prompt.split('\n', 1)[1])['targets']]}
 
+    def test_recommended_cleanup_calls_llm_only_for_jev_candidates(self):
+        reviews = {
+            "a": {"flagged": True, "decision": "cutoff_suspected"},
+            "b": {"flagged": False, "decision": "complete_or_natural"},
+        }
+        calls = []
+
+        def call(system, prompt, name, schema):
+            calls.append((system, json.loads(prompt.split('\n', 1)[1]), name, schema))
+            return {
+                "confirmed_problem": True,
+                "needs_more_context": False,
+                "issue_type": "cutoff",
+                "text": "賛成ではありません。",
+                "reason": "語尾の断裂を前後文脈から補正",
+            }
+
+        result = finishing.repair_recommended_segments(
+            self.segments, reviews, call, lambda *_: None, lambda: None,
+            effort="medium",
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][2], "transcript_recommended_cleanup")
+        self.assertEqual(calls[0][1]["target_segment_id"], "a")
+        self.assertEqual(len(calls[0][1]["conversation_window"]), 1)
+        self.assertEqual(result[0]["text"], "賛成ではありません。")
+        self.assertTrue(result[0]["recommended_review"]["llm"]["replacement_applied"])
+        self.assertNotIn("recommended_review", result[1])
+
+    def test_unconfirmed_recommended_candidate_keeps_original_text(self):
+        result = finishing.repair_recommended_segments(
+            self.segments,
+            {"a": {"flagged": True}},
+            lambda *_args: {
+                "confirmed_problem": False,
+                "needs_more_context": False,
+                "issue_type": "none",
+                "text": "モデルが勝手に変えた文",
+                "reason": "自然な言いさし",
+            },
+            lambda *_: None,
+            lambda: None,
+        )
+
+        self.assertEqual(result[0]["text"], self.segments[0]["text"])
+        self.assertFalse(result[0]["recommended_review"]["llm"]["replacement_applied"])
+
+    def test_no_effort_keeps_original_without_calling_llm(self):
+        calls = []
+        result = finishing.repair_recommended_segments(
+            self.segments, {"a": {"flagged": True}},
+            lambda *_args: calls.append(True), lambda *_: None, lambda: None,
+            effort="off",
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual(result, self.segments)
+
+    def test_high_effort_expands_previous_context_one_at_a_time_up_to_ten(self):
+        segments = [
+            {"id": f"s{index}", "speaker": "A", "text": f"発話{index}"}
+            for index in range(12)
+        ]
+        window_sizes = []
+
+        def call(_system, prompt, _name, _schema):
+            payload = json.loads(prompt.split('\n', 1)[1])
+            window_sizes.append(len(payload["conversation_window"]))
+            needs_more = len(window_sizes) < 10
+            return {
+                "confirmed_problem": not needs_more,
+                "needs_more_context": needs_more,
+                "issue_type": "asr_error" if not needs_more else "none",
+                "text": "修正文" if not needs_more else "発話11",
+                "reason": "前の会話から誤認識を確認" if not needs_more else "文脈不足",
+            }
+
+        result = finishing.repair_recommended_segments(
+            segments, {"s11": {"flagged": True}}, call,
+            lambda *_: None, lambda: None, effort="high", outline=self.outline,
+        )
+
+        self.assertEqual(window_sizes, list(range(2, 12)))
+        self.assertEqual(result[-1]["text"], "修正文")
+        self.assertEqual(result[-1]["recommended_review"]["llm"]["attempt_count"], 10)
+
+    def test_max_effort_reads_outline_and_up_to_ten_turns_on_both_sides(self):
+        segments = [
+            {"id": f"s{index}", "speaker": "A", "text": f"発話{index}"}
+            for index in range(25)
+        ]
+        captured = {}
+
+        def call(_system, prompt, _name, _schema):
+            captured.update(json.loads(prompt.split('\n', 1)[1]))
+            return {"confirmed_problem": True, "needs_more_context": False,
+                    "issue_type": "noise", "text": "予測した文章", "reason": "前後の流れから復元"}
+
+        result = finishing.repair_recommended_segments(
+            segments, {"s12": {"flagged": True}}, call,
+            lambda *_: None, lambda: None, effort="ultra", outline=self.outline,
+        )
+
+        self.assertEqual(len(captured["conversation_window"]), 21)
+        self.assertEqual(captured["outline"], self.outline["sections"])
+        self.assertEqual(result[12]["text"], "予測した文章")
+        self.assertEqual(result[12]["recommended_review"]["llm"]["effort"], "max")
+
     def test_full_long_single_utterance_id_and_boundary_preservation(self):
         segments = copy.deepcopy(self.segments)
         segments[0]['text'] = 'あ' * 1499 + ' ' + 'b' * 19000 + '末尾'

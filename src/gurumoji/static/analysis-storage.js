@@ -54,6 +54,12 @@ function refreshAnalysisStorage() {
         body.append(contentButton('保存済み結果から再試行', () => retrySavedVault(run.id)));
       }
       const files = analysisElement('div', 'analysis-archive-files');
+      if (run.status === 'completed') {
+        const bundle = analysisElement('a', 'analysis-export-link', 'export.zip');
+        bundle.href = `/api/analysis/runs/${encodeURIComponent(run.id)}/export.zip`;
+        bundle.download = '';
+        files.append(bundle);
+      }
       (run.artifacts || []).forEach(artifact => {
         const link = analysisElement('a', 'analysis-export-link', artifact.name);
         link.href = artifact.url; link.download = ''; files.append(link);

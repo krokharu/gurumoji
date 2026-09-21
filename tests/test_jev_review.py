@@ -55,6 +55,10 @@ class JevReviewTests(unittest.TestCase):
         self.assertEqual(set(captured["questions"]["decision_0"]["criteria"]), {
             "correction_needed", "no_correction_needed",
         })
+        self.assertIn(
+            "audio noise rendered as words",
+            captured["questions"]["decision_0"]["instructions"]["correction_needed_when"],
+        )
         self.assertEqual(reviews["s1"]["decision"], "no_correction_needed")
         self.assertFalse(reviews["s1"]["flagged"])
         self.assertEqual(reviews["s2"]["decision"], "correction_needed")

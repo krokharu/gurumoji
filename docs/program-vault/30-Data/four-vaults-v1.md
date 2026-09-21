@@ -62,6 +62,6 @@ Whisperの文字起こしと各分析の保存結果を、役割の異なる4つ
 
 検証先：`tests/test_four_vaults.py`（Whisper台帳・秘密情報の除外・再出力の不変・手動編集の保持・分析の3 Vault分割・stale反映）、`tests/test_vault_coverage.py`（Whisper設定、AI話者特定・Obsidian反映・取り込み・削除の台帳、再保存時の出力、会議議事録と比較の独立保存・比較のstale）、既存の `tests/test_analysis_storage.py`、`tests/test_obsidian_layout.py`。
 
-未実装：保存先変更UI、ResearchVaultから4 Vaultへの移行、取り込み済みでない保存済み会話の一括台帳作成、外部分析結果の登録、保存済み比較の一覧を表示する画面（APIは実装済み）。
+未実装：保存先変更UI、ResearchVaultから4 Vaultへの移行、取り込み済みでない保存済み会話の一括台帳作成、外部分析結果の登録。保存済み比較の一覧、成果物、Vault再試行は比較画面へ実装済み。
 
 関連：[[30-Data/analysis-storage-v1]]、[[40-Design/storage-policy]]、[[50-Analysis-Methods/00-Orchestrator-Common-Contract]]。

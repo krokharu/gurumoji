@@ -298,6 +298,15 @@ class AnalysisCommandHandlerTests(unittest.TestCase):
         self.assertEqual(self.stale, ["run-1"])
         self.assertEqual((self.store.retry_count, self.build_count), (1, 0))
 
+    def test_comparison_retry_uses_saved_package_without_a_synthetic_library_item(self):
+        self.store.run = {
+            "id": "run-1", "item_id": "comparison-synthetic",
+            "kind": "interview_comparison", "input_fingerprint": "saved",
+        }
+        result = self.commands.retry_vault("run-1")
+        self.assertEqual(result["id"], "run-1")
+        self.assertEqual((self.store.retry_count, self.stale, self.build_count), (1, [], 0))
+
     def test_missing_run_is_reported_without_entering_the_lock(self):
         with self.assertRaises(AnalysisCommandNotFound):
             self.commands.retry_vault("missing")

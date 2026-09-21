@@ -31,7 +31,8 @@ class ObsidianWorkbenchTests(unittest.TestCase):
     def test_efforts_persist_and_can_be_updated_without_replacing_notes(self):
         original = read_text(self.workbench.note_path(self.state['work']))
         self.workbench.prepare('recording', '会議.wav', self.segments, revision=0,
-                               ai_efforts={'cleanup': 'high', 'name_verify': 'low'})
+                               ai_efforts={'cleanup': 'high', 'name_verify': 'low'},
+                               speaker_names={'A': '後からの名前'})
         self.assertEqual(self.workbench.load('recording')['ai_efforts']['cleanup'], 'high')
         self.workbench.prepare('recording', '会議.wav', self.segments, revision=0)
         self.assertEqual(self.workbench.load('recording')['ai_efforts']['name_verify'], 'low')
@@ -89,6 +90,19 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         self.assertEqual(len(list(self.workbench.root.glob('*/source-*.json'))), 1)
         with self.assertRaises(ValueError):
             parse_transcript(note.replace('6669727374', '0000'), source)
+
+    def test_initial_work_notes_render_verified_speaker_names(self):
+        workbench = ObsidianWorkbench(Path(self.temporary.name) / 'named.sqlite3')
+        state = workbench.prepare(
+            'named-recording', '会議.wav', self.segments, revision=0,
+            speaker_names={'A': '田中', 'B': '佐藤'},
+        )
+
+        work_note = read_text(workbench.note_path(state['work']))
+        source_note = read_text(workbench.note_path(state['original_note']))
+        self.assertIn('秒 田中', work_note)
+        self.assertIn('秒 佐藤', work_note)
+        self.assertIn('秒 田中', source_note)
 
     def test_native_properties_blocks_and_legacy_notes_round_trip(self):
         note = read_text(self.workbench.note_path(self.state['work']))

@@ -191,7 +191,7 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         self.assertEqual(summary["temporary"], {"SPEAKER_01": "佐藤", "SPEAKER_02": "山田"})
         self.assertEqual(summary["ambiguous"], {"SPEAKER_01": ["speaker_sato_a", "speaker_sato_b"]})
 
-    def test_rerun_identification_links_registered_and_keeps_unknown_as_temporary(self):
+    def test_rerun_identification_links_registered_and_registers_new_name(self):
         app.save_speaker_registry_records([{
             "id": "speaker_tanaka",
             "display_name": "田中太郎",
@@ -225,12 +225,54 @@ class SpeakerRegistryApiTests(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data["speaker_profiles"]["SPEAKER_00"]["global_speaker_id"], "speaker_tanaka")
         self.assertEqual(data["speaker_profiles"]["SPEAKER_00"]["registration_status"], "registered")
-        self.assertEqual(data["speaker_profiles"]["SPEAKER_01"]["global_speaker_id"], "")
+        new_speaker_id = data["speaker_profiles"]["SPEAKER_01"]["global_speaker_id"]
+        self.assertTrue(new_speaker_id.startswith("speaker_auto_"))
+        self.assertEqual(data["speaker_profiles"]["SPEAKER_01"]["registration_status"], "registered")
         self.assertEqual(
-            data["speaker_profiles"]["SPEAKER_01"]["registration_status"],
-            "temporary_single_group",
+            data["speaker_identity"]["registration"]["created"],
+            {"SPEAKER_01": new_speaker_id},
         )
-        self.assertEqual(data["speaker_identity"]["registration"]["temporary"], {"SPEAKER_01": "山田"})
+        registry = self.client.get("/api/speakers").get_json()["speakers"]
+        self.assertIn(
+            (new_speaker_id, "山田"),
+            {(record["id"], record["display_name"]) for record in registry},
+        )
+
+    def test_registers_an_unambiguous_detected_name_without_duplicate_records(self):
+        profiles = app.normalize_conversation_speaker_profiles(
+            None, {"SPEAKER_00"}, {"SPEAKER_00": "鈴木"}
+        )
+
+        profiles, summary = app.register_detected_speakers(
+            profiles, {"SPEAKER_00": "鈴木"}
+        )
+
+        speaker_id = summary["created"]["SPEAKER_00"]
+        self.assertTrue(speaker_id.startswith("speaker_auto_"))
+        self.assertEqual(profiles["SPEAKER_00"]["global_speaker_id"], speaker_id)
+        self.assertEqual(profiles["SPEAKER_00"]["registration_status"], "registered")
+        registry = self.client.get("/api/speakers").get_json()
+        self.assertEqual(registry["registry_revision"], 1)
+        self.assertEqual(len(registry["speakers"]), 1)
+        self.assertEqual(registry["speakers"][0]["display_name"], "鈴木")
+
+    def test_does_not_register_a_name_when_active_records_are_ambiguous(self):
+        app.save_speaker_registry_records([
+            {"id": "speaker_sato_a", "display_name": "佐藤"},
+            {"id": "speaker_sato_b", "pseudonym": "佐藤"},
+        ], expected_revision=0)
+        profiles = app.normalize_conversation_speaker_profiles(
+            None, {"SPEAKER_00"}, {"SPEAKER_00": "佐藤"}
+        )
+
+        profiles, summary = app.register_detected_speakers(
+            profiles, {"SPEAKER_00": "佐藤"}
+        )
+
+        self.assertEqual(summary["created"], {})
+        self.assertEqual(summary["ambiguous"], {"SPEAKER_00": ["speaker_sato_a", "speaker_sato_b"]})
+        self.assertEqual(profiles["SPEAKER_00"]["registration_status"], "temporary_single_group")
+        self.assertEqual(len(self.client.get("/api/speakers").get_json()["speakers"]), 2)
 
     def test_imports_google_forms_csv_and_preserves_unknown_questions(self):
         csv_body = (

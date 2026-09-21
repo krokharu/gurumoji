@@ -35,7 +35,7 @@ tags:
 | --- | --- | --- | --- | --- | --- | --- |
 | 文字起こし・話者分離ジョブ | Implemented | 新規作成／`POST /api/jobs`、`GET /api/jobs/<id>`、`GET /api/jobs/active`、`POST …/cancel` | `create_job` → `run_transcription_job`（FFmpeg、WhisperX、pyannote） | `library_items` | `runtime/uploads`、`runtime/output`、`<data>/media` | `ObsidianWorkbench.prepare`、`publish_input_vault` |
 | 逐語録の確認・編集保存 | Implemented | 作業画面「発話の確認・編集」（`#/data/<id>`）／`PUT /api/library/<id>`、`PUT /api/jobs/<id>/transcript` | `update_library_from_payload`、`save_transcript`、編集トランザクション群（`write_edit_transaction_manifest` ほか） | `library_items`、`transcript_versions`、`training_events` | 出力を再生成 | InputVault更新、ResearchVault索引のstale化 |
-| 処理済みデータ一覧・検索 | Implemented | 処理済みデータ（`#/data`）／`GET /api/library`、`GET /api/library/<id>` | `list_library`、`library_public` | `library_items` | サムネイル | なし |
+| 処理済みデータ一覧・検索・グループ整理 | Implemented | 処理済みデータ（`#/data`）／`GET /api/library`、`POST/PUT/DELETE /api/library/groups`、`PUT /api/library/<id>/group` | `list_library`、`library_public`、グループ管理API | `library_items.group_id`、`library_groups` | サムネイル | なし |
 | 分析・可視化（自動集計・手動コード） | Implemented | 分析・可視化（`#/analysis/<id>`）／`GET/PUT /api/library/<id>/analysis` | `group_analysis_for_row`、`research_analysis.build_research_analysis`、`save_group_analysis` | `analysis_config_json`、`analysis_annotations_json` | 解析キャッシュ | なし（保存時のみ） |
 | 分析結果の固定保存 | Implemented | 「分析結果をObsidianに保存」／`POST/GET …/analysis/runs`、`POST /api/analysis/runs/<id>/vault`、`GET /api/analysis/artifacts/<id>` | `archive_group_analysis` → `AnalysisStore.save` → `publish` | `analysis_runs`、`analysis_artifacts`、`analysis_pending_packages`、`obsidian_notes` | `<data>/analysis_store` | ResearchVaultと3 Vault |
 

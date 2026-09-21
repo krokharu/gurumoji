@@ -63,6 +63,7 @@ class AnalysisCommands:
         run_classification: Callable[..., dict[str, Any]],
         write_lock: Any,
         expose_local_paths: bool,
+        pipeline_service: Any | None = None,
     ) -> None:
         self._store = store
         self._find_item = find_item
@@ -85,6 +86,7 @@ class AnalysisCommands:
         self._start_transformer = start_transformer
         self._cancel_transformer = cancel_transformer
         self._run_classification = run_classification
+        self._pipeline = pipeline_service
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
 
@@ -134,14 +136,17 @@ class AnalysisCommands:
 
     def retry_vault(self, run_id: str) -> dict[str, Any]:
         run = self._store.get(run_id)
-        if not run or self._find_item(run["item_id"]) is None:
+        if not run:
+            raise AnalysisCommandNotFound("保存結果が見つかりません。")
+        if run.get("kind") != "interview_comparison" and self._find_item(run["item_id"]) is None:
             raise AnalysisCommandNotFound("保存結果が見つかりません。")
         with self._write_lock:
-            item = self._find_item(run["item_id"])
-            if item is None:
-                raise AnalysisCommandNotFound("対象の会話が見つかりません。")
-            if run["input_fingerprint"] != self._source_fingerprint(item):
-                self._mark_stale(run_id)
+            if run.get("kind") != "interview_comparison":
+                item = self._find_item(run["item_id"])
+                if item is None:
+                    raise AnalysisCommandNotFound("対象の会話が見つかりません。")
+                if run["input_fingerprint"] != self._source_fingerprint(item):
+                    self._mark_stale(run_id)
             result = self._store.retry(run_id)
         return self._store.public(result, local=self._expose_local_paths)
 
@@ -192,6 +197,56 @@ class AnalysisCommands:
         self, item_id: str, payload: dict[str, Any], *, app_url: str
     ) -> dict[str, Any]:
         return self._run_classification(item_id, payload, app_url=app_url)
+
+    def pipeline_capabilities(self) -> dict[str, Any]:
+        if self._pipeline is None:
+            return {"version": "unavailable", "capabilities": {}}
+        return self._pipeline.capabilities()
+
+    def save_definition(
+        self, item_id: str, definition_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        if self._find_item(item_id) is None:
+            raise AnalysisCommandNotFound("対象の会話が見つかりません。")
+        return self._pipeline.save_definition(item_id, definition_id, payload)
+
+    def trial_definition(
+        self, item_id: str, definition_id: str, *, limit: int
+    ) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.trial_definition(item_id, definition_id, limit=limit)
+
+    def preview_pipeline(self, item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.preview(item_id, payload)
+
+    def start_pipeline(
+        self, item_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> tuple[dict[str, Any], int]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.start(item_id, payload, app_url=app_url)
+
+    def pipeline_status(self, item_id: str, pipeline_id: str) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.status(item_id, pipeline_id)
+
+    def cancel_pipeline(self, item_id: str, pipeline_id: str) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.cancel(item_id, pipeline_id)
+
+    def retry_pipeline(
+        self, item_id: str, pipeline_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.retry(item_id, pipeline_id, payload, app_url=app_url)
 
     def save_comparison(
         self,

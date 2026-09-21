@@ -157,8 +157,9 @@ class AnalysisStore:
         self.connect = connect
         self.root = Path(database_file).parent / "analysis_store"
         self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+        self._last_publication_outcomes: dict[str, dict[str, dict[str, str]]] = {}
 
-    def publish_vaults(self, run_id: str) -> None:
+    def publish_vaults(self, run_id: str) -> dict[str, str]:
         """Mirror a completed run into the Input, Orchestrator, and Visualization Vaults.
 
         Those Vaults hold ID-linked summaries only. A failure there never changes
@@ -166,7 +167,7 @@ class AnalysisStore:
         """
         run = self.get(run_id)
         if not run or run["status"] != "completed":
-            return
+            return {}
         try:
             snapshot, result = self._read_package(run_id)
             artifacts = self.artifacts(run_id)
@@ -176,9 +177,60 @@ class AnalysisStore:
                 if name.startswith("tables/") and name.endswith(".csv"):
                     with safe_path(self.root, artifact["path"]).open(encoding="utf-8-sig", newline="") as handle:
                         fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(handle), [])
-            self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
+            statuses = self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
+            outcomes = {
+                kind: {"status": status, "error": "" if status == "published" else "公開先を確認してください。"}
+                for kind, status in statuses.items()
+            }
+            self._last_publication_outcomes[run_id] = outcomes
+            return statuses
         except (OSError, ValueError, LookupError, TypeError) as exc:
             LOGGER.warning("4 Vaultへの書き出しを完了できませんでした（%s）: %s", run_id, exc)
+            outcomes = {kind: {"status": "failed", "error": str(exc)}
+                        for kind in ("input", "orchestrator", "visualization")}
+            self._last_publication_outcomes[run_id] = outcomes
+            return {"error": str(exc)}
+
+    def publication_outcomes(self, run_id: str) -> dict[str, dict[str, str]]:
+        """Return per generated-Vault publication state for one fixed package."""
+        run = self.get(run_id)
+        if not run:
+            raise LookupError("保存結果がありません。")
+        if run_id in self._last_publication_outcomes:
+            return copy.deepcopy(self._last_publication_outcomes[run_id])
+        try:
+            data = self.vaults.load()
+        except (OSError, ValueError) as exc:
+            return {kind: {"status": "unknown", "error": str(exc)}
+                    for kind in ("input", "orchestrator", "visualization")}
+        snapshot_note = "input-snapshot-" + str(run["snapshot_id"])
+        run_note = "orchestrator-run-" + run_id
+        visual_prefix = "visual-" + run_id + "-"
+
+        def outcome(note_ids: list[str]) -> dict[str, str]:
+            if not note_ids:
+                return {"status": "unknown", "error": "公開対象ノートを確認できません。"}
+            entries = [data.get("notes", {}).get(note_id) for note_id in note_ids]
+            if any(entry is None for entry in entries):
+                return {"status": "unknown", "error": "公開対象ノートがありません。"}
+            sync = {str(entry.get("sync") or "unknown") for entry in entries if entry}
+            if sync <= {"current"}:
+                return {"status": "published", "error": ""}
+            if "conflict" in sync:
+                return {"status": "conflict", "error": "利用者の編集を保持したため競合しています。"}
+            if "missing" in sync:
+                return {"status": "failed", "error": "管理対象ノートが移動または削除されています。"}
+            return {"status": "unknown", "error": "公開状態を確認できません。"}
+
+        visual_ids = [note_id for note_id in data.get("notes", {}) if note_id.startswith(visual_prefix)]
+        # A run with no tabular visual still has a valid Visualization publication:
+        # its generated index/home are current and there was nothing to write.
+        visual = outcome(visual_ids) if visual_ids else {"status": "published", "error": ""}
+        return {
+            "input": outcome([snapshot_note]),
+            "orchestrator": outcome([run_note]),
+            "visualization": visual,
+        }
 
     def refresh_vaults(self, item_id: str) -> None:
         """Republish only runs whose stale state differs from their Orchestrator note.
@@ -259,7 +311,8 @@ class AnalysisStore:
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
-             member_ids: list[str] | None = None, check_cancelled=lambda: None) -> dict:
+             member_ids: list[str] | None = None, check_cancelled=lambda: None,
+             publish: bool = True) -> dict:
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
@@ -279,9 +332,9 @@ class AnalysisStore:
                     match = conn.execute("SELECT * FROM analysis_runs WHERE fingerprint=? AND item_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1", (fingerprint, item_id)).fetchone()
                 if match: previous = dict(match)
             if previous and previous["status"] == "completed":
-                if previous["vault_status"] != "completed":
+                if publish and previous["vault_status"] != "completed":
                     self.publish(previous["id"])
-                else:
+                elif publish:
                     try:
                         unpublished = self.vaults.run_status(previous["id"]) is None
                     except (OSError, ValueError):
@@ -299,7 +352,7 @@ class AnalysisStore:
                        "datasets": datasets, "request_id": request_id, "input_fingerprint": input_fingerprint,
                        "source_revision": source_revision, "analysis_revision": analysis_revision,
                        "app_url": app_url, "provider": provider, "model": model,
-                       "member_ids": list(member_ids or [])}
+                       "member_ids": list(member_ids or []), "publish": publish}
             with self.connect() as conn:
                 conn.execute("""INSERT INTO analysis_runs(id,request_id,item_id,kind,fingerprint,input_fingerprint,
                     snapshot_id,source_revision,analysis_revision,created_at,status,app_url,provider,model)
@@ -358,7 +411,8 @@ class AnalysisStore:
                 with self.connect() as conn:
                     conn.execute("UPDATE analysis_runs SET status='failed',error='分析結果を保存できませんでした。再保存してください。' WHERE id=?", (run_id,))
                 raise
-            self.publish(run_id)
+            if publish:
+                self.publish(run_id)
             return self.get(run_id)
 
     def retry(self, run_id: str) -> dict:

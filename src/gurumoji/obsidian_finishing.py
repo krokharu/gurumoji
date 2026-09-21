@@ -333,7 +333,8 @@ class ObsidianWorkbench:
     def prepare(self, item_id: str, title: str, segments: list[dict], *, revision: int,
                 provider: str = "none", model: str = "", detect_names: bool = True,
                 create_outline: bool = True, jev_compare: bool = False,
-                ready: bool = True, source_kind: str = "whisper", ai_efforts: dict | None = None) -> dict:
+                ready: bool = True, source_kind: str = "whisper", ai_efforts: dict | None = None,
+                speaker_names: dict[str, str] | None = None) -> dict:
         update_efforts = ai_efforts is not None
         ai_efforts = normalize_efforts(ai_efforts)
         existing = self.load(item_id)
@@ -375,8 +376,10 @@ class ObsidianWorkbench:
                      json.dumps(segments, ensure_ascii=False).encode())
         if not existing:
             label = "Whisper原文" if source_kind == "whisper" else "アプリ保存版"
-            self.save_note(state, original_note, transcript_note(title + "：" + label, segments), "source")
-        self.save_note(state, state["work"], transcript_note(title, segments), "transcript")
+            self.save_note(state, original_note, transcript_note(
+                title + "：" + label, segments, speaker_names
+            ), "source")
+        self.save_note(state, state["work"], transcript_note(title, segments, speaker_names), "transcript")
         self.save_note(state, state["outline"], outline_note({"sections": []}), "outline")
         controls = ["# AI仕上げの操作", "",
                     "Gurumojiを起動したまま、下の操作を1つだけチェックして保存してください。",

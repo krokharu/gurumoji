@@ -312,7 +312,7 @@ function buildTransformerCandidateList(result, state) {
   const rows = transformerCandidates(result);
   if (!rows.length) {
     box.append(analysisElement('p', 'analysis-caption',
-      '候補一覧はまだありません。「自動でまとめる」で1回実行すると、テーマ数ごとのsilhouetteが出ます。ここで件数を選んで実行すると、その件数で作り直したうえで候補一覧も作ります。'));
+      '候補一覧はまだありません。画面上部の「分析を実行」からテーマ分析を行うと、テーマ数ごとのsilhouetteが出ます。候補モードでは、指定した件数で作り直したうえで候補一覧も作ります。'));
     return box;
   }
   const best = rows.reduce(
@@ -1036,7 +1036,7 @@ function refreshInsightControls() {
     const usage = state.run?.usage;
     const tokenText = usage?.request_count ? ` / ${usage.request_count}回・${Number(usage.total_tokens || 0).toLocaleString()}トークン` : '';
     host.textContent = analysisState.dirty ? '未保存の変更があります。設定・コードを保存してから生成してください。'
-      : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解はボタンを押したときだけ生成します。');
+      : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解は画面上部の「分析を実行」から明示的に生成します。');
   });
   document.querySelectorAll('[data-insight-output]').forEach(host => {
     const insights = analysisState.data.insights || {};
@@ -1150,6 +1150,7 @@ async function pollContentInsights() {
 }
 
 function onContentAnalysisLoaded() {
+  if (analysisState.data?.executed === false) return;
   loadAnalysisStorage();
   openLinkedAnalysisEvidence();
   const state = contentAnalysisState();

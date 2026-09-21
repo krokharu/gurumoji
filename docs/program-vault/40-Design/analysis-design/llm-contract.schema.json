@@ -1,0 +1,653 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gurumoji:analysis:llm-contract:design-1",
+  "title": "Gurumoji LLM共通契約（設計用骨格）",
+  "description": "手法別payload/parameters schema、DAG、根拠、尺度、方針の意味検証は別途必須。provenanceはホストが付与しモデルの申告を採用しない。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/TaskRequest"
+    },
+    {
+      "$ref": "#/$defs/TaskResult"
+    },
+    {
+      "$ref": "#/$defs/PlanProposal"
+    }
+  ],
+  "$defs": {
+    "VersionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ]
+    },
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "source_id",
+        "revision",
+        "sha256"
+      ]
+    },
+    "ContextPacket": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 0
+        },
+        "excerpts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "evidence_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "selection_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "source_id",
+              "evidence_id",
+              "text",
+              "selection_reason"
+            ]
+          },
+          "minItems": 0
+        },
+        "omitted_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "data_policy": {
+          "enum": [
+            "local_only",
+            "cloud_allowed"
+          ]
+        },
+        "allowed_method_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionedRef"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "purpose",
+        "source_refs",
+        "excerpts",
+        "omitted_scope",
+        "data_policy",
+        "allowed_method_refs"
+      ]
+    },
+    "InputBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "artifact"
+            },
+            "artifact_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "column_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "kind",
+            "artifact_id",
+            "revision",
+            "column_ids"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "step_output"
+            },
+            "step_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "output_key": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "column_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "kind",
+            "step_id",
+            "output_key",
+            "column_ids"
+          ]
+        }
+      ]
+    },
+    "PlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "step_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "milestone": {
+          "enum": [
+            "M0",
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7"
+          ]
+        },
+        "method_ref": {
+          "$ref": "#/$defs/VersionedRef"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "input_bindings": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/InputBinding"
+          }
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "step_id",
+        "milestone",
+        "method_ref",
+        "depends_on",
+        "input_bindings",
+        "parameters",
+        "reason",
+        "required"
+      ]
+    },
+    "TaskRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "analysis-llm-1"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "role_id": {
+          "enum": [
+            "O01",
+            "O02",
+            "O03",
+            "O04",
+            "O05",
+            "O06",
+            "O07"
+          ]
+        },
+        "message_kind": {
+          "const": "task_request"
+        },
+        "task_type": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "milestone": {
+          "enum": [
+            "M0",
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7"
+          ]
+        },
+        "context": {
+          "$ref": "#/$defs/ContextPacket"
+        },
+        "definition_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionedRef"
+          },
+          "minItems": 0
+        },
+        "allowed_evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "allowed_labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "expected_payload_schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_model_calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "max_model_calls",
+            "max_output_tokens",
+            "timeout_seconds"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "role_id",
+        "message_kind",
+        "task_type",
+        "milestone",
+        "context",
+        "definition_refs",
+        "allowed_evidence_ids",
+        "allowed_labels",
+        "expected_payload_schema",
+        "budget"
+      ]
+    },
+    "TaskResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "analysis-llm-1"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "role_id": {
+          "enum": [
+            "O01",
+            "O02",
+            "O03",
+            "O04",
+            "O05",
+            "O06",
+            "O07"
+          ]
+        },
+        "message_kind": {
+          "const": "task_result"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "not_applicable",
+            "refused",
+            "invalid_output",
+            "timeout",
+            "cancelled",
+            "failed",
+            "partial"
+          ]
+        },
+        "payload_schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "payload": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "unresolved": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "model_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "call_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "input_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "input_tokens",
+                "output_tokens"
+              ]
+            }
+          },
+          "required": [
+            "provider_id",
+            "model_id",
+            "call_id",
+            "prompt_version",
+            "usage"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "role_id",
+        "message_kind",
+        "status",
+        "payload_schema",
+        "payload",
+        "evidence_ids",
+        "unresolved",
+        "warnings",
+        "reason",
+        "provenance"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "success"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "type": "object"
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "refused",
+                  "invalid_output",
+                  "timeout",
+                  "cancelled",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "PlanProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "analysis-llm-1"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "role_id": {
+          "enum": [
+            "O01",
+            "O02",
+            "O03",
+            "O04",
+            "O05",
+            "O06",
+            "O07"
+          ]
+        },
+        "message_kind": {
+          "const": "plan_proposal"
+        },
+        "proposal_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "scope": {
+          "enum": [
+            "full_plan",
+            "stage_fragment"
+          ]
+        },
+        "base_plan_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "committed": {
+          "const": false
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanStep"
+          },
+          "minItems": 1
+        },
+        "unresolved": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "role_id",
+        "message_kind",
+        "proposal_id",
+        "scope",
+        "base_plan_revision",
+        "committed",
+        "steps",
+        "unresolved"
+      ]
+    }
+  }
+}

@@ -1,0 +1,2461 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gurumoji｜分析ワークスペース設計</title>
+<style>
+:root{--ink:#183b44;--muted:#536b72;--line:#d6e2e4;--bg:#f3f7f7;--accent:#12695e;--pale:#e5f3ef;--warn:#80501c;--error:#a83345}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--bg);font:14px/1.65 "Yu Gothic UI",Meiryo,sans-serif}button,input,select,textarea{font:inherit}button,a,summary{cursor:pointer}button{padding:9px 14px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink)}button:disabled{opacity:.48;cursor:not-allowed}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #d38a26;outline-offset:2px}.primary{background:var(--accent);color:white;border-color:var(--accent)}a{color:var(--accent)}.notice{background:#e8edf6;padding:8px 24px;font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.top{padding:15px 24px;background:white;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line)}.brand{font-size:23px;letter-spacing:-.8px;font-weight:800}.top small{margin-left:20px;color:var(--muted)}main{max-width:1480px;margin:auto;padding:24px}.heading{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:16px}h1{margin:0;font-size:26px}h2{font-size:20px;margin:0 0 12px}h3{font-size:15px;margin:0 0 10px}p{margin:6px 0 12px}.sub,.muted{color:var(--muted);font-size:12px}.nav{display:flex;gap:8px;border-bottom:1px solid var(--line);padding-bottom:15px;margin-bottom:22px;flex-wrap:wrap}.nav button[aria-current=page]{background:var(--ink);color:white}.panel{border:1px solid var(--line);background:white;border-radius:12px;padding:20px;min-width:0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.results{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px}.side button{display:block;width:100%;text-align:left;margin-top:8px}.side button[aria-pressed=true]{background:var(--pale);border-color:var(--accent)}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}.metric{padding:14px;border:1px solid var(--line);border-radius:10px;background:white}.metric strong{display:block;font-size:25px}.pill{display:inline-block;padding:3px 8px;border-radius:5px;background:#edf2f4;font-size:12px}.good{background:var(--pale);color:var(--accent)}.warn{background:#fff0d9;color:var(--warn)}.bad{background:#fde7e9;color:var(--error)}.toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.table-wrap{overflow:auto;max-width:100%}table{border-collapse:collapse;width:100%;text-align:left;font-size:13px}th,td{padding:10px;border-bottom:1px solid var(--line)}th{background:#f1f6f6;white-space:nowrap}caption{text-align:left;color:var(--muted);padding:5px 0}.stance{width:100%;border:0;padding:6px}.yes{background:#daf0df}.no{background:#f8dde3}.neutral{background:#ddebf9}.third{background:#e8e1fb}.unknown{background:#e7eaed}.barrow{display:grid;grid-template-columns:70px 1fr 40px;align-items:center;gap:10px;margin:10px 0}.bartrack{background:#eaf0f0;border-radius:4px;height:17px}.barfill{background:#308f80;height:100%;border-radius:4px}.timeline{display:flex;height:40px;border-radius:6px;overflow:hidden;margin:16px 0}.timeline span{display:grid;place-items:center;font-size:12px}.field{display:block;margin-bottom:12px;font-weight:600}.field input,.field select,.field textarea{display:block;width:100%;padding:9px;border:1px solid #b9cecf;border-radius:7px;margin-top:5px;background:white;color:var(--ink)}textarea{min-height:83px;resize:vertical}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.row .field{flex:1;min-width:145px}.definition{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.note{padding:12px;border-left:3px solid #c69439;background:#fff8e9;font-size:12px;margin:12px 0}.steps{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:18px}.step{padding:12px 7px;border:1px solid var(--line);border-radius:9px;text-align:center;background:white;font-size:11px}.step b{display:block;font-size:17px}.step.active{border:2px solid var(--accent);background:var(--pale)}.step.done{color:var(--accent)}.tasks{display:grid;gap:12px}.task{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:9px}.task small{display:block;color:var(--muted)}.statusline{font-weight:700;margin:15px 0}.progress{height:9px;background:#e7eeee;border-radius:9px;overflow:hidden}.progress span{display:block;background:var(--accent);height:100%}.choices{display:grid;gap:9px}.choice{border:1px solid var(--line);padding:12px;border-radius:8px;display:flex;gap:10px}.choice input{margin-top:5px}section[hidden],div[hidden],dialog:not([open]){display:none!important}.diagram{max-width:100%;height:auto}.linkcards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.linkcards a{display:block;padding:15px;border:1px solid var(--line);border-radius:10px;text-decoration:none;background:white}.catalog-tools{display:flex;gap:10px;margin-bottom:12px}.catalog-tools input,.catalog-tools select{padding:8px;max-width:100%;border:1px solid var(--line);border-radius:7px}.catalog-tools input{flex:1;min-width:0}.catalog-table td{vertical-align:top}.catalog-table small{display:block;color:var(--muted)}dialog{position:fixed;inset:0 0 0 auto;margin:0;width:410px;max-width:100%;height:100%;max-height:100%;padding:25px;border:0;box-shadow:-10px 0 40px #183b4430;color:var(--ink);overflow:auto}dialog::backdrop{background:#183b4430}blockquote{margin:20px 0;padding:16px;background:var(--pale);border-left:3px solid var(--accent);font-size:18px}.close{float:right}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:white;padding:13px 22px;border-radius:9px;max-width:90%;z-index:10}.foot{font-size:12px;color:var(--muted);margin:24px 0}.sample{display:inline-block;font-size:11px;letter-spacing:.08em;color:var(--accent)}.compare{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.state-switch{border-top:1px dashed var(--line);margin-top:20px;padding-top:14px}.state-switch button{font-size:12px;padding:6px 10px}.mockstate{padding:25px;border:1px dashed var(--line);border-radius:10px}
+@media(max-width:959px){main{padding:14px}.results,.grid,.definition{grid-template-columns:1fr}.side{display:flex;gap:7px;flex-wrap:wrap}.side h3{width:100%}.side button{width:auto;margin:0}.steps{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}.top small{display:none}.top{padding:12px 14px;flex-wrap:wrap}.heading{align-items:flex-start}.heading .sub{max-width:235px}h1{font-size:22px}.panel{padding:15px}.compare,.linkcards{grid-template-columns:1fr}.nav{gap:5px}.nav button{padding:8px 10px;font-size:12px}.notice{padding:7px 14px}dialog{width:100%}.catalog-table{min-width:780px}}@media print{.notice,.nav,.state-switch,.toolbar,button{display:none!important}main{max-width:none}.panel{break-inside:avoid}}
+</style></head>
+<body>
+<div class="notice"><span><strong>設計プレビュー</strong>　架空データ・画面操作のみ。分析・API送信・ファイル出力は行いません。</span><span><a href="../analysis-milestone-visualization-design.md">設計書</a> · <a href="design-spec.json">構造JSON</a> · <a href="diagrams.html">設計図</a></span></div>
+<header class="top"><div class="brand">Gurumoji <small>インタビューの根拠から、分析へ。</small></div><div class="row"><span>新規作成</span><strong>処理済みデータ</strong><span>話者管理</span></div></header>
+<main>
+<div class="heading"><div><span class="sample">ANALYSIS WORKSPACE / PROPOSED</span><h1>分析・可視化</h1><p class="sub">架空インタビューA ／ 本文 v3 ／ 定義 v1 ／ 6名</p></div><button data-go="run">M2 実行中 · 状況を見る</button></div>
+<nav class="nav" aria-label="分析の作業"><button data-go="results" aria-current="page">結果を見る</button><button data-go="compare">比較する</button><button data-go="plan">分析を組む</button><button data-go="exports">データ・出力</button><button data-go="run">実行状況</button><button data-go="catalog">47成果物の対応表</button><button data-go="blueprints">UI画像・設計図</button></nav>
+
+<section id="results" data-page>
+<div class="heading"><h2>S01 結果を見る</h2><label>表示状態 <select id="result-state"><option value="completed">完了</option><option value="empty">未分析</option><option value="stale">更新が必要</option><option value="failed">失敗</option></select></label></div>
+<div id="result-message" role="status"></div>
+<div id="result-body">
+<div class="metrics"><div class="metric">参加者<strong>6 <small>人</small></strong></div><div class="metric">発話<strong>148 <small>件</small></strong></div><div class="metric">論点<strong>3</strong></div><div class="metric">立場未判定<strong>1 <small>セル</small></strong></div></div>
+<div class="results"><aside class="panel side"><h3>アウトライン</h3><button data-topic="全体" aria-pressed="true">全体</button><button data-topic="導入効果">01 導入効果</button><button data-topic="費用">02 費用</button><button data-topic="運用体制">03 運用体制</button><p class="sub">予定との照合：3 / 4項目<br>未照合：追加支援</p></aside>
+<div><div class="panel"><div class="heading"><h2>話者 × 論点の立場</h2><span class="pill good">確定済みの例</span></div>
+<div class="toolbar"><span id="scope" class="pill">対象：全体</span><button id="toggle-chart">図 / 表を切替</button><button data-go="plan">選択列で追加分析</button><button data-go="exports">図を保存</button></div>
+<p class="sub">対象提案への立場。条件付き・混合意見は根拠で確認できます。空白は中立に含めません。</p>
+<div class="table-wrap" id="stance-view"><table><caption>架空の話者6名 × 論点3件。セルを選ぶと根拠が開きます。</caption><thead><tr><th>話者</th><th>導入効果</th><th>費用</th><th>運用体制</th></tr></thead><tbody id="stance-body"></tbody></table></div>
+<div id="plain-view" hidden><div class="table-wrap"><table><thead><tr><th>論点</th><th>賛成</th><th>反対</th><th>中立</th><th>第三案</th><th>未判定</th></tr></thead><tbody><tr><td>導入効果</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td></tr><tr><td>費用</td><td>2</td><td>1</td><td>3</td><td>0</td><td>0</td></tr><tr><td>運用体制</td><td>2</td><td>1</td><td>2</td><td>1</td><td>0</td></tr></tbody></table></div><p class="sub">集計単位：人数。分母は各論点6人。未判定を別表示。</p></div></div>
+<div class="panel" style="margin-top:16px"><h3>会話タイムライン</h3><div class="timeline" aria-label="導入効果、費用、運用体制、費用への回帰"><span style="width:30%;background:#cde5df">導入効果</span><span style="width:25%;background:#dae8f1">費用</span><span style="width:30%;background:#e6e0f3">運用体制</span><span style="width:15%;background:#dae8f1">費用</span></div><div class="row muted"><span>00:00</span><span style="margin-left:auto">01:20:00</span></div><p class="sub">主論点による簡略表示。複数論点への対応は原表に保持。</p></div></div></div></div>
+</section>
+
+<section id="plan" data-page hidden>
+<div class="heading"><h2>S02 手動で分析を組む</h2><span class="pill">下書き</span></div><p>ラベル・測定・尺度を手入力し、対象カラムと分析手法を選択します。</p>
+<form id="definition-form">
+<div class="definition">
+<div class="panel"><h3>1 ラベル</h3><label class="field">名称<input id="label-name" value="導入への賛否" required></label><label class="field">定義・採用例<textarea id="label-definition" required>対象の導入提案への立場。条件付き賛成は条件を別に記録する。</textarea></label><label class="field">除外例<input value="相づちだけ、立場の表明なし"></label></div>
+<div class="panel"><h3>2 測定</h3><label class="field">測定方法<textarea id="measurement" required>話者×論点ごとに、対象提案への立場を分類する。</textarea></label><label class="field">観測単位<select id="grain"><option>話者×論点</option><option>発話</option><option>話者</option><option>インタビュー</option></select></label><label class="field">判定元<select><option>人手で入力・確認</option><option>定義に従ってJEVで判定</option><option>定義に従ってLLMで判定</option><option>規則で判定</option></select></label></div>
+<div class="panel"><h3>3 尺度</h3><label class="field">尺度の種類<select id="scale"><option value="nominal">名義尺度</option><option value="ordinal">順序尺度</option><option value="interval">間隔尺度</option><option value="ratio">比率尺度</option></select></label><label class="field">選択肢・順序・値域<textarea id="levels">賛成 / 反対 / 中立 / 第三案</textarea></label><label class="field">欠測の扱い<input id="missing" value="未判定はnull、理由を別列に保持" required></label></div></div>
+<div class="grid" style="margin-top:16px">
+<div class="panel"><h3>4 カラムを指定</h3><label class="field">測定に使う入力カラム<select id="input-column"><option>発話本文＋対象論点</option><option>手動コード</option></select></label><label class="field">生成する出力カラム<input id="output-column" value="adoption_stance" pattern="[A-Za-z][A-Za-z0-9_]*" required></label><div class="row"><label class="field">分析対象カラム A<select id="column-a"><option>adoption_stance（導入への賛否）</option><option>speaking_seconds（発話時間）</option></select></label><label class="field">分析対象カラム B<select id="column-b"><option>department（所属）</option><option>response_count（応答数）</option></select></label></div></div>
+<div class="panel"><h3>5 分析手法と適用条件</h3><label class="field">手法<select id="method"><option value="crosstab">クロス集計</option><option value="chi_square">カイ二乗検定</option><option value="pearson">Pearson相関</option><option value="descriptive">記述統計</option></select></label><label class="field">集約・分母<input value="1行＝話者×論点、所属別人数"></label><div id="method-warning" class="note" role="status">選択した尺度と手法の適合性を確認します。</div><p class="sub">試作は入力と手法選択の導線を示します。推定・検定は実行しません。</p></div></div>
+<div class="panel" style="margin-top:16px"><div class="toolbar"><button type="button" id="draft-save">下書き保存（試作）</button><button type="button" id="trial">少数で試す（表示例）</button><button type="submit" id="freeze" class="primary">定義を確定（試作）</button></div><div id="trial-result" hidden><h3>試行結果の確認例</h3><p class="sub">架空の固定例です。入力した規則で推論した結果ではありません。</p><table><thead><tr><th>対象</th><th>判定</th><th>確認</th></tr></thead><tbody><tr><td>Aさん・費用</td><td>賛成（条件付き）</td><td>根拠あり</td></tr><tr><td>Fさん・導入効果</td><td>未判定</td><td>表明なし</td></tr></tbody></table></div><div id="plan-preview" role="status"></div></div>
+</form></section>
+
+<section id="run" data-page hidden>
+<div class="heading"><h2>S03 実行状況</h2><span class="pill">入力 v3 / 計画 v1</span></div>
+<div class="steps" id="steps"></div><div class="grid"><div class="panel"><h2 id="run-title">M2 一次分析</h2><div class="statusline" id="run-count">2 / 4 処理が完了</div><div class="progress"><span id="run-progress" style="width:50%"></span></div><div class="tasks" id="tasks" style="margin-top:18px"></div><div class="note" id="gate-message">この段階の全処理の検証・保存が完了するまで、M3を開始しません。</div><div class="toolbar"><button data-go="results">完了済みの結果を見る</button><button id="retry-run" hidden>失敗だけ再試行</button><button id="cancel-run">中止（試作）</button></div></div>
+<div class="panel"><h3>処理の依存関係</h3><p>言語解析 → 特徴語<br>立場判定 → 意見集約</p><p class="sub">独立した処理は同じ段階で並列実行。依存待ち・資源待ち・確認待ちは別表示。</p><h3 style="margin-top:24px">次段階</h3><p id="next-status">M3 評価・会話の流れ：待機</p><p class="sub">完了済みの結果を閲覧しても、実行順は変わりません。</p><div class="state-switch"><strong>設計確認用の状態切替</strong><p class="sub">実処理ではありません。</p><button data-run-state="running">実行中</button> <button data-run-state="failed">一部失敗</button> <button data-run-state="committing">保存待ち</button> <button data-run-state="completed">全件保存済み</button> <button data-run-state="interrupted">再起動後</button></div></div></div>
+</section>
+
+<section id="compare" data-page hidden><h2>S05 比較する</h2><div class="compare"><div class="panel"><h3>結果A</h3><p>架空インタビューA / 具体性</p><span class="pill">定義 v1 · 0〜4 · 順序尺度</span><p>観測単位：論点　対象：3論点</p></div><div class="panel"><h3>結果B</h3><label class="field">比較先<select id="compare-version"><option value="same">架空インタビューB / 同じ定義v1</option><option value="different">別の定義v2 / 1〜7点</option></select></label><p id="compare-meta">観測単位：論点　同じ評価軸</p></div></div><div id="compare-status" class="note">同じ尺度・単位です。分布と根拠を比較できます。</div><div class="panel"><h3>評価分布の比較（表示例）</h3><div class="barrow"><span>会話A</span><div class="bartrack"><div class="barfill" style="width:75%"></div></div><span>3</span></div><div class="barrow"><span>会話B</span><div class="bartrack"><div class="barfill" style="width:50%"></div></div><span>2</span></div><p class="sub">同じ0〜4尺度の中央値の架空例。因果関係や有意差を示すものではありません。</p><button id="compare-diff">比較結果を確認（試作）</button> <button data-go="plan">追加分析を組む</button></div></section>
+
+<section id="exports" data-page hidden><h2>S04 データ・出力</h2><div class="grid"><div class="panel"><h3>分析用データ</h3><label class="field">出力単位<select><option>話者×アウトライン</option><option>発話</option><option>話者</option><option>アウトライン</option><option>インタビュー</option></select></label><div class="choices">
+<label class="choice"><input type="checkbox" checked><span><strong>SPSS .sav ＋ .sps</strong><br><small>値・ラベル・欠測・対応する分析構文</small></span></label>
+<label class="choice"><input type="checkbox" checked><span><strong>jamovi .sav / .csv</strong><br><small>変数辞書・尺度設定・再現手順を同梱</small></span></label>
+<label class="choice"><input type="checkbox" checked><span><strong>Excel .xlsx</strong><br><small>データ・集計・統計・根拠を別シートに出力</small></span></label>
+<label class="choice"><input type="checkbox"><span>CSV / JSON / Parquet</span></label></div><p class="sub">同じ固定datasetから生成。欠測を0に変換しません。</p></div>
+<div class="panel"><h3>グラフ画像</h3><svg viewBox="0 0 520 175" role="img" aria-label="架空の論点別参加者数、導入効果5人、費用6人、運用体制6人" style="width:100%;background:#f7faf9;border-radius:8px"><g font-family="Meiryo,sans-serif" fill="#183b44" font-size="15"><text x="20" y="40">導入効果</text><text x="20" y="85">費用</text><text x="20" y="130">運用体制</text><rect x="120" y="20" width="275" height="25" fill="#78b6a8"/><rect x="120" y="65" width="330" height="25" fill="#78b6a8"/><rect x="120" y="110" width="330" height="25" fill="#78b6a8"/><text x="410" y="40">5人</text><text x="465" y="85">6人</text><text x="465" y="130">6人</text></g></svg>
+<div class="row"><label class="field">画像形式<select id="image-format"><option>PNG</option><option>JPEG</option><option>SVG</option><option>PDF</option><option>TIFF</option></select></label><label class="field">サイズの指定<select id="size-mode"><option value="px">ピクセル</option><option value="mm">印刷寸法 mm</option></select></label></div>
+<div class="row"><label class="field" id="width-label">幅<input id="image-width" type="number" min="1" value="1800"></label><label class="field">高さ<input id="image-height" type="number" min="1" value="1200"></label><label class="field">dpi<select id="dpi"><option>300</option><option>600</option></select></label></div>
+<label><input type="checkbox" id="transparent"> 透過背景</label><p id="image-note" class="sub">1800 × 1200 px / 300 dpi</p><label><input type="checkbox" checked> 図に使った表・条件・根拠一覧を同梱</label></div></div>
+<div class="panel" style="margin-top:16px"><div class="toolbar"><button id="bundle" class="primary">選択した成果物をZIPで保存（試作）</button><button id="export-failure">出力失敗の表示例</button></div><div id="export-status" role="status">M7では全選択形式の検証・保存完了を待ちます。</div></div></section>
+
+<section id="catalog" data-page hidden><h2>47成果物：プログラムと表示の対応</h2><p class="sub">全て設計上の候補です。入力条件と選択手法が適合する成果物だけを計画に含めます。</p><div class="catalog-tools"><input id="catalog-search" placeholder="成果物・処理担当・条件で検索" aria-label="成果物検索"><select id="catalog-group" aria-label="分類"><option value="">すべて</option></select></div><p id="catalog-count"></p><div class="panel table-wrap"><table class="catalog-table"><thead><tr><th>ID・成果物</th><th>段階・処理担当</th><th>入力データ</th><th>表示部品・画面</th><th>条件・根拠</th></tr></thead><tbody id="catalog-body"></tbody></table></div></section>
+<section id="blueprints" data-page hidden><h2>画像生成によるUI設計と構造図</h2><p>画像は視覚的な方向性、設計書とJSONは操作・データ・状態の定義です。</p><a href="ui-concept-v2.png"><img src="ui-concept-v2.png" alt="結果、手動分析、実行状況、出力の4画面の生成画像" class="diagram"></a><div class="linkcards"><a href="analysis-sequence.svg">分析シーケンス図 →</a><a href="milestones.svg">マイルストーンと並列処理 →</a><a href="ui-map.svg">画面構成と遷移 →</a><a href="data-map.svg">データと成果物の関係 →</a></div><p class="sub">生成画像内の省略・仮の文言より、構造JSONと画面試作の状態定義を優先します。</p></section>
+<p class="foot">設計版 2026-09-21 · 表示データは架空 · 実行基盤・分析機能・外部ソフトへの出力は未実装</p>
+</main>
+<dialog id="evidence" aria-labelledby="evidence-title"><button class="close" id="close-evidence" aria-label="根拠を閉じる">閉じる ×</button><span class="sample">S06 / EVIDENCE</span><h2 id="evidence-title">判定の根拠</h2><p id="evidence-subject"></p><span class="pill">本文 v3 · 架空の例</span><blockquote id="evidence-quote"></blockquote><h3>判定と条件</h3><p id="evidence-detail"></p><h3>前後の文脈</h3><p id="evidence-context"></p><h3>原文への参照</h3><p id="evidence-id" class="sub"></p><button id="audio-demo">音声で確認（導線例）</button><div class="note">推定と研究者の確認済み値は分けて保存します。閉じると選択したセルへ戻ります。</div></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<script id="design-data" type="application/json">{
+  "schema_version": "design-1",
+  "status": "proposed",
+  "updated": "2026-09-21",
+  "title": "Gurumoji 分析マイルストーンとUI",
+  "runtime_implemented": false,
+  "fictional_data": true,
+  "visual_count": 47,
+  "source_document": "../analysis-milestone-visualization-design.md",
+  "concept_image": "ui-concept-v2.png",
+  "image_interpretation": "見た目の参考。文字・操作・状態の正本はこのJSONと設計書。S05/S06は画像外の補完設計。",
+  "tokens": {
+    "background": "#f3f7f7",
+    "surface": "#ffffff",
+    "ink": "#183b44",
+    "muted": "#536b72",
+    "primary": "#12695e",
+    "line": "#d6e2e4",
+    "warning": "#80501c",
+    "radius": 12,
+    "spacing": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32
+    ],
+    "font": "Yu Gothic UI, Meiryo, sans-serif"
+  },
+  "responsive": {
+    "wide": "1280px以上：論点240px＋結果可変＋根拠360px",
+    "medium": "960〜1279px：根拠は重ねるドロワー",
+    "small": "959px以下：単列・段階縦並び・根拠全画面",
+    "minimum_width": 390
+  },
+  "states": [
+    "empty",
+    "draft",
+    "validating",
+    "awaiting_input",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "stale",
+    "unavailable"
+  ],
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "入力・計画枠の確定",
+      "barrier": "PlanEnvelopeの入力・規則・許容slot・研究区分を確定保存",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M1",
+      "title": "アウトライン",
+      "barrier": "全所属stepの検証・保存完了まで次段階を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M2",
+      "title": "一次分析",
+      "barrier": "全所属stepの検証・保存完了まで次段階を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M3",
+      "title": "評価・流れ",
+      "barrier": "全所属stepの検証・保存完了まで次段階を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M4",
+      "title": "実行定義の確定",
+      "barrier": "全必須slotを許容範囲内で解決しExecutionBindingを保存するまでM5を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M5",
+      "title": "本分析",
+      "barrier": "全所属stepの検証・保存完了まで次段階を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M6",
+      "title": "二次分析",
+      "barrier": "全所属stepの検証・保存完了まで次段階を起動しない",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    },
+    {
+      "id": "M7",
+      "title": "成果物",
+      "barrier": "保存run確定→選択先公開→M7確定→pipeline完了。計算と公開を別表示",
+      "parallel": "同じ段階の依存解決済みtaskを資源上限内で並列"
+    }
+  ],
+  "screens": [
+    {
+      "id": "S01",
+      "title": "結果を見る",
+      "route": "#/analysis/{item_id}",
+      "regions": [
+        "対象・本文版・実行版",
+        "論点と成果物リスト",
+        "条件・対象数・欠測",
+        "図と代替表",
+        "根拠ドロワー"
+      ],
+      "components": [
+        "ScopeSelector",
+        "OutlineTree",
+        "VisualCatalog",
+        "ResultCard",
+        "ChartView",
+        "DataTable",
+        "EvidenceDrawer"
+      ],
+      "actions": [
+        {
+          "id": "filter",
+          "label": "絞り込み",
+          "effect": "確定datasetの対象を変更。AI再実行なし"
+        },
+        {
+          "id": "evidence",
+          "label": "根拠",
+          "effect": "S06を開き戻り先を保存"
+        },
+        {
+          "id": "derive",
+          "label": "追加分析",
+          "effect": "選択したdataset/columnsをS02へ渡す"
+        },
+        {
+          "id": "export",
+          "label": "図を保存",
+          "effect": "ChartSpecをS04へ渡す"
+        }
+      ],
+      "states": [
+        "empty",
+        "running",
+        "completed",
+        "stale",
+        "unavailable"
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "分析を組む",
+      "route": "#/analysis/{item_id}/plan",
+      "regions": [
+        "自動/手動",
+        "ラベル・測定・尺度エディター",
+        "入力列・出力列・対象列",
+        "分析手法・パラメーター",
+        "少数試行と定義の確定",
+        "段階別実行計画"
+      ],
+      "components": [
+        "ModeSelector",
+        "DefinitionEditor",
+        "ColumnPicker",
+        "MethodPicker",
+        "TrialPreview",
+        "PlanPreview"
+      ],
+      "fields": [
+        {
+          "key": "label",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "measurement_rule",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "measurement_level",
+          "type": "select",
+          "options": [
+            "nominal",
+            "ordinal",
+            "interval",
+            "ratio"
+          ],
+          "required": true
+        },
+        {
+          "key": "levels",
+          "type": "editable_rows",
+          "required_when": "nominal or ordinal"
+        },
+        {
+          "key": "missing_policy",
+          "type": "editable_rows",
+          "required": true
+        },
+        {
+          "key": "input_columns",
+          "type": "multiselect",
+          "required": true
+        },
+        {
+          "key": "output_column",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "analysis_columns",
+          "type": "multiselect",
+          "required": true
+        },
+        {
+          "key": "method_id",
+          "type": "select",
+          "required": true
+        },
+        {
+          "key": "unit_of_analysis",
+          "type": "select",
+          "options": [
+            "segment",
+            "speaker",
+            "outline",
+            "speaker_outline",
+            "interview"
+          ],
+          "required": true
+        }
+      ],
+      "actions": [
+        {
+          "id": "save",
+          "label": "下書き保存",
+          "effect": "revision競合を検出"
+        },
+        {
+          "id": "trial",
+          "label": "少数で試す",
+          "effect": "明示した対象IDのみ試行"
+        },
+        {
+          "id": "freeze",
+          "label": "定義を確定",
+          "effect": "試行・意味検証後に定義版を固定"
+        },
+        {
+          "id": "start",
+          "label": "計画を確認して実行",
+          "effect": "固定Planをサーバーへ送る"
+        }
+      ],
+      "states": [
+        "draft",
+        "validating",
+        "awaiting_input",
+        "ready",
+        "failed"
+      ],
+      "validation": [
+        "尺度と手法の適合",
+        "出力列名重複",
+        "欠測と値域",
+        "粒度と対応キー",
+        "任意コード禁止"
+      ],
+      "manual_definition": "利用者がラベル・測定・尺度を手入力し、カラムと分析手法を選ぶ。LLM定義生成は不要"
+    },
+    {
+      "id": "S03",
+      "title": "実行状況",
+      "route": "#/analysis/{item_id}/run",
+      "regions": [
+        "段階M0〜M7",
+        "現在段階の完了数",
+        "並列taskと親待ち・資源待ち",
+        "失敗・確認事項",
+        "完了済み成果物"
+      ],
+      "components": [
+        "MilestoneStepper",
+        "TaskList",
+        "UsagePanel",
+        "FailurePanel",
+        "CompletedResults"
+      ],
+      "actions": [
+        {
+          "id": "view",
+          "label": "完了済みの結果を見る",
+          "effect": "確定済みだけ閲覧"
+        },
+        {
+          "id": "retry",
+          "label": "失敗だけ再試行",
+          "effect": "成功した兄弟taskを保持"
+        },
+        {
+          "id": "cancel",
+          "label": "中止",
+          "effect": "取消要求、遅延応答から後続を起動しない"
+        }
+      ],
+      "states": [
+        "planned",
+        "running",
+        "awaiting_input",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "completed"
+      ],
+      "forbidden_actions": [
+        "未完了段階の強制スキップ",
+        "次段階の先行実行"
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "データ・出力",
+      "route": "#/analysis/{item_id}/exports",
+      "regions": [
+        "固定datasetと粒度",
+        "変数辞書",
+        "データ形式",
+        "図・画像形式・寸法",
+        "成果物チェックと出力進捗"
+      ],
+      "components": [
+        "DatasetSelector",
+        "DictionaryView",
+        "ExportFormats",
+        "ChartPreview",
+        "ImageOptions",
+        "ArtifactList"
+      ],
+      "actions": [
+        {
+          "id": "download",
+          "label": "個別保存",
+          "effect": "確定artifactを取得"
+        },
+        {
+          "id": "bundle",
+          "label": "選択した成果物をZIPで保存",
+          "effect": "全選択形式の検証完了後にまとめる"
+        },
+        {
+          "id": "retry",
+          "label": "失敗した出力だけ再試行",
+          "effect": "AI/統計を再実行しない"
+        }
+      ],
+      "states": [
+        "empty",
+        "ready",
+        "exporting",
+        "failed",
+        "completed"
+      ],
+      "formats": {
+        "data": [
+          "sav",
+          "sps",
+          "csv",
+          "xlsx",
+          "json",
+          "parquet"
+        ],
+        "image": [
+          "png",
+          "jpeg",
+          "svg",
+          "pdf",
+          "tiff"
+        ],
+        "jamovi": "sav/csv＋辞書・手順。omvはjamovi側で保存"
+      },
+      "rules": [
+        "JPEGは透過不可",
+        "pxとmm/dpiの変換を一意にする",
+        "図のデータ表とmanifestを同梱",
+        "粒度が異なる表は別dataset"
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "比較する",
+      "route": "#/analysis/{item_id}/compare",
+      "regions": [
+        "左右の結果選択",
+        "尺度・単位・版・Nの比較",
+        "差分または並列閲覧",
+        "根拠",
+        "追加分析"
+      ],
+      "components": [
+        "RunPicker",
+        "CompatibilityBanner",
+        "ComparisonTable",
+        "ChartView"
+      ],
+      "actions": [
+        {
+          "id": "compare",
+          "label": "比較",
+          "effect": "互換性検証後だけ数値差分"
+        },
+        {
+          "id": "derive",
+          "label": "追加分析",
+          "effect": "親run参照をS02へ"
+        }
+      ],
+      "states": [
+        "empty",
+        "compatible",
+        "incompatible",
+        "completed"
+      ],
+      "rules": [
+        "会話間比較は独立run",
+        "同名だけで同尺度とみなさない"
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "根拠",
+      "route": "drawer; #/analysis/{item_id}?result={id}&segment={id}",
+      "regions": [
+        "結果の主張",
+        "根拠引用と前後文脈",
+        "発話ID・本文版・時刻",
+        "推定/確認・関係の種別",
+        "音声と元画面への復帰"
+      ],
+      "components": [
+        "QuotePanel",
+        "ContextView",
+        "SourceMetadata",
+        "EvidenceLinks"
+      ],
+      "actions": [
+        {
+          "id": "audio",
+          "label": "音声で確認",
+          "effect": "既存作業画面の該当時刻へ"
+        },
+        {
+          "id": "close",
+          "label": "閉じる",
+          "effect": "元セルへフォーカス復帰"
+        }
+      ],
+      "states": [
+        "available",
+        "historical",
+        "missing"
+      ],
+      "rules": [
+        "根拠欠損は本文を生成して埋めない",
+        "Escapeで閉じる",
+        "小画面では全画面"
+      ]
+    }
+  ],
+  "visuals": [
+    {
+      "id": "V01",
+      "title": "分析サマリー",
+      "group": "overview",
+      "group_label": "全体・評価",
+      "milestone": "M2",
+      "producer": "基礎集計Adapter",
+      "inputs": [
+        "segments",
+        "speakers",
+        "outlines"
+      ],
+      "component": "MetricCards",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "対象範囲・人数・発話数・欠測を分ける",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V02",
+      "title": "予定質問と実際の論点",
+      "group": "overview",
+      "group_label": "全体・評価",
+      "milestone": "M1",
+      "producer": "OutlineRunner",
+      "inputs": [
+        "outlines",
+        "outline_segments",
+        "moderator_guide"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "未照合を未実施と断定しない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V03",
+      "title": "インタビュー評価8軸",
+      "group": "overview",
+      "group_label": "全体・評価",
+      "milestone": "M3",
+      "producer": "InterviewEvaluationRunner",
+      "inputs": [
+        "measurements",
+        "evidence"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "0〜4・判定不能・対象外を分離。レーダーは補助",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V04",
+      "title": "論点別の評価",
+      "group": "overview",
+      "group_label": "全体・評価",
+      "milestone": "M3",
+      "producer": "InterviewEvaluationRunner",
+      "inputs": [
+        "measurements",
+        "outlines"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "共通の軸定義版のみ比較",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V05",
+      "title": "評価の根拠一覧",
+      "group": "overview",
+      "group_label": "全体・評価",
+      "milestone": "M3",
+      "producer": "EvidenceResolver",
+      "inputs": [
+        "measurements",
+        "evidence",
+        "segments"
+      ],
+      "component": "QuotePanel",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "得点から該当版の原文へ戻る",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V06",
+      "title": "階層アウトライン",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M1",
+      "producer": "OutlineRunner",
+      "inputs": [
+        "outlines"
+      ],
+      "component": "OutlineTree",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "親子循環なし、未分類を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V07",
+      "title": "論点別の議論量",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M2",
+      "producer": "参加集計Adapter",
+      "inputs": [
+        "outline_segments",
+        "segments"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "時間・発話数・参加人数を切替、重複の分母を明記",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V08",
+      "title": "論点別の立場分布",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M2",
+      "producer": "StanceRunner＋集計",
+      "inputs": [
+        "stances",
+        "claims"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "人数と件数を分離、条件付き・混合・未判定を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V09",
+      "title": "共通意見・対立点・代替案",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M2",
+      "producer": "論点集約Adapter",
+      "inputs": [
+        "claims",
+        "stances",
+        "evidence"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "共通意見には複数話者の根拠",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V10",
+      "title": "主張と理由・条件",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M2",
+      "producer": "論点集約Adapter",
+      "inputs": [
+        "claims",
+        "evidence"
+      ],
+      "component": "RelationGraph",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "対象主張を明示、配置と辺を固定",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V11",
+      "title": "未解決点・未回答質問",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M3",
+      "producer": "InteractionRunner",
+      "inputs": [
+        "interactions",
+        "claims",
+        "segments"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "未検出と未回答を区別",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V12",
+      "title": "論点別キーワード",
+      "group": "outline",
+      "group_label": "論点・グループ意見",
+      "milestone": "M2",
+      "producer": "語彙Adapter",
+      "inputs": [
+        "term_frequency",
+        "outline_segments"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "TF・DF・特徴度を分けて表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V13",
+      "title": "話者プロフィール",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "話者集計Adapter",
+      "inputs": [
+        "speakers",
+        "stances",
+        "characteristic_terms"
+      ],
+      "component": "MetricCards",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "架空の人格・性格を推定しない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V14",
+      "title": "話者×論点の立場",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "StanceRunner",
+      "inputs": [
+        "stances",
+        "claims",
+        "outlines"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "対象主張と時間範囲を指定",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V15",
+      "title": "話者×論点の参加",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "参加集計Adapter",
+      "inputs": [
+        "segments",
+        "outline_segments"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "発話数と発話時間を切替",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V16",
+      "title": "話者別キーワード",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "語彙Adapter",
+      "inputs": [
+        "characteristic_terms"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "順位の根拠指標を表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V17",
+      "title": "話者別の関心候補",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "関心分析Runner",
+      "inputs": [
+        "claims",
+        "segments",
+        "evidence"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "明示・自発言及・質問への回答を分離",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V18",
+      "title": "立場の変化",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M3",
+      "producer": "StanceRunner＋時系列集計",
+      "inputs": [
+        "stances",
+        "segments"
+      ],
+      "component": "Timeline",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "同じ対象・条件か確認",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V19",
+      "title": "話者間の共通点・相違点",
+      "group": "speaker",
+      "group_label": "話者の傾向",
+      "milestone": "M2",
+      "producer": "論点集約Adapter",
+      "inputs": [
+        "claims",
+        "stances",
+        "evidence"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "発話のない領域を中立扱いしない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V20",
+      "title": "会話タイムライン",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "時間集計Adapter",
+      "inputs": [
+        "segments",
+        "outline_segments"
+      ],
+      "component": "Timeline",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "重なりと同一論点への回帰を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V21",
+      "title": "話題の遷移",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "時間集計Adapter",
+      "inputs": [
+        "outline_segments",
+        "segments"
+      ],
+      "component": "RelationGraph",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "遷移行列を併設。表示の主論点選択規則を固定",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V22",
+      "title": "質問→回答→深掘り",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "InteractionRunner",
+      "inputs": [
+        "interactions",
+        "segments"
+      ],
+      "component": "RelationGraph",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "推定/確認を区別",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V23",
+      "title": "同意・反論・補足の関係",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "InteractionRunner",
+      "inputs": [
+        "interactions",
+        "evidence"
+      ],
+      "component": "RelationGraph",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "辺方向は応答側から参照先",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V24",
+      "title": "話者交代",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "時間集計Adapter",
+      "inputs": [
+        "transitions"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "発話交代だけで影響力を断定しない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V25",
+      "title": "参加バランスの推移",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "参加集計Adapter",
+      "inputs": [
+        "timeline",
+        "speakers"
+      ],
+      "component": "Timeline",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "時間窓・分母を表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V26",
+      "title": "相づち・応答状況",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "Transformer相づちAdapter",
+      "inputs": [
+        "transformer_backchannels",
+        "transformer_backchannel_rates"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "相づちは賛成と断定しない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V27",
+      "title": "無音・重なり候補",
+      "group": "flow",
+      "group_label": "会話の流れ",
+      "milestone": "M3",
+      "producer": "時間集計Adapter",
+      "inputs": [
+        "gaps",
+        "overlaps"
+      ],
+      "component": "Timeline",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "候補として表示し音声へ戻す",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V28",
+      "title": "変数・尺度一覧",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M4",
+      "producer": "DefinitionService",
+      "inputs": [
+        "variable_catalog"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "手動入力可。定義版・単位・欠測規則を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V29",
+      "title": "ラベルの付与状況",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M5",
+      "producer": "MeasurementRunner＋集計",
+      "inputs": [
+        "measurements"
+      ],
+      "component": "BarChart",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "複数ラベルの分母・重複を明記",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V30",
+      "title": "評定値の分布",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "measurements"
+      ],
+      "component": "DistributionPlot",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "順序値は離散棒、連続値は条件に応じヒストグラム",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V31",
+      "title": "欠測・未判定の状況",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M5",
+      "producer": "DatasetBuilder",
+      "inputs": [
+        "measurements",
+        "datasets"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "根拠不足/対象外/未入力など理由別表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V32",
+      "title": "判定元の比較",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M5",
+      "producer": "判定比較Adapter",
+      "inputs": [
+        "measurements"
+      ],
+      "component": "DataTable",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "人手・規則・LLM・JEV、同じ対象と定義で照合",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V33",
+      "title": "定義変更前後の比較",
+      "group": "measurement",
+      "group_label": "ラベル・測定・尺度",
+      "milestone": "M6",
+      "producer": "比較Adapter",
+      "inputs": [
+        "variable_catalog",
+        "measurements"
+      ],
+      "component": "DataTable",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "旧版と新版を明記、非互換は差分計算しない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V34",
+      "title": "記述統計",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "datasets",
+        "descriptives"
+      ],
+      "component": "DataTable",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "単位・N・欠測・分布・前提を表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V35",
+      "title": "群別の分布",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "datasets"
+      ],
+      "component": "DistributionPlot",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "箱ひげ/個別点を対象数と尺度から選ぶ",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V36",
+      "title": "クロス集計",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "datasets",
+        "crosstabs"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "行/列/全体の割合と分母を明示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V37",
+      "title": "相関",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "datasets",
+        "correlations"
+      ],
+      "component": "Heatmap",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "散布図を併設、名義コードへのPearsonを拒否",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V38",
+      "title": "群間比較",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "statistical_tests"
+      ],
+      "component": "EffectPlot",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "効果量・区間・p・補正・前提を表示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V39",
+      "title": "対応のある比較",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "StatisticsRunner",
+      "inputs": [
+        "datasets"
+      ],
+      "component": "DistributionPlot",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "対応キーを必須、未対応を検出",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V40",
+      "title": "語の共起",
+      "group": "statistics",
+      "group_label": "量的・統計分析",
+      "milestone": "M5",
+      "producer": "語彙Adapter",
+      "inputs": [
+        "cooccurrence"
+      ],
+      "component": "RelationGraph",
+      "screen": "S01",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "単位・閾値・重み、根拠文脈を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V41",
+      "title": "テーマとコードの構造",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M5",
+      "producer": "QualitativeRunner",
+      "inputs": [
+        "codes",
+        "claims"
+      ],
+      "component": "OutlineTree",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "AI提案と確定コードを分離",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V42",
+      "title": "ケース×テーマ",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M5",
+      "producer": "QualitativeRunner",
+      "inputs": [
+        "case_matrix"
+      ],
+      "component": "Heatmap",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "ケースの単位を固定",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V43",
+      "title": "重要引用・反例・少数意見",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M5",
+      "producer": "QualitativeRunner",
+      "inputs": [
+        "important_quotes",
+        "claims",
+        "evidence"
+      ],
+      "component": "QuotePanel",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "頻度で重要性を決めない",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V44",
+      "title": "量的結果と質的解釈",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M6",
+      "producer": "統合分析Runner",
+      "inputs": [
+        "statistical_tests",
+        "claims",
+        "evidence"
+      ],
+      "component": "DataTable",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "一致と不一致を保持",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V45",
+      "title": "複数インタビュー比較",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M6",
+      "producer": "既存interview_comparison拡張",
+      "inputs": [
+        "comparison_interviews",
+        "datasets"
+      ],
+      "component": "Heatmap",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "同じ定義・尺度・観測単位で比較",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V46",
+      "title": "分析結果の統合",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M6",
+      "producer": "統合分析Runner",
+      "inputs": [
+        "claims",
+        "measurements",
+        "interactions",
+        "evidence"
+      ],
+      "component": "RelationGraph",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "親結果を経由して原文に到達",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    },
+    {
+      "id": "V47",
+      "title": "追加調査の候補",
+      "group": "qualitative",
+      "group_label": "質的・二次分析",
+      "milestone": "M6",
+      "producer": "統合分析Runner",
+      "inputs": [
+        "claims",
+        "interactions",
+        "evidence"
+      ],
+      "component": "DataTable",
+      "screen": "S05",
+      "evidence_screen": "S06",
+      "export_screen": "S04",
+      "export_milestone": "M7",
+      "conditions": "優先度の基準と終了条件を明示",
+      "status": "proposed",
+      "exports": [
+        "table",
+        "PNG",
+        "JPEG",
+        "SVG",
+        "PDF",
+        "TIFF"
+      ],
+      "interaction": "対象を絞る → 図/表を切替 → セル/点/辺の根拠を開く → 選択結果を追加分析または出力",
+      "tests": [
+        "対象数と分母の一致",
+        "未判定と0の区別",
+        "図と元表の値一致",
+        "根拠ID・版の解決",
+        "小画面・キーボード操作"
+      ]
+    }
+  ],
+  "review_notes": [],
+  "validation_rules": [
+    "screen ids resolve",
+    "visual ids unique",
+    "producer/data/component/screen/min milestone mandatory",
+    "every visual has evidence and export access",
+    "selected outputs committed before M7 completion"
+  ],
+  "system_extensions": {
+    "status": "proposed_structure_only",
+    "architecture_file": "analysis-architecture.json",
+    "llm_schema_file": "llm-contract.schema.json",
+    "screens": [
+      {
+        "screen_id": "S02",
+        "region": "advanced-role-settings",
+        "title": "役割と実行モデル",
+        "fields": [
+          "role_id",
+          "enabled",
+          "provider_id",
+          "model_id",
+          "required_capabilities",
+          "data_policy",
+          "max_calls",
+          "max_tokens",
+          "timeout"
+        ],
+        "actions": [
+          "能力の確認",
+          "計画に固定"
+        ],
+        "states": [
+          "compatible",
+          "incompatible",
+          "budget_exceeded"
+        ],
+        "rule": "手動定義にLLM生成を必須にしない。"
+      },
+      {
+        "screen_id": "S02",
+        "region": "manual-definition-obsidian",
+        "title": "Obsidianで定義を編集",
+        "fields": [
+          "note_id",
+          "base_revision",
+          "base_hash",
+          "app_revision",
+          "changed_fields"
+        ],
+        "actions": [
+          "Obsidianで開く",
+          "変更を確認",
+          "項目を選択して適用"
+        ],
+        "states": [
+          "unchanged",
+          "changed",
+          "conflict",
+          "missing",
+          "invalid",
+          "applied"
+        ],
+        "rule": "適用は新定義版を保存し関連結果をstaleにする。分析開始は別操作。"
+      },
+      {
+        "screen_id": "S03",
+        "region": "task-details",
+        "title": "処理の担当と待機理由",
+        "fields": [
+          "method_ref",
+          "role_id",
+          "provider_id",
+          "model_id",
+          "phase",
+          "resource_wait",
+          "dependency_wait"
+        ],
+        "actions": [
+          "詳細を開く",
+          "再試行",
+          "取消"
+        ],
+        "states": [
+          "proposing",
+          "validating",
+          "computing",
+          "committing",
+          "publishing"
+        ],
+        "rule": "段階内のみ並列。全必須taskの保存と検証が完了して次へ。"
+      },
+      {
+        "screen_id": "S04",
+        "region": "obsidian-publication",
+        "title": "Obsidian連携",
+        "fields": [
+          "target_vaults",
+          "attach_graphs",
+          "calculation_status",
+          "publication_status",
+          "conflict_note_ids",
+          "pipeline_id",
+          "result_run_id",
+          "export_status",
+          "per_target_outcomes"
+        ],
+        "actions": [
+          "ノートを開く",
+          "公開のみ再試行"
+        ],
+        "states": [
+          "not_selected",
+          "pending",
+          "publishing",
+          "published",
+          "failed",
+          "conflict"
+        ],
+        "rule": "result_run確定後に公開。選択先成功までM7とpipelineは未完了。公開のみ再試行。"
+      },
+      {
+        "screen_id": "S06",
+        "region": "source-provenance",
+        "title": "根拠と参照版",
+        "fields": [
+          "source_id",
+          "revision",
+          "note_id",
+          "artifact_id",
+          "source_hash"
+        ],
+        "actions": [
+          "アプリで開く",
+          "Obsidianで開く"
+        ],
+        "states": [
+          "current",
+          "old_revision",
+          "missing"
+        ],
+        "rule": "旧版の根拠を現在の原文へ黙って置換しない。"
+      },
+      {
+        "screen_id": "S03",
+        "region": "core-decision",
+        "title": "分析コアの判断",
+        "fields": [
+          "decision_id",
+          "step_id",
+          "eligibility_status",
+          "observational_unit",
+          "effective_count",
+          "rule_id",
+          "rule_version",
+          "reason_code",
+          "action",
+          "attempts_remaining",
+          "affected_steps",
+          "required_input",
+          "assessment_dimension",
+          "severity",
+          "check_outcome",
+          "execution",
+          "inference_scope"
+        ],
+        "actions": [
+          "理由と根拠を開く",
+          "入力を修正",
+          "代替計画を確認",
+          "再試行",
+          "取消"
+        ],
+        "states": [
+          "checking",
+          "retry_wait",
+          "awaiting_input",
+          "blocked",
+          "failed",
+          "completed"
+        ],
+        "rule": "hard失敗/不明は当該task停止。warningは状態を保持して許容範囲で実行。必須処理未完了で次段階開始不可。"
+      },
+      {
+        "screen_id": "S01",
+        "region": "partial-result-summary",
+        "title": "分析できた範囲と不足",
+        "fields": [
+          "completed_steps",
+          "unavailable_steps",
+          "not_applicable_steps",
+          "input_coverage",
+          "result_refs",
+          "limitations"
+        ],
+        "actions": [
+          "不足理由を見る",
+          "S02で入力・計画を修正"
+        ],
+        "states": [
+          "partial",
+          "final"
+        ],
+        "rule": "部分結果を全体成功と表示しない。コア応答の集計値と一致させる。"
+      },
+      {
+        "screen_id": "S02",
+        "region": "plan-binding-research",
+        "title": "計画枠・実行定義・研究区分",
+        "fields": [
+          "plan_ref",
+          "binding_slots",
+          "binding_ref",
+          "research_mode",
+          "access_log",
+          "test_family",
+          "multiplicity_policy"
+        ],
+        "actions": [
+          "M0の計画枠を確定",
+          "M4の実行定義を確定",
+          "範囲外の変更を新計画にする"
+        ],
+        "states": [
+          "envelope_frozen",
+          "binding_unresolved",
+          "binding_frozen",
+          "scope_exceeded"
+        ],
+        "rule": "元のEnvelopeを書き換えない。事後の仮説を確認的に昇格しない。"
+      }
+    ],
+    "core_control_contract": "core-control-contract.json",
+    "core_authority": "分析コアがメインとの応答、ハンドラーへの指示、可否と回復判断、結果集約を統括する。",
+    "core_control_schema": "core-control.schema.json",
+    "implementation_gates": "implementation-gates.json",
+    "prototype_limit": "追加のコア判断・研究区分・二段階確定は構造設計のみ。HTMLの既存操作デモに実行エンジンはない。"
+  }
+}</script>
+<script>
+"use strict";
+const spec=JSON.parse(document.getElementById("design-data").textContent);
+const $=id=>document.getElementById(id);
+let dirty=false,trialDone=false,returnFocus=null,toastTimer;
+function toast(message){$("toast").textContent=message;$("toast").hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,3500)}
+function showPage(name){if(!document.querySelector('[data-page][id="'+name+'"]'))name="results";if(!$("plan").hidden&&dirty&&name!=="plan"&&!confirm("未保存の設計入力があります。画面を移動しますか？"))return;document.querySelectorAll("[data-page]").forEach(e=>e.hidden=e.id!==name);document.querySelectorAll(".nav [data-go]").forEach(e=>e.setAttribute("aria-current",e.dataset.go===name?"page":"false"));history.replaceState(null,"","#"+name);window.scrollTo(0,0)}
+document.querySelectorAll("[data-go]").forEach(e=>e.addEventListener("click",()=>showPage(e.dataset.go)));
+const stanceRows=[["Aさん","賛成","賛成","中立"],["Bさん","反対","中立","賛成"],["Cさん","賛成","反対","第三案"],["Dさん","中立","中立","賛成"],["Eさん","第三案","賛成","中立"],["Fさん","未判定","中立","反対"]];
+const klass={"賛成":"yes","反対":"no","中立":"neutral","第三案":"third","未判定":"unknown"};
+stanceRows.forEach((row,ri)=>{const tr=document.createElement("tr");row.forEach((value,ci)=>{const cell=document.createElement(ci===0?"th":"td");if(ci===0)cell.textContent=value;else{const b=document.createElement("button");b.className="stance "+klass[value];b.textContent=value;b.dataset.topic=["導入効果","費用","運用体制"][ci-1];b.addEventListener("click",()=>openEvidence(row[0],b.dataset.topic,value,b,ri*3+ci));cell.append(b)}tr.append(cell)});$("stance-body").append(tr)});
+function openEvidence(speaker,topic,value,button,n){returnFocus=button;$("evidence-subject").textContent=speaker+" / "+topic+" / "+value;const quotes={"賛成":"条件が合えば、この提案に賛成です。","反対":"現状の条件では、この案には反対です。","中立":"今の説明だけでは、どちらとも決められません。","第三案":"別の案として、小規模な試行から始めたいです。","未判定":"立場を示す発話が確認できません。"};$("evidence-quote").textContent=speaker==="Aさん"&&topic==="費用"?"費用の条件が合えば賛成です。":quotes[value];$("evidence-detail").textContent=value==="未判定"?"表明なし。中立や0点に置き換えません。":value==="賛成"?"条件付きの支持。条件を別項目に保存します。":"対象の主張を指定した架空の判定例です。";$("evidence-context").textContent="司会：この提案について、理由も含めて教えてください。";$("evidence-id").textContent="架空segment demo-"+n+" / snapshot demo-v3 / 00:12:34";$("evidence").showModal()}
+$("close-evidence").onclick=()=>$("evidence").close();$("evidence").addEventListener("close",()=>returnFocus?.focus());$("audio-demo").onclick=()=>toast("実装時は既存の文字起こし・音声確認画面へ移動します。試作には音声はありません。");
+document.querySelectorAll(".side [data-topic]").forEach(b=>b.onclick=()=>{document.querySelectorAll(".side [data-topic]").forEach(e=>e.setAttribute("aria-pressed",String(e===b)));$("scope").textContent="対象："+b.dataset.topic;const ci=["全体","導入効果","費用","運用体制"].indexOf(b.dataset.topic);document.querySelectorAll("#stance-view tr").forEach(tr=>[...tr.children].forEach((c,i)=>c.hidden=ci>0&&i>0&&i!==ci));document.querySelectorAll("#plain-view tbody tr").forEach((r,i)=>r.hidden=ci>0&&i!==ci-1)});
+$("toggle-chart").onclick=()=>{$("stance-view").hidden=!$("stance-view").hidden;$("plain-view").hidden=!$("plain-view").hidden};
+$("result-state").onchange=()=>{const state=$("result-state").value;$("result-body").hidden=state==="empty"||state==="failed";$("result-message").className=state==="completed"?"":"note";$("result-message").textContent={completed:"",empty:"まだ分析結果がありません。「分析を組む」から定義と計画を作成します。",stale:"更新が必要：ここには旧版の確定結果を表示しています。新しい原文に対する再分析は未実行です。",failed:"処理を完了できませんでした。実行状況から原因を確認し、失敗した処理だけ再試行できます。"}[state]};
+function validateMethod(){const pearson=$("method").value==="pearson";const scale=$("scale").value;const invalid=pearson&&(scale==="nominal"||scale==="ordinal"||$("column-a").selectedIndex===0||$("column-b").selectedIndex===0);$("method-warning").textContent=invalid?"実行不可：Pearson相関には数値の適合列が必要です。尺度・カラムを自動変更しません。":$("method").value==="chi_square"?"実行時に期待度数と観測の独立性を検証します。入力選択だけでは適用を確定しません。":"選択内容を保持しました。実装時は型・尺度・対象数・集約の適合性を検証します。";$("method-warning").className="note"+(invalid?" bad":"");$("freeze").disabled=invalid;$("trial").disabled=invalid;return !invalid}
+$("definition-form").addEventListener("input",()=>{dirty=true;trialDone=false;$("trial-result").hidden=true;$("plan-preview").textContent="変更あり：再試行と定義の確定が必要です。";validateMethod()});
+["method","scale","column-a","column-b"].forEach(id=>$(id).addEventListener("change",validateMethod));
+$("draft-save").onclick=()=>{dirty=false;toast("下書き保存の表示例です。ファイルやDBには保存していません。")};
+$("trial").onclick=()=>{if(!$("definition-form").reportValidity()||!validateMethod())return;trialDone=true;$("trial-result").hidden=false;toast("少数試行の表示例を開きました。AI判定は実行していません。")};
+$("definition-form").onsubmit=e=>{e.preventDefault();if(!validateMethod())return;if(!trialDone){toast("まず「少数で試す」で試行結果の確認例を開いてください。");return}dirty=false;$("plan-preview").textContent="確定内容の例："+$("label-name").value+" / "+$("measurement").value+" / "+$("scale").selectedOptions[0].textContent+" / "+$("output-column").value+" / "+$("method").selectedOptions[0].textContent+"。実装時はこの内容を版付き計画へ保存します。";toast("手入力の定義を計画へ渡す導線を確認しました。")};
+function renderRun(state){const completed=state==="completed";const isCommitting=state==="committing";$("steps").replaceChildren();spec.milestones.forEach((m,i)=>{const div=document.createElement("div");div.className="step"+(i<2||i===2&&completed?" done":i===(completed?3:2)?" active":"");const b=document.createElement("b");b.textContent=m.id;div.append(b,document.createTextNode(m.title));const small=document.createElement("div");small.textContent=i<2||i===2&&completed?"✓ 完了":i===(completed?3:2)?"● 現在":"待機";div.append(small);$("steps").append(div)});$("run-title").textContent=completed?"M2 完了 → M3 開始可能":"M2 一次分析";$("run-count").textContent=completed?"4 / 4 処理の検証・保存完了":isCommitting?"3 / 4 処理の保存完了":"2 / 4 処理が完了";$("run-progress").style.width=completed?"100%":isCommitting?"75%":"50%";const statuses=completed?["完了","完了","完了","完了"]:state==="failed"?["完了","完了","失敗","親待ち"]:state==="cancelled"?["完了","完了","取消","取消"]:state==="interrupted"?["完了","完了","中断","親待ち"]:isCommitting?["完了","完了","完了","保存中"]:["完了","完了","実行中","親待ち"];$("tasks").replaceChildren();["言語解析","話者集計","立場判定","意見集約"].forEach((name,i)=>{const d=document.createElement("div");d.className="task";const span=document.createElement("span");span.textContent=name;const s=document.createElement("small");s.textContent=i===3?"立場判定の確定結果を待つ":"同じ段階の独立した処理";span.append(s);const p=document.createElement("span");p.className="pill "+(statuses[i]==="完了"?"good":statuses[i]==="失敗"?"bad":"warn");p.textContent=statuses[i];d.append(span,p);$("tasks").append(d)});$("gate-message").textContent=completed?"全必須成果物の検証・保存を確認したため、初めてM3を開始できます。":state==="failed"?"立場判定が失敗しました。M3以降は開始せず、成功済みの2処理を保持します。":isCommitting?"計算が終わっていても保存中の成果物があるため、M3は待機します。":state==="interrupted"?"再起動後の照合中です。外部AIへの不明な要求を自動再送しません。":"この段階の全処理の検証・保存が完了するまで、M3を開始しません。";$("next-status").textContent=completed?"M3 評価・会話の流れ：開始可能":"M3 評価・会話の流れ：待機";$("retry-run").hidden=!["failed","interrupted"].includes(state);$("cancel-run").disabled=completed||state==="cancelled"}
+document.querySelectorAll("[data-run-state]").forEach(b=>b.onclick=()=>renderRun(b.dataset.runState));$("retry-run").onclick=()=>{renderRun("running");toast("成功済み2処理を保持し、失敗処理の再試行を示します。")};$("cancel-run").onclick=()=>{renderRun("cancelled");toast("取消状態の表示例です。後続段階は起動しません。")};
+$("compare-version").onchange=()=>{const ok=$("compare-version").value==="same";$("compare-status").textContent=ok?"同じ尺度・単位です。分布と根拠を比較できます。":"比較不可：定義と値域が異なります。並べて閲覧できますが、直接の数値差分は計算しません。";$("compare-meta").textContent=ok?"観測単位：論点　同じ評価軸":"定義 v2 · 1〜7 · 同じ尺度として扱えません";$("compare-diff").disabled=!ok};$("compare-diff").onclick=()=>toast("比較の導線例です。対応キーと尺度版の一致を検証してから算出します。");
+function imageOptions(){const fmt=$("image-format").value;const vector=fmt==="SVG"||fmt==="PDF";$("transparent").disabled=fmt==="JPEG";if(fmt==="JPEG")$("transparent").checked=false;$("dpi").disabled=vector;const w=Number($("image-width").value),h=Number($("image-height").value),dpi=Number($("dpi").value);const size=$("size-mode").value==="px"?w+" × "+h+" px":w+" × "+h+" mm / "+Math.round(w/25.4*dpi)+" × "+Math.round(h/25.4*dpi)+" px";$("image-note").textContent=vector?"ベクトル形式。出力寸法を保持し、dpiはラスタライズ時だけ使用。":size+" / "+dpi+" dpi"+(fmt==="JPEG"?"。JPEGは白背景で保存。":"")}
+["image-format","size-mode","dpi","image-width","image-height"].forEach(id=>$(id).addEventListener("change",imageOptions));
+$("bundle").onclick=()=>{$("export-status").textContent="出力計画の例：選択形式を並列生成 → 再読み込み・画像検証 → 全件保存 → ZIP確定。試作ではファイルを生成しません。"};
+$("export-failure").onclick=()=>{$("export-status").replaceChildren(document.createTextNode("Excel・PNGは保存済み、SAV出力が失敗。M7は未完了。 "));const b=document.createElement("button");b.textContent="SAVだけ再試行（試作）";b.onclick=()=>{$("export-status").textContent="保存済みデータからSAVを書き出し直す表示例です。AIや統計を再実行しません。"};$("export-status").append(b)};
+[...new Map(spec.visuals.map(v=>[v.group,v.group_label]))].forEach(([value,label])=>{const o=document.createElement("option");o.value=value;o.textContent=label;$("catalog-group").append(o)});
+function catalog(){const q=$("catalog-search").value.toLowerCase(),g=$("catalog-group").value;const list=spec.visuals.filter(v=>(!g||v.group===g)&&JSON.stringify(v).toLowerCase().includes(q));$("catalog-count").textContent=list.length+" / "+spec.visuals.length+" 件";$("catalog-body").replaceChildren();list.forEach(v=>{const tr=document.createElement("tr");[v.id+" "+v.title,v.milestone+" / "+v.producer,v.inputs.join(", "),v.component+" / "+v.screen,v.conditions].forEach(t=>{const td=document.createElement("td");td.textContent=t;tr.append(td)});$("catalog-body").append(tr)})}
+$("catalog-search").oninput=catalog;$("catalog-group").onchange=catalog;
+window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue=""}});
+renderRun("running");catalog();validateMethod();imageOptions();showPage(location.hash.slice(1)||"results");
+</script></body></html>

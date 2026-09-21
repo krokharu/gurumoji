@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    participant Main as メインコア / 入口
+    participant Core as 分析コア
+    participant A as 分析ハンドラー A
+    participant B as 分析ハンドラー B
+    participant Store as AnalysisStore
+    Main->>Core: 目的・入力版・計画枠・研究区分・方針
+    Core-->>Main: 受付 / pipeline_id
+    loop 現段階だけを処理。完了確定後に次段階へ
+        Core->>Store: 短い読取で前段階・固定入力・親成果を確認
+        opt 現在段階がM4
+            Core->>Core: 許容slot内で定義・手法・列を解決
+            Core->>Store: Envelopeを変更せずExecutionBindingを保存
+        end
+        par 同段階の独立taskの検査
+            Core->>A: check指示 / 固定dataset
+            A-->>Core: 有効件数・単位・欠測・前提の事実
+        and 別の独立taskの検査
+            Core->>B: check指示 / 固定dataset
+            B-->>Core: 検査事実
+        end
+        Core->>Core: 手法別規則で実行可否と対処を判定
+        Note over A,B: 計算・外部呼出しは大域書込ロック外。hard不合格taskは起動しない。
+        par 実行可能なtask Aのみ
+            Core->>A: execute指示 / attempt / 世代
+            A->>A: 分析プログラムを呼出し
+            A-->>Core: 結果候補またはエラー事実
+        and 実行可能なtask Bのみ
+            Core->>B: execute指示 / attempt / 世代
+            B->>B: 分析プログラムを呼出し
+            B-->>Core: 結果候補またはエラー事実
+        end
+        Core->>Core: 報告の版・根拠・出力契約を検証
+        Core->>Store: 準備済み成果物を短い比較更新で確定
+        Store-->>Core: 保存成功または保存エラー
+        opt 現在段階がM7かつ保存済み
+            Core->>Store: completedのresult_runを選択先へ公開
+            Store-->>Core: 公開先別Outcome
+            Note over Core,Store: pipelineは公開を待つ。公開はpipeline完了を待たない。
+        end
+        alt 必須taskのデータ不足・未解決
+            Core-->>Main: 同段階で待機 / 不足と必要操作 / 部分成果
+            Note over Core,B: 同段階の独立処理は継続可。次段階は開始不可。
+        else 安全に再試行できる一時失敗
+            Core->>Core: 回数・待機・予算・外部完了状態を検証
+            Core->>A: Runtime経由で対象だけ新attempt
+            Core-->>Main: 再試行中 / 理由 / 残り回数
+        else 回復不能または取消
+            Core->>A: 実行中処理の取消指示
+            Core->>B: 実行中処理の取消指示
+            break 取消・停止の整理が完了
+                Core-->>Main: 失敗 / 取消と確定済みの部分成果
+            end
+        else 全必須処理の検証と保存が完了
+            Core->>Store: 段階完了を一度だけ確定
+            Store-->>Core: 完了コミット
+            Core-->>Main: 集約進捗 / 次段階へ移行
+        end
+    end
+    opt M7まで計画内の全成果が確定した場合のみ
+        Core->>Core: 対象範囲・数値・不足・来歴を最終集約
+        Core-->>Main: completed / 最終結果・図表・出力参照
+    end

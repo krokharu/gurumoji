@@ -74,6 +74,9 @@ class InterviewComparisonApiTests(unittest.TestCase):
         self.assertIn("'comparison_group'", script)
         self.assertIn("#session-comparison-group", script)
         self.assertIn("/api/library/interview-comparison", comparison_script)
+        self.assertIn('id="interview-comparison-history-list"', template)
+        self.assertIn("/api/analysis/runs/${encodeURIComponent(runId)}/vault", comparison_script)
+        self.assertIn("loadComparisonHistory()", comparison_script)
 
     def test_browser_requests_require_csrf_and_save_the_displayed_input_version(self):
         headers = {'Origin': 'http://localhost', 'Sec-Fetch-Site': 'same-origin'}

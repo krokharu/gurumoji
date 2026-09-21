@@ -488,12 +488,16 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
         return app.JobOptions(**values)
 
     @contextmanager
-    def fake_pipeline(self):
+    def fake_pipeline(self, cuda_available=False):
         transcribe_calls = []
+        whisperx_load_model_calls = []
         torch_module = types.ModuleType("torch")
         torch_module.cuda = types.SimpleNamespace(
-            is_available=lambda: False,
+            is_available=lambda: cuda_available,
             empty_cache=lambda: None,
+            get_device_name=lambda _index: "Fake NVIDIA GPU",
+            get_device_capability=lambda _index: (8, 0),
+            get_device_properties=lambda _index: types.SimpleNamespace(total_memory=12 * 1024**3),
         )
 
         class FakeWhisperModel:
@@ -521,6 +525,12 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
         whisperx_module.__path__ = []
         whisperx_module.load_audio = lambda _path: [0.0]
         whisperx_module.assign_word_speakers = lambda _diarization, result, **_kwargs: result
+
+        def load_whisperx_model(*args, **kwargs):
+            whisperx_load_model_calls.append((args, dict(kwargs)))
+            return FakeWhisperModel()
+
+        whisperx_module.load_model = load_whisperx_model
 
         class FakeDiarizationPipeline:
             def __init__(self, model_name=None, token=None, device=None):
@@ -566,6 +576,14 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             }]))
             stack.enter_context(patch.object(app, "row_session_profile", return_value={}))
             stack.enter_context(patch.object(app, "row_speaker_profiles", return_value={}))
+            register_speakers = stack.enter_context(patch.object(
+                app,
+                "register_detected_speakers",
+                side_effect=lambda profiles, _names: (profiles, {
+                    "linked": {}, "temporary": {}, "ambiguous": {}, "changed": False,
+                    "created": {}, "inactive": {}, "duplicate_identifications": {},
+                }),
+            ))
             yield {
                 "write_outputs": write_outputs,
                 "stage_media": stage_media,
@@ -573,6 +591,8 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                 "upsert": upsert,
                 "outline": outline,
                 "transcribe_calls": transcribe_calls,
+                "whisperx_load_model_calls": whisperx_load_model_calls,
+                "register_speakers": register_speakers,
             }
 
     @staticmethod
@@ -594,6 +614,27 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             self.assertEqual(
                 calls["transcribe_calls"][0].get("initial_prompt"),
                 "用語・固有名詞: グルモジ、WhisperX。",
+            )
+
+    def test_registered_vocabulary_is_configured_when_loading_whisperx(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-whisperx-prompt-") as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            options = self.options(
+                root,
+                device="cuda",
+                custom_vocabulary=("Gurumoji", "WhisperX"),
+            )
+            with self.fake_pipeline(cuda_available=True) as calls:
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            self.assertNotIn("initial_prompt", calls["transcribe_calls"][0])
+            self.assertEqual(len(calls["whisperx_load_model_calls"]), 1)
+            load_kwargs = calls["whisperx_load_model_calls"][0][1]
+            self.assertEqual(
+                load_kwargs["asr_options"]["initial_prompt"],
+                app.whisper_vocabulary_prompt(options.custom_vocabulary),
             )
 
     def test_optional_ai_failures_warn_but_core_result_completes(self):
@@ -637,13 +678,14 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                 identity_inputs.extend(segments)
                 return {"SPEAKER_00": "話者名"}
 
-            with self.fake_pipeline(), \
+            with self.fake_pipeline() as calls, \
                     patch.object(app, "clean_segments_with_ai", side_effect=clean), \
                     patch.object(app, "detect_speaker_names_with_ai", side_effect=identify):
                 app.run_transcription_job(job, options)
 
             self.assertEqual(job.status, "completed")
             self.assertEqual(identity_inputs[0]["text"], "元の文字起こし")
+            self.assertEqual(calls["register_speakers"].call_count, 1)
 
     def test_ai_usage_is_accumulated_and_saved_with_the_job(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-job-") as temporary:
@@ -720,13 +762,91 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             self.assertIn("全体アウトライン", job.output_warning)
             self.assertEqual(calls["write_outputs"].call_args.args[2][0]["text"], "元の文字起こし")
 
+    def test_recommended_cleanup_runs_jev_then_effort_scoped_llm_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            events = []
+            reviews = {"placeholder": {"flagged": True}}
+
+            def review(segments, *_args, **_kwargs):
+                events.append(("jev", segments[0]["text"]))
+                return reviews, {"provider": "typesafe", "model": "jev-test", "request_count": 1}
+
+            def repair(segments, supplied_reviews, *_args, **_kwargs):
+                events.append(("llm", segments[0]["text"]))
+                self.assertIs(supplied_reviews, reviews)
+                return [{**segment, "text": "途中切れを補正した本文"} for segment in segments]
+
+            with self.fake_pipeline() as calls, \
+                    patch.object(app, "review_segments_with_jev", side_effect=review), \
+                    patch.object(app, "clean_recommended_segments_with_ai", side_effect=repair), \
+                    patch.object(app, "clean_segments_with_ai") as full_cleanup:
+                app.run_transcription_job(job, self.options(
+                    root,
+                    transcript_finishing_mode="recommended",
+                    recommended_cleanup=True,
+                    jev_api_key="typesafe-key",
+                    jev_model="jev-test",
+                ))
+
+            self.assertEqual(events, [("jev", "元の文字起こし"), ("llm", "元の文字起こし")])
+            full_cleanup.assert_not_called()
+            self.assertEqual(
+                calls["write_outputs"].call_args.args[2][0]["text"],
+                "途中切れを補正した本文",
+            )
+            self.assertEqual(job.formatting_result["methods"][3]["status"], "completed")
+            self.assertEqual(job.formatting_result["summary"]["llm_request_count"], 1)
+
+    def test_recommended_high_builds_outline_before_jev_and_llm(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            events = []
+            outline = {"sections": [{"title": "議題", "bullets": ["要点"]}]}
+            reviews = {"placeholder": {"flagged": True}}
+
+            def create_outline(segments, *_args, **_kwargs):
+                events.append("outline")
+                return outline
+
+            def review(segments, *_args, **kwargs):
+                events.append("jev")
+                self.assertIs(kwargs["outline"], outline)
+                return reviews, {"provider": "typesafe", "request_count": 1}
+
+            def repair(segments, supplied_reviews, *_args, **kwargs):
+                events.append("llm")
+                self.assertIs(supplied_reviews, reviews)
+                self.assertEqual(kwargs["effort"], "high")
+                self.assertIs(kwargs["outline"], outline)
+                return segments
+
+            efforts = app.normalize_efforts({"cleanup": "high"})
+            with self.fake_pipeline(), \
+                    patch.object(app, "create_outline_with_ai", side_effect=create_outline), \
+                    patch.object(app, "review_segments_with_jev", side_effect=review), \
+                    patch.object(app, "clean_recommended_segments_with_ai", side_effect=repair):
+                app.run_transcription_job(job, self.options(
+                    root,
+                    transcript_finishing_mode="recommended",
+                    recommended_cleanup=True,
+                    jev_api_key="typesafe-key",
+                    ai_efforts=efforts,
+                ))
+
+            self.assertEqual(events, ["outline", "jev", "llm"])
+
     def test_obsidian_mode_saves_whisper_before_outputs_and_defers_all_ai(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             job = self.job(root)
             with self.fake_pipeline() as calls, patch.object(app, 'DATABASE_FILE', root / 'library.sqlite3'), \
                     patch.object(app, 'clean_segments_with_ai') as clean, \
-                    patch.object(app, 'detect_speaker_names_with_ai') as identify:
+                    patch.object(app, 'review_segments_with_jev') as recommended_review, \
+                    patch.object(app, 'clean_recommended_segments_with_ai') as recommended_repair, \
+                    patch.object(app, 'detect_speaker_names_with_ai', return_value={}) as identify:
                 calls['upsert'].return_value = {'revision_count': 0}
                 def output(*_args, **_kwargs):
                     state = app.obsidian_workbench().load(job.id)
@@ -736,12 +856,15 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                     return []
                 calls['write_outputs'].side_effect = output
                 app.run_transcription_job(job, self.options(root, finish_in_obsidian=True,
-                    clean_transcript=True, detect_speaker_names=True, create_outline=True))
+                    clean_transcript=True, recommended_cleanup=True,
+                    detect_speaker_names=True, create_outline=True))
                 state = app.obsidian_workbench().load(job.id)
                 self.assertTrue(state['ready'])
                 self.assertTrue(app.obsidian_workbench().note_path(state['original_note']).exists())
                 clean.assert_not_called()
-                identify.assert_not_called()
+                recommended_review.assert_not_called()
+                recommended_repair.assert_not_called()
+                identify.assert_called_once()
                 calls['outline'].assert_not_called()
             self.assertEqual(job.status, 'completed')
 

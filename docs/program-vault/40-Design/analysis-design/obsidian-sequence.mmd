@@ -1,0 +1,47 @@
+sequenceDiagram
+  autonumber
+  actor U as 研究者
+  participant H as 入口アダプター
+  participant R as 分析コア
+  participant S as AnalysisStore
+  participant A as 既存公開 / Workbench
+  participant V as 対象Vault
+  R->>S: 検証済みの結果・図・表を確定保存
+  S-->>R: result_run_idはcompleted / artifact ID / hash
+  Note over R,S: pipeline_idは別ID。pipelineはまだ未完了。
+  R->>S: M7の選択先へ公開要求 / result_run_idとpackage hash
+  S->>A: ID解決・所有権と直前hashの照合
+  A->>V: 現在のノート / hashを取得
+  V-->>A: ノートと変更状態
+  alt 研究者の編集または競合
+    A-->>S: conflict / user contentを保持
+    S-->>R: 公開未完了。M7を停止
+  else 更新可能
+    A->>V: 管理ノートと画像を公開
+    V-->>A: 書込結果
+    A-->>S: 公開先ごとの成功 / 失敗
+    S-->>R: 公開先別Outcomeを保存して返す
+    opt 全選択先の公開を検証済み
+      R->>R: M7確定後にpipelineをcompletedへ
+    end
+  end
+  Note over S,V: 公開失敗でも確定結果を保持。公開だけ再試行し分析は再計算しない。
+  U->>V: 手入力で定義ノートを編集
+  V-->>A: 変更を検出 / 対象を再取得
+  Note over A,R: 変更検出だけでは分析・AI・外部通信を開始しない
+  U->>H: 変更を確認
+  H->>A: note ID / 基準版 / 現在版で差分取得
+  A-->>H: 基準・アプリ・ノートの3者差分
+  H-->>U: 変更項目と競合を表示
+  U->>H: 採用項目を選択し適用
+  H->>R: Schema・尺度・列・手法・版を検証
+  alt 競合または不正
+    R-->>H: 適用を止めて理由を返す
+    H-->>U: 修正 / 競合解決
+  else 有効
+    R->>S: 新しい定義版を保存
+    S-->>R: 定義版ID
+    R-->>H: 関連結果をstaleにする
+    H-->>U: 定義を更新。試行・実行は別操作
+  end
+  Note over U,V: 既存の明示的AI仕上げ操作は維持。図は新しい定義差分取込経路を示す。

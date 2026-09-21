@@ -1351,6 +1351,12 @@ def _cache_key(analysis: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def is_research_analysis_cached(analysis: dict[str, Any]) -> bool:
+    key = _cache_key(analysis)
+    with _ENGINE_LOCK:
+        return key in _RESEARCH_CACHE
+
+
 def build_research_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     key = _cache_key(analysis)
     with _ENGINE_LOCK:

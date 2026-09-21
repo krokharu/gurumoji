@@ -39,7 +39,7 @@ tags:
 | 保存履歴・Vaultからの発話参照 | `static/analysis-storage.js` | `tests/test_content_browser.py` |
 | 分析出力 | `app.py`: `analysis_csv_rows`, `export_library_analysis_json`; `research_analysis.py`: `build_analysis_workbook` | `tests/test_analysis.py`, `tests/test_research_analysis.py` |
 | 編集差分の学習データ | `app.py`: `training_export_contents`, `write_training_exports`, `refresh_training_exports` | `tests/test_backend_safety.py`, `tests/test_outputs.py` |
-| UI・引用から音声確認（画面構成は [[20-Modules/ui-screens]]） | `templates/index.html`, `static/app.js`, `static/analysis-content.js`, `static/style.css`, `static/ai-effort.css` | `tests/test_content_browser.py`, `tests/test_browser_e2e.py`, `tests/test_ui_defaults.py` |
+| UI・分析実行・引用から音声確認（画面構成は [[20-Modules/ui-screens]]） | `templates/index.html`, `static/app.js`, `static/analysis-content.js`, `static/analysis-execution.js`, `static/style.css`, `static/ai-effort.css` | `tests/test_content_browser.py`, `tests/test_browser_e2e.py`, `tests/test_ui_defaults.py` |
 | メディアパス・リモートアクセス | `app.py` のメディアAPI・認証・アクセス制限 | `tests/test_media_paths.py`, `tests/test_backend_safety.py` |
 
 ## 現在の分析API

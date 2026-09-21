@@ -1,0 +1,341 @@
+{
+  "schema_version": "implementation-gates-1",
+  "status": "accepted_initial_scope",
+  "runtime_implemented": true,
+  "delegation_performed": false,
+  "implementation_scope": "initial_vertical_slice: participation + conversation_dynamics + manual_measurement; M0-M7; JSON/CSV/ZIP; optional three-target publication; local_only",
+  "delegation_note": "The primary agent implemented and verified this scope; no Terra/Luna execution is claimed.",
+  "verification": {
+    "scope_id": "analysis-pipeline-initial-v1",
+    "verified_at": "2026-09-21T23:04:38+09:00",
+    "code_fingerprint": "f9f6e541a4888d487cbf4c73d357e4d3eebb2137106e7bdc67c18ba8ec480d94",
+    "test_fingerprint": "0a79f2e27db245d06b5eb4c63f01a902b808f74612c8e5399895ca6488dd054a",
+    "environment_ref": "Windows, Python 3.12 virtualenv, temporary SQLite/data/Vault roots, mocked external services, Chromium browser tests",
+    "commands": [
+      "$env:PYTHONPATH='src;tests'; .venv\\Scripts\\python.exe -m unittest discover -s tests",
+      "node --check src/gurumoji/static/analysis-execution.js",
+      ".venv\\Scripts\\python.exe -m compileall -q src/gurumoji",
+      ".venv\\Scripts\\python.exe -m json.tool docs/program-vault/40-Design/analysis-design/implementation-gates.json",
+      "git diff --check"
+    ],
+    "required_cases": 550,
+    "executed_cases": 550,
+    "post_full_suite_impacted_cases": 26,
+    "failures": [],
+    "unexpected_skips": 0,
+    "exit_codes": [0],
+    "log_refs": ["unittest full-suite output in implementation session"],
+    "reviewer": "primary agent",
+    "decision": "accepted"
+  },
+  "models": {
+    "implementation": "gpt-5.6-terra",
+    "tests": "gpt-5.6-luna",
+    "availability": "Confirm at implementation time; never claim execution by an unavailable model.",
+    "pricing_claim": "none"
+  },
+  "runtime_vs_development": "M0-M7: runtime analysis barriers; D0-D7: implementation/test gates.",
+  "gates": [
+    {
+      "id": "D0",
+      "title": "基準と契約",
+      "status": "accepted",
+      "depends_on": [],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_analysis_queries.py",
+        "tests/test_analysis_storage.py"
+      ],
+      "proposed_tests": [],
+      "required_checks": [
+        "schema positive/negative",
+        "baseline relevant tests",
+        "required cases collected"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 41, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Fix scope, baseline and required cases before implementation.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D1",
+      "title": "コア窓口と計画",
+      "status": "accepted",
+      "depends_on": [
+        "D0"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_analysis_queries.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_core_contracts.py",
+        "tests/test_analysis_plan_binding.py",
+        "tests/test_analysis_eligibility.py"
+      ],
+      "required_checks": [
+        "main/core/handler direction",
+        "M0/M4 binding scope",
+        "hard vs warning",
+        "manual definition without LLM"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 27, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D2",
+      "title": "固定入力と保存",
+      "status": "accepted",
+      "depends_on": [
+        "D1"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_analysis_storage.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_snapshot_commit.py"
+      ],
+      "required_checks": [
+        "immutable snapshot",
+        "short commit locks",
+        "cancel/edit/commit race",
+        "legacy read compatibility",
+        "orphan recovery"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 21, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D3",
+      "title": "段階・並列・回復",
+      "status": "accepted",
+      "depends_on": [
+        "D2"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_pipeline_regressions.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_milestones.py",
+        "tests/test_analysis_recovery.py"
+      ],
+      "required_checks": [
+        "zero next-stage early starts",
+        "independent task overlap",
+        "retry budget",
+        "late/duplicate report",
+        "restart and unknown remote outcome"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 9, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D4",
+      "title": "手法と研究規則",
+      "status": "accepted",
+      "depends_on": [
+        "D3"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_research_analysis.py",
+        "tests/test_content_analysis.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_research_protocol.py"
+      ],
+      "required_checks": [
+        "legacy numerical equivalence",
+        "missingness and observational unit",
+        "unsupported methods",
+        "exploratory vs confirmatory",
+        "complete analysis history"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 26, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D5",
+      "title": "LLM境界",
+      "status": "accepted",
+      "depends_on": [
+        "D4"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_ai_http_worker.py",
+        "tests/test_ai_model_settings.py",
+        "tests/test_method_experts.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_llm_contracts.py"
+      ],
+      "required_checks": [
+        "cloud/local mocked contract",
+        "refusal/invalid output/evidence",
+        "timeout/cancel/budget",
+        "local_only zero external calls",
+        "manual path remains usable"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 44, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D6",
+      "title": "出力と公開",
+      "status": "accepted",
+      "depends_on": [
+        "D5"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_analysis_storage.py",
+        "tests/test_four_vaults.py",
+        "tests/test_obsidian_layout.py",
+        "tests/test_vault_coverage.py"
+      ],
+      "proposed_tests": [
+        "tests/test_analysis_exports.py",
+        "tests/test_analysis_publication.py"
+      ],
+      "required_checks": [
+        "format round trip",
+        "Japanese charts",
+        "per-target failure",
+        "result complete while pipeline waiting",
+        "publication retry zero AI calls"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 47, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    },
+    {
+      "id": "D7",
+      "title": "UIと統合",
+      "status": "accepted",
+      "depends_on": [
+        "D6"
+      ],
+      "implementation_owner": "gpt-5.6-terra",
+      "test_runner": "gpt-5.6-luna",
+      "acceptance_owner": "Terra or primary agent",
+      "existing_tests": [
+        "tests/test_content_browser.py",
+        "tests/test_browser_e2e.py",
+        "tests/test_analysis_method_view.py"
+      ],
+      "proposed_tests": [],
+      "required_checks": [
+        "manual definition to export",
+        "partial results and required input",
+        "keyboard and widths",
+        "legacy URLs",
+        "selected-scope final regression"
+      ],
+      "execution": "passed",
+      "evidence": {"executed_cases": 32, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+    }
+  ],
+  "extra_gates": [
+    {
+      "id": "EVAL",
+      "status": "planned",
+      "execution": "not_run",
+      "required_before": "enable validated JEV interview success/failure decisions",
+      "checks": [
+        "independent human ratings",
+        "held-out evaluation data",
+        "criteria fixed before evaluation",
+        "per-axis results and coverage",
+        "revalidation after model/prompt/rubric changes"
+      ]
+    }
+  ],
+  "states": [
+    "planned",
+    "implementing",
+    "testing",
+    "accepted",
+    "fix_required",
+    "blocked"
+  ],
+  "progression_rule": "No implementation of D[n+1] before D[n] accepted. Read-only design inspection is allowed.",
+  "scope_rule": "Unselected capabilities are declared at D0 and shown unavailable. Do not downgrade a required feature to skip its tests.",
+  "evidence_fields": [
+    "gate_id",
+    "scope_id",
+    "code_fingerprint",
+    "test_fingerprint",
+    "environment_ref",
+    "commands",
+    "required_cases",
+    "executed_cases",
+    "failures",
+    "unexpected_skips",
+    "exit_codes",
+    "log_refs",
+    "reviewer",
+    "decision"
+  ],
+  "evidence_invalidation": "Changed relevant source/test/dependency fingerprints invalidate affected acceptance records.",
+  "task_packet_fields": [
+    "gate_id",
+    "objective",
+    "required_reads",
+    "editable_files",
+    "invariants",
+    "commands",
+    "acceptance_criteria",
+    "last_failure"
+  ],
+  "report_fields": [
+    "PASS_FAIL_BLOCKED",
+    "fingerprints",
+    "case_counts",
+    "failed_test_names",
+    "minimal_failure_excerpt",
+    "log_refs",
+    "next_owner"
+  ],
+  "test_command_template": ".\\.venv\\Scripts\\python.exe -m unittest discover -s tests -p <test_file.py>",
+  "environment": "Use existing README setup: PYTHONPATH points to src; temporary DB/Vault and mocked external services.",
+  "token_rules": [
+    "Use bounded TaskPacket instead of full conversation or full design.",
+    "One owner per implementation gate; no same-file concurrent edits.",
+    "Persist full logs outside conversation; report short evidence.",
+    "Rerun failed and impacted boundary tests; broaden at D7 or cross-cutting changes.",
+    "Reuse compatible fixtures and valid unchanged evidence.",
+    "Parallel tests only with isolated storage/ports.",
+    "Do not hide failures or skip required coverage to save tokens."
+  ],
+  "current_limit": "D0-D7 are accepted only for the recorded initial vertical slice. EVAL and all unavailable catalog capabilities remain planned."
+}

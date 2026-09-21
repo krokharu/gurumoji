@@ -1,0 +1,1543 @@
+{
+  "schema_version": "core-control-design-2",
+  "status": "proposed",
+  "runtime_implemented": false,
+  "format": "JSON",
+  "scope": "設計用JSON Schemaと状態遷移表。examplesをSchema検証する。実行エンジンとguard評価器は未実装。",
+  "authority": {
+    "main": "要求・表示・利用者入力の伝達",
+    "analysis_core": "可否/回復判断・指示・検証・集約・応答",
+    "analysis_handler": "指示実行・事実報告",
+    "llm": "候補・解釈・説明の提案"
+  },
+  "contracts": [
+    {
+      "id": "PlanEnvelope",
+      "schema_ref": "core-control.schema.json#/$defs/PlanEnvelope",
+      "required_fields": [
+        "schema_version",
+        "plan_id",
+        "revision",
+        "parent_plan_ref",
+        "immutable",
+        "frozen_at",
+        "input_refs",
+        "early_definition_refs",
+        "milestones",
+        "steps",
+        "binding_slots",
+        "research_protocol",
+        "execution_policy",
+        "export_formats",
+        "publication_targets",
+        "out_of_scope_methods"
+      ]
+    },
+    {
+      "id": "ExecutionBinding",
+      "schema_ref": "core-control.schema.json#/$defs/ExecutionBinding",
+      "required_fields": [
+        "binding_id",
+        "revision",
+        "plan_ref",
+        "immutable",
+        "frozen_at",
+        "bindings",
+        "protocol_check_ref"
+      ]
+    },
+    {
+      "id": "AnalysisRequest",
+      "schema_ref": "core-control.schema.json#/$defs/AnalysisRequest",
+      "required_fields": [
+        "request_id",
+        "plan_ref",
+        "objective",
+        "input_refs",
+        "resume_of_pipeline_id"
+      ]
+    },
+    {
+      "id": "HandlerDirective",
+      "schema_ref": "core-control.schema.json#/$defs/HandlerDirective",
+      "required_fields": [
+        "request_id",
+        "pipeline_id",
+        "plan_ref",
+        "step_id",
+        "attempt_id",
+        "generation",
+        "directive_id",
+        "milestone",
+        "operation",
+        "method_ref",
+        "input_refs",
+        "binding_ref",
+        "definition_refs",
+        "deadline",
+        "expected_report_contract",
+        "constraints"
+      ]
+    },
+    {
+      "id": "HandlerReport",
+      "schema_ref": "core-control.schema.json#/$defs/HandlerReport",
+      "required_fields": [
+        "request_id",
+        "pipeline_id",
+        "plan_ref",
+        "step_id",
+        "attempt_id",
+        "generation",
+        "report_id",
+        "directive_id",
+        "input_fingerprints",
+        "status",
+        "observation_refs",
+        "candidate_artifact_refs",
+        "error",
+        "usage"
+      ]
+    },
+    {
+      "id": "EligibilityAssessment",
+      "schema_ref": "core-control.schema.json#/$defs/EligibilityAssessment",
+      "required_fields": [
+        "assessment_id",
+        "step_id",
+        "input_refs",
+        "method_ref",
+        "status",
+        "execution",
+        "inference_scope",
+        "checks",
+        "required_input",
+        "limitations"
+      ]
+    },
+    {
+      "id": "CoreDecision",
+      "schema_ref": "core-control.schema.json#/$defs/CoreDecision",
+      "required_fields": [
+        "decision_id",
+        "pipeline_id",
+        "step_id",
+        "plan_ref",
+        "rule_refs",
+        "fact_refs",
+        "reason_code",
+        "action",
+        "affected_steps",
+        "resume_condition"
+      ]
+    },
+    {
+      "id": "AnalysisResponse",
+      "schema_ref": "core-control.schema.json#/$defs/AnalysisResponse",
+      "required_fields": [
+        "request_id",
+        "pipeline_id",
+        "plan_ref",
+        "event_sequence",
+        "pipeline_status",
+        "wait_reasons",
+        "current_milestone",
+        "milestone_states",
+        "counts",
+        "calculation_status",
+        "export_status",
+        "result_completeness",
+        "result_refs",
+        "publication_outcomes",
+        "issues",
+        "allowed_actions",
+        "required_input",
+        "summary"
+      ]
+    }
+  ],
+  "reason_codes": [
+    "EMPTY_EFFECTIVE_DATASET",
+    "MISSING_REQUIRED_COLUMN",
+    "INSUFFICIENT_OBSERVATIONS",
+    "ASSUMPTIONS_NOT_MET",
+    "CHECK_NOT_IMPLEMENTED",
+    "METHOD_UNSUPPORTED",
+    "TRANSIENT_TRANSPORT",
+    "RATE_LIMITED",
+    "REMOTE_OUTCOME_UNKNOWN",
+    "INVALID_OUTPUT",
+    "INVALID_EVIDENCE",
+    "AUTH_OR_POLICY",
+    "RESOURCE_UNAVAILABLE",
+    "PERSISTENCE_FAILED",
+    "PUBLICATION_FAILED",
+    "RETRY_EXHAUSTED",
+    "USER_CANCELLED",
+    "PRECISION_UNASSESSED",
+    "PROTOCOL_MISMATCH",
+    "PLAN_SCOPE_EXCEEDED"
+  ],
+  "retry_policy_fields": [
+    "max_attempts",
+    "max_elapsed",
+    "backoff",
+    "retryable_codes",
+    "outcome_known",
+    "budget_remaining"
+  ],
+  "aggregation_rules": [
+    "対象・単位・版が異なる結果を無条件に合算しない。",
+    "完了・失敗・不足・適用外・未検査を個別集計。",
+    "数値と来歴はコアが集約。文章解釈は必要に応じLLM提案を検証。"
+  ],
+  "examples": [
+    {
+      "contract": "PlanEnvelope",
+      "value": {
+        "schema_version": "core-control-2",
+        "plan_id": "plan-demo",
+        "revision": "1",
+        "parent_plan_ref": null,
+        "immutable": true,
+        "frozen_at": "2026-09-21T00:00:00Z",
+        "input_refs": [
+          {
+            "id": "snapshot-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "early_definition_refs": [
+          {
+            "id": "base-labels",
+            "version": "1"
+          }
+        ],
+        "milestones": [
+          "M0",
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6",
+          "M7"
+        ],
+        "steps": [
+          {
+            "step_id": "step-0",
+            "milestone": "M0",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-0",
+                "version": "1"
+              }
+            },
+            "depends_on": [],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-1",
+            "milestone": "M1",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-1",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-0"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-2",
+            "milestone": "M2",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-2",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-1"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-3",
+            "milestone": "M3",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-3",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-2"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-4",
+            "milestone": "M4",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-4",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-3"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-5",
+            "milestone": "M5",
+            "method_selector": {
+              "kind": "binding",
+              "slot_id": "measurement-slot"
+            },
+            "depends_on": [
+              "step-4"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-6",
+            "milestone": "M6",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-6",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-5"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          },
+          {
+            "step_id": "step-7",
+            "milestone": "M7",
+            "method_selector": {
+              "kind": "fixed",
+              "method_ref": {
+                "id": "fixture-stage-7",
+                "version": "1"
+              }
+            },
+            "depends_on": [
+              "step-6"
+            ],
+            "input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true,
+            "allow_not_applicable": false,
+            "not_applicable_rules": [],
+            "preapproved_alternative_ids": [],
+            "eligibility_rule_refs": [
+              {
+                "id": "nonempty",
+                "version": "1"
+              }
+            ]
+          }
+        ],
+        "binding_slots": [
+          {
+            "slot_id": "measurement-slot",
+            "allowed_method_refs": [
+              {
+                "id": "descriptive_summary",
+                "version": "1"
+              }
+            ],
+            "allowed_input_contract_refs": [
+              {
+                "id": "dataset.v1",
+                "version": "1"
+              }
+            ],
+            "output_contract": {
+              "id": "summary.v1",
+              "version": "1"
+            },
+            "required": true
+          }
+        ],
+        "research_protocol": {
+          "mode": "exploratory",
+          "inference_scope": "descriptive",
+          "hypotheses_ref": null,
+          "access_log_ref": {
+            "id": "access-log-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "confirmation_basis": "none",
+          "evaluation_partition_ref": null,
+          "test_family_ref": null,
+          "multiplicity_policy": "not_applicable",
+          "rubric_validation_status": "not_applicable",
+          "rubric_validation_ref": null,
+          "hypothesis_tests_planned": false
+        },
+        "execution_policy": {
+          "data_policy": "local_only",
+          "max_llm_calls": 0,
+          "max_output_tokens": 0,
+          "max_elapsed_seconds": 600,
+          "retry": {
+            "max_attempts": 2,
+            "max_elapsed_seconds": 60,
+            "backoff_seconds": [
+              1,
+              3
+            ],
+            "retryable_codes": [
+              "TRANSIENT_TRANSPORT"
+            ],
+            "require_known_outcome": true
+          }
+        },
+        "export_formats": [
+          "JSON",
+          "CSV"
+        ],
+        "publication_targets": [
+          "VisualizationVault"
+        ],
+        "out_of_scope_methods": [
+          "jev_interview_evaluation"
+        ]
+      }
+    },
+    {
+      "contract": "ExecutionBinding",
+      "value": {
+        "binding_id": "binding-demo",
+        "revision": "1",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "immutable": true,
+        "frozen_at": "2026-09-21T01:00:00Z",
+        "bindings": [
+          {
+            "slot_id": "measurement-slot",
+            "method_ref": {
+              "id": "descriptive_summary",
+              "version": "1"
+            },
+            "definition_refs": [
+              {
+                "id": "manual-variable",
+                "version": "1"
+              }
+            ],
+            "dataset_ref": {
+              "id": "dataset-demo",
+              "revision": "1",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "column_ids": [
+              "value"
+            ],
+            "observational_unit": "speaker",
+            "trial_report_ref": {
+              "id": "trial-demo",
+              "revision": "1",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        ],
+        "protocol_check_ref": {
+          "id": "protocol-check-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "contract": "AnalysisRequest",
+      "value": {
+        "request_id": "request-demo",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "objective": "固定入力の記述集計を行う。架空の設計例。",
+        "input_refs": [
+          {
+            "id": "snapshot-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "resume_of_pipeline_id": null
+      }
+    },
+    {
+      "contract": "HandlerDirective",
+      "value": {
+        "request_id": "request-demo",
+        "pipeline_id": "pipeline-demo",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "step_id": "step-5",
+        "attempt_id": "attempt-demo",
+        "generation": 1,
+        "directive_id": "directive-demo",
+        "milestone": "M5",
+        "operation": "execute",
+        "method_ref": {
+          "id": "descriptive_summary",
+          "version": "1"
+        },
+        "input_refs": [
+          {
+            "id": "dataset-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "binding_ref": {
+          "id": "binding-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "definition_refs": [
+          {
+            "id": "manual-variable",
+            "version": "1"
+          }
+        ],
+        "deadline": "2026-09-21T01:10:00Z",
+        "expected_report_contract": {
+          "id": "HandlerReport",
+          "version": "1"
+        },
+        "constraints": {
+          "max_output_tokens": 0,
+          "data_policy": "local_only",
+          "retry_owner": "analysis_core"
+        }
+      }
+    },
+    {
+      "contract": "HandlerReport",
+      "value": {
+        "request_id": "request-demo",
+        "pipeline_id": "pipeline-demo",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "step_id": "step-5",
+        "attempt_id": "attempt-demo",
+        "generation": 1,
+        "report_id": "report-demo",
+        "directive_id": "directive-demo",
+        "input_fingerprints": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "status": "succeeded",
+        "observation_refs": [
+          {
+            "id": "check-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "candidate_artifact_refs": [
+          {
+            "id": "candidate-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "error": null,
+        "usage": {
+          "model_calls": 0,
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    },
+    {
+      "contract": "EligibilityAssessment",
+      "value": {
+        "assessment_id": "assessment-demo",
+        "step_id": "step-5",
+        "input_refs": [
+          {
+            "id": "dataset-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "method_ref": {
+          "id": "descriptive_summary",
+          "version": "1"
+        },
+        "status": "eligible_with_warnings",
+        "execution": "allowed",
+        "inference_scope": "descriptive",
+        "checks": [
+          {
+            "rule_ref": {
+              "id": "nonempty",
+              "version": "1"
+            },
+            "dimension": "computability",
+            "severity": "hard",
+            "outcome": "pass",
+            "observed": 12,
+            "required_value": "nonempty",
+            "unit": "speaker",
+            "evidence_refs": [
+              {
+                "id": "check-demo",
+                "revision": "1",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "explanation": "有効観測の存在を確認"
+          },
+          {
+            "rule_ref": {
+              "id": "precision",
+              "version": "1"
+            },
+            "dimension": "precision",
+            "severity": "warning",
+            "outcome": "unknown",
+            "observed": null,
+            "required_value": null,
+            "unit": "speaker",
+            "evidence_refs": [
+              {
+                "id": "check-demo",
+                "revision": "1",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "explanation": "精度は未評価。計画上の警告条件。"
+          }
+        ],
+        "required_input": [],
+        "limitations": [
+          "精度未評価。記述集計のみ。"
+        ]
+      }
+    },
+    {
+      "contract": "EligibilityAssessment",
+      "value": {
+        "assessment_id": "assessment-empty-demo",
+        "step_id": "step-5",
+        "input_refs": [
+          {
+            "id": "dataset-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "method_ref": {
+          "id": "descriptive_summary",
+          "version": "1"
+        },
+        "status": "insufficient_data",
+        "execution": "blocked",
+        "inference_scope": "none",
+        "checks": [
+          {
+            "rule_ref": {
+              "id": "nonempty",
+              "version": "1"
+            },
+            "dimension": "computability",
+            "severity": "hard",
+            "outcome": "fail",
+            "observed": 0,
+            "required_value": "nonempty",
+            "unit": "speaker",
+            "evidence_refs": [
+              {
+                "id": "check-demo",
+                "revision": "1",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "explanation": "有効観測の存在を確認"
+          }
+        ],
+        "required_input": [
+          "フィルターと欠測条件を確認し、新しい入力版を用意する。"
+        ],
+        "limitations": [
+          "有効観測なし。"
+        ]
+      }
+    },
+    {
+      "contract": "CoreDecision",
+      "value": {
+        "decision_id": "decision-demo",
+        "pipeline_id": "pipeline-demo",
+        "step_id": "step-5",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "rule_refs": [
+          {
+            "id": "nonempty",
+            "version": "1"
+          }
+        ],
+        "fact_refs": [
+          {
+            "id": "assessment-empty-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "reason_code": "EMPTY_EFFECTIVE_DATASET",
+        "action": "wait_input",
+        "affected_steps": [
+          "step-5",
+          "step-6"
+        ],
+        "resume_condition": "新しい入力に対する新計画を確定する。"
+      }
+    },
+    {
+      "contract": "AnalysisResponse",
+      "value": {
+        "request_id": "request-demo",
+        "pipeline_id": "pipeline-demo",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "event_sequence": 12,
+        "pipeline_status": "waiting",
+        "wait_reasons": [
+          "publication"
+        ],
+        "current_milestone": "M7",
+        "milestone_states": {
+          "M0": "committed",
+          "M1": "committed",
+          "M2": "committed",
+          "M3": "committed",
+          "M4": "committed",
+          "M5": "committed",
+          "M6": "committed",
+          "M7": "waiting"
+        },
+        "counts": {
+          "committed": 7,
+          "reused": 0,
+          "not_applicable": 0,
+          "active": 0,
+          "waiting": 1,
+          "failed": 0,
+          "cancelled": 0,
+          "pending": 0,
+          "total": 8
+        },
+        "calculation_status": "completed",
+        "export_status": "completed",
+        "result_completeness": "partial",
+        "result_refs": [
+          {
+            "result_run_id": "saved-run-demo",
+            "result_status": "completed",
+            "artifact_refs": [
+              {
+                "id": "result-demo",
+                "revision": "1",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        ],
+        "publication_outcomes": [
+          {
+            "result_run_id": "saved-run-demo",
+            "target_role": "VisualizationVault",
+            "package_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "selected": true,
+            "status": "failed",
+            "attempt_id": "publication-attempt-demo",
+            "reason_code": "PUBLICATION_FAILED"
+          }
+        ],
+        "issues": [
+          {
+            "step_id": "step-7",
+            "reason_code": "PUBLICATION_FAILED",
+            "decision_id": "decision-publication-demo",
+            "message": "計算と保存は完了。選択した公開先への公開に失敗。"
+          }
+        ],
+        "allowed_actions": [
+          "inspect_results",
+          "retry_publication",
+          "cancel"
+        ],
+        "required_input": [],
+        "summary": "計算済み・保存済み。公開失敗によりM7とpipelineは未完了。"
+      }
+    },
+    {
+      "contract": "AnalysisResponse",
+      "value": {
+        "request_id": "request-demo",
+        "pipeline_id": "pipeline-demo",
+        "plan_ref": {
+          "id": "plan-demo",
+          "revision": "1",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "event_sequence": 15,
+        "pipeline_status": "completed",
+        "wait_reasons": [],
+        "current_milestone": "M7",
+        "milestone_states": {
+          "M0": "committed",
+          "M1": "committed",
+          "M2": "committed",
+          "M3": "committed",
+          "M4": "committed",
+          "M5": "committed",
+          "M6": "committed",
+          "M7": "committed"
+        },
+        "counts": {
+          "committed": 8,
+          "reused": 0,
+          "not_applicable": 0,
+          "active": 0,
+          "waiting": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "pending": 0,
+          "total": 8
+        },
+        "calculation_status": "completed",
+        "export_status": "completed",
+        "result_completeness": "final",
+        "result_refs": [
+          {
+            "result_run_id": "saved-run-demo",
+            "result_status": "completed",
+            "artifact_refs": [
+              {
+                "id": "result-demo",
+                "revision": "1",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        ],
+        "publication_outcomes": [
+          {
+            "result_run_id": "saved-run-demo",
+            "target_role": "VisualizationVault",
+            "package_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "selected": true,
+            "status": "published",
+            "attempt_id": "publication-attempt-demo",
+            "reason_code": null
+          }
+        ],
+        "issues": [],
+        "allowed_actions": [
+          "inspect_results",
+          "export"
+        ],
+        "required_input": [],
+        "summary": "全選択成果と公開を確定。"
+      }
+    }
+  ],
+  "schema_file": "core-control.schema.json",
+  "id_policy": {
+    "pipeline_id": "分析全体の要求台帳ID",
+    "result_run_id": "既存analysis_runs.id。pipelineと別識別子。",
+    "legacy_run_id": "既存保存APIは従来のrun_idを維持。新制御契約ではpipeline_idを使用。"
+  },
+  "state_machines": {
+    "step": {
+      "states": [
+        "planned",
+        "checking",
+        "ready",
+        "waiting_resource",
+        "running",
+        "validating",
+        "persisting",
+        "committed",
+        "reused",
+        "awaiting_input",
+        "retry_wait",
+        "blocked",
+        "failed",
+        "cancelling",
+        "cancelled",
+        "interrupted",
+        "not_applicable"
+      ],
+      "initial": "planned",
+      "terminal": [
+        "committed",
+        "reused",
+        "failed",
+        "cancelled",
+        "not_applicable"
+      ],
+      "unlisted_transition": "reject",
+      "transitions": [
+        {
+          "from": "planned",
+          "to": "checking",
+          "guard": "current_stage_parents_committed"
+        },
+        {
+          "from": "checking",
+          "to": "ready",
+          "guard": "eligibility_allowed"
+        },
+        {
+          "from": "checking",
+          "to": "awaiting_input",
+          "guard": "missing_required_input"
+        },
+        {
+          "from": "checking",
+          "to": "blocked",
+          "guard": "hard_condition_failed_or_unknown"
+        },
+        {
+          "from": "checking",
+          "to": "reused",
+          "guard": "compatible_committed_artifacts"
+        },
+        {
+          "from": "checking",
+          "to": "not_applicable",
+          "guard": "plan_allows_na_and_record_committed"
+        },
+        {
+          "from": "ready",
+          "to": "waiting_resource",
+          "guard": "resource_unavailable_within_budget"
+        },
+        {
+          "from": "waiting_resource",
+          "to": "ready",
+          "guard": "resource_available_and_context_valid"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "guard": "lease_generation_and_budget_valid"
+        },
+        {
+          "from": "running",
+          "to": "validating",
+          "guard": "matching_success_report"
+        },
+        {
+          "from": "validating",
+          "to": "persisting",
+          "guard": "all_output_semantics_valid"
+        },
+        {
+          "from": "persisting",
+          "to": "committed",
+          "guard": "artifacts_and_state_committed"
+        },
+        {
+          "from": "persisting",
+          "to": "blocked",
+          "guard": "persistence_error"
+        },
+        {
+          "from": "blocked",
+          "to": "persisting",
+          "guard": "same_verified_package_retry_authorized"
+        },
+        {
+          "from": "awaiting_input",
+          "to": "checking",
+          "guard": "same_plan_input_resolved_without_mutation"
+        },
+        {
+          "from": "blocked",
+          "to": "checking",
+          "guard": "external_condition_resolved"
+        },
+        {
+          "from": "running",
+          "to": "retry_wait",
+          "guard": "retryable_known_failure_within_budget"
+        },
+        {
+          "from": "validating",
+          "to": "retry_wait",
+          "guard": "repair_allowed_within_budget"
+        },
+        {
+          "from": "checking",
+          "to": "retry_wait",
+          "guard": "retryable_known_failure_within_budget"
+        },
+        {
+          "from": "retry_wait",
+          "to": "checking",
+          "guard": "new_attempt_created_after_backoff"
+        },
+        {
+          "from": "running",
+          "to": "blocked",
+          "guard": "remote_outcome_unknown"
+        },
+        {
+          "from": "running",
+          "to": "interrupted",
+          "guard": "lease_lost"
+        },
+        {
+          "from": "interrupted",
+          "to": "checking",
+          "guard": "reconciled_new_attempt_safe"
+        },
+        {
+          "from": "interrupted",
+          "to": "blocked",
+          "guard": "outcome_unknown"
+        },
+        {
+          "from": "planned",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "planned",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "checking",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "checking",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "ready",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "ready",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "waiting_resource",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "waiting_resource",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "running",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "validating",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "validating",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "persisting",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "persisting",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "awaiting_input",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "awaiting_input",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "retry_wait",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "retry_wait",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "blocked",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "blocked",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "interrupted",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "interrupted",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "cancelling",
+          "to": "cancelled",
+          "guard": "cancel_fenced_and_workers_reconciled"
+        }
+      ]
+    },
+    "pipeline": {
+      "states": [
+        "accepted",
+        "running",
+        "waiting",
+        "cancelling",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "initial": "accepted",
+      "terminal": [
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "unlisted_transition": "reject",
+      "transitions": [
+        {
+          "from": "accepted",
+          "to": "running",
+          "guard": "M0_ready"
+        },
+        {
+          "from": "running",
+          "to": "waiting",
+          "guard": "no_runnable_work_in_current_stage"
+        },
+        {
+          "from": "waiting",
+          "to": "running",
+          "guard": "same_plan_unblocked"
+        },
+        {
+          "from": "running",
+          "to": "completed",
+          "guard": "all_stages_and_selected_publications_committed"
+        },
+        {
+          "from": "waiting",
+          "to": "completed",
+          "guard": "all_stages_and_selected_publications_committed"
+        },
+        {
+          "from": "accepted",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "running",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "waiting",
+          "to": "cancelling",
+          "guard": "cancel_requested"
+        },
+        {
+          "from": "cancelling",
+          "to": "cancelled",
+          "guard": "cancel_fenced_and_workers_reconciled"
+        },
+        {
+          "from": "accepted",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        },
+        {
+          "from": "waiting",
+          "to": "failed",
+          "guard": "nonrecoverable_or_budget_exhausted"
+        }
+      ]
+    },
+    "milestone": {
+      "states": [
+        "pending",
+        "active",
+        "waiting",
+        "committed",
+        "failed",
+        "cancelled"
+      ],
+      "initial": "pending",
+      "terminal": [
+        "committed",
+        "failed",
+        "cancelled"
+      ],
+      "unlisted_transition": "reject",
+      "transitions": [
+        {
+          "from": "pending",
+          "to": "active",
+          "guard": "prior_stage_committed_or_M0"
+        },
+        {
+          "from": "active",
+          "to": "waiting",
+          "guard": "no_runnable_work_in_current_stage"
+        },
+        {
+          "from": "waiting",
+          "to": "active",
+          "guard": "same_plan_unblocked"
+        },
+        {
+          "from": "active",
+          "to": "committed",
+          "guard": "all_selected_steps_and_artifacts_committed"
+        },
+        {
+          "from": "waiting",
+          "to": "committed",
+          "guard": "all_selected_steps_and_artifacts_committed"
+        },
+        {
+          "from": "pending",
+          "to": "cancelled",
+          "guard": "pipeline_cancelled"
+        },
+        {
+          "from": "active",
+          "to": "cancelled",
+          "guard": "pipeline_cancelled"
+        },
+        {
+          "from": "waiting",
+          "to": "cancelled",
+          "guard": "pipeline_cancelled"
+        },
+        {
+          "from": "active",
+          "to": "failed",
+          "guard": "required_step_failed"
+        },
+        {
+          "from": "waiting",
+          "to": "failed",
+          "guard": "required_step_failed"
+        }
+      ]
+    },
+    "publication": {
+      "states": [
+        "not_selected",
+        "pending",
+        "publishing",
+        "published",
+        "failed",
+        "conflict",
+        "unknown"
+      ],
+      "initial": "pending",
+      "terminal": [
+        "not_selected",
+        "published"
+      ],
+      "unlisted_transition": "reject",
+      "transitions": [
+        {
+          "from": "pending",
+          "to": "publishing",
+          "guard": "result_run_committed_and_target_selected"
+        },
+        {
+          "from": "publishing",
+          "to": "published",
+          "guard": "target_artifacts_and_hashes_verified"
+        },
+        {
+          "from": "publishing",
+          "to": "failed",
+          "guard": "publication_io_failure"
+        },
+        {
+          "from": "publishing",
+          "to": "conflict",
+          "guard": "ownership_conflict"
+        },
+        {
+          "from": "publishing",
+          "to": "unknown",
+          "guard": "publication_interrupted"
+        },
+        {
+          "from": "failed",
+          "to": "pending",
+          "guard": "publication_only_retry_authorized"
+        },
+        {
+          "from": "conflict",
+          "to": "pending",
+          "guard": "user_conflict_resolution_verified"
+        },
+        {
+          "from": "unknown",
+          "to": "published",
+          "guard": "reconciliation_proves_publication"
+        },
+        {
+          "from": "unknown",
+          "to": "pending",
+          "guard": "reconciliation_allows_safe_publication_retry"
+        }
+      ]
+    }
+  },
+  "fixture_note": "ID/hash/時刻/手法は架空。構造確認用であり登録済み手法・実データを表さない。",
+  "semantic_validation": [
+    "ID・入力hash・版の実在と一意性",
+    "EnvelopeとBindingの全slot解決・許容範囲",
+    "手法別payload schema・列・尺度・観測単位",
+    "DAGと段階ゲート・成果物依存",
+    "研究区分・閲覧履歴・仮説・評価データ・検定群",
+    "報告と指示のID・世代・hash対応",
+    "状態遷移表とguard・比較更新・予算",
+    "結果件数の合計・選択公開先の網羅・package hash",
+    "固定計画を変更する場合は新pipeline"
+  ],
+  "retry_semantics": "retry_wait→checkingは同じstep内で新attemptを作る。旧attemptを再開しない。取消世代を更新し旧報告を除外する。",
+  "publication_semantics": "result_run completed→選択先公開→M7 committed→pipeline completed。新pipelineは保存と公開を分離するadapterの能力を開始前確認。",
+  "guard_notes": {
+    "current_stage_parents_committed": "前段階commit済み、現在段階内の依存成果と入力版が一致。",
+    "eligibility_allowed": "固定MethodCardと計画に基づく全必須hard検査がpass、warningは保持。",
+    "plan_allows_na_and_record_committed": "required=false、allow_not_applicable=true、許可規則一致、判定artifact保存済み。",
+    "artifacts_and_state_committed": "hash・schema・世代・取消・期待状態を比較し、artifact登録と状態更新が確定。",
+    "all_selected_steps_and_artifacts_committed": "全選択stepのcommit/reuse/許可済みNAと必須成果、M4全slot、M7全選択公開先を検証。",
+    "all_stages_and_selected_publications_committed": "M0〜M7が順にcommitted、未解決の必須成果なし、選択公開先のpackage hash一致。",
+    "retryable_known_failure_within_budget": "外部完了状態が既知、retryable code、回数・時間・費用上限内、取消なし。",
+    "same_plan_input_resolved_without_mutation": "固定snapshotや定義を変えずに外部入力参照を解決。内容変更は新pipeline。",
+    "nonrecoverable_or_budget_exhausted": "回復不能または上限到達。新規指示停止・実行中attemptの世代無効化・部分成果と未確定外部状態を記録。",
+    "cancel_fenced_and_workers_reconciled": "旧世代の結果採用を禁止。所有するworker終了/取消を確認し外部完了不明は記録。",
+    "result_run_committed_and_target_selected": "analysis_runsのパッケージ確定と対象選択を検証。pipeline completedを要求しない。",
+    "target_artifacts_and_hashes_verified": "指定公開先のノート・画像・manifestの対応を検証しOutcomeを永続化。"
+  },
+  "gate_guard_policy": "guard_notesは重要条件の補足。各transitionのguardは実装時に純粋規則へ対応させ、未対応guardでは遷移を拒否する。"
+}

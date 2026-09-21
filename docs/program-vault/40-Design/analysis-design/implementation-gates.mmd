@@ -1,0 +1,38 @@
+flowchart TB
+  START["初回導入範囲<br/>主担当が実装・検証。D0〜D7 accepted"]
+  D0["✓ D0 基準・契約<br/>Schema正常/異常例・既存基準"]
+  D1["✓ D1 コア窓口・M0/M4<br/>指示/報告・slot・停止/警告"]
+  D2["✓ D2 snapshot・確定保存<br/>短いロック・取消競合・旧run互換"]
+  D3["✓ D3 段階内並列・回復<br/>先行開始0件・重複・再起動・再試行上限"]
+  D4["✓ D4 手法・研究規則<br/>既存値一致・有効N・探索/検証"]
+  D5["✓ D5 LLM境界<br/>local_only・手動経路・送信方針"]
+  D6["✓ D6 出力・公開<br/>再読込・公開先別失敗・AI再呼出し0件"]
+  D7["✓ D7 UI・統合<br/>手入力から出力・部分結果・互換・最終回帰"]
+  START --> D0
+  D0 -->|"対象差分で合格"| D1
+  D1 -->|"対象差分で合格"| D2
+  D2 -->|"対象差分で合格"| D3
+  D3 -->|"対象差分で合格"| D4
+  D4 -->|"対象差分で合格"| D5
+  D5 -->|"対象差分で合格"| D6
+  D6 -->|"対象差分で合格"| D7
+  D7 -->|"全必須証跡を確認"| DONE["選択した実装範囲が完了"]
+  subgraph RULE["今後の拡張でも各D工程で繰り返す"]
+    PACKET["短いTaskPacket<br/>対象ファイル・不変条件・テスト・合格条件"]
+    TERRA["実装担当：当該工程の実装・修正"]
+    LUNA["テスト担当：指定テストを実行<br/>件数・終了コード・失敗・ログ参照"]
+    CHECK{"全必須テスト合格<br/>現在の差分と証跡が一致？"}
+    ACCEPT["主担当が受入確認<br/>acceptedにして次工程へ"]
+    BLOCK["当該工程で停止<br/>後段実装を始めない"]
+    PACKET --> TERRA --> LUNA --> CHECK
+    CHECK -->|"はい"| ACCEPT
+    CHECK -->|"失敗 / 未実行 / skip / 環境不備"| BLOCK
+    BLOCK -->|"最小の失敗情報で修正"| TERRA
+  end
+  START -. 今後の拡張に適用 .-> PACKET
+  EVAL["planned：別のEVALゲート<br/>JEV8軸の人手評定・独立評価・事前基準<br/>合格まで成功/失敗の自動判定は未検証表示"]
+  D5 -. モック試験では代替不可 .-> EVAL
+  classDef accepted fill:#dff5e6,stroke:#217a45,stroke-width:2px;
+  classDef planned fill:#fff3cd,stroke:#a66a00,stroke-width:2px;
+  class START,D0,D1,D2,D3,D4,D5,D6,D7,DONE accepted;
+  class EVAL planned;

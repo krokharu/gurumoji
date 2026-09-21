@@ -6,12 +6,14 @@ import io
 import re
 import sqlite3
 import subprocess
+import zipfile
 from typing import Callable
 
 from flask import Blueprint, Flask, jsonify, request, send_file
 
 from .. import transcript_preparation as preparation
 from ..analysis_store import StoreConflict
+from ..analysis_core import AnalysisContractError
 from ..handlers.analysis_commands import (
     AnalysisCommandRequestError,
     AnalysisCommands,
@@ -55,6 +57,125 @@ def register_analysis_routes(
             return jsonify({"error": str(exc)}), 404
         except (OSError, ValueError):
             return jsonify({"error": "保存ファイルが移動または変更されています。"}), 409
+
+    @blueprint.get("/api/analysis/runs/<run_id>/export.zip")
+    def get_analysis_run_bundle(run_id: str):
+        try:
+            artifact = queries().run_bundle(run_id)
+            return send_file(
+                io.BytesIO(artifact.data), mimetype=artifact.media_type,
+                as_attachment=True, download_name=artifact.download_name,
+            )
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return jsonify({"error": "固定成果物のZIPを作成できませんでした。"}), 409
+
+    def pipeline_error(exc: AnalysisContractError):
+        status = 409 if exc.code in {
+            "revision_conflict", "request_conflict", "definition_not_adopted",
+            "unresolved_binding", "binding_out_of_scope", "ineligible",
+            "nothing_to_retry", "provider_unavailable", "method_unavailable",
+            "retry_limit_reached",
+        } else 400
+        return jsonify({"error": str(exc), "reason_code": exc.code, "field": exc.field}), status
+
+    @blueprint.get("/api/analysis/pipeline-capabilities")
+    def get_pipeline_capabilities():
+        return jsonify(commands().pipeline_capabilities())
+
+    @blueprint.put("/api/library/<item_id>/analysis/definitions/<definition_id>")
+    def put_analysis_definition(item_id: str, definition_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "定義はJSONオブジェクトで送信してください。"}), 400
+        try:
+            return jsonify({"definition": commands().save_definition(item_id, definition_id, payload)})
+        except AnalysisCommandNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except sqlite3.Error:
+            return jsonify({"error": "定義を保存できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/definitions/<definition_id>/trials")
+    def trial_analysis_definition(item_id: str, definition_id: str):
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify({"error": "試行条件はJSONオブジェクトで送信してください。"}), 400
+        try:
+            return jsonify({"trial": commands().trial_definition(
+                item_id, definition_id, limit=int(payload.get("limit", 20))
+            )})
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (AnalysisContractError, ValueError) as exc:
+            return pipeline_error(exc) if isinstance(exc, AnalysisContractError) else (jsonify({"error": str(exc)}), 400)
+        except sqlite3.Error:
+            return jsonify({"error": "定義の試行を保存できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/plans/preview")
+    def preview_analysis_pipeline(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "計画はJSONオブジェクトで送信してください。"}), 400
+        try:
+            return jsonify(commands().preview_pipeline(item_id, payload))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except sqlite3.Error:
+            return jsonify({"error": "計画を確認できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/pipelines")
+    def start_analysis_pipeline(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "実行計画はJSONオブジェクトで送信してください。"}), 400
+        try:
+            body, status = commands().start_pipeline(item_id, payload, app_url=request.url_root)
+            return jsonify(body), status
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "分析pipelineを開始できませんでした。"}), 500
+
+    @blueprint.get("/api/library/<item_id>/analysis/pipelines/<pipeline_id>")
+    def get_analysis_pipeline(item_id: str, pipeline_id: str):
+        try:
+            return jsonify(commands().pipeline_status(item_id, pipeline_id))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "分析pipelineの状態を取得できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/pipelines/<pipeline_id>/cancel")
+    def cancel_analysis_pipeline(item_id: str, pipeline_id: str):
+        try:
+            return jsonify(commands().cancel_pipeline(item_id, pipeline_id))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "分析pipelineを中止できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/pipelines/<pipeline_id>/retry")
+    def retry_analysis_pipeline(item_id: str, pipeline_id: str):
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify({"error": "再試行条件はJSONオブジェクトで送信してください。"}), 400
+        try:
+            return jsonify(commands().retry_pipeline(
+                item_id, pipeline_id, payload, app_url=request.url_root
+            ))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "分析pipelineを再試行できませんでした。"}), 500
 
     @blueprint.get("/api/library/<item_id>/analysis/insights")
     def get_analysis_insights(item_id: str):

@@ -12,7 +12,7 @@ tags:
 
 # Software Vault 索引
 
-最新の設計：[[40-Design/core-handler-routing-reorganization-plan|分析・AI・UI再設計（2026-09-20）]]。LLM／Jev、ローカルの専用オーケストレーター、疑似人格の相談、結果の型と追加分析、RAWと出力の分離、7つの設計図、現行21手法と追加予定の手法に対応するUIを記録。[[00-Home#分析・AI・UIの再設計（2026-09-20、設計案）|ホームの入口]]から関連計画・設計判断・HTML見本も辿れる。
+最新の設計：[[40-Design/core-handler-routing-reorganization-plan|分析・AI・UI再設計（2026-09-20）]]。LLM／Jev、ローカルの専用オーケストレーター、疑似人格の相談、結果の型と追加分析、RAWと出力の分離、7つの設計図、現行21手法と追加予定の手法に対応するUIを記録。分析ボタンの統合、自動／手動実行、進捗画面、段階分析の具体案は [[40-Design/analysis-execution-ux-plan]]。[[00-Home#分析・AI・UIの再設計（2026-09-20、設計案）|ホームの入口]]から関連計画・設計判断・HTML見本も辿れる。
 
 現状の入口：[[40-Design/convergence-plan#プッシュ済みの対応状況（2026-09-15）|コミット1b8fe41の対応状況と残課題]]。優先修正に加え、先行UI改善の対応状態もまとめた。
 
@@ -30,6 +30,6 @@ Gurumojiの4 Vaultのうち、プログラムの構造・保存契約・手法�
 | 収束・問題点 | [[40-Design/convergence-plan]]、[[40-Design/known-issues]]、[[40-Design/decisions]]、[[40-Design/ai-development-rules]] | 整理計画、問題点と改善方法、ADR、AI開発ルール |
 | テスト計画 | [[50-Tests/obsidian-safety-test-plan]] | Obsidian連携の安全性テスト |
 | データ | [[30-Data/four-vaults-v1]]、[[30-Data/analysis-storage-v1]]、[[30-Data/current-storage]] | 4 Vault、分析の固定保存、既存の保存形式 |
-| 設計 | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]、[[40-Design/method-rules]]、[[40-Design/ui-ux-issues]]、[[40-Design/quantification-statistics-plan]]、[[40-Design/core-handler-routing-reorganization-plan]] | 正本の分類、ID・同期、手法の登録規約、UI/UXの問題点、発話の数値化とjamovi型統計の自動実行計画、コア・ハンドラー・ルーティング再編案（提案） |
+| 設計 | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]、[[40-Design/method-rules]]、[[40-Design/ui-ux-issues]]、[[40-Design/video-ui-redesign-plan]]、[[40-Design/quantification-statistics-plan]]、[[40-Design/core-handler-routing-reorganization-plan]]、[[40-Design/analysis-execution-ux-plan]] | 正本の分類、ID・同期、手法の登録規約、UI/UXの問題点、動画処理・確認画面UI改善設計図、発話の数値化とjamovi型統計の自動実行計画、コア再編案、分析実行UXと段階分析（提案） |
 | 分析手法・知識 | [[50-Analysis-Methods/00-Index]] | 19手法の定義・限界・オーケストレーター契約、専門家定義、共通知識、文献・調査記録 |
 | テンプレート | `90-Templates/` | 登録票。検索の既定対象外 |

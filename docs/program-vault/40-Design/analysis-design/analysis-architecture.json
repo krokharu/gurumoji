@@ -1,0 +1,613 @@
+{
+  "schema_version": "architecture-design-3",
+  "status": "proposed",
+  "runtime_implemented": false,
+  "user_clarification": "様々なLLMが共通形式で使える",
+  "deployment": "初期は同一アプリ内のモジュール分離と必要な計算ワーカー。別DB/サーバー必須ではない。",
+  "components": [
+    {
+      "id": "main",
+      "title": "メインコア",
+      "responsibility": "起動・入力・共通資源・依存組立。分析コアへ要求し応答を受ける。",
+      "allowed_dependencies": [
+        "analysis_api_port",
+        "input_port",
+        "resource_port"
+      ]
+    },
+    {
+      "id": "entry",
+      "title": "入口アダプター",
+      "responsibility": "既存AnalysisCommands/Queriesの外部契約を保ち、UI等の要求を分析コアへ渡す。",
+      "allowed_dependencies": [
+        "contracts",
+        "analysis_api_port"
+      ]
+    },
+    {
+      "id": "coordinator",
+      "title": "分析コア統括 / AnalysisCoordinator",
+      "responsibility": "メイン応答・ハンドラー指示・実行可否と回復判断・集約・ゲート確定",
+      "allowed_dependencies": [
+        "contracts",
+        "core",
+        "runtime_port",
+        "store_port",
+        "orchestrator_port"
+      ]
+    },
+    {
+      "id": "handlers",
+      "title": "分析ハンドラー（実行側）",
+      "responsibility": "コアの指示で検査・runner呼出しを行い、観測事実と結果・エラーを報告。独自の分析順序・再試行判断を持たない。",
+      "allowed_dependencies": [
+        "contracts",
+        "method_port",
+        "input_port",
+        "artifact_staging_port"
+      ]
+    },
+    {
+      "id": "core",
+      "title": "分析コア内部の純粋規則",
+      "responsibility": "DAG・尺度・適用性・データ不足・エラー対処・ゲート・結果・staleの検証",
+      "allowed_dependencies": [
+        "contracts"
+      ]
+    },
+    {
+      "id": "runtime",
+      "title": "分析コア内部のRuntime",
+      "responsibility": "統括が決めた指示の配布、段階内並列、資源枠、取消・再試行・回復機構。方針を独自変更しない。",
+      "allowed_dependencies": [
+        "contracts",
+        "task_handler_port",
+        "store_port",
+        "resource_port"
+      ]
+    },
+    {
+      "id": "methods",
+      "title": "各種分析プログラム",
+      "responsibility": "一手法の固定入力からResultBundleを生成",
+      "allowed_dependencies": [
+        "contracts",
+        "llm_port"
+      ]
+    },
+    {
+      "id": "orchestrators",
+      "title": "役割別オーケストレーター",
+      "responsibility": "候補・指摘・解釈・図仕様の提案",
+      "allowed_dependencies": [
+        "contracts",
+        "llm_port",
+        "knowledge_port"
+      ]
+    },
+    {
+      "id": "gateway",
+      "title": "LLM Gateway",
+      "responsibility": "能力交渉・provider変換・出力とusageの正規化",
+      "allowed_dependencies": [
+        "contracts",
+        "provider_adapters"
+      ]
+    },
+    {
+      "id": "storage",
+      "title": "AnalysisStore",
+      "responsibility": "確定保存・既存公開・公開状態の観測",
+      "allowed_dependencies": [
+        "contracts",
+        "vault_registry",
+        "research_workbench"
+      ]
+    },
+    {
+      "id": "knowledge",
+      "title": "知識アダプター",
+      "responsibility": "索引→概要→必要な根拠のContextPacket",
+      "allowed_dependencies": [
+        "contracts",
+        "expert_catalog",
+        "vault_registry"
+      ]
+    }
+  ],
+  "dependency_note": "分析コアはcoordinator/core/runtimeの責任境界。純粋coreは契約のみ。coordinatorは注入ポートを通じてI/Oを指示。実行ハンドラーから入口ハンドラーを再帰呼出ししない。全層からapp.pyへの逆import禁止。",
+  "orchestrators": [
+    {
+      "id": "O01",
+      "title": "計画",
+      "milestones": [
+        "M0"
+      ],
+      "output": "PlanProposal",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O02",
+      "title": "アウトライン",
+      "milestones": [
+        "M1"
+      ],
+      "output": "OutlineProposal",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O03",
+      "title": "意味分析",
+      "milestones": [
+        "M2",
+        "M3"
+      ],
+      "output": "EvidenceBackedCandidates",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O04",
+      "title": "ラベル・測定・尺度",
+      "milestones": [
+        "M4"
+      ],
+      "output": "VariableDefinitionDraft",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O05",
+      "title": "手法・結果確認",
+      "milestones": [
+        "M0",
+        "M3",
+        "M4",
+        "M5"
+      ],
+      "output": "ReviewFindings",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O06",
+      "title": "統合・二次分析",
+      "milestones": [
+        "M6"
+      ],
+      "output": "SynthesisProposal",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    },
+    {
+      "id": "O07",
+      "title": "可視化・説明",
+      "milestones": [
+        "M3",
+        "M7"
+      ],
+      "output": "ChartSpecDraft",
+      "may_commit": false,
+      "may_release_gate": false,
+      "provider_binding": "runで固定。複数役割に同じモデルを割当可能。",
+      "knowledge": "既存ExpertCatalogと手法登録票",
+      "max_debate_rounds": 2,
+      "max_structure_repairs": 1
+    }
+  ],
+  "llm_contract": {
+    "encoding": "UTF-8",
+    "format": "JSON",
+    "schema": "llm-contract.schema.json",
+    "examples": "llm-contract.examples.json",
+    "method_payload_schema_required": true,
+    "semantic_checks": [
+      "登録手法と版の存在",
+      "根拠IDと原文版/hashの一致",
+      "DAGと同一段階依存",
+      "前段階commit済み",
+      "列・尺度・観測単位・JOIN多重化",
+      "local_only等の送信方針",
+      "role権限と予算",
+      "出力契約とサンプル欠測条件"
+    ],
+    "provider_policy": "既存設定で許可したproviderとモデルのみ。無断fallback禁止。",
+    "jev": "Choice判定用。生成系オーケストレーターと能力を区別。"
+  },
+  "tool_catalog": {
+    "required_transport": "in_process",
+    "optional_transport": "MCP",
+    "read": [
+      "list_methods",
+      "get_method",
+      "get_context",
+      "preview_plan",
+      "inspect_result",
+      "get_run"
+    ],
+    "write": [
+      "propose_definition",
+      "request_run",
+      "cancel_run",
+      "request_export"
+    ],
+    "authority": "全入口を既存AnalysisCommands/Queriesから同じ分析コアへ。コアが確定済みの範囲・方針・ゲート・予算を検証し、実行ハンドラーに指示する。",
+    "forbidden": [
+      "arbitrary_sql",
+      "shell",
+      "python_eval",
+      "arbitrary_vault_paths"
+    ]
+  },
+  "milestone_policy": {
+    "sequence": [
+      "M0",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "M7"
+    ],
+    "parallel_scope": "within_current_milestone_after_dependencies",
+    "gate": "全選択stepの確定/再利用/許可済み適用外と全必須artifactを確認。M4はBinding全解決、M7は選択先の公開確定を追加条件とする。",
+    "failure": "コアが回復方針を判断。回復待ち中は同段階の独立taskのみ継続可能。次段階は停止。回復不能なら新規指示を停止して部分成果を返す。",
+    "not_applicable": "確定計画にallow_not_applicableと条件が明示されたtaskのみ。必須分析の不足・失敗を適用外へ自動変換しない。判定artifactを保存し、成果物依存を別途検証する。"
+  },
+  "obsidian": {
+    "data_root": "既存MOJIOKOSI_DATA_DIRの解決値",
+    "connection": "既存のfilesystem連携。Obsidian API/専用pluginを必須にしない。",
+    "canonical_owner": "AnalysisStoreの固定snapshot/result/artifactと定義版",
+    "vaults": [
+      {
+        "role": "Software",
+        "owner": "Git",
+        "write_policy": "アプリ書込不可"
+      },
+      {
+        "role": "InputVault",
+        "owner": "VaultRegistry",
+        "write_policy": "既存生成契約"
+      },
+      {
+        "role": "OrchestratorVault",
+        "owner": "VaultRegistry",
+        "write_policy": "既存生成契約"
+      },
+      {
+        "role": "VisualizationVault",
+        "owner": "VaultRegistry",
+        "write_policy": "既存契約に管理画像添付を追加"
+      },
+      {
+        "role": "ResearchVault",
+        "owner": "AnalysisStore/ObsidianLayout/ObsidianFinishing",
+        "write_policy": "研究者本文と既存Workbench契約を保持"
+      }
+    ],
+    "publication": [
+      "commit_result_run",
+      "persist_selected_publication_requests",
+      "publish_selected_targets",
+      "record_each_target_outcome",
+      "commit_M7",
+      "complete_pipeline"
+    ],
+    "import": [
+      "detect_edit",
+      "resolve_stable_id",
+      "three_way_diff",
+      "select_fields",
+      "validate_schema_scale_columns",
+      "save_new_definition_revision",
+      "mark_dependents_stale"
+    ],
+    "no_automatic_analysis_on_import": true,
+    "existing_explicit_finishing_trigger": "既存のAI仕上げチェックによる明示操作を維持",
+    "preserve": [
+      "user_body",
+      "tags",
+      "aliases",
+      "unknown_yaml",
+      "comments",
+      "line_endings"
+    ],
+    "cross_vault_reference": "stable IDs + resolver + optional obsidian URI",
+    "images": "正本artifactを維持しVisualizationVault内にID/hash付き表示コピー。",
+    "current_gaps": [
+      "汎用定義/研究メモの差分取込は未実装",
+      "管理グラフ添付公開は追加設計",
+      "publish_vaultsの例外抑制を観測可能にする必要",
+      "hash確認と書込の競合窓は局所改修と試験が必要",
+      "新pipeline用の保存・公開分離モード、pipeline_id/result_run_id関連付けは未実装"
+    ]
+  },
+  "ui_extensions": [
+    {
+      "screen_id": "S02",
+      "region": "advanced-role-settings",
+      "title": "役割と実行モデル",
+      "fields": [
+        "role_id",
+        "enabled",
+        "provider_id",
+        "model_id",
+        "required_capabilities",
+        "data_policy",
+        "max_calls",
+        "max_tokens",
+        "timeout"
+      ],
+      "actions": [
+        "能力の確認",
+        "計画に固定"
+      ],
+      "states": [
+        "compatible",
+        "incompatible",
+        "budget_exceeded"
+      ],
+      "rule": "手動定義にLLM生成を必須にしない。"
+    },
+    {
+      "screen_id": "S02",
+      "region": "manual-definition-obsidian",
+      "title": "Obsidianで定義を編集",
+      "fields": [
+        "note_id",
+        "base_revision",
+        "base_hash",
+        "app_revision",
+        "changed_fields"
+      ],
+      "actions": [
+        "Obsidianで開く",
+        "変更を確認",
+        "項目を選択して適用"
+      ],
+      "states": [
+        "unchanged",
+        "changed",
+        "conflict",
+        "missing",
+        "invalid",
+        "applied"
+      ],
+      "rule": "適用は新定義版を保存し関連結果をstaleにする。分析開始は別操作。"
+    },
+    {
+      "screen_id": "S03",
+      "region": "task-details",
+      "title": "処理の担当と待機理由",
+      "fields": [
+        "method_ref",
+        "role_id",
+        "provider_id",
+        "model_id",
+        "phase",
+        "resource_wait",
+        "dependency_wait"
+      ],
+      "actions": [
+        "詳細を開く",
+        "再試行",
+        "取消"
+      ],
+      "states": [
+        "proposing",
+        "validating",
+        "computing",
+        "committing",
+        "publishing"
+      ],
+      "rule": "段階内のみ並列。全必須taskの保存と検証が完了して次へ。"
+    },
+    {
+      "screen_id": "S04",
+      "region": "obsidian-publication",
+      "title": "Obsidian連携",
+      "fields": [
+        "target_vaults",
+        "attach_graphs",
+        "calculation_status",
+        "publication_status",
+        "conflict_note_ids",
+        "pipeline_id",
+        "result_run_id",
+        "export_status",
+        "per_target_outcomes"
+      ],
+      "actions": [
+        "ノートを開く",
+        "公開のみ再試行"
+      ],
+      "states": [
+        "not_selected",
+        "pending",
+        "publishing",
+        "published",
+        "failed",
+        "conflict"
+      ],
+      "rule": "result_run確定後に公開。選択先成功までM7とpipelineは未完了。公開のみ再試行。"
+    },
+    {
+      "screen_id": "S06",
+      "region": "source-provenance",
+      "title": "根拠と参照版",
+      "fields": [
+        "source_id",
+        "revision",
+        "note_id",
+        "artifact_id",
+        "source_hash"
+      ],
+      "actions": [
+        "アプリで開く",
+        "Obsidianで開く"
+      ],
+      "states": [
+        "current",
+        "old_revision",
+        "missing"
+      ],
+      "rule": "旧版の根拠を現在の原文へ黙って置換しない。"
+    },
+    {
+      "screen_id": "S03",
+      "region": "core-decision",
+      "title": "分析コアの判断",
+      "fields": [
+        "decision_id",
+        "step_id",
+        "eligibility_status",
+        "observational_unit",
+        "effective_count",
+        "rule_id",
+        "rule_version",
+        "reason_code",
+        "action",
+        "attempts_remaining",
+        "affected_steps",
+        "required_input",
+        "assessment_dimension",
+        "severity",
+        "check_outcome",
+        "execution",
+        "inference_scope"
+      ],
+      "actions": [
+        "理由と根拠を開く",
+        "入力を修正",
+        "代替計画を確認",
+        "再試行",
+        "取消"
+      ],
+      "states": [
+        "checking",
+        "retry_wait",
+        "awaiting_input",
+        "blocked",
+        "failed",
+        "completed"
+      ],
+      "rule": "hard失敗/不明は当該task停止。warningは状態を保持して許容範囲で実行。必須処理未完了で次段階開始不可。"
+    },
+    {
+      "screen_id": "S01",
+      "region": "partial-result-summary",
+      "title": "分析できた範囲と不足",
+      "fields": [
+        "completed_steps",
+        "unavailable_steps",
+        "not_applicable_steps",
+        "input_coverage",
+        "result_refs",
+        "limitations"
+      ],
+      "actions": [
+        "不足理由を見る",
+        "S02で入力・計画を修正"
+      ],
+      "states": [
+        "partial",
+        "final"
+      ],
+      "rule": "部分結果を全体成功と表示しない。コア応答の集計値と一致させる。"
+    },
+    {
+      "screen_id": "S02",
+      "region": "plan-binding-research",
+      "title": "計画枠・実行定義・研究区分",
+      "fields": [
+        "plan_ref",
+        "binding_slots",
+        "binding_ref",
+        "research_mode",
+        "access_log",
+        "test_family",
+        "multiplicity_policy"
+      ],
+      "actions": [
+        "M0の計画枠を確定",
+        "M4の実行定義を確定",
+        "範囲外の変更を新計画にする"
+      ],
+      "states": [
+        "envelope_frozen",
+        "binding_unresolved",
+        "binding_frozen",
+        "scope_exceeded"
+      ],
+      "rule": "元のEnvelopeを書き換えない。事後の仮説を確認的に昇格しない。"
+    }
+  ],
+  "control_authority": "分析コアがメインとの応答、ハンドラーへの指示、可否と回復判断、結果集約を統括する。",
+  "control_contract": "core-control-contract.json",
+  "control_schema": "core-control.schema.json",
+  "implementation_gates": "implementation-gates.json",
+  "plan_lifecycle": {
+    "M0": "immutable PlanEnvelope with bounded binding slots",
+    "M4": "immutable ExecutionBinding referencing original envelope",
+    "outside_scope": "new envelope and pipeline; reuse compatible immutable results after gate checks",
+    "research_mode": "exploratory or evidence-backed confirmatory"
+  },
+  "state_authority": {
+    "pipeline": "request ledger / pipeline_id",
+    "result": "existing AnalysisStore / result_run_id",
+    "publication": "per selected target and package hash in M7 attempts",
+    "gates": "core-control-contract.json state_machines"
+  },
+  "storage_concurrency": {
+    "input": "consistent snapshot read",
+    "compute": "outside global write locks",
+    "prepare": "attempt-specific immutable outputs",
+    "commit": "short transaction with generation/hash/state compare",
+    "publish": "after result commit; separate from pipeline completion",
+    "legacy": "existing save APIs keep current behavior; pipeline adapter requires explicit deferred publication capability"
+  },
+  "research_policy": {
+    "default": "exploratory",
+    "confirmatory_requires": [
+      "fixed hypotheses",
+      "access history",
+      "valid pre-registration or independent held-out data",
+      "test family and multiplicity policy when hypothesis tests are planned"
+    ],
+    "measurement_validation": [
+      "rubric version",
+      "independent human ratings",
+      "development/evaluation separation",
+      "predefined criteria",
+      "revalidation on model or prompt change"
+    ],
+    "unknown_precision": "warning unless explicitly mandatory; retain unknown status"
+  }
+}

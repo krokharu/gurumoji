@@ -1,0 +1,31 @@
+flowchart TB
+  MAIN["メインコア<br/>目的・入力・方針を渡し応答を受ける"]
+  ENTRY["既存の入口アダプター<br/>AnalysisCommands / Queries"]
+  UI["UI / HTTP / Obsidian / 任意MCP"]
+  UI --> ENTRY
+  subgraph CORE["分析コア：分析全体の判断と指揮"]
+    C["AnalysisCoordinator<br/>受付・指示・集約・メインへの応答"]
+    POLICY["純粋な判定規則<br/>データ充足性・エラー対処・計画・尺度・ゲート"]
+    R["Runtime<br/>コアの決定に従う並列配布・資源待ち・回復"]
+    C -->|判定を照会| POLICY
+    C <-->|版付き指示 / 報告| R
+  end
+  MAIN <-->|要求 / 進捗・不足・集約結果| C
+  ENTRY <-->|同じ要求と応答の契約| C
+  H["分析ハンドラー群<br/>検査・実行・取消・事実報告"]
+  R <-->|指示 / 報告。同段階のみ並列| H
+  M["分析プログラム / MethodRunner<br/>統計・量的・質的・会話・JEV評価"]
+  H <-->|固定入力 / 結果・事実・エラー| M
+  O["オーケストレーター O01〜O07<br/>計画・分析・解釈の候補"]
+  C <-->|提案の依頼 / 検証対象の候補| O
+  G["LLM Gateway / 共通JSON契約<br/>各種provider adapter"]
+  O --> G
+  M -->|必要な手法のみ| G
+  K["知識アダプター<br/>ExpertCatalog / 対象根拠"]
+  O --> K
+  S["既存AnalysisStore<br/>結果・判断・状態の確定保存"]
+  C <-->|確定保存 / 保存結果| S
+  V["既存のObsidian公開・Workbench<br/>所有権保持・公開状態・定義差分"]
+  S --> V
+  NOTE["ハンドラーは対処方針・次段階を決めない。<br/>純粋規則はI/Oを持たず、統括は注入ポートを使う。<br/>実行時のやり取りの図。import依存は構造JSONに記載。"]
+  POLICY -. 制約 .-> NOTE

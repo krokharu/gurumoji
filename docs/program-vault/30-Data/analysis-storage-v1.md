@@ -5,7 +5,7 @@ title: AI仕上げ・文章分析の保存契約 v1
 summary: AI仕上げと文章分析の固定保存、ResearchVault公開、保存履歴の契約を定める。
 status: current
 feature: analysis-storage
-verified: 2026-09-20
+verified: 2026-09-21
 schema_version: 1
 tags:
   - gurumoji/program
@@ -24,6 +24,7 @@ tags:
 3. 冒頭の見解の下にある「分析結果をObsidianに保存」を押す。全件の文章分析と実行条件を固定し、研究用Vaultに見解・表の抜粋・根拠を登録する。
 4. KWICは「この検索をObsidianに保存」で、現在の検索条件に一致する全件を保存する。画面の50件表示に限定しない。
 5. 任意のAI見解は生成成功時に自動記録する。「保存履歴」からJSON／CSVの取得、Obsidianでの閲覧、保存失敗の再試行ができる。
+6. 統合実行では、確定した入力版からM0〜M7をサーバー側で進行する。手動モードは定義を下書き保存し、少数試行に合格した版を採用してから全件測定する。画面を閉じてもpipeline IDから状態を復元できる。
 
 AI再生成は利用者の生成操作に限る。保存・履歴確認・再試行でAIを呼ばない。過去の会話を一括移行する機能ではなく、既存会話は保存ボタンを押した時点から履歴を蓄積する。
 
@@ -36,6 +37,11 @@ AI再生成は利用者の生成操作に限る。保存・履歴確認・再試
 | SQLite `analysis_artifacts` | ファイルID・相対パス・SHA-256・バイト数・CSV行数。ファイル本体の重複保存はしない |
 | SQLite `obsidian_notes` | アプリ生成ノートのID・パス・最後に書いたhash。手書き内容の保護に使用 |
 | SQLite `analysis_pending_packages` | 書き出し中・失敗時だけ、再試行するための入力と結果を保持する一時的な記録。成果物の確定と同時に削除 |
+| SQLite `analysis_definitions` | 手動測定定義の版、draft/adopted/retired状態、最後の少数試行。楽観的revisionで更新する |
+| SQLite `analysis_pipeline_requests` | 確定したPlanEnvelope、ExecutionBinding、固定snapshot、M0〜M7の現在地、結果runとの関連 |
+| SQLite `analysis_step_attempts` | stepごとの世代・試行番号・状態・成果物・HandlerReport・失敗理由。最新attemptだけを進行判定に使う |
+| SQLite `analysis_pipeline_publications` | Input／Orchestrator／Visualizationごとの公開状態、package hash、エラー。計算済み結果と独立して再試行する |
+| SQLite `analysis_pipeline_events` | pipelineとmilestoneの開始・確定・待機・完了を時系列で表示する監査イベント |
 | `data/analysis_store/inputs/<hash>/input.json` | 実行時点の発話・注釈・実効話者情報と、保存済み原文。共通の入力版を再利用 |
 | `data/analysis_store/runs/<id>/` | `manifest.json`、`parameters.json`、`result.json`、`tables/*.csv`。固定された結果の正本 |
 | `data/obsidian/ResearchVault` | 分析を読むためのノート・保存時点の引用・研究者自身のメモ |
@@ -78,7 +84,7 @@ Whisper原文を先に保存し、Obsidianの専用作業ノートから仕上�
 
 DBに再試行用パッケージを登録 → 一時ファイルから各JSON／CSVを置換 → hashと件数をDBに確定 → Markdownを生成、の順に保存する。起動時に中断中の書き出しを検出する。「保存済み結果から再試行」は当時のパッケージを使うので、後から本文を編集しても過去版を現在の内容に置き換えない。
 
-`analysis_pending_packages`が回復するのは計算後の保存であり、推論中の計画・ステップを再開する台帳ではない。追加分析の受付・試行状態の永続化と明示再開は、再編計画のFLOW-1〜2の拡張として扱う。
+`analysis_pending_packages`は計算後の保存回復だけを担当する。統合実行の受付・計画・step試行は別のpipeline台帳へ保存し、起動時に実行中attemptを`interrupted`へ移してpipelineを再試行待ちにする。再試行は世代を更新し、失敗したstepから新しいattemptを作る。確定済みの親成果物と結果runは再利用し、公開再試行で分析やAIを繰り返さない。
 
 分析の生成ノートが人の編集・移動・削除によって変わっていたら同期を保留する。保存済みのJSON／CSVと手書き内容は保持する。人の追記は各インタビューの`I###-研究メモ.md`などへ移し、生成ノートを変更前の内容・場所に戻してから再試行できる。旧`60-ResearchNotes`は移行前の配置。ノートの自動マージや強制上書きは行わない。ナビゲーションや設定を含む全書き込みの保護が統一済みという意味ではなく、差異は[[20-Modules/obsidian-integration]]を参照する。
 
@@ -89,6 +95,13 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 | 操作 | API |
 | --- | --- |
 | 組み込み手法一覧 | `GET /api/analysis/methods` |
+| 統合実行の能力一覧 | `GET /api/analysis/pipeline-capabilities`。提供中と未提供の手法・形式・provider役割を区別する |
+| 手動定義の保存 | `PUT /api/library/<id>/analysis/definitions/<definition-id>`。`expected_revision`を検証する |
+| 手動定義の少数試行 | `POST /api/library/<id>/analysis/definitions/<definition-id>/trials`。固定入力の最大20件を既定にし外部通信しない |
+| 計画プレビュー | `POST /api/library/<id>/analysis/plans/preview`。副作用なくPlanEnvelopeとExecutionBindingを返す |
+| 統合実行の開始 | `POST /api/library/<id>/analysis/pipelines`。`request_id`、入力版、local-only方針、定義ID、公開先を固定する |
+| 統合実行の状態 | `GET /api/library/<id>/analysis/pipelines/<pipeline-id>`。milestone、step attempt、event、公開先別状態を返す |
+| 統合実行の取消・再試行 | `POST .../<pipeline-id>/cancel` / `retry`。取消は世代単位、再試行は失敗箇所から行う |
 | インタビュー比較 | `POST /api/library/interview-comparison`。応答に対象会話ごとの`input_fingerprints`を含む |
 | 比較の固定保存 | `POST /api/library/interview-comparison/runs`。集計時の`item_ids`・`allow_different_content`・`input_fingerprints`と`request_id`を送る。入力版の欠落は400、現在版との不一致は409で再集計が必要 |
 | 全件分析／KWICの固定保存 | `POST /api/library/<id>/analysis/runs`。`request_id`, `source_revision`, `analysis_revision` と任意の `kwic: {q, mode, speaker}` |
@@ -97,13 +110,14 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 | 保存履歴 | `GET /api/library/<id>/analysis/runs`。直近100件。古い成果物は保持 |
 | 保存・Vault生成の再試行 | `POST /api/analysis/runs/<run-id>/vault` |
 | 成果物取得 | `GET /api/analysis/artifacts/<artifact-id>`。hashを検証して返す |
+| 固定runのZIP取得 | `GET /api/analysis/runs/<run-id>/export.zip`。manifest、parameters、result、表CSVを同じ固定成果物から束ねる |
 
 新しい組み込み手法は [[40-Design/method-rules|登録規約]] を満たし、`analysis_method_registry.METHODS` にID・表示名・CSVデータセットを追加する。計算は既存の分析層へ、詳細と状態・単位・解析器の対応付けは `method_results` へ加える。CSVの列定義、根拠IDの検証、空・除外・更新時の検証を追加し、計算が変わった版を更新する。ファイルから任意コードを実行する登録方式にはしない。登録手法の一覧・件数は現行の`METHODS`を正本とする。
 
-複数会話のインタビュー比較と固定保存は実装済み。ResearchVaultでは`40-研究/インタビュー比較/comparison-<run-id>.md`に保存する。比較履歴のGET APIはあるが、Web画面から履歴・成果物・Vault再試行へ進む導線は未実装（UX-33）。研究メモ・解釈・コード案の差分取り込み、外部R／Python等の結果登録、図の自動添付、保存先変更UI、バックアップ専用UIも後続工程。
+複数会話のインタビュー比較と固定保存は実装済み。ResearchVaultでは`40-研究/インタビュー比較/comparison-<run-id>.md`に保存する。比較画面から保存履歴、成果物、Obsidianノートを開き、固定済み成果物からVault保存を再試行できる（UX-33）。研究メモ・解釈・コード案の差分取り込み、外部R／Python等の結果登録、図の自動添付、保存先変更UI、バックアップ専用UIも後続工程。
 
-検証先：`tests/test_ai_finishing.py`、`tests/test_analysis_storage.py`、`tests/test_content_analysis.py`、`tests/test_content_browser.py`。AI通信はモックを用いる。
+検証先：`tests/test_analysis_core_contracts.py`、`tests/test_analysis_plan_binding.py`、`tests/test_analysis_snapshot_commit.py`、`tests/test_analysis_milestones.py`、`tests/test_analysis_recovery.py`、`tests/test_analysis_research_protocol.py`、`tests/test_analysis_exports.py`、`tests/test_analysis_publication.py`、`tests/test_analysis_storage.py`、`tests/test_content_browser.py`。AI通信はモックを用い、実Vaultは使わない。
 
-2026-09-13のWindows作業ツリーで `python -X utf8 -m unittest discover -s tests` の272件が成功。ブラウザーのファイル保存待ちを実時間で確認する修正後に、`test_content_browser.py` の4件も再実行して成功した。実APIによる生成品質・料金の検証は行っていない。
+2026-09-21のWindows作業ツリーで `PYTHONPATH=src;tests` を設定し、`.venv\Scripts\python.exe -m unittest discover -s tests` の550件が成功した。手動定義の少数試行からM0〜M7完了までをChromiumでも確認した。実APIによる生成品質・料金の検証は行っていない。
 
 関連：[[current-storage]]、[[40-Design/storage-policy]]、[[20-Modules/module-map]]。

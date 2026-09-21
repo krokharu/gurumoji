@@ -16,7 +16,8 @@ class UiDefaultsTests(unittest.TestCase):
             "複数回処理やエフェクトを加えて精度を上げます。注意：処理時間が増えます",
             page,
         )
-        self.assertIn("AI仕上げ <em>任意</em>", page)
+        self.assertIn("文章整形 <em>任意</em>", page)
+        self.assertIn('name="transcript_finishing_mode" type="radio" value="recommended" checked', page)
         self.assertIn("TXT は常に作成", page)
         self.assertNotIn("JSON（常時）", page)
 
@@ -31,12 +32,14 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("パスと保存先を指定", page)
         self.assertIn("処理装置・話者数・無音判定", page)
         self.assertIn('id="setup-ready-state"', page)
-        # Detailed settings are summarised and start closed; "変更" opens one panel.
+        # Recognition is the first setting and starts open; other panels open on request.
         self.assertIn('id="settings-summary"', page)
         for panel in ("recognition", "vocabulary", "finishing", "emotion", "output"):
             self.assertIn(f'data-open-panel="{panel}"', page)
             self.assertRegex(page, rf'<details[^>]*data-settings-panel="{panel}"')
-        self.assertNotRegex(page, r'<details[^>]*data-settings-panel="[^"]+"[^>]*\bopen\b')
+        self.assertRegex(page, r'<details[^>]*data-settings-panel="recognition"[^>]*\bopen\b')
+        for panel in ("vocabulary", "finishing", "emotion", "output"):
+            self.assertNotRegex(page, rf'<details[^>]*data-settings-panel="{panel}"[^>]*\bopen\b')
         self.assertIn('id="flow-steps"', page)
         self.assertIn('class="primary-button launch-button"', page)
         self.assertRegex(page, r'id="finish-in-obsidian"[^>]*checked')
@@ -108,16 +111,18 @@ class UiDefaultsTests(unittest.TestCase):
         ids = re.findall(r'\bid="([^"]+)"', page)
         self.assertEqual(len(ids), len(set(ids)))
 
-    def test_ai_provider_selection_enables_all_options_and_json_downloads_are_hidden(self):
+    def test_ai_provider_selection_applies_finishing_mode_and_json_downloads_are_hidden(self):
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        effort_script = (app.APP_DIRECTORY / "static" / "ai-effort.js").read_text(encoding="utf-8")
 
         self.assertIn("listen(aiProvider, 'change', selectDefaultAiOptions);", script)
-        self.assertIn(
-            "if (aiProvider.value !== 'none')",
-            script,
-        )
-        self.assertIn("aiOptionInputs.forEach(input => { input.checked = true; });", script)
-        self.assertIn("if (jevCompare && tokenConfigSnapshot.typesafe) jevCompare.checked = true;", script)
+        self.assertIn("function applyTranscriptFinishingPreset()", script)
+        self.assertIn("mode === 'advanced' && hasAi", script)
+        self.assertIn("mode !== 'off' && hasAi", script)
+        self.assertIn("mode === 'advanced' && hasAi && Boolean(tokenConfigSnapshot.typesafe)", script)
+        self.assertIn("[['off', 'なし'], ['low', '小'], ['medium', '中'], ['high', '高'], ['ultra', 'MAX']]", effort_script)
+        self.assertIn("前を1発話ずつ最大10回", effort_script)
+        self.assertIn("前後最大10発話", effort_script)
         self.assertIn("if (aiProvider.value === 'none') input.checked = false;", script)
         self.assertIn("function applyLmStudioDefaults(config)", script)
         self.assertIn("config.lmstudio || !String(config.lmstudio_model || '').trim()", script)
@@ -157,7 +162,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("事前アンケート回答", page)
         self.assertIn('id="speaker-identity-provider"', page)
         self.assertIn('id="rerun-speaker-identification"', page)
-        self.assertIn("自己紹介から話者名を再特定", page)
+        self.assertIn("自己紹介から話者を再特定・登録", page)
         self.assertIn('role="tabpanel"', page)
         self.assertNotIn("研究同意", page)
         self.assertNotIn("録音同意", page)
@@ -168,6 +173,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function setSpeakerRegistryDirty(", script)
         self.assertIn("libraryRequestController.abort()", script)
         self.assertIn("function clearLibraryFilters()", script)
+        self.assertIn("className = 'library-group-heading'", script)
         self.assertIn("function renderSpeakerSurveyAnalysis()", script)
         self.assertIn("function buildSpeakerSurveyCrosstab(", script)
         self.assertIn("function speakerSurveyCorrelation(", script)
@@ -176,7 +182,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function showView(", script)
         self.assertIn("async function rerunSpeakerIdentification()", script)
         self.assertIn("/speaker-identification`, {", script)
-        self.assertIn("listen(showAnalysisButton, 'click'", script)
+        self.assertIn("listen(showLibraryAnalysisButton, 'click'", script)
         self.assertIn("function openAnalysisForItem(itemId)", script)
         self.assertIn("showView('analysis', {analysisItemId: targetItemId})", script)
         self.assertIn("function openResultDestination(destination)", script)
@@ -188,7 +194,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertNotIn("話者台帳", script)
         self.assertNotIn("研究同意 未確認", script)
         self.assertNotIn("録音同意 未確認", script)
-        self.assertIn("自己紹介から話者を特定・リンク", page)
+        self.assertIn("自己紹介から話者を特定・登録", page)
         self.assertIn("候補抽出とリンク再確認を2回処理", page)
         self.assertIn("AI自動生成アウトライン", page)
         self.assertIn('id="session-date-note"', page)
@@ -221,8 +227,12 @@ class UiDefaultsTests(unittest.TestCase):
             4,
         )
         self.assertIn('id="show-analysis-button"', page)
-        self.assertNotIn('id="processed-data-hub"', page)
-        self.assertNotIn('id="show-library-analysis-button"', page)
+        self.assertIn('id="processed-data-hub"', page)
+        self.assertIn('id="show-library-list-button"', page)
+        self.assertIn('id="show-library-analysis-button"', page)
+        self.assertIn('id="manage-library-groups-button"', page)
+        self.assertIn('id="library-group-dialog"', page)
+        self.assertIn('id="library-group"', page)
         self.assertIn('id="analysis-card"', page)
         self.assertIn('id="result-analysis-button"', page)
         self.assertIn('id="analysis-open-item-button"', page)
@@ -240,6 +250,17 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('id="analysis-xlsx-export"', page)
         self.assertIn("Excel（標準出力）", page)
         self.assertIn('id="analysis-json-export"', page)
+        self.assertIn('id="analysis-run-button"', page)
+        self.assertIn('id="analysis-run-settings-button"', page)
+        self.assertIn('id="analysis-run-dialog"', page)
+        self.assertIn('id="analysis-execution-view"', page)
+        self.assertIn('id="analysis-manual-definition"', page)
+        self.assertIn('id="analysis-definition-description"', page)
+        self.assertIn('id="analysis-job-chip"', page)
+        self.assertIn("自動実行", page)
+        self.assertIn("手動実行", page)
+        self.assertIn("バックグラウンドで続ける", page)
+        self.assertIn("analysis-execution.js", page)
 
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
         self.assertIn("async function loadAnalysisCatalog(", script)
@@ -250,6 +271,10 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("function buildAnalysisTermTreeChart(", script)
         self.assertIn("function buildAnalysisDependencyExplorer(", script)
         self.assertIn("function buildAnalysisCorrelationExplorer(", script)
+        self.assertIn("function buildAnalysisDescriptiveChart(", script)
+        self.assertIn("function buildAnalysisFrequencyExplorer(", script)
+        self.assertIn("function buildAnalysisEffectChart(", script)
+        self.assertIn("function buildAnalysisCrosstabExplorer(", script)
         self.assertIn("function buildAnalysisNavigation(", script)
         self.assertIn("function syncAnalysisNavigationToScroll(", script)
         self.assertIn("function buildAnalysisScopeSwitch(", script)
@@ -282,7 +307,17 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertNotIn("participant: '参加者単位'", script)
         self.assertNotIn("topic: 'テーマ単位'", script)
 
+        execution = (app.APP_DIRECTORY / "static" / "analysis-execution.js").read_text(encoding="utf-8")
+        self.assertIn("const analysisExecutionStageDefinitions", execution)
+        self.assertIn("function openAnalysisExecutionDialog(", execution)
+        self.assertIn("async function analysisExecutionPoll(", execution)
+        self.assertIn("async function cancelAnalysisExecution(", execution)
+        self.assertIn("async function analysisExecutionPrepareDefinition(", execution)
+        self.assertIn("/analysis/pipelines", execution)
+        self.assertIn("provider_policy: 'local_only'", execution)
+
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn("prefers-reduced-motion", styles)
         self.assertIn(".analysis-desktop-layout", styles)
         self.assertIn(".analysis-mobile-layout", styles)
         self.assertIn(".item-tabs", styles)
@@ -298,6 +333,9 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn(".analysis-term-tree", styles)
         self.assertIn(".analysis-dependency-tree", styles)
         self.assertIn(".analysis-correlation-table", styles)
+        self.assertIn(".analysis-distribution-chart", styles)
+        self.assertIn(".analysis-effect-chart", styles)
+        self.assertIn(".analysis-stacked-bar", styles)
         self.assertIn(".analysis-engine-notice", styles)
         self.assertIn(".segment-proposal-grid", styles)
         self.assertIn(".segment-manual-classification", styles)
@@ -554,7 +592,7 @@ class UiDefaultsTests(unittest.TestCase):
         sizes = [float(value) for value in re.findall(r"font(?:-size)?:[^;]*?(?<![\d.])(0?\.\d+)rem", styles)]
         self.assertEqual([size for size in sizes if size < 0.7], [])
         # UX-23: tab semantics match the markup and support arrow keys.
-        self.assertNotIn('aria-controls="processed-data-hub result-card"', page)
+        self.assertIn('aria-controls="processed-data-hub library-card analysis-card"', page)
         self.assertNotRegex(page, r'id="result-card"[^>]*role="tabpanel"')
         self.assertIn("function syncTabStops()", script)
         self.assertIn("ArrowRight: index + 1", script)
@@ -605,6 +643,15 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('id="job-chip"', page)
         self.assertIn("function updateJobChip(job)", script)
         self.assertIn("let activeJobId = null;", script)
+        # The launch review exposes the actual audio AI and CPU/GPU selected for each stage.
+        self.assertIn('data-review-transcription', page)
+        self.assertIn('data-review-diarization', page)
+        self.assertIn('WhisperX (faster-whisper)', script)
+        self.assertIn('pyannote.audio', script)
+        # Each review card, including its text, is one large actionable button.
+        self.assertEqual(page.count('class="launch-review-card"'), 4)
+        self.assertNotIn('<div class="launch-review" aria-label="設定内容の確認">\n            <div>', page)
+        self.assertIn('.launch-review-card { display: grid;', styles)
         # UX-18 / UX-27: shared palette and content-width buttons by default.
         effort_styles = (app.APP_DIRECTORY / "static" / "ai-effort.css").read_text(encoding="utf-8")
         self.assertNotIn("#315ed0", effort_styles)
@@ -612,7 +659,8 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn(".primary-button { width: auto; margin: 0;", styles)
         # UX-21 / UX-22: no decorative English labels on every card.
         self.assertNotIn('class="eyebrow"', page)
-        # Detailed settings only open on request.
+        # Recognition is the first and initially open settings panel; others open on request.
+        self.assertIn('id="panel-recognition" class="settings-panel" data-settings-panel="recognition" open', page)
         self.assertIn("function openSettingsPanel(name", script)
 
 

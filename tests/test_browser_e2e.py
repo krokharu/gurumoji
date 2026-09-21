@@ -187,11 +187,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const mode = document.querySelector('#finish-in-obsidian');
     const direct = document.querySelector('[data-app-finishing-only]');
     if (!mode.checked || !direct.hidden) throw new Error('Obsidian mode is not the default');
-    mode.checked = false;
-    mode.dispatchEvent(new Event('change'));
-    if (direct.hidden) throw new Error('direct finishing mode did not become available');
-    mode.checked = true;
-    mode.dispatchEvent(new Event('change'));
+    const advanced = document.querySelector('input[name="transcript_finishing_mode"][value="advanced"]');
+    advanced.checked = true;
+    advanced.dispatchEvent(new Event('change'));
+    if (direct.hidden || mode.checked) throw new Error('advanced finishing mode did not become available');
     currentJob = {speaker_names: {}, speaker_profiles: {}, segments: [{
       id: 'review-test', speaker: 'A', start: 0, end: 1, text: '校正後の本文',
       ai_review: {original_text: '元の本文', noise_candidate: true, fragments: [
@@ -266,6 +265,16 @@ window.addEventListener('DOMContentLoaded', () => {
                 speaker_names={'A': '参加者'}, files=[], outline=None, emotion_analysis=None,
                 write_srt=False, write_json=True,
                 session_profile={'session_type': 'focus_group', 'comparison_group': 'example'})
+        client = app.app.test_client()
+        selection = {'item_ids': ['compare_a', 'compare_b'], 'allow_different_content': False}
+        compared = client.post('/api/library/interview-comparison', json=selection).get_json()
+        with patch.object(app.AnalysisStore, '_publish_comparison', side_effect=app.StoreConflict('test conflict')):
+            saved = client.post('/api/library/interview-comparison/runs', json={
+                **selection, 'request_id': 'browser-conflict-comparison',
+                'input_fingerprints': compared['input_fingerprints'],
+            })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertEqual(saved.get_json()['run']['vault_status'], 'conflict')
         driver = r"""
 window.addEventListener('DOMContentLoaded', async () => {
   const check = (condition, message) => { if (!condition) throw Error(message); };
@@ -280,7 +289,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     const base = document.querySelector('#interview-comparison-base');
     const run = document.querySelector('#interview-comparison-run');
     const result = document.querySelector('#interview-comparison-result');
+    const history = document.querySelector('#interview-comparison-history-list');
     await until(() => !base.disabled && base.options.length === 2);
+    await until(() => history.querySelector('[data-comparison-vault-retry]'));
+    history.querySelector('[data-comparison-vault-retry]').click();
+    await until(() => !history.querySelector('[data-comparison-vault-retry]'));
+    check(history.querySelector('[data-comparison-run] summary').textContent.includes('保存済み'), 'vault retry did not refresh history');
     const target = document.querySelector('#interview-comparison-targets input:not(:disabled)');
     target.click();
     run.click();
@@ -289,6 +303,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     await until(() => !result.hidden);
     result.querySelector('button').click();
     await until(() => result.querySelector('.interview-comparison-save-status').textContent.includes('保存しました'));
+    await until(() => history.querySelector('[data-comparison-run]'));
+    const saved = history.querySelector('[data-comparison-run]');
+    saved.open = true;
+    check(saved.querySelector('a[href^="/api/analysis/artifacts/"]'), 'saved comparison artifact link missing');
+    document.querySelector('#interview-comparison-history-refresh').click();
+    await until(() => document.querySelector('#interview-comparison-history-status').textContent.includes('1件'));
 
     const originalConfirm = window.confirm;
     const originalLoad = loadAnalysisItem;
@@ -521,27 +541,39 @@ window.addEventListener('DOMContentLoaded', async () => {
     activeJobId = null;
 
     // UX-23: one Tab stop per tablist; arrows, Home and End move focus.
-    const tabs = ['show-new-button', 'show-library-button', 'show-analysis-button', 'show-speakers-button'].map(byId);
+    const tabs = ['show-new-button', 'show-library-button', 'show-speakers-button'].map(byId);
     const key = name => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: name, bubbles: true}));
-    expect('UX-23 roving tabindex', tabs.map(tab => tab.getAttribute('tabindex')).join() === '0,-1,-1,-1',
+    expect('UX-23 roving tabindex', tabs.map(tab => tab.getAttribute('tabindex')).join() === '0,-1,-1',
       tabs.map(tab => tab.getAttribute('tabindex')).join());
     tabs[0].focus();
     key('ArrowRight');
     expect('UX-23 ArrowRight', document.activeElement === tabs[1], document.activeElement.id);
     key('End');
-    expect('UX-23 End', document.activeElement === tabs[3], document.activeElement.id);
+    expect('UX-23 End', document.activeElement === tabs[2], document.activeElement.id);
     key('Home');
     expect('UX-23 Home', document.activeElement === tabs[0], document.activeElement.id);
     key('ArrowLeft');
-    expect('UX-23 ArrowLeft wraps', document.activeElement === tabs[3], document.activeElement.id);
+    expect('UX-23 ArrowLeft wraps', document.activeElement === tabs[2], document.activeElement.id);
     expect('UX-23 arrows do not switch view', !byId('create-view').hidden);
     showView('speakers');
     await pause(0);
-    expect('UX-23 Tab stop follows selection', tabs[3].getAttribute('tabindex') === '0' && tabs[0].getAttribute('tabindex') === '-1');
+    expect('UX-23 Tab stop follows selection', tabs[2].getAttribute('tabindex') === '0' && tabs[0].getAttribute('tabindex') === '-1');
     expect('UX-01 route follows the screen', window.location.hash === '#/speakers', window.location.hash);
     showView('new');
     await pause(0);
     expect('UX-01 route returns to create', window.location.hash === '#/new', window.location.hash);
+    showView('library');
+    await pause(0);
+    expect('processed data hub opens on list', !byId('processed-data-hub').hidden
+      && byId('show-library-list-button').getAttribute('aria-selected') === 'true');
+    byId('show-library-analysis-button').click();
+    await pause(0);
+    expect('analysis has a separate top-level destination', window.location.hash === '#/analysis'
+      && byId('show-analysis-button').getAttribute('aria-selected') === 'true'
+      && byId('show-library-button').getAttribute('aria-selected') === 'false'
+      && byId('show-library-analysis-button').getAttribute('aria-selected') === 'true');
+    showView('new');
+    await pause(0);
 
     // UX-24 / UX-17: inspect the loaded stylesheet itself.
     const sheet = [...document.styleSheets].find(item => item.href && item.href.includes('style.css'));
@@ -602,12 +634,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     expect('UX-09 no horizontal overflow', document.documentElement.scrollWidth <= window.innerWidth + 2,
       String(document.documentElement.scrollWidth));
 
-    // Detailed settings stay closed until "変更" opens exactly one panel.
+    // Recognition starts open; "変更" opens the requested additional panel.
     const panels = [...document.querySelectorAll('[data-settings-panel]')];
-    expect('settings panels closed by default', panels.every(panel => !panel.open), panels.filter(p => p.open).map(p => p.id).join());
+    expect('recognition settings open by default', byId('panel-recognition').open
+      && panels.filter(panel => panel.open).length === 1, panels.filter(p => p.open).map(p => p.id).join());
     document.querySelector('[data-open-panel="finishing"]').click();
     await pause(400);
-    expect('変更 opens one panel', byId('panel-finishing').open && panels.filter(panel => panel.open).length === 1);
+    expect('変更 opens requested panel', byId('panel-finishing').open && byId('panel-recognition').open);
     byId('panel-finishing').open = false;
 
     // UX-06 / UX-07: the main task is placed first.

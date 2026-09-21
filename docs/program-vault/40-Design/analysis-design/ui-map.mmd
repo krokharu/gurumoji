@@ -1,0 +1,19 @@
+flowchart LR
+    entry["処理済みデータ / 分析・可視化"] --> result["S01 結果を見る"]
+    entry --> plan["S02 分析を組む"]
+    entry --> compare["S05 比較する"]
+    entry --> export["S04 データ・出力"]
+    plan --> manual["手動：ラベル・測定・尺度を入力"]
+    manual --> columns["入力列・出力列・分析対象列"]
+    columns --> method["手法・条件・観測単位を選択"]
+    method --> trial["少数試行・定義確定・計画確認"]
+    trial --> run["S03 実行状況 M0〜M7"]
+    run -->|"確定済み結果"| result
+    result -->|"セル・点・辺を選択"| evidence["S06 根拠ドロワー"]
+    evidence -->|"閉じる・元位置へ"| result
+    result -->|"選択した列を引継ぐ"| plan
+    compare -->|"親結果を引継ぐ"| plan
+    result -->|"図と条件を固定"| export
+    export --> files["SPSS / jamovi / Excel / 画像 / ZIP"]
+    classDef screen fill:#e5f3ef,stroke:#12695e,color:#183b44
+    class result,plan,compare,export,run,evidence screen

@@ -72,14 +72,22 @@ const detectNames = document.querySelector('#detect-names');
 const createOutline = document.querySelector('#create-outline');
 const finishInObsidian = document.querySelector('#finish-in-obsidian');
 const jevCompare = document.querySelector('#jev-compare');
+const transcriptFinishingModeInputs = [...document.querySelectorAll('input[name="transcript_finishing_mode"]')];
+const finishingModeHint = document.querySelector('#finishing-mode-hint');
 const jevConfigStatus = document.querySelector('#jev-config-status');
 const speakerIdentityProvider = document.querySelector('#speaker-identity-provider');
 const rerunSpeakerIdentificationButton = document.querySelector('#rerun-speaker-identification');
 const speakerIdentityStatus = document.querySelector('#speaker-identity-status');
 const showLibraryButton = document.querySelector('#show-library-button');
 const showAnalysisButton = document.querySelector('#show-analysis-button');
+const processedDataHub = document.querySelector('#processed-data-hub');
+const showLibraryListButton = document.querySelector('#show-library-list-button');
+const showLibraryAnalysisButton = document.querySelector('#show-library-analysis-button');
 const showNewButton = document.querySelector('#show-new-button');
 const showSpeakersButton = document.querySelector('#show-speakers-button');
+const libraryGroupDialog = document.querySelector('#library-group-dialog');
+const libraryGroupList = document.querySelector('#library-group-list');
+const libraryGroupMessage = document.querySelector('#library-group-message');
 const segmentEditor = document.querySelector('#segment-editor');
 const speakerEditor = document.querySelector('#speaker-editor');
 const mediaReview = document.querySelector('#media-review');
@@ -147,6 +155,7 @@ const speakerSurveyAnalysisState = {
 };
 let libraryRequestController = null;
 let libraryRequestSequence = 0;
+let libraryGroups = [];
 let trainingStatusLoaded = false;
 let analysisCatalogLoaded = false;
 let analysisCatalog = [];
@@ -731,12 +740,19 @@ function updateCreateSummary() {
   const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
   const language = selectedOptionText(languageSelect) || '自動判定';
   const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
+  const transcriptionDevice = document.querySelector('#transcription-device');
+  const diarizationDevice = document.querySelector('#diarization-device');
+  const transcriptionHardware = transcriptionDevice && transcriptionDevice.value === 'cuda' ? 'GPU (CUDA)' : 'CPU';
+  const diarizationHardware = diarizationDevice && diarizationDevice.value === 'cuda' ? 'GPU (CUDA)' : 'CPU';
+  const gpuCapabilityMajor = Number(tokenConfigSnapshot.machine?.gpu?.capability_major) || 0;
+  const transcriptionAi = transcriptionDevice && transcriptionDevice.value === 'cuda' && gpuCapabilityMajor >= 7
+    ? 'WhisperX (faster-whisper)'
+    : 'OpenAI Whisper';
   const vocabularyTerms = vocabularyTermsFromInput();
   const recognitionParts = [model, language, `前処理: ${preprocess}`];
   if (boostQuietSpeech && boostQuietSpeech.checked) recognitionParts.push('小さい声対策');
   if (triplePass && triplePass.checked) recognitionParts.push('詳細処理');
-  const deviceSelect = document.querySelector('#transcription-device');
-  if (deviceSelect) recognitionParts.push(deviceSelect.value === 'cuda' ? 'GPU' : 'CPU');
+  if (transcriptionDevice) recognitionParts.push(transcriptionDevice.value === 'cuda' ? 'GPU' : 'CPU');
   const speakerRange = [minSpeakersInput && minSpeakersInput.value, maxSpeakersInput && maxSpeakersInput.value].filter(Boolean);
   if (speakerRange.length === 2) recognitionParts.push(`話者 ${speakerRange[0]}〜${speakerRange[1]}名`);
   const recognitionExtras = [];
@@ -745,14 +761,11 @@ function updateCreateSummary() {
   if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
   const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
   const providerLabel = aiProvider && aiProvider.value !== 'none' ? selectedOptionText(aiProvider) : '';
-  let finishingLabel = '使用しない';
-  if (finishInObsidian && finishInObsidian.checked) {
-    finishExtras.push('文字起こし後にObsidianで仕上げ');
-    finishingLabel = providerLabel ? `Obsidianで仕上げ（標準）/ ${providerLabel}` : 'Obsidianで仕上げ（標準）';
-  } else if (providerLabel && enabledAiOptions) {
-    finishExtras.push(`${providerLabel} AI仕上げ ${enabledAiOptions}項目`);
-    finishingLabel = `${providerLabel} / ${enabledAiOptions}項目`;
-  }
+  const finishingMode = selectedTranscriptFinishingMode();
+  let finishingLabel = {recommended: 'おすすめ（LLM最小）', advanced: '高度', off: '整形しない'}[finishingMode] || '個別設定';
+  finishExtras.push(`文章整形: ${finishingLabel}`);
+  if (providerLabel && enabledAiOptions) finishingLabel += ` / ${providerLabel}`;
+  if (finishInObsidian && finishInObsidian.checked) finishExtras.push('Obsidianにも保存');
   if (jevCompare && jevCompare.checked) finishExtras.push('Jev修正要否比較');
   const emotionEnabled = Boolean(emotionAnalysis && emotionAnalysis.checked);
   if (emotionEnabled) finishExtras.push('感情分析');
@@ -780,7 +793,8 @@ function updateCreateSummary() {
   setText('[data-settings-value="emotion"]', emotionLabel);
   setText('[data-settings-value="output"]', outputParts.join(' / '));
   setText('[data-review-source]', sourceLabel);
-  setText('[data-review-recognition]', `${mode} / ${model} / ${language} / ${preprocess}`);
+  setText('[data-review-transcription]', `文字起こし: ${transcriptionAi} / ${model} / ${transcriptionHardware}`);
+  setText('[data-review-diarization]', `話者分離: pyannote.audio / ${diarizationHardware}`);
   setText('[data-review-finish]', finishExtras.length ? finishExtras.join(' / ') : '追加処理なし');
   setText('[data-review-output]', outputParts.join(' / '));
   setText('[data-flow-detail="1"]', hasSource ? sourceLabel : '未選択');
@@ -976,6 +990,14 @@ function setActiveNavigation(view) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
+  [
+    [showLibraryListButton, view === 'library'],
+    [showLibraryAnalysisButton, view === 'analysis']
+  ].forEach(([button, active]) => {
+    if (!button) return;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
 }
 
 function showView(view, {analysisItemId = '', itemId = '', force = false, replace = false} = {}) {
@@ -990,6 +1012,7 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   if (resultVisible && currentJobDirty && target !== 'item') setCurrentJobDirty(false);
   if (target !== 'item' && mediaPlayer) mediaPlayer.pause();
   if (createView) createView.hidden = target !== 'new';
+  if (processedDataHub) processedDataHub.hidden = !['library', 'analysis'].includes(target);
   if (libraryCard) libraryCard.hidden = target !== 'library';
   if (analysisCard) analysisCard.hidden = target !== 'analysis';
   if (speakerRegistryCard) speakerRegistryCard.hidden = target !== 'speakers';
@@ -1083,6 +1106,8 @@ function showProgressCard({scroll = false} = {}) {
 
 listen(showLibraryButton, 'click', () => showView('library'));
 listen(showAnalysisButton, 'click', () => showView('analysis'));
+listen(showLibraryListButton, 'click', () => showView('library'));
+listen(showLibraryAnalysisButton, 'click', () => showView('analysis'));
 listen(showNewButton, 'click', () => showView('new'));
 listen(showSpeakersButton, 'click', () => showView('speakers'));
 itemTabButtons.forEach(button => listen(button, 'click', () => setItemTab(button.dataset.itemTab)));
@@ -2312,7 +2337,7 @@ function applyLmStudioDefaults(config) {
   // selected yet: either state would make the default form fail at submission.
   if (!aiProvider || !config || !config.lmstudio || !String(config.lmstudio_model || '').trim()) return;
   aiProvider.value = 'lmstudio';
-  aiOptionInputs.forEach(input => { input.checked = true; });
+  applyTranscriptFinishingPreset();
   syncAiFields();
   updateCreateSummary();
 }
@@ -2452,18 +2477,43 @@ function syncAiFields() {
     if (jevConfigStatus) {
       jevConfigStatus.textContent = tokenConfigSnapshot.typesafe
         ? `TypeSafe ${tokenConfigSnapshot.typesafe_model || 'jev-latest'} を使用できます。`
-        : 'Jev比較には tokens.json の typesafe_api_key が必要です。';
+        : 'おすすめのJev判定／Jev比較には tokens.json の typesafe_api_key が必要です。';
     }
   }
   if (typeof syncAiEffortSettings === 'function') syncAiEffortSettings();
 }
 
+function selectedTranscriptFinishingMode() {
+  const selected = transcriptFinishingModeInputs.find(input => input.checked);
+  return selected ? selected.value : 'recommended';
+}
+
+function applyTranscriptFinishingPreset() {
+  const mode = selectedTranscriptFinishingMode();
+  const hasAi = Boolean(aiProvider && aiProvider.value !== 'none');
+  if (cleanTranscript) cleanTranscript.checked = mode === 'advanced' && hasAi;
+  if (detectNames) detectNames.checked = mode !== 'off' && hasAi;
+  if (createOutline) createOutline.checked = mode === 'advanced' && hasAi;
+  if (jevCompare) jevCompare.checked = mode === 'advanced' && hasAi && Boolean(tokenConfigSnapshot.typesafe);
+  if (finishInObsidian && mode !== 'recommended') finishInObsidian.checked = false;
+  document.querySelectorAll('[data-advanced-finishing-only]').forEach(row => {
+    row.hidden = mode !== 'advanced';
+  });
+  document.querySelectorAll('[data-speaker-finishing-option]').forEach(row => {
+    row.hidden = mode === 'off';
+  });
+  if (finishingModeHint) {
+    finishingModeHint.textContent = {
+      recommended: 'おすすめモードはJevが意味不明・ノイズ・途切れを発話ごとに判定し、疑わしい文章だけを「なし／小／中／高／MAX」の範囲でLLMが予測・置換します。',
+      advanced: '高度モードは全体文脈の再校正、自己紹介・話者統合、Jev比較を実行するため、AI呼び出しが増えます。',
+      off: '文字本文は変更せず、境界・ノイズ・句読点の確認候補だけを整形リザルトに残します。'
+    }[mode] || '';
+  }
+}
+
 function selectDefaultAiOptions() {
   if (!aiProvider) return;
-  if (aiProvider.value !== 'none') {
-    aiOptionInputs.forEach(input => { input.checked = true; });
-    if (jevCompare && tokenConfigSnapshot.typesafe) jevCompare.checked = true;
-  }
+  applyTranscriptFinishingPreset();
   syncAiFields();
   updateCreateSummary();
 }
@@ -2489,15 +2539,25 @@ listen(emotionAnalysis, 'change', () => {
 });
 listen(aiProvider, 'change', selectDefaultAiOptions);
 function syncFinishingMode() {
-  document.querySelectorAll('[data-app-finishing-only]').forEach(row => {
-    row.hidden = Boolean(finishInObsidian && finishInObsidian.checked);
+  const mode = selectedTranscriptFinishingMode();
+  document.querySelectorAll('[data-advanced-finishing-only]').forEach(row => {
+    row.hidden = mode !== 'advanced';
+  });
+  document.querySelectorAll('[data-speaker-finishing-option]').forEach(row => {
+    row.hidden = mode === 'off';
   });
 }
 listen(finishInObsidian, 'change', () => {
   syncFinishingMode();
   updateCreateSummary();
 });
+applyTranscriptFinishingPreset();
 syncFinishingMode();
+transcriptFinishingModeInputs.forEach(input => listen(input, 'change', () => {
+  applyTranscriptFinishingPreset();
+  syncAiFields();
+  updateCreateSummary();
+}));
 [modelName, languageSelect, audioPreprocess, writeSrt, burnSubtitledVideo].forEach(input => {
   listen(input, 'change', updateCreateSummary);
 });
@@ -2519,7 +2579,7 @@ document.querySelectorAll('[data-flow-jump]').forEach(button => {
 document.querySelectorAll('[data-open-panel]').forEach(button => {
   listen(button, 'click', () => openSettingsPanel(button.dataset.openPanel));
 });
-[document.querySelector('#transcription-device'), minSpeakersInput, maxSpeakersInput, boostQuietSpeech].forEach(input => {
+[document.querySelector('#transcription-device'), document.querySelector('#diarization-device'), minSpeakersInput, maxSpeakersInput, boostQuietSpeech].forEach(input => {
   listen(input, 'change', updateCreateSummary);
 });
 mobileWizardMedia.addEventListener('change', () => {
@@ -2803,6 +2863,12 @@ listen(form, 'submit', async event => {
     return;
   }
   const provider = aiProvider ? aiProvider.value : 'none';
+  if (selectedTranscriptFinishingMode() === 'advanced' && provider === 'none') {
+    setAlert(formError, '高度モードでは OpenAI、Google Gemini、またはローカルLLMを選択してください。', true);
+    const finishSection = document.querySelector('#setup-finish');
+    if (finishSection) finishSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+    return;
+  }
   if (provider === 'none') aiOptionInputs.forEach(input => { input.checked = false; });
   const wantsAi = provider !== 'none' && aiOptionInputs.some(input => input.checked);
   if (wantsAi && provider === 'none') {
@@ -3025,11 +3091,110 @@ function updateFacetSelect(select, values, allLabel) {
   if ([...select.options].some(option => option.value === selected)) select.value = selected;
 }
 
+function updateLibraryGroupSelect(select, groups, {includeAll = false, includeUngrouped = false} = {}) {
+  if (!select) return;
+  const selected = select.value;
+  select.replaceChildren();
+  if (includeAll) select.add(new Option('すべてのグループ', ''));
+  if (includeAll || includeUngrouped) select.add(new Option('未分類', includeAll ? '__ungrouped__' : ''));
+  groups.forEach(group => select.add(new Option(`${group.name}（${group.item_count || 0}件）`, group.id)));
+  if ([...select.options].some(option => option.value === selected)) select.value = selected;
+}
+
+async function assignLibraryItemGroup(item, select) {
+  const previous = item.group_id || '';
+  select.disabled = true;
+  try {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(item.id)}/group`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group_id: select.value})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || 'グループを変更できませんでした。');
+    await loadLibrary();
+  } catch (error) {
+    select.value = previous;
+    select.disabled = false;
+    setAlert(document.querySelector('#library-message'), error.message, true);
+  }
+}
+
+function renderLibraryGroupManager() {
+  if (!libraryGroupList) return;
+  libraryGroupList.replaceChildren();
+  if (!libraryGroups.length) {
+    const empty = document.createElement('p');
+    empty.className = 'library-group-empty';
+    empty.textContent = 'グループはまだありません。上の欄から作成できます。';
+    libraryGroupList.append(empty);
+    return;
+  }
+  libraryGroups.forEach(group => {
+    const row = document.createElement('div');
+    row.className = 'library-group-row';
+    const field = document.createElement('label');
+    field.className = 'field';
+    const label = document.createElement('span');
+    label.textContent = `${group.item_count || 0}件`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.value = group.name;
+    input.setAttribute('aria-label', `${group.name}のグループ名`);
+    field.append(label, input);
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'secondary-button compact-button';
+    save.textContent = '名前を保存';
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        const response = await apiFetch(`/api/library/groups/${encodeURIComponent(group.id)}`, {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: input.value})
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'グループ名を変更できませんでした。');
+        await loadLibrary();
+        renderLibraryGroupManager();
+        setAlert(libraryGroupMessage, 'グループ名を変更しました。');
+      } catch (error) {
+        save.disabled = false;
+        setAlert(libraryGroupMessage, error.message, true);
+      }
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary-button danger compact-button';
+    remove.textContent = '削除';
+    remove.addEventListener('click', async () => {
+      const count = Number(group.item_count || 0);
+      const note = count ? `\n所属する${count}件のデータは「未分類」に戻ります。` : '';
+      if (!window.confirm(`グループ「${group.name}」を削除しますか？${note}\n処理済みデータ本体は削除されません。`)) return;
+      remove.disabled = true;
+      try {
+        const response = await apiFetch(`/api/library/groups/${encodeURIComponent(group.id)}`, {method: 'DELETE'});
+        const data = await readJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'グループを削除できませんでした。');
+        await loadLibrary();
+        renderLibraryGroupManager();
+        setAlert(libraryGroupMessage, `「${group.name}」を削除しました。`);
+      } catch (error) {
+        remove.disabled = false;
+        setAlert(libraryGroupMessage, error.message, true);
+      }
+    });
+    row.append(field, save, remove);
+    libraryGroupList.append(row);
+  });
+}
+
 function libraryFilterState() {
   return {
     keyword: document.querySelector('#library-keyword').value.trim(),
     speaker: document.querySelector('#library-speaker').value,
     emotion: document.querySelector('#library-emotion').value,
+    group: document.querySelector('#library-group').value,
     sort: document.querySelector('#library-sort').value
   };
 }
@@ -3040,6 +3205,10 @@ function updateLibraryFilterState() {
   if (state.keyword) conditions.push(`「${state.keyword}」`);
   if (state.speaker) conditions.push(`話者: ${state.speaker}`);
   if (state.emotion) conditions.push(`感情: ${state.emotion}`);
+  if (state.group) {
+    const group = document.querySelector('#library-group');
+    conditions.push(`グループ: ${group.options[group.selectedIndex].text}`);
+  }
   if (state.sort !== 'updated_desc') {
     const sort = document.querySelector('#library-sort');
     conditions.push(`並び: ${sort.options[sort.selectedIndex].text}`);
@@ -3104,6 +3273,8 @@ async function loadLibrary() {
     if (!response.ok) throw new Error(data.error || '処理済みデータの一覧を取得できません。');
     updateFacetSelect(document.querySelector('#library-speaker'), data.facets.speakers || [], 'すべての話者');
     updateFacetSelect(document.querySelector('#library-emotion'), data.facets.emotions || [], 'すべての感情');
+    libraryGroups = Array.isArray(data.groups) ? data.groups : [];
+    updateLibraryGroupSelect(document.querySelector('#library-group'), libraryGroups, {includeAll: true});
     const items = data.items || [];
     document.querySelector('#library-count').textContent = `${data.total}件を表示`;
     renderLibraryOverview(items);
@@ -3146,7 +3317,26 @@ function renderLibraryItems(items) {
     list.append(empty);
     return;
   }
+  const grouped = document.querySelector('#library-sort').value === 'group';
+  const visibleGroupCounts = items.reduce((counts, item) => {
+    const key = item.group_id || '__ungrouped__';
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map());
+  let previousGroupKey = null;
   items.forEach(item => {
+    const groupKey = item.group_id || '__ungrouped__';
+    if (grouped && groupKey !== previousGroupKey) {
+      const heading = document.createElement('div');
+      heading.className = 'library-group-heading';
+      const name = document.createElement('strong');
+      name.textContent = item.group_name || '未分類';
+      const count = document.createElement('span');
+      count.textContent = `${visibleGroupCounts.get(groupKey) || 0}件`;
+      heading.append(name, count);
+      list.append(heading);
+      previousGroupKey = groupKey;
+    }
     const card = document.createElement('article');
     card.className = 'library-item';
     const media = document.createElement('div');
@@ -3195,6 +3385,12 @@ function renderLibraryItems(items) {
     preview.textContent = item.preview || '本文はまだありません。';
     const chips = document.createElement('div');
     chips.className = 'library-chips';
+    if (item.group_name) {
+      const chip = document.createElement('span');
+      chip.className = 'library-chip group';
+      chip.textContent = item.group_name;
+      chips.append(chip);
+    }
     (item.speakers || []).slice(0, 5).forEach(value => {
       const chip = document.createElement('span');
       chip.className = 'library-chip';
@@ -3222,6 +3418,18 @@ function renderLibraryItems(items) {
     body.append(heading, meta, preview, chips);
     const actions = document.createElement('div');
     actions.className = 'library-actions';
+    const groupLabel = document.createElement('label');
+    groupLabel.className = 'library-group-assignment';
+    const groupLabelText = document.createElement('span');
+    groupLabelText.className = 'visually-hidden';
+    groupLabelText.textContent = `${item.source_name}のグループ`;
+    const groupSelect = document.createElement('select');
+    groupSelect.setAttribute('aria-label', `${item.source_name}のグループ`);
+    updateLibraryGroupSelect(groupSelect, libraryGroups, {includeUngrouped: true});
+    groupSelect.value = item.group_id || '';
+    groupSelect.addEventListener('click', event => event.stopPropagation());
+    groupSelect.addEventListener('change', () => assignLibraryItemGroup(item, groupSelect));
+    groupLabel.append(groupLabelText, groupSelect);
     const open = document.createElement('button');
     open.className = 'library-card-open';
     open.type = 'button';
@@ -3239,7 +3447,7 @@ function renderLibraryItems(items) {
     remove.textContent = '削除';
     remove.setAttribute('aria-label', `${item.source_name}を削除`);
     remove.addEventListener('click', () => deleteLibraryItem(item.id, item.source_name));
-    actions.append(analyze, remove);
+    actions.append(groupLabel, analyze, remove);
     card.append(open, media, body, actions);
     list.append(card);
   });
@@ -3277,7 +3485,7 @@ async function loadTrainingStatus() {
   }
 }
 
-['#library-speaker', '#library-emotion', '#library-sort'].forEach(selector => {
+['#library-speaker', '#library-emotion', '#library-group', '#library-sort'].forEach(selector => {
   listen(document.querySelector(selector), 'change', () => loadLibrary());
 });
 listen(document.querySelector('#library-keyword'), 'input', () => {
@@ -3289,6 +3497,7 @@ function clearLibraryFilters() {
   document.querySelector('#library-keyword').value = '';
   document.querySelector('#library-speaker').value = '';
   document.querySelector('#library-emotion').value = '';
+  document.querySelector('#library-group').value = '';
   document.querySelector('#library-sort').value = 'updated_desc';
   updateLibraryFilterState();
   loadLibrary();
@@ -3310,6 +3519,38 @@ listen(document.querySelector('#library-refresh-button'), 'click', () => {
   loadLibrary();
 });
 listen(document.querySelector('#library-create-new-button'), 'click', () => showView('new'));
+listen(document.querySelector('#manage-library-groups-button'), 'click', async () => {
+  setAlert(libraryGroupMessage, '');
+  await loadLibrary();
+  renderLibraryGroupManager();
+  if (libraryGroupDialog && !libraryGroupDialog.open) libraryGroupDialog.showModal();
+});
+listen(document.querySelector('#close-library-group-dialog'), 'click', () => {
+  if (libraryGroupDialog) libraryGroupDialog.close();
+});
+listen(document.querySelector('#library-group-create-form'), 'submit', async event => {
+  event.preventDefault();
+  const input = document.querySelector('#library-group-name');
+  const name = String(input && input.value || '').trim();
+  if (!name) return;
+  const submit = event.currentTarget.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    const response = await apiFetch('/api/library/groups', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || 'グループを作成できませんでした。');
+    input.value = '';
+    await loadLibrary();
+    renderLibraryGroupManager();
+    setAlert(libraryGroupMessage, `「${data.name}」を作成しました。`);
+  } catch (error) {
+    setAlert(libraryGroupMessage, error.message, true);
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 function selectedAiModelEntry() {
   if (!aiModelSelect) return null;
@@ -4021,6 +4262,59 @@ function renderMedia(job) {
   mediaReview.hidden = false;
 }
 
+function renderFormattingResult(result) {
+  const section = document.querySelector('#formatting-result');
+  const mode = document.querySelector('#formatting-result-mode');
+  const metrics = document.querySelector('#formatting-result-metrics');
+  const detailsHost = document.querySelector('#formatting-result-details');
+  if (!section || !metrics || !detailsHost) return;
+  const value = result && typeof result === 'object' ? result : null;
+  section.hidden = !value || !value.summary;
+  metrics.replaceChildren();
+  detailsHost.replaceChildren();
+  if (!value || !value.summary) return;
+  if (mode) mode.textContent = `${value.mode_label || value.mode || '整形結果'}${value.manual_edit_status ? '・手動編集後' : ''}`;
+  const summary = value.summary || {};
+  [
+    ['文字調整', summary.text_change_count, '件'],
+    ['境界確認', summary.boundary_warning_count, '件'],
+    ['AI文章置換', summary.recommended_replacement_count, '件'],
+    ['ノイズ候補', summary.noise_candidate_count, '件'],
+    ['句読点確認', summary.punctuation_warning_count, '件'],
+    ['話者統合', summary.speaker_relabel_count, '発話'],
+    ['AI呼び出し', summary.llm_request_count, '回']
+  ].forEach(([label, count, unit]) => {
+    const card = document.createElement('article');
+    const caption = document.createElement('span');
+    const number = document.createElement('strong');
+    caption.textContent = label;
+    number.textContent = `${Number(count || 0)}${unit}`;
+    card.append(caption, number);
+    metrics.append(card);
+  });
+  const appendDetails = (title, rows, describe) => {
+    if (!Array.isArray(rows) || !rows.length) return;
+    const details = document.createElement('details');
+    const summaryElement = document.createElement('summary');
+    const list = document.createElement('ul');
+    summaryElement.textContent = `${title}（${rows.length}件）`;
+    rows.slice(0, 50).forEach(row => {
+      const item = document.createElement('li');
+      item.textContent = describe(row);
+      list.append(item);
+    });
+    details.append(summaryElement, list);
+    detailsHost.append(details);
+  };
+  appendDetails('処理方法', value.methods, row => `${row.label}: ${row.status}`);
+  appendDetails('自己紹介から抽出した話者', value.self_introductions, row => `${row.name}（${row.speaker}${row.status === 'local_candidate' ? '・ローカル抽出候補' : '・確認済み'}）`);
+  appendDetails('不自然な分割の確認候補', value.boundary_warnings, row => `${row.message} 間隔 ${Number(row.gap_seconds || 0).toFixed(2)}秒`);
+  appendDetails('おすすめ文章整形（Jev＋LLM）', value.recommended_reviews, row => `${row.replacement_applied ? '置換済み' : (row.llm_confirmed ? '問題確認・置換なし' : '補正不要')}［${row.effort || '中'}］— ${row.reason || row.original_text}`);
+  appendDetails('ノイズ候補', value.noise_candidates, row => `${formatTime(row.start)} ${row.text} — ${row.reason}`);
+  appendDetails('句読点の確認候補', value.punctuation_warnings, row => row.message || row.type || '確認してください');
+  appendDetails('話者ラベルの統合', value.speaker_changes, row => `${row.from} → ${row.to}`);
+}
+
 function renderResult(job) {
   const evidenceReturnButton = document.querySelector('#return-to-analysis-evidence');
   if (evidenceReturnButton) evidenceReturnButton.hidden = analysisEvidenceReturn?.itemId !== job.id;
@@ -4037,8 +4331,9 @@ function renderResult(job) {
   }
   if (speakerIdentityStatus) {
     const identifiedCount = Object.values(currentJob.speaker_names).filter(value => String(value || '').trim()).length;
+    const registeredCount = Object.keys((job.speaker_registration || {}).created || {}).length;
     speakerIdentityStatus.textContent = identifiedCount
-      ? `${identifiedCount}名の表示名を反映済みです。既存名は再実行で上書きしません。`
+      ? `${identifiedCount}名の表示名を反映済みです。${registeredCount ? `${registeredCount}名を話者管理へ登録しました。` : '既存名は再実行で上書きしません。'}`
       : '話者名は未反映です。OpenAI、Gemini、またはローカルLLMで話者特定だけを実行できます。';
   }
   currentJobId = job.id;
@@ -4051,6 +4346,7 @@ function renderResult(job) {
   }
   renderDownloads(job.files);
   renderAiTokenUsage('#result-ai-usage', job.ai_usage);
+  renderFormattingResult(job.formatting_result);
   renderMeetingMinutes(currentJob.meeting_minutes, job.id);
   renderOutline(job.outline);
   renderSessionOutline(job.session_outline, job.outline);
@@ -4060,6 +4356,9 @@ function renderResult(job) {
   renderSpeakerEditor();
   updateSegmentFilterOptions();
   renderSegments();
+  if (Object.keys((job.speaker_registration || {}).created || {}).length && !speakerRegistryDirty) {
+    void loadSpeakerRegistry(true);
+  }
   setAlert(document.querySelector('#save-message'), '');
   if (job.output_warning) {
     setAlert(document.querySelector('#save-message'), job.output_warning, true);
@@ -4077,6 +4376,12 @@ function renderResult(job) {
 
 function speakerLabels() {
   return [...new Set(currentJob.segments.map(segment => segment.speaker || 'UNKNOWN'))].sort();
+}
+
+function displaySpeakerName(label) {
+  const speakerLabel = String(label || 'UNKNOWN');
+  const profile = (currentJob && currentJob.speaker_profiles || {})[speakerLabel] || {};
+  return profile.display_name || (currentJob && currentJob.speaker_names || {})[speakerLabel] || fallbackSpeaker(speakerLabel);
 }
 
 function renderSessionProfile() {
@@ -4274,7 +4579,8 @@ function renderSpeakerEditor() {
     const row = document.createElement('tr');
     const labelCell = document.createElement('td');
     labelCell.className = 'speaker-label-cell';
-    labelCell.textContent = label;
+    labelCell.textContent = displaySpeakerName(label);
+    labelCell.title = `話者ID: ${label}`;
     row.append(labelCell);
     const displayName = conversationControl('input', profile.display_name || currentJob.speaker_names[label], null, value => {
       profile.display_name = value.trim();
@@ -4377,7 +4683,7 @@ function updateSegmentFilterOptions() {
   const select = document.querySelector('#segment-speaker-filter');
   const selected = select.value;
   select.replaceChildren(new Option('すべて', ''));
-  speakerLabels().forEach(label => select.add(new Option(currentJob.speaker_names[label] || fallbackSpeaker(label), label)));
+  speakerLabels().forEach(label => select.add(new Option(displaySpeakerName(label), label)));
   if ([...select.options].some(option => option.value === selected)) select.value = selected;
 }
 
@@ -4509,7 +4815,7 @@ function renderSegments() {
     const speaker = document.createElement('span');
     speaker.className = 'segment-speaker';
     speaker.dataset.label = segment.speaker || 'UNKNOWN';
-    speaker.textContent = currentJob.speaker_names[speaker.dataset.label] || fallbackSpeaker(speaker.dataset.label);
+    speaker.textContent = displaySpeakerName(speaker.dataset.label);
     speaker.style.borderColor = (currentJob.speaker_profiles[speaker.dataset.label] || {}).theme_color || '';
     meta.append(time, speaker);
     const emotionText = segmentEmotionText(segment);
@@ -4570,10 +4876,11 @@ function renderSegments() {
       setCurrentJobDirty();
       renderSegments();
     });
-    const speakerInput = document.createElement('input');
-    speakerInput.type = 'text'; speakerInput.maxLength = 80; speakerInput.value = segment.speaker || 'UNKNOWN';
+    const speakerInput = document.createElement('select');
+    speakerLabels().forEach(label => speakerInput.add(new Option(displaySpeakerName(label), label)));
+    speakerInput.value = segment.speaker || 'UNKNOWN';
     speakerInput.addEventListener('change', () => {
-      segment.speaker = speakerInput.value.trim() || 'UNKNOWN';
+      segment.speaker = speakerInput.value || 'UNKNOWN';
       setCurrentJobDirty();
       renderSpeakerEditor();
       updateSegmentFilterOptions();
@@ -4594,7 +4901,7 @@ function renderSegments() {
       setCurrentJobDirty();
       renderSegments();
     });
-    fields.append(createField('開始（秒）', start), createField('終了（秒）', end), createField('話者ラベル', speakerInput), createField('くしなだ感情', emotionSelect));
+    fields.append(createField('開始（秒）', start), createField('話者', speakerInput), createField('終了（秒）', end), createField('くしなだ感情', emotionSelect));
     const textarea = document.createElement('textarea');
     textarea.value = segment.text || '';
     textarea.setAttribute('aria-label', `${speaker.textContent}の発話`);
@@ -4656,7 +4963,7 @@ function renderSegments() {
 function updateSpeakerBadges() {
   document.querySelectorAll('.segment-speaker').forEach(badge => {
     const label = badge.dataset.label;
-    badge.textContent = currentJob.speaker_names[label] || fallbackSpeaker(label);
+    badge.textContent = displaySpeakerName(label);
     badge.style.borderColor = (currentJob.speaker_profiles[label] || {}).theme_color || '';
   });
 }
@@ -4690,17 +4997,22 @@ async function rerunSpeakerIdentification() {
     const repairs = summary.repairs || {};
     const repairedSegments = Math.max(0, Number(repairs.aliased_segments) || 0)
       + Math.max(0, Number(repairs.corrected_segments) || 0);
-    const hasChanges = Boolean(summary.applied_count || repairedSegments);
+    const registeredCount = Object.keys((summary.registration || {}).created || {}).length;
+    const hasChanges = Boolean(summary.applied_count || repairedSegments || registeredCount);
     const nameMessage = summary.applied_count
       ? `${summary.applied_count}名を話者IDへ反映しました。`
       : '新たに反映できる話者名はありませんでした。';
+    const registrationMessage = registeredCount
+      ? ` ${registeredCount}名を話者管理へ登録しました。`
+      : '';
     const repairMessage = repairedSegments
       ? ` 話者ラベルの重複・断裂を${repairedSegments}発話修正しました。`
       : '';
     const ambiguityMessage = ambiguousCount
       ? ` 一意に特定できない${ambiguousCount}件は反映していません。`
       : '';
-    const message = nameMessage + repairMessage + ambiguityMessage;
+    const message = nameMessage + registrationMessage + repairMessage + ambiguityMessage;
+    if (registeredCount && !speakerRegistryDirty) await loadSpeakerRegistry(true);
     if (speakerIdentityStatus) speakerIdentityStatus.textContent = message;
     setAlert(document.querySelector('#save-message'), message, !hasChanges);
   } catch (error) {
@@ -4747,7 +5059,7 @@ function playSegment(segmentId) {
   const context = Number(document.querySelector('#play-context').value) || 5;
   const start = Math.max(0, Number(segment.start || 0) - context);
   playbackStopAt = Number(segment.end || segment.start || 0) + context;
-  document.querySelector('#media-caption').textContent = `${formatTime(segment.start)}–${formatTime(segment.end)} / ${currentJob.speaker_names[segment.speaker] || fallbackSpeaker(segment.speaker)}（前後 ${context} 秒）`;
+  document.querySelector('#media-caption').textContent = `${formatTime(segment.start)}–${formatTime(segment.end)} / ${displaySpeakerName(segment.speaker)}（前後 ${context} 秒）`;
   mediaPlayer.currentTime = start;
   const promise = mediaPlayer.play();
   if (promise) promise.catch(() => {});
@@ -5039,7 +5351,7 @@ async function loadAnalysisCatalog(force = false) {
   }
 }
 
-async function loadAnalysisItem(itemId, {discardDirty = false} = {}) {
+async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} = {}) {
   const nextId = String(itemId || '');
   if (!nextId) return;
   if (!discardDirty && hasUnsavedAnalysisChanges()) {
@@ -5060,7 +5372,8 @@ async function loadAnalysisItem(itemId, {discardDirty = false} = {}) {
   setAnalysisLoading(true);
   setAlert(document.querySelector('#analysis-message'), '');
   try {
-    const response = await apiFetch(`/api/library/${encodeURIComponent(nextId)}/analysis`, {
+    const query = execute ? '?execute=1' : '';
+    const response = await apiFetch(`/api/library/${encodeURIComponent(nextId)}/analysis${query}`, {
       cache: 'no-store', signal: analysisRequestController.signal
     });
     const payload = await readJsonResponse(response);
@@ -5103,6 +5416,20 @@ function analysisModeContent(compact) {
 
 function renderAnalysisWorkspace() {
   if (!analysisState.data) return;
+  const shell = document.querySelector('#analysis-shell');
+  const empty = document.querySelector('#analysis-empty');
+  if (analysisState.data.executed === false) {
+    if (shell) shell.hidden = true;
+    if (empty) {
+      empty.hidden = false;
+      const title = empty.querySelector('strong');
+      const desc = empty.querySelector('p');
+      if (title) title.textContent = '分析はまだ実行されていません';
+      if (desc) desc.textContent = '右上の［分析を実行］ボタンを押すと、発話量・会話構造・形態素・共起・統計検定の分析を開始します。';
+    }
+    setAnalysisDirty(false);
+    return;
+  }
   document.querySelectorAll('[data-analysis-mode]').forEach(button => {
     const active = button.dataset.analysisMode === analysisState.mode;
     button.classList.toggle('active', active);
@@ -5772,6 +6099,199 @@ function buildAnalysisCorrelationExplorer(correlations) {
   return module;
 }
 
+function buildAnalysisDescriptiveChart(rows) {
+  const chart = analysisElement('div', 'analysis-distribution-chart');
+  chart.setAttribute('aria-label', '記述統計の分布');
+  (Array.isArray(rows) ? rows : []).forEach(item => {
+    const minimum = Number(item.minimum);
+    const maximum = Number(item.maximum);
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return;
+    const span = Math.max(maximum - minimum, Number.EPSILON);
+    const position = value => {
+      const number = Number(value);
+      return Number.isFinite(number) ? boundedAnalysisPercent(100 * (number - minimum) / span) : 0;
+    };
+    const q1 = position(item.q1);
+    const q3 = position(item.q3);
+    const median = position(item.median);
+    const mean = position(item.mean);
+    const row = analysisElement('article', 'analysis-distribution-row');
+    const heading = analysisElement('header');
+    heading.append(
+      analysisElement('strong', '', item.label || item.variable),
+      analysisElement('span', '', `N=${item.n || 0}`)
+    );
+    const plot = analysisElement('div', 'analysis-distribution-plot');
+    plot.setAttribute('role', 'img');
+    plot.setAttribute('aria-label', `${item.label || item.variable}: 最小 ${analysisNumberText(minimum, 2)}、第1四分位 ${analysisNumberText(item.q1, 2)}、中央値 ${analysisNumberText(item.median, 2)}、平均 ${analysisNumberText(item.mean, 2)}、第3四分位 ${analysisNumberText(item.q3, 2)}、最大 ${analysisNumberText(maximum, 2)}`);
+    const range = analysisElement('i', 'analysis-distribution-range');
+    const box = analysisElement('i', 'analysis-distribution-box');
+    box.style.left = `${Math.min(q1, q3)}%`;
+    box.style.width = `${Math.max(1, Math.abs(q3 - q1))}%`;
+    const medianMark = analysisElement('i', 'analysis-distribution-median');
+    medianMark.style.left = `${median}%`;
+    const meanMark = analysisElement('i', 'analysis-distribution-mean');
+    meanMark.style.left = `${mean}%`;
+    meanMark.title = `平均 ${analysisNumberText(item.mean, 2)}`;
+    plot.append(range, box, medianMark, meanMark);
+    const scale = analysisElement('div', 'analysis-distribution-scale');
+    scale.append(
+      analysisElement('span', '', analysisNumberText(minimum, 2)),
+      analysisElement('span', '', `中央値 ${analysisNumberText(item.median, 2)}`),
+      analysisElement('span', '', analysisNumberText(maximum, 2))
+    );
+    row.append(heading, plot, scale);
+    chart.append(row);
+  });
+  const legend = analysisElement('div', 'analysis-distribution-legend');
+  legend.append(
+    analysisElement('span', 'box', '第1〜第3四分位'),
+    analysisElement('span', 'median', '中央値'),
+    analysisElement('span', 'mean', '平均')
+  );
+  chart.append(legend);
+  return chart;
+}
+
+function buildAnalysisFrequencyExplorer(frequencies, compact) {
+  const rows = Array.isArray(frequencies) ? frequencies : [];
+  const variables = [];
+  rows.forEach(item => {
+    const key = String(item.variable || 'unknown');
+    if (!variables.some(entry => entry.key === key)) {
+      variables.push({key, label: item.label || key});
+    }
+  });
+  const module = analysisElement('div', 'analysis-chart-module');
+  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
+  const explanation = analysisElement('div', 'analysis-chart-explanation');
+  explanation.append(
+    analysisElement('strong', '', 'カテゴリ別の構成割合'),
+    analysisElement('span', '', '項目を切り替えて、件数と全体に占める割合を確認できます。')
+  );
+  const selectLabel = analysisElement('label', 'analysis-chart-select');
+  selectLabel.append(analysisElement('span', '', '表示項目'));
+  const select = analysisElement('select');
+  variables.forEach(item => select.add(new Option(item.label, item.key)));
+  selectLabel.append(select);
+  toolbar.append(explanation, selectLabel);
+  const stage = analysisElement('div', 'analysis-frequency-stage');
+  module.append(toolbar, stage);
+  const render = variable => {
+    stage.replaceChildren();
+    rows.filter(item => String(item.variable || 'unknown') === variable)
+      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+      .slice(0, compact ? 8 : 14)
+      .forEach(item => appendAnalysisBar(
+        stage,
+        item.value || '未設定',
+        Number(item.percent) || 0,
+        `${item.count || 0}件 / ${analysisNumberText(item.percent, 1, '%')}`,
+        '#438F70'
+      ));
+  };
+  select.addEventListener('change', () => render(select.value));
+  if (variables.length) render(variables[0].key);
+  return module;
+}
+
+function buildAnalysisEffectChart(tests, compact) {
+  const rows = (Array.isArray(tests) ? tests : [])
+    .filter(item => item.status === 'computed' && Number.isFinite(Number(item.effect_size)))
+    .slice(0, compact ? 10 : 24);
+  const chart = analysisElement('div', 'analysis-effect-chart');
+  const axis = analysisElement('div', 'analysis-effect-axis');
+  axis.append(
+    analysisElement('span', '', '0'),
+    analysisElement('span', '', '効果量 0.5'),
+    analysisElement('span', '', '1.0')
+  );
+  chart.append(axis);
+  rows.forEach(item => {
+    const effect = Math.abs(Number(item.effect_size));
+    const row = analysisElement('article', `analysis-effect-row${item.significant_0_05 ? ' significant' : ''}`);
+    const heading = analysisElement('header');
+    heading.append(
+      analysisElement('strong', '', item.outcome_label || item.outcome || item.test),
+      analysisElement('span', '', `${item.effect_name || 'effect'}=${analysisNumberText(effect, 3)} / p ${analysisPValueText(item.p_value)}`)
+    );
+    const track = analysisElement('div', 'analysis-effect-track');
+    track.setAttribute('role', 'img');
+    track.setAttribute('aria-label', `${item.outcome_label || item.outcome}: 効果量 ${analysisNumberText(effect, 3)}、p値 ${analysisPValueText(item.p_value)}`);
+    const fill = analysisElement('i');
+    fill.style.width = `${boundedAnalysisPercent(effect * 100)}%`;
+    track.append(fill);
+    row.append(heading, track);
+    chart.append(row);
+  });
+  return chart;
+}
+
+function buildAnalysisCrosstabExplorer(crosstabs, compact) {
+  const rows = Array.isArray(crosstabs) ? crosstabs : [];
+  const tables = [];
+  rows.forEach(item => {
+    const key = String(item.table_id || item.table_label || 'table');
+    if (!tables.some(entry => entry.key === key)) {
+      tables.push({key, label: item.table_label || key});
+    }
+  });
+  const palette = ['#1C6B50', '#74A57F', '#E2A45E', '#6B8FD4', '#9B70B6', '#D97872'];
+  const module = analysisElement('div', 'analysis-chart-module');
+  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
+  const explanation = analysisElement('div', 'analysis-chart-explanation');
+  explanation.append(
+    analysisElement('strong', '', '項目の組み合わせを割合で比較'),
+    analysisElement('span', '', '各行を100%として、回答・分類の構成差を色分けします。')
+  );
+  const selectLabel = analysisElement('label', 'analysis-chart-select');
+  selectLabel.append(analysisElement('span', '', 'クロス集計'));
+  const select = analysisElement('select');
+  tables.forEach(item => select.add(new Option(item.label, item.key)));
+  selectLabel.append(select);
+  toolbar.append(explanation, selectLabel);
+  const stage = analysisElement('div', 'analysis-crosstab-stage');
+  const legend = analysisElement('div', 'analysis-chart-legend');
+  module.append(toolbar, stage, legend, analysisElement('p', 'analysis-chart-note', '色の幅は行内割合です。件数が少ない行は割合が大きく変動するため、詳細表の度数も確認してください。'));
+  const render = tableId => {
+    stage.replaceChildren();
+    legend.replaceChildren();
+    const tableRows = rows.filter(item => String(item.table_id || item.table_label || 'table') === tableId);
+    const columnValues = [...new Set(tableRows.map(item => String(item.column_value || '未設定')))];
+    const rowValues = [...new Set(tableRows.map(item => String(item.row_value || '未設定')))];
+    columnValues.forEach((value, index) => {
+      const entry = analysisElement('span');
+      const marker = analysisElement('i');
+      marker.style.backgroundColor = palette[index % palette.length];
+      entry.append(marker, document.createTextNode(value));
+      legend.append(entry);
+    });
+    rowValues.slice(0, compact ? 8 : 14).forEach(value => {
+      const item = analysisElement('article', 'analysis-crosstab-row');
+      const values = columnValues.map(column => tableRows.find(row => String(row.row_value || '未設定') === value && String(row.column_value || '未設定') === column));
+      const total = values.reduce((sum, row) => sum + Number(row?.count || 0), 0);
+      item.append(analysisElement('strong', '', `${value}（${total}件）`));
+      const bar = analysisElement('div', 'analysis-stacked-bar');
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', `${value}: ${values.map((row, index) => `${columnValues[index]} ${row?.count || 0}件`).join('、')}`);
+      values.forEach((row, index) => {
+        const count = Number(row?.count || 0);
+        const percent = total ? 100 * count / total : 0;
+        const part = analysisElement('i');
+        part.style.width = `${percent}%`;
+        part.style.backgroundColor = palette[index % palette.length];
+        part.title = `${columnValues[index]} ${count}件（${percent.toFixed(1)}%）`;
+        bar.append(part);
+      });
+      item.append(bar);
+      stage.append(item);
+    });
+  };
+  select.addEventListener('change', () => render(select.value));
+  if (tables.length) render(tables[0].key);
+  return module;
+}
+
 function analysisSectionHeading(anchor, eyebrow, titleText, description) {
   const section = analysisElement('section', 'analysis-section-heading wide');
   section.dataset.analysisAnchor = anchor;
@@ -5946,6 +6466,9 @@ function appendResearchAnalysis(grid, compact) {
     .filter(item => item.scope === 'overall');
   const statsPanel = analysisCardPanel('会話データの基本統計', 'automatic', 'descriptives', true, 'descriptive_statistics');
   if (descriptives.length) {
+    statsPanel.body.append(buildAnalysisDescriptiveChart(descriptives));
+    const details = analysisElement('details', 'analysis-table-details');
+    details.append(analysisElement('summary', '', '記述統計の数値表を確認'));
     const wrap = analysisElement('div', 'analysis-table-wrap');
     const table = analysisElement('table', 'analysis-table');
     const head = analysisElement('thead');
@@ -5968,10 +6491,20 @@ function appendResearchAnalysis(grid, compact) {
     });
     table.append(head, body);
     wrap.append(table);
-    statsPanel.body.append(wrap);
+    details.append(wrap);
+    statsPanel.body.append(details);
   } else statsPanel.body.append(analysisElement('p', 'analysis-no-data', '記述統計を計算できる発話がありません。'));
   statsPanel.body.append(analysisElement('p', 'analysis-caption', `分析単位: ${statistics.analysis_unit || '発話'} / 比較軸: ${statistics.group_variable === 'role' ? '役割' : '話者'}。欠損値は変数ごとに除外します。`));
   grid.append(statsPanel.panel);
+
+  const frequencies = Array.isArray(statistics.frequencies) ? statistics.frequencies : [];
+  const frequencyPanel = analysisCardPanel('カテゴリ別の件数と割合', 'automatic', 'frequencies', true, 'descriptive_statistics');
+  if (frequencies.length) {
+    frequencyPanel.body.append(buildAnalysisFrequencyExplorer(frequencies, compact));
+  } else {
+    frequencyPanel.body.append(analysisElement('p', 'analysis-no-data', '割合を可視化できるカテゴリデータがありません。'));
+  }
+  grid.append(frequencyPanel.panel);
 
   const tests = Array.isArray(statistics.tests) ? statistics.tests : [];
   const crosstabs = Array.isArray(statistics.crosstabs) ? statistics.crosstabs : [];
@@ -6027,6 +6560,9 @@ function appendResearchAnalysis(grid, compact) {
   const testsPanel = analysisCardPanel('グループ間の違いと効果の大きさ', 'automatic', 'statistical_tests', true, 'group_statistics');
   const computedTests = tests.filter(item => item.status === 'computed');
   if (computedTests.length) {
+    testsPanel.body.append(buildAnalysisEffectChart(computedTests, compact));
+    const details = analysisElement('details', 'analysis-table-details');
+    details.append(analysisElement('summary', '', '統計検定の数値表を確認'));
     const wrap = analysisElement('div', 'analysis-table-wrap');
     const table = analysisElement('table', 'analysis-table analysis-stat-table');
     const head = analysisElement('thead');
@@ -6048,7 +6584,8 @@ function appendResearchAnalysis(grid, compact) {
     });
     table.append(head, body);
     wrap.append(table);
-    testsPanel.body.append(wrap);
+    details.append(wrap);
+    testsPanel.body.append(details);
   } else testsPanel.body.append(analysisElement('p', 'analysis-no-data', '比較群または標本数が不足しているため、推測統計を計算していません。'));
   const unavailableCount = tests.filter(item => item.status !== 'computed').length;
   testsPanel.body.append(analysisElement('p', 'analysis-caption', `発話の独立性を仮定しにくいため探索的な値です。p値だけで結論を出さず、効果量・標本数・前提条件を確認してください。未計算 ${unavailableCount}件。`));
@@ -6056,6 +6593,9 @@ function appendResearchAnalysis(grid, compact) {
 
   const crosstabsPanel = analysisCardPanel('項目の組み合わせ比較（クロス集計）', 'automatic', 'crosstabs', true, 'group_statistics');
   if (crosstabs.length) {
+    crosstabsPanel.body.append(buildAnalysisCrosstabExplorer(crosstabs, compact));
+    const details = analysisElement('details', 'analysis-table-details');
+    details.append(analysisElement('summary', '', 'クロス集計の数値表を確認'));
     const wrap = analysisElement('div', 'analysis-table-wrap');
     const table = analysisElement('table', 'analysis-table');
     const head = analysisElement('thead');
@@ -6077,7 +6617,8 @@ function appendResearchAnalysis(grid, compact) {
     });
     table.append(head, body);
     wrap.append(table);
-    crosstabsPanel.body.append(wrap);
+    details.append(wrap);
+    crosstabsPanel.body.append(details);
   } else crosstabsPanel.body.append(analysisElement('p', 'analysis-no-data', 'クロス集計できるデータがありません。'));
   grid.append(crosstabsPanel.panel);
 
@@ -6773,7 +7314,7 @@ function buildSegmentClassificationPanel(compact) {
 
   const rows = result && Array.isArray(result.segments) ? result.segments : [];
   if (!rows.length) {
-    panel.body.append(analysisElement('p', 'analysis-no-data', '分類結果はまだありません。上のボタンで435発話を一括判定できます。'));
+    panel.body.append(analysisElement('p', 'analysis-no-data', `分類結果はまだありません。画面上部の「分析を実行」から${summary.segment_count || 0}発話を一括判定できます。`));
   } else {
     const ranked = [...rows].sort((a, b) => {
       const score = row => Math.max(
@@ -6817,11 +7358,16 @@ function buildSegmentClassificationPanel(compact) {
   return panel.panel;
 }
 
-async function runSegmentClassification() {
+async function runSegmentClassification({useJev = true, quiet = false} = {}) {
   if (!analysisState.itemId || !analysisState.data || segmentClassificationInProgress || analysisState.dirty) return;
   segmentClassificationInProgress = true;
   renderAnalysisWorkspace();
-  setAlert(document.querySelector('#analysis-message'), 'Jevへ発話本文と短い前後文脈を送り、分類候補を作成しています。');
+  if (!quiet) setAlert(
+    document.querySelector('#analysis-message'),
+    useJev
+      ? 'Jevへ発話本文と短い前後文脈を送り、分類候補を作成しています。'
+      : 'テンプレートと保存済みTransformer結果から分類候補を作成しています。'
+  );
   try {
     const item = analysisState.data.item || {};
     const response = await apiFetch(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/classifications`, {
@@ -6830,7 +7376,7 @@ async function runSegmentClassification() {
         request_id: createSubmissionId(),
         source_revision: Number(item.revision_count || 0),
         analysis_revision: Number(item.analysis_revision || 0),
-        use_jev: true
+        use_jev: Boolean(useJev)
       })
     });
     const payload = await readJsonResponse(response);
@@ -6838,9 +7384,11 @@ async function runSegmentClassification() {
     analysisState.data.segment_classification = payload.segment_classification;
     invalidateAnalysisMethodOverview();
     const warning = payload.archive_warning ? ` ${payload.archive_warning}` : '';
-    setAlert(document.querySelector('#analysis-message'), `発話分類を保存しました。${warning}`, Boolean(payload.archive_warning));
+    if (!quiet) setAlert(document.querySelector('#analysis-message'), `発話分類を保存しました。${warning}`, Boolean(payload.archive_warning));
+    return {ok: true, payload};
   } catch (error) {
-    setAlert(document.querySelector('#analysis-message'), error.message, true);
+    if (!quiet) setAlert(document.querySelector('#analysis-message'), error.message, true);
+    return {ok: false, error: error.message};
   } finally {
     segmentClassificationInProgress = false;
     renderAnalysisWorkspace();

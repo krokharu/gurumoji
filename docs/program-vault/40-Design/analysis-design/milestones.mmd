@@ -1,0 +1,20 @@
+flowchart TB
+    m0["M0 入力・計画枠を固定<br/>PlanEnvelope / 許容slot / 研究区分"] -->|"全件確定"| m1["M1 アウトライン確定"]
+    m1 -->|"全件確定"| fork["M2 同段階で並列開始"]
+    fork --> lexical["語彙・言語解析"]
+    fork --> participation["時間・話者集計"]
+    fork --> stance["主張・立場判定"]
+    lexical --> keywords["特徴語・キーワード"]
+    stance --> opinions["論点別意見の集約"]
+    keywords --> gate{"全必須処理を検証・保存済み？"}
+    participation --> gate
+    opinions --> gate
+    gate -->|"いいえ"| wait["同段階で待機・再試行・確認"]
+    wait --> gate
+    gate -->|"はい"| m3["M3 JEV8軸・会話の流れ・一次図"]
+    m3 -->|"全件確定"| m4["M4 許容slotを解決<br/>手入力/AI案の定義・ExecutionBinding確定"]
+    m4 -->|"全件確定"| m5["M5 全件測定・統計・質的分析"]
+    m5 -->|"全件確定"| m6["M6 比較・二次分析"]
+    m6 -->|"全件確定"| m7["M7 出力保存→選択先公開<br/>全件確定後にpipeline完了"]
+    classDef barrier fill:#e5f3ef,stroke:#12695e,color:#183b44
+    class m0,m1,m3,m4,m5,m6,m7,gate barrier

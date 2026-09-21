@@ -1,0 +1,173 @@
+{
+  "status": "design_only",
+  "fictional_data": true,
+  "schema_file": "llm-contract.schema.json",
+  "validation_scope": "examples各要素をschemaで検証。架空ID/hashの実在検証と手法別payload検証は別契約。",
+  "examples": [
+    {
+      "schema_version": "analysis-llm-1",
+      "request_id": "request-demo-001",
+      "role_id": "O03",
+      "message_kind": "task_request",
+      "task_type": "outline_stance",
+      "milestone": "M2",
+      "context": {
+        "purpose": "論点ごとの立場の候補と根拠を返す。架空データ。",
+        "source_refs": [
+          {
+            "source_id": "source-demo",
+            "revision": "1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "excerpts": [
+          {
+            "source_id": "source-demo",
+            "evidence_id": "utterance-demo-01",
+            "text": "費用の条件が整えば導入に賛成です。",
+            "selection_reason": "導入への条件付き賛成を述べる発話"
+          }
+        ],
+        "omitted_scope": [
+          "他の論点の発話"
+        ],
+        "data_policy": "local_only",
+        "allowed_method_refs": [
+          {
+            "id": "outline_stance",
+            "version": "1"
+          }
+        ]
+      },
+      "definition_refs": [
+        {
+          "id": "stance_definition",
+          "version": "1"
+        }
+      ],
+      "allowed_evidence_ids": [
+        "utterance-demo-01"
+      ],
+      "allowed_labels": [
+        "support",
+        "oppose",
+        "neutral",
+        "alternative",
+        "undetermined"
+      ],
+      "expected_payload_schema": "outline_stance.result.v1",
+      "budget": {
+        "max_model_calls": 2,
+        "max_output_tokens": 1200,
+        "timeout_seconds": 120
+      }
+    },
+    {
+      "schema_version": "analysis-llm-1",
+      "request_id": "request-demo-001",
+      "role_id": "O03",
+      "message_kind": "task_result",
+      "status": "success",
+      "payload_schema": "outline_stance.result.v1",
+      "payload": {
+        "outline_id": "outline-demo-01",
+        "speaker_id": "speaker-demo-01",
+        "label": "support",
+        "qualifier": "conditional",
+        "confidence": 0.8
+      },
+      "evidence_ids": [
+        "utterance-demo-01"
+      ],
+      "unresolved": [],
+      "warnings": [
+        "一つの発話の候補。話者全体の立場を確定しない。"
+      ],
+      "reason": null,
+      "provenance": {
+        "provider_id": "local_demo",
+        "model_id": "fixture-model",
+        "call_id": "call-demo-001",
+        "prompt_version": "1",
+        "usage": {
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    },
+    {
+      "schema_version": "analysis-llm-1",
+      "request_id": "request-demo-001",
+      "role_id": "O03",
+      "message_kind": "task_result",
+      "status": "refused",
+      "payload_schema": "outline_stance.result.v1",
+      "payload": null,
+      "evidence_ids": [],
+      "unresolved": [],
+      "warnings": [],
+      "reason": "モデルが応答を拒否した。ホストが正規化した状態。",
+      "provenance": {
+        "provider_id": "local_demo",
+        "model_id": "fixture-model",
+        "call_id": "call-demo-001",
+        "prompt_version": "1",
+        "usage": {
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    },
+    {
+      "schema_version": "analysis-llm-1",
+      "request_id": "request-demo-001",
+      "role_id": "O01",
+      "message_kind": "plan_proposal",
+      "proposal_id": "proposal-demo-001",
+      "scope": "stage_fragment",
+      "base_plan_revision": "1",
+      "committed": false,
+      "steps": [
+        {
+          "step_id": "stance-outline-01",
+          "milestone": "M2",
+          "method_ref": {
+            "id": "outline_stance",
+            "version": "1"
+          },
+          "depends_on": [],
+          "input_bindings": {
+            "utterances": {
+              "kind": "artifact",
+              "artifact_id": "utterance-table-demo",
+              "revision": "1",
+              "column_ids": [
+                "utterance_id",
+                "speaker_id",
+                "text"
+              ]
+            },
+            "outlines": {
+              "kind": "artifact",
+              "artifact_id": "outline-table-demo",
+              "revision": "1",
+              "column_ids": [
+                "outline_id",
+                "utterance_id"
+              ]
+            }
+          },
+          "parameters": {
+            "definition_id": "stance_definition",
+            "definition_version": "1"
+          },
+          "reason": "M1確定後に論点ごとの立場を候補化する。",
+          "required": true
+        }
+      ],
+      "unresolved": [
+        "断片例。全M0〜M7計画に組み込み、全体の依存とゲートを検証する。"
+      ]
+    }
+  ]
+}

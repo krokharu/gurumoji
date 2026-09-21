@@ -1,0 +1,17 @@
+flowchart LR
+    source["原文snapshot・発話ID・話者ID"] --> outline["アウトライン / 発話との対応表"]
+    source --> evidence["根拠引用・原文版"]
+    outline --> claims["主張・立場・会話関係"]
+    definitions["手入力 / AI案のラベル・測定・尺度"] --> measures["型付き測定値・欠測理由"]
+    claims --> measures
+    measures --> dataset["粒度・列・集約を固定したDataset"]
+    dataset --> stats["統計・質的・二次分析"]
+    stats --> chart["ChartSpec / 元表 / 配置"]
+    evidence --> claims
+    evidence --> stats
+    chart --> ui["共通UI部品・根拠表示"]
+    chart --> images["PNG / JPEG / SVG / PDF / TIFF"]
+    dataset --> exports["SAV / CSV / XLSX"]
+    manifest["SQLite台帳＋JSON manifest：版・親artifact・状態"] -.-> source
+    manifest -.-> dataset
+    manifest -.-> chart

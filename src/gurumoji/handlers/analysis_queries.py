@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from pathlib import Path
+import zipfile
 from typing import Any, Callable
 
 from ..analysis_method_registry import METHODS, REGISTRY_VERSION
@@ -88,6 +90,20 @@ class AnalysisQueries:
             data=data,
             media_type=metadata["media_type"],
             download_name=Path(metadata["name"]).name,
+        )
+
+    def run_bundle(self, run_id: str) -> AnalysisArtifact:
+        run = self._store.get(run_id)
+        if not run or run.get("status") != "completed" or self._find_item(run["item_id"]) is None:
+            raise AnalysisQueryNotFound("保存結果が見つかりません。")
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for metadata in self._store.artifacts(run_id):
+                stored, data = self._store.read_artifact(metadata["id"])
+                archive.writestr(stored["name"], data)
+        return AnalysisArtifact(
+            data=stream.getvalue(), media_type="application/zip",
+            download_name=f"analysis-{run_id}.zip",
         )
 
     def insights(self, item_id: str) -> dict[str, Any]:

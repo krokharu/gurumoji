@@ -33,7 +33,7 @@ class ContentBrowserTests(unittest.TestCase):
         _, args = self.fixture.start()
         self.fixture.run_worker(args, response=content_support.finding(["E0001"], text="保存済みAI見解。<img src=x onerror=window.injected=1>"))
 
-    def exercise_browser(self, mobile=False, reload_only=False, generate=False, linked=''):
+    def exercise_browser(self, mobile=False, reload_only=False, generate=False, linked='', unified_execution=False):
         browser = browser_support.browser_executable()
         if not browser:
             self.skipTest("Edge, Chrome or Chromium is required")
@@ -65,6 +65,33 @@ window.addEventListener('DOMContentLoaded', async () => {
   const assert = (value, message) => { if (!value) throw new Error(message); };
   try {
     await waitFor(() => !!analysisState.data);
+    if (UNIFIED_EXECUTION) {
+      const runButton = document.querySelector('#analysis-run-button');
+      runButton.click();
+      assert(document.querySelector('#analysis-run-dialog').open, 'unified execution dialog did not open');
+      const manual = document.querySelector('input[name="analysis_run_mode"][value="manual"]');
+      manual.checked = true;
+      manual.dispatchEvent(new Event('input', {bubbles: true}));
+      document.querySelector('#analysis-definition-name').value = 'Utterance length';
+      document.querySelector('#analysis-definition-id').value = 'utterance_length';
+      document.querySelector('#analysis-definition-description').value = 'Characters in each included utterance';
+      document.querySelector('#analysis-definition-output').value = 'utterance_length';
+      document.querySelector('#analysis-definition-output').dispatchEvent(new Event('input', {bubbles: true}));
+      const initialTrialText = document.querySelector('#analysis-definition-trial-result').textContent;
+      document.querySelector('#analysis-run-publish').checked = false;
+      document.querySelector('#analysis-run-form').requestSubmit();
+      await waitFor(() => analysisExecutionState.status === 'completed');
+      assert(!document.querySelector('#analysis-execution-view').hidden, 'execution screen missing');
+      assert(document.querySelector('#analysis-execution-percent').textContent === '100%', 'execution progress incomplete');
+      assert(document.querySelectorAll('.analysis-execution-stage.completed').length === 8, 'unexpected completed milestones');
+      assert(document.querySelector('#analysis-execution-stages').textContent.includes('M7'), 'M0-M7 milestones missing');
+      assert(document.querySelector('#analysis-definition-trial-result').textContent !== initialTrialText, 'manual trial result missing');
+      document.querySelector('#analysis-execution-results').click();
+      await waitFor(() => document.querySelector('#analysis-execution-view').hidden && !document.querySelector('#analysis-shell').hidden);
+      assert(window.location.hash === '#/analysis/content', 'execution route did not return to results');
+      assert(!!document.querySelector('.analysis-archive-files a[href$="/export.zip"]'), 'pipeline ZIP export link missing');
+      document.body.dataset.contentTest = 'passed'; return;
+    }
     if (LINKED_MODE === 'valid') {
       await waitFor(() => !resultCard.hidden && selectedSegmentId === 'a1');
       assert(mediaPlayer.src.includes('/content/media'), 'linked media unavailable');
@@ -82,6 +109,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     assert(host.querySelector('.content-insight-summary').compareDocumentPosition(host.querySelector('.analysis-overview')) & Node.DOCUMENT_POSITION_FOLLOWING, 'summary order');
     assert(!window.injected && !host.querySelector('.content-ai-output img'), 'AI output was not escaped');
     assert(host.querySelector('.content-ai-output').textContent.includes('保存済みAI見解'), 'saved AI missing');
+    assert(host.querySelectorAll('.analysis-distribution-row').length > 0, 'descriptive statistics chart missing');
+    assert(host.querySelector('.analysis-frequency-stage .analysis-bar-track'), 'frequency chart missing');
+    assert(host.querySelector('.analysis-crosstab-stage .analysis-stacked-bar'), 'crosstab chart missing');
+    assert(host.querySelector('.analysis-table-details'), 'statistical detail table missing');
     await waitFor(() => analysisStorageState().runs.length > 0);
     assert(host.querySelector('.analysis-archive-run'), 'saved archive missing');
     if (GENERATE_ONLY) {
@@ -156,7 +187,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (error) { document.body.dataset.contentTest = 'failed: ' + error.message; }
 });
 </script>
-""".replace("RELOAD_ONLY", "true" if reload_only else "false").replace("GENERATE_ONLY", "true" if generate else "false").replace('LINKED_MODE', repr(linked))
+""".replace("RELOAD_ONLY", "true" if reload_only else "false").replace("GENERATE_ONLY", "true" if generate else "false").replace("UNIFIED_EXECUTION", "true" if unified_execution else "false").replace('LINKED_MODE', repr(linked))
 
         def render(*args, **kwargs):
             return original_render(*args, **kwargs).replace("</body>", '<script src="/static/content-browser-driver.js" defer></script></body>')
@@ -225,6 +256,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     def test_ai_generation_button_saves_and_deduplicates(self):
         self.exercise_browser(generate=True)
+
+    def test_unified_analysis_execution_dialog_and_progress_screen(self):
+        self.exercise_browser(unified_execution=True)
 
     def test_vault_links_open_matching_audio_and_preserve_old_evidence_after_edit(self):
         self.exercise_browser(linked='valid')

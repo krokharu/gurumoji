@@ -46,6 +46,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any, Callable
 
 _ORIGINAL_OS_REPLACE = os.replace
@@ -54,6 +55,7 @@ from flask import Flask, g, has_request_context, jsonify, render_template, reque
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from .research_analysis import (
+    is_research_analysis_cached,
     RESEARCH_CSV_FIELDS,
     build_analysis_workbook,
     build_research_analysis,
@@ -80,6 +82,7 @@ from .transformer_analysis import (
 from .ai_finishing import (
     FINISHING_VERSION, clean_transcript as finish_clean_transcript,
     create_outline as finish_create_outline, finishing_changes,
+    repair_recommended_segments as finish_repair_recommended_segments,
 )
 from .jev_review import (
     JEV_DEFAULT_MODEL, JEV_REVIEW_VERSION,
@@ -104,6 +107,7 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
+from .analysis_pipeline import AnalysisPipelineService, initialize_pipeline_store
 from .handlers.analysis_commands import (
     AnalysisCommandRequestError,
     AnalysisCommands,
@@ -121,7 +125,12 @@ from .handlers.speaker_registry import (
 )
 from .web.analysis_routes import register_analysis_routes
 from .web.job_routes import register_job_routes
+from .web.obsidian_routes import register_obsidian_routes
 from .web.speaker_routes import register_speaker_routes
+from .services.obsidian_watcher import ObsidianWatcher
+from .services.obsidian_workflows import ObsidianWorkflowService
+from .services.transcription_reporting import TranscriptionReporter
+from .services.vault_publication import VaultPublicationService, whisper_settings
 from . import transcript_preparation as preparation
 from . import method_experts
 
@@ -776,9 +785,13 @@ class JobOptions:
     ai_efforts: dict = field(default_factory=normalize_efforts)
     conversation_mode: str = "meeting"
     custom_vocabulary: tuple[str, ...] = ()
+    recommended_cleanup: bool = False
     jev_compare: bool = False
     jev_api_key: str = ""
     jev_model: str = JEV_DEFAULT_MODEL
+    transcript_finishing_mode: str = "custom"
+    write_word_cloud: bool = False
+    generate_meeting_minutes: bool = False
 
 
 @dataclass
@@ -801,9 +814,11 @@ class JobRecord:
     speaker_names: dict[str, str] = field(default_factory=dict)
     session_profile: dict[str, Any] = field(default_factory=dict)
     speaker_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    speaker_registration: dict[str, Any] = field(default_factory=dict)
     outline: dict[str, Any] | None = None
     meeting_minutes: dict[str, Any] | None = None
     emotion_analysis: dict[str, Any] | None = None
+    formatting_result: dict[str, Any] = field(default_factory=dict)
     ai_usage: dict[str, Any] = field(default_factory=dict)
     media_path: Path | None = None
     files: list[Path] = field(default_factory=list)
@@ -844,6 +859,9 @@ class JobRecord:
                     {key: dict(value) for key, value in self.speaker_profiles.items()}
                     if self.status == "completed" else {}
                 ),
+                "speaker_registration": (
+                    dict(self.speaker_registration) if self.status == "completed" else {}
+                ),
                 "write_srt": self.write_srt,
                 "write_json": True,
                 "burn_subtitled_video": self.burn_subtitled_video,
@@ -857,6 +875,9 @@ class JobRecord:
                     dict(self.emotion_analysis)
                     if self.status == "completed" and self.emotion_analysis
                     else None
+                ),
+                "formatting_result": (
+                    dict(self.formatting_result) if self.status == "completed" else {}
                 ),
                 "ai_usage": normalize_ai_usage(self.ai_usage),
                 "media_url": f"/api/library/{self.id}/media" if self.status == "completed" and self.media_path else None,
@@ -1550,6 +1571,7 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
             CREATE TABLE IF NOT EXISTS library_items (
                 id TEXT PRIMARY KEY,
                 source_name TEXT NOT NULL,
+                group_id TEXT NOT NULL DEFAULT '',
                 output_dir TEXT NOT NULL,
                 media_path TEXT,
                 language TEXT,
@@ -1560,6 +1582,7 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
                 outline_json TEXT,
                 meeting_minutes_json TEXT NOT NULL DEFAULT '{}',
                 emotion_analysis_json TEXT,
+                formatting_result_json TEXT NOT NULL DEFAULT '{}',
                 ai_usage_json TEXT NOT NULL DEFAULT '{}',
                 files_json TEXT NOT NULL,
                 write_srt INTEGER NOT NULL DEFAULT 1,
@@ -1583,6 +1606,10 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
         if "session_profile_json" not in library_columns:
             connection.execute(
                 "ALTER TABLE library_items ADD COLUMN session_profile_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "group_id" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"
             )
         if "original_segments_json" not in library_columns:
             # A transcript that existed before this schema revision cannot be
@@ -1622,6 +1649,10 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
         if "ai_usage_json" not in library_columns:
             connection.execute(
                 "ALTER TABLE library_items ADD COLUMN ai_usage_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "formatting_result_json" not in library_columns:
+            connection.execute(
+                "ALTER TABLE library_items ADD COLUMN formatting_result_json TEXT NOT NULL DEFAULT '{}'"
             )
         if "burn_subtitled_video" not in library_columns:
             connection.execute(
@@ -1752,6 +1783,22 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
         )
         connection.execute("CREATE INDEX IF NOT EXISTS library_updated_idx ON library_items(updated_at DESC)")
         connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS library_group_name_idx ON library_groups(name COLLATE NOCASE)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS library_items_group_idx ON library_items(group_id)"
+        )
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS speaker_registry_code_idx "
             "ON speaker_registry(participant_code)"
         )
@@ -1810,6 +1857,7 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
             )
         ensure_output_import_provenance_schema(connection)
         initialize_store(connection)
+        initialize_pipeline_store(connection)
         preparation.initialize(connection)
         if repair_provenance:
             repair_output_import_provenance(connection)
@@ -1997,6 +2045,50 @@ def save_speaker_registry_records(
     )
 
 
+def persist_speaker_registry_record(
+    connection: sqlite3.Connection,
+    record: dict[str, Any],
+    previous: dict[str, Any] | None,
+    now: str,
+) -> None:
+    """Insert one normalized registry record without changing the revision."""
+    connection.execute(
+        """
+        INSERT INTO speaker_registry (
+            id, participant_code, display_name, pseudonym, default_role,
+            organization, department, job_title, consent_status,
+            recording_consent, confidentiality_status, tags_json,
+            attributes_json, notes, active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            participant_code=excluded.participant_code,
+            display_name=excluded.display_name,
+            pseudonym=excluded.pseudonym,
+            default_role=excluded.default_role,
+            organization=excluded.organization,
+            department=excluded.department,
+            job_title=excluded.job_title,
+            consent_status=excluded.consent_status,
+            recording_consent=excluded.recording_consent,
+            confidentiality_status=excluded.confidentiality_status,
+            tags_json=excluded.tags_json,
+            attributes_json=excluded.attributes_json,
+            notes=excluded.notes,
+            active=excluded.active,
+            updated_at=excluded.updated_at
+        """,
+        (
+            record["id"], record["participant_code"], record["display_name"],
+            record["pseudonym"], record["default_role"], record["organization"],
+            record["department"], record["job_title"], record["consent_status"],
+            record["recording_consent"], record["confidentiality_status"],
+            json.dumps(record["tags"], ensure_ascii=False),
+            json.dumps(record["attributes"], ensure_ascii=False), record["notes"],
+            int(record["active"]), previous["created_at"] if previous else now, now,
+        ),
+    )
+
+
 def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any = None,
     expected_revision: int | None = None, merge_by_participant_code: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -2058,41 +2150,7 @@ def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any =
         ]
         for record in normalized:
             previous = existing_records.get(record["id"])
-            connection.execute(
-                """
-                INSERT INTO speaker_registry (
-                    id, participant_code, display_name, pseudonym, default_role,
-                    organization, department, job_title, consent_status,
-                    recording_consent, confidentiality_status, tags_json,
-                    attributes_json, notes, active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    participant_code=excluded.participant_code,
-                    display_name=excluded.display_name,
-                    pseudonym=excluded.pseudonym,
-                    default_role=excluded.default_role,
-                    organization=excluded.organization,
-                    department=excluded.department,
-                    job_title=excluded.job_title,
-                    consent_status=excluded.consent_status,
-                    recording_consent=excluded.recording_consent,
-                    confidentiality_status=excluded.confidentiality_status,
-                    tags_json=excluded.tags_json,
-                    attributes_json=excluded.attributes_json,
-                    notes=excluded.notes,
-                    active=excluded.active,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    record["id"], record["participant_code"], record["display_name"],
-                    record["pseudonym"], record["default_role"], record["organization"],
-                    record["department"], record["job_title"], record["consent_status"],
-                    record["recording_consent"], record["confidentiality_status"],
-                    json.dumps(record["tags"], ensure_ascii=False),
-                    json.dumps(record["attributes"], ensure_ascii=False), record["notes"],
-                    int(record["active"]), previous["created_at"] if previous else now, now,
-                ),
-            )
+            persist_speaker_registry_record(connection, record, previous, now)
         if requested_delete_ids:
             placeholders = ",".join("?" for _ in requested_delete_ids)
             connection.execute(
@@ -2543,7 +2601,20 @@ def emotion_values(segment: dict[str, Any]) -> list[str]:
     return values
 
 
-def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | None = None) -> dict[str, Any]:
+def library_group_name(group_id: str) -> str:
+    if not group_id:
+        return ""
+    with database_connection() as connection:
+        row = connection.execute(
+            "SELECT name FROM library_groups WHERE id = ?", (group_id,)
+        ).fetchone()
+    return str(row["name"]) if row is not None else ""
+
+
+def library_public(
+    row: sqlite3.Row, *, full: bool = True, match_count: int | None = None,
+    group_name: str | None = None,
+) -> dict[str, Any]:
     segments = row_segments(row)
     speaker_names = json_load(row["speaker_names_json"], {})
     if not isinstance(speaker_names, dict):
@@ -2561,6 +2632,8 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
     comparison_key, comparison_label, comparison_source = interview_comparison_identity(
         session_profile
     )
+    group_id = str(row["group_id"] or "") if "group_id" in row.keys() else ""
+    resolved_group_name = library_group_name(group_id) if group_name is None else group_name
     media_available = bool(
         media_path
         and path_is_within(media_path, MEDIA_DIRECTORY / str(row["id"]))
@@ -2569,6 +2642,8 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
     result: dict[str, Any] = {
         "id": row["id"],
         "source_name": row["source_name"],
+        "group_id": group_id,
+        "group_name": resolved_group_name,
         "output_dir": row["output_dir"] if local_path_access_allowed() else "",
         "language": row["language"],
         "segment_count": len(segments),
@@ -2612,6 +2687,7 @@ def library_public(row: sqlite3.Row, *, full: bool = True, match_count: int | No
             "session_outline": row_session_outline(row, session_profile),
             "meeting_minutes": row_meeting_minutes(row),
             "emotion_analysis": json_load(row["emotion_analysis_json"], None),
+            "formatting_result": json_load(row["formatting_result_json"], {}),
             "ai_usage": normalize_ai_usage(json_load(row["ai_usage_json"], {})),
             "write_srt": bool(row["write_srt"]),
             "write_json": True,
@@ -2632,6 +2708,7 @@ def upsert_library_item(
     ai_usage: dict[str, Any] | None = None,
     meeting_minutes: dict[str, Any] | None = None,
     original_segments: list[dict[str, Any]] | None = None,
+    formatting_result: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     validate_json_value(segments)
     validate_json_value(original_segments)
@@ -2641,6 +2718,7 @@ def upsert_library_item(
     validate_json_value(session_profile)
     validate_json_value(speaker_profiles)
     validate_json_value(meeting_minutes)
+    validate_json_value(formatting_result)
     ai_usage = normalize_ai_usage(ai_usage)
     validate_json_value(ai_usage)
     now = utc_now_iso()
@@ -2671,21 +2749,26 @@ def upsert_library_item(
                 raise TranscriptConflictError(current_revision)
         if previous is not None:
             preparation.capture(active_connection, previous, "legacy_current_baseline")
+        persisted_formatting_result = formatting_result
+        if persisted_formatting_result is None and previous is not None:
+            persisted_formatting_result = json_load(previous["formatting_result_json"], {})
         active_connection.execute(
             """
             INSERT INTO library_items (
                 id, source_name, output_dir, media_path, language, segments_json,
                 original_segments_json, original_segments_status,
-                speaker_names_json, outline_json, meeting_minutes_json, emotion_analysis_json, ai_usage_json, files_json,
+                speaker_names_json, outline_json, meeting_minutes_json, emotion_analysis_json,
+                formatting_result_json, ai_usage_json, files_json,
                 write_srt, write_json, burn_subtitled_video, revision_count, created_at, updated_at,
                 session_profile_json, speaker_profiles_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 source_name=excluded.source_name, output_dir=excluded.output_dir,
                 media_path=excluded.media_path, language=excluded.language,
                 segments_json=excluded.segments_json, speaker_names_json=excluded.speaker_names_json,
                 outline_json=excluded.outline_json, meeting_minutes_json=excluded.meeting_minutes_json,
                 emotion_analysis_json=excluded.emotion_analysis_json,
+                formatting_result_json=excluded.formatting_result_json,
                 ai_usage_json=excluded.ai_usage_json,
                 files_json=excluded.files_json, write_srt=excluded.write_srt,
                 write_json=excluded.write_json,
@@ -2702,6 +2785,7 @@ def upsert_library_item(
                 json.dumps(outline, ensure_ascii=False) if outline else None,
                 json.dumps(meeting_minutes, ensure_ascii=False),
                 json.dumps(emotion_analysis, ensure_ascii=False) if emotion_analysis else None,
+                json.dumps(persisted_formatting_result or {}, ensure_ascii=False),
                 json.dumps(ai_usage, ensure_ascii=False),
                 json.dumps([str(path) for path in files], ensure_ascii=False),
                 int(write_srt), 1, int(burn_subtitled_video),
@@ -5580,6 +5664,7 @@ def group_analysis_for_row(
     row: sqlite3.Row,
     *,
     include_research_rows: bool = False,
+    execute: bool = True,
 ) -> dict[str, Any]:
     segments = row_segments(row)
     with database_connection() as connection:
@@ -6357,10 +6442,19 @@ def group_analysis_for_row(
             "important_quotes": f"/api/library/{row['id']}/analysis/export.csv?dataset=important_quotes",
         },
     }
-    analysis = enrich_research_analysis(
-        analysis,
-        include_rows=include_research_rows,
-    )
+    has_cached = is_research_analysis_cached(analysis)
+    if execute or has_cached:
+        analysis = enrich_research_analysis(
+            analysis,
+            include_rows=include_research_rows,
+        )
+        analysis["executed"] = True
+    else:
+        analysis["executed"] = False
+        analysis["research"] = None
+        analysis["insights"] = {
+            "local": None, "ai": None, "stale": False, "fingerprint": ""
+        }
     saved = json_load(row["analysis_insights_json"], {}) if "analysis_insights_json" in row.keys() else {}
     if isinstance(saved, dict) and saved:
         analysis["insights"]["ai"] = saved
@@ -7182,6 +7276,10 @@ def import_existing_outputs() -> None:
                     speaker_names=payload.get("speaker_names") if isinstance(payload.get("speaker_names"), dict) else {},
                     outline=payload.get("outline") if isinstance(payload.get("outline"), dict) else None,
                     emotion_analysis=payload.get("emotion_analysis") if isinstance(payload.get("emotion_analysis"), dict) else None,
+                    formatting_result=(
+                        payload.get("formatting_result")
+                        if isinstance(payload.get("formatting_result"), dict) else None
+                    ),
                     files=files, write_srt=any(path.suffix.lower() == ".srt" for path in files),
                     write_json=True, created_at=created, connection=connection,
                 )
@@ -8347,6 +8445,223 @@ def make_display_segments(raw_segments: list[dict[str, Any]]) -> list[dict[str, 
     return merged
 
 
+TRANSCRIPT_FINISHING_MODES = {"off", "recommended", "advanced", "custom"}
+TRANSCRIPT_FORMATTING_VERSION = "transcript-formatting-v2"
+
+
+def normalize_transcript_punctuation(text: Any) -> str:
+    """Apply conservative, meaning-preserving whitespace/punctuation fixes."""
+    value = re.sub(r"[\r\n\t]+", " ", str(text or ""))
+    value = re.sub(r"[ \u3000]+", " ", value).strip()
+    value = re.sub(r"\s+([、。！？])", r"\1", value)
+    value = re.sub(r"([「『（【])\s+", r"\1", value)
+    value = re.sub(r"\s+([」』）】])", r"\1", value)
+    value = re.sub(r"([、。！？])\1{1,}", r"\1", value)
+    return value
+
+
+def transcript_formatting_result(
+    original_segments: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+    *,
+    mode: str,
+    audio_preprocess: str = "none",
+    speaker_names: dict[str, str] | None = None,
+    speaker_diagnostics: dict[str, Any] | None = None,
+    speaker_repair_summary: dict[str, int] | None = None,
+    finishing_stages: dict[str, str] | None = None,
+    ai_usage: dict[str, Any] | None = None,
+    jev_usage: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Format safe surface issues and produce a reviewable finishing report.
+
+    The function never deletes a suspected noise fragment and never guesses a
+    speaker identity.  Speaker changes are reported only after the separately
+    validated identity workflow has supplied aliases/corrections.
+    """
+    selected_mode = mode if mode in TRANSCRIPT_FINISHING_MODES else "custom"
+    apply_local_fixes = selected_mode in {"recommended", "advanced", "custom"}
+    speaker_names = speaker_names if isinstance(speaker_names, dict) else {}
+    diagnostics = speaker_diagnostics if isinstance(speaker_diagnostics, dict) else {}
+    repairs = speaker_repair_summary if isinstance(speaker_repair_summary, dict) else {}
+    stages = finishing_stages if isinstance(finishing_stages, dict) else {}
+    source_by_id = {
+        str(item.get("id") or ""): item for item in original_segments if item.get("id")
+    }
+    formatted: list[dict[str, Any]] = []
+    text_changes: list[dict[str, Any]] = []
+    noise_candidates: list[dict[str, Any]] = []
+    punctuation_warnings: list[dict[str, Any]] = []
+    noise_pattern = re.compile(
+        r"(?:\[(?:noise|inaudible)\]|[（(](?:雑音|ノイズ|聞き取り不能)[）)]|"
+        r"^(?:雑音|ノイズ|無音)$|ご視聴ありがとうございました)",
+        re.IGNORECASE,
+    )
+    for index, raw in enumerate(segments):
+        item = dict(raw)
+        before = str(item.get("text") or "")
+        after = normalize_transcript_punctuation(before) if apply_local_fixes else before
+        if after != before:
+            item["text"] = after
+            text_changes.append({
+                "segment_id": str(item.get("id") or ""),
+                "before": before,
+                "after": after,
+                "reason": "空白・句読点の安全な正規化",
+            })
+        text_value = str(item.get("text") or "")
+        if noise_pattern.search(text_value):
+            noise_candidates.append({
+                "segment_id": str(item.get("id") or ""),
+                "start": float(item.get("start", 0) or 0),
+                "text": text_value[:240],
+                "reason": "雑音・聞き取り不能・定型的な誤認識表現の候補",
+            })
+        if re.search(r"[、。！？]{2,}", text_value):
+            punctuation_warnings.append({
+                "segment_id": str(item.get("id") or ""),
+                "type": "repeated_punctuation",
+                "message": "句読点が連続しています。",
+            })
+        opening = sum(text_value.count(value) for value in "「『（【")
+        closing = sum(text_value.count(value) for value in "」』）】")
+        if opening != closing:
+            punctuation_warnings.append({
+                "segment_id": str(item.get("id") or ""),
+                "type": "unbalanced_bracket",
+                "message": "括弧またはかぎ括弧の対応を確認してください。",
+            })
+        formatted.append(item)
+
+    boundary_warnings: list[dict[str, Any]] = []
+    for previous, current in zip(formatted, formatted[1:]):
+        previous_text = str(previous.get("text") or "").rstrip()
+        gap = float(current.get("start", 0) or 0) - float(previous.get("end", 0) or 0)
+        same_speaker = str(previous.get("speaker") or "UNKNOWN") == str(
+            current.get("speaker") or "UNKNOWN"
+        )
+        if same_speaker and gap <= 3.0 and previous_text and not re.search(r"[。！？!?」』）】]$", previous_text):
+            boundary_warnings.append({
+                "before_segment_id": str(previous.get("id") or ""),
+                "after_segment_id": str(current.get("id") or ""),
+                "gap_seconds": round(max(0.0, gap), 2),
+                "message": "同じ話者の文が不自然な位置で分割された可能性があります。",
+            })
+
+    recommended_reviews = []
+    for item in formatted:
+        review = item.get("recommended_review")
+        if not isinstance(review, dict):
+            continue
+        jev = review.get("jev") if isinstance(review.get("jev"), dict) else {}
+        llm = review.get("llm") if isinstance(review.get("llm"), dict) else {}
+        recommended_reviews.append({
+            "segment_id": str(item.get("id") or ""),
+            "jev_flagged": bool(jev.get("flagged")),
+            "jev_probability": jev.get("correction_needed_probability"),
+            "llm_confirmed": bool(llm.get("confirmed_problem")),
+            "replacement_applied": bool(llm.get("replacement_applied")),
+            "issue_type": str(llm.get("issue_type") or "none"),
+            "original_text": str(llm.get("original_text") or jev.get("original_text") or ""),
+            "replacement_text": str(llm.get("replacement_text") or item.get("text") or ""),
+            "reason": str(llm.get("reason") or ""),
+            "effort": str(llm.get("effort") or ""),
+            "context_before_count": int(llm.get("context_before_count", 0) or 0),
+            "context_after_count": int(llm.get("context_after_count", 0) or 0),
+            "attempt_count": int(llm.get("attempt_count", 0) or 0),
+        })
+
+    speaker_changes = []
+    for item in formatted:
+        segment_id = str(item.get("id") or "")
+        original = source_by_id.get(segment_id)
+        if original is None:
+            continue
+        before_speaker = str(original.get("speaker") or "UNKNOWN")
+        after_speaker = str(item.get("speaker") or "UNKNOWN")
+        if before_speaker != after_speaker:
+            speaker_changes.append({
+                "segment_id": segment_id,
+                "from": before_speaker,
+                "to": after_speaker,
+            })
+
+    usage = normalize_ai_usage(ai_usage)
+    jev_requests = safe_token_count((jev_usage or {}).get("request_count"))
+    methods = [
+        {"id": "audio_preprocess", "label": "動画・音声前処理", "status": audio_preprocess},
+        {"id": "local_rules", "label": "ローカル規則", "status": "completed"},
+        {"id": "speaker_identity", "label": "自己紹介・話者連続性", "status": stages.get("speaker_identity", "not_requested")},
+        {"id": "recommended_cleanup", "label": "おすすめ：Jev判定＋発話単位LLM整形", "status": stages.get("recommended_cleanup", "not_requested")},
+        {"id": "context_cleanup", "label": "LLM文脈再校正", "status": stages.get("cleanup", "not_requested")},
+        {"id": "jev", "label": "Jev比較", "status": stages.get("jev_comparison", "not_requested")},
+        {"id": "transformer", "label": "ローカルTransformer（分析画面）", "status": "available_after_transcription"},
+    ]
+    introductions = [
+        {"speaker": str(label), "name": str(name), "status": "verified"}
+        for label, name in sorted(speaker_names.items()) if str(name).strip()
+    ]
+    introduction_keys = {(item["speaker"], item["name"]) for item in introductions}
+    introduction_patterns = (
+        re.compile(r"(?:私は|わたしは|僕は|ぼくは|名前は)[、,\s]*([A-Za-zァ-ヶ一-龯々・]{2,24}?)(?:です|と申します|といいます|と言います)"),
+        re.compile(r"(?:^|[。！？!?\s])([A-Za-zァ-ヶ一-龯々・]{2,24}?)(?:と申します|といいます|と言います)"),
+    )
+    rejected_names = {"よろしく", "ありがとう", "こちら", "それでは", "本日", "今日"}
+    for item in formatted:
+        text_value = str(item.get("text") or "")
+        for pattern in introduction_patterns:
+            match = pattern.search(text_value)
+            if not match:
+                continue
+            name = normalize_detected_speaker_name(match.group(1), match.group(0))
+            speaker = str(item.get("speaker") or "UNKNOWN")
+            if not name or name in rejected_names or (speaker, name) in introduction_keys:
+                break
+            introductions.append({
+                "speaker": speaker,
+                "name": name,
+                "status": "local_candidate",
+                "segment_id": str(item.get("id") or ""),
+            })
+            introduction_keys.add((speaker, name))
+            break
+    result = {
+        "version": TRANSCRIPT_FORMATTING_VERSION,
+        "mode": selected_mode,
+        "mode_label": {
+            "off": "整形しない",
+            "recommended": "おすすめ",
+            "advanced": "高度",
+            "custom": "個別設定",
+        }[selected_mode],
+        "methods": methods,
+        "summary": {
+            "original_segment_count": len(original_segments),
+            "formatted_segment_count": len(formatted),
+            "text_change_count": len(text_changes),
+            "boundary_warning_count": len(boundary_warnings),
+            "recommended_candidate_count": len(recommended_reviews),
+            "recommended_confirmed_count": sum(1 for item in recommended_reviews if item["llm_confirmed"]),
+            "recommended_replacement_count": sum(1 for item in recommended_reviews if item["replacement_applied"]),
+            "noise_candidate_count": len(noise_candidates),
+            "punctuation_warning_count": len(punctuation_warnings),
+            "speaker_alias_count": int(repairs.get("alias_count", 0) or 0),
+            "speaker_relabel_count": len(speaker_changes),
+            "self_introduction_count": len(introductions),
+            "llm_request_count": safe_token_count(usage.get("request_count")) + jev_requests,
+        },
+        "text_changes": text_changes[:200],
+        "boundary_warnings": boundary_warnings[:200],
+        "recommended_reviews": recommended_reviews[:200],
+        "noise_candidates": noise_candidates[:200],
+        "punctuation_warnings": punctuation_warnings[:200],
+        "speaker_changes": speaker_changes[:500],
+        "speaker_aliases": diagnostics.get("speaker_aliases", {}),
+        "self_introductions": introductions,
+    }
+    return formatted, result
+
+
 def format_outline_text(source_name: str, outline: dict[str, Any]) -> str:
     lines = ["議題・アウトライン", f"元ファイル: {source_name}", ""]
     sections = outline.get("sections") if isinstance(outline, dict) else None
@@ -9263,6 +9578,8 @@ def write_outputs(
     speaker_profiles: dict[str, dict[str, Any]] | None = None,
     meeting_minutes: dict[str, Any] | None = None,
     check_cancelled: Callable[[], None] | None = None,
+    formatting_result: dict[str, Any] | None = None,
+    write_word_cloud_file: bool = False,
 ) -> list[Path]:
     # Keep direct callers using the previous positional final callback working.
     if check_cancelled is None and callable(meeting_minutes):
@@ -9312,8 +9629,18 @@ def write_outputs(
         payload["meeting_minutes"] = normalize_meeting_minutes(meeting_minutes)
     if emotion_analysis:
         payload["emotion_analysis"] = emotion_analysis
+    if formatting_result:
+        payload["formatting_result"] = formatting_result
     write_text(json_path, json.dumps(payload, ensure_ascii=False, indent=2))
     written.append(json_path)
+
+    if formatting_result:
+        formatting_path = output_dir / f"{stem}_整形リザルト.json"
+        write_text(
+            formatting_path,
+            json.dumps(formatting_result, ensure_ascii=False, indent=2),
+        )
+        written.append(formatting_path)
 
     text_path = output_dir / f"{stem}_話者分離.txt"
     lines = [f"元ファイル: {source_name}", ""]
@@ -9330,11 +9657,12 @@ def write_outputs(
     write_text(text_path, "\n".join(lines))
     written.append(text_path)
 
-    word_cloud_path = output_dir / f"{stem}_ワードクラウド.svg"
-    check()
-    write_word_cloud(word_cloud_path, source_name, segments)
-    check()
-    written.append(word_cloud_path)
+    if write_word_cloud_file:
+        word_cloud_path = output_dir / f"{stem}_ワードクラウド.svg"
+        check()
+        write_word_cloud(word_cloud_path, source_name, segments)
+        check()
+        written.append(word_cloud_path)
 
     if write_srt:
         srt_path = output_dir / f"{stem}_話者分離.srt"
@@ -10259,6 +10587,28 @@ def review_segments_with_jev(
     )
 
 
+def clean_recommended_segments_with_ai(
+    segments: list[dict[str, Any]], reviews: dict[str, dict[str, Any]],
+    provider: str, api_key: str, model: str,
+    status: Callable[[str], None], check_cancelled: Callable[[], None],
+    usage_callback: Callable[[dict[str, Any]], None] | None = None,
+    base_url: str = "", ai_efforts: dict | None = None,
+    effort: str = "medium", outline: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Apply the recommended per-utterance rewrite policy to Jev candidates."""
+    def call(system, prompt, name, schema):
+        return call_ai_json(
+            provider, api_key, model, system, prompt, name, schema,
+            check_cancelled, usage_callback, base_url,
+            **({"ai_efforts": ai_efforts} if ai_efforts else {}),
+        )
+
+    return finish_repair_recommended_segments(
+        segments, reviews, call, status, check_cancelled,
+        effort=effort, outline=outline,
+    )
+
+
 def classify_segments_with_jev(
     segments: list[dict[str, Any]], topics: list[dict[str, str]],
     api_key: str, model: str,
@@ -10401,6 +10751,115 @@ def link_detected_speakers_to_registry(
         "temporary": temporary,
         "ambiguous": ambiguous,
         "changed": changed,
+    }
+
+
+def register_detected_speakers(
+    speaker_profiles: dict[str, dict[str, Any]],
+    speaker_names: dict[str, str],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Link verified introductions and register unambiguous new speakers.
+
+    This is deliberately called only from the AI self-introduction workflow,
+    never from a manually edited display name.  Existing duplicate or inactive
+    records remain for a person to resolve rather than creating another global
+    speaker with the same name.
+    """
+    if not speaker_names:
+        profiles, summary = link_detected_speakers_to_registry(
+            speaker_profiles, speaker_names, []
+        )
+        return profiles, {
+            **summary,
+            "created": {},
+            "inactive": {},
+            "duplicate_identifications": {},
+        }
+
+    # The registry's ordinary editor uses the same lock, so a transcription
+    # cannot create a duplicate while someone is saving speaker management.
+    with library_write_lock:
+        with database_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            revision = speaker_registry_revision(connection)
+            all_records = [
+                speaker_registry_public(row)
+                for row in speaker_registry_rows(connection, include_inactive=True)
+            ]
+            active_records = [
+                record for record in all_records if record.get("active") is not False
+            ]
+            profiles, summary = link_detected_speakers_to_registry(
+                speaker_profiles, speaker_names, active_records
+            )
+
+            inactive_matches: dict[str, list[str]] = defaultdict(list)
+            for record in all_records:
+                if record.get("active") is not False:
+                    continue
+                for field in ("display_name", "pseudonym"):
+                    key = speaker_registry_identity_key(record.get(field))
+                    if key and record.get("id"):
+                        inactive_matches[key].append(str(record["id"]))
+
+            labels_by_name: dict[str, list[str]] = defaultdict(list)
+            for label, name in summary["temporary"].items():
+                key = speaker_registry_identity_key(name)
+                if key:
+                    labels_by_name[key].append(label)
+
+            inactive: dict[str, list[str]] = {}
+            duplicate_identifications: dict[str, list[str]] = {}
+            new_records: list[tuple[str, str, dict[str, Any]]] = []
+            for label, name in summary["temporary"].items():
+                key = speaker_registry_identity_key(name)
+                if not key:
+                    continue
+                if label in summary["ambiguous"]:
+                    continue
+                if inactive_matches.get(key):
+                    inactive[label] = sorted(set(inactive_matches[key]))
+                    continue
+                duplicate_labels = sorted(labels_by_name[key])
+                if len(duplicate_labels) > 1:
+                    duplicate_identifications[label] = duplicate_labels
+                    continue
+                record = normalize_speaker_registry_record({
+                    "id": f"speaker_auto_{uuid.uuid4().hex}",
+                    "display_name": name,
+                    "default_role": "participant",
+                    "active": True,
+                })
+                new_records.append((label, name, record))
+
+            created: dict[str, str] = {}
+            if new_records:
+                now = utc_now_iso()
+                for label, _name, record in new_records:
+                    persist_speaker_registry_record(connection, record, None, now)
+                    created[label] = record["id"]
+                connection.execute(
+                    "UPDATE application_metadata SET value = ? WHERE key = ?",
+                    (str(revision + 1), "speaker_registry_revision"),
+                )
+                all_records.extend(record for _label, _name, record in new_records)
+
+        if created:
+            # Reuse the normal profile mapping so newly registered names get
+            # the same display and role semantics as pre-existing speakers.
+            profiles, refreshed = link_detected_speakers_to_registry(
+                profiles, speaker_names, all_records
+            )
+            summary = {
+                **refreshed,
+                "changed": bool(summary["changed"] or refreshed["changed"]),
+            }
+
+    return profiles, {
+        **summary,
+        "created": created,
+        "inactive": inactive,
+        "duplicate_identifications": duplicate_identifications,
     }
 
 
@@ -11002,39 +11461,19 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
     diarize_segments: Any = None
     staged_media_path: Path | None = None
 
-    def status(message: str) -> None:
-        update_job(job, message=message)
-
-    def progress(value: int) -> None:
-        update_job(job, progress=value)
-
-    def set_stage(key: str, label: str, value: int = 0) -> None:
-        update_job(
-            job,
-            stage=key,
-            stage_label=label,
-            stage_progress=value,
-        )
-
-    def record_ai_usage(sample: dict[str, Any]) -> None:
-        usage = normalize_ai_usage(sample)
-        if not usage:
-            return
-        with jobs_lock:
-            current = normalize_ai_usage(job.ai_usage)
-            if current and current["provider"] != usage["provider"]:
-                current = {}
-            job.ai_usage = merge_ai_usage(current, usage)
-
-    def check_cancelled() -> None:
-        if job.cancel_event.is_set():
-            raise InterruptedError("処理を中止しました。")
-
-    def record_warning(message: str) -> None:
-        with jobs_lock:
-            current = job.output_warning.strip()
-            job.output_warning = f"{current}\n{message}".strip() if current else message
-        status(message)
+    reporter = TranscriptionReporter(
+        job=job,
+        update_job=update_job,
+        jobs_lock=jobs_lock,
+        normalize_usage=normalize_ai_usage,
+        merge_usage=merge_ai_usage,
+    )
+    status = reporter.status
+    progress = reporter.progress
+    set_stage = reporter.stage
+    record_ai_usage = reporter.record_ai_usage
+    check_cancelled = reporter.check_cancelled
+    record_warning = reporter.warning
 
     with jobs_lock:
         job.status = "running"
@@ -11140,13 +11579,21 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
 
                 model = whisper.load_model(options.model_name, device=device)
             else:
+                asr_options: dict[str, Any] = {
+                    "no_speech_threshold": no_speech_threshold,
+                }
+                if vocabulary_prompt:
+                    # WhisperX stores faster-whisper decoding options on the
+                    # pipeline when the model is loaded; its transcribe()
+                    # method does not accept initial_prompt.
+                    asr_options["initial_prompt"] = vocabulary_prompt
                 model = whisperx.load_model(
                     options.model_name,
                     device,
                     device_index=0,
                     compute_type=compute_type,
                     language=language_hint,
-                    asr_options={"no_speech_threshold": no_speech_threshold},
+                    asr_options=asr_options,
                     vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
                 )
             return model
@@ -11187,7 +11634,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 }
             else:
                 transcribe_kwargs = {"batch_size": 1}
-            if vocabulary_prompt:
+            if vocabulary_prompt and use_openai_whisper:
                 transcribe_kwargs["initial_prompt"] = vocabulary_prompt
             pass_result = pass_model.transcribe(pass_audio, **transcribe_kwargs)
             set_stage("transcription", f"{pass_label}の文字起こし", 90)
@@ -11264,7 +11711,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                             }
                         else:
                             transcribe_kwargs = {"batch_size": 1}
-                        if vocabulary_prompt:
+                        if vocabulary_prompt and use_openai_whisper:
                             transcribe_kwargs["initial_prompt"] = vocabulary_prompt
                         clip_result = pass_model.transcribe(clip_audio, **transcribe_kwargs)
                         if not detected_language:
@@ -11420,20 +11867,8 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         # source so text cleanup cannot remove or rewrite a self-introduction.
         speaker_identity_segments = [dict(item) for item in segments]
         obsidian_prepared = False
-        if options.finish_in_obsidian:
-            try:
-                obsidian_workbench().prepare(
-                    job.id, options.source_name, segments, revision=0,
-                    provider=options.ai_provider, model=options.ai_model, ai_efforts=options.ai_efforts,
-                    detect_names=options.detect_speaker_names or options.ai_provider == "none",
-                    create_outline=options.create_outline or options.ai_provider == "none",
-                    jev_compare=options.jev_compare, ready=False,
-                )
-                obsidian_prepared = True
-                status("Whisperの原文と会話全文をObsidianに保存しました。仕上げは操作ノートから実行できます。")
-            except (OSError, ValueError) as exc:
-                record_warning("Obsidianの作業ノートを保存できませんでした。処理完了後に「Obsidianで仕上げ」から再試行してください: " + str(exc))
         finishing_stages = {"outline_context": "not_requested", "cleanup": "not_requested",
+                            "recommended_cleanup": "not_requested",
                             "jev_comparison": "not_requested",
                             "speaker_identity": "not_requested", "outline": "not_requested"}
         jev_usage: dict[str, Any] = {}
@@ -11461,6 +11896,53 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         if any(level != "auto" for level in options.ai_efforts.values()):
             ai_base_kwargs["ai_efforts"] = options.ai_efforts
         context_outline: dict[str, Any] | None = None
+        if (options.recommended_cleanup and not options.finish_in_obsidian
+                and options.ai_efforts.get("cleanup", "medium") != "off"):
+            try:
+                cleanup_effort = options.ai_efforts.get("cleanup", "medium")
+                if cleanup_effort == "auto":
+                    cleanup_effort = "medium"
+                if cleanup_effort in {"high", "ultra"}:
+                    status("おすすめ文章整形の参照用アウトラインを作成しています…")
+                    context_outline = create_outline_with_ai(
+                        segments, {}, options.ai_provider, options.ai_api_key, options.ai_model,
+                        status, check_cancelled, record_ai_usage, **ai_base_kwargs,
+                    )
+                    if not context_outline.get("sections"):
+                        raise RuntimeError("会話全体のアウトラインが空でした。")
+                    finishing_stages["outline_context"] = "completed"
+                recommended_reviews, jev_usage = review_segments_with_jev(
+                    imported_transcript,
+                    options.jev_api_key,
+                    options.jev_model,
+                    status,
+                    check_cancelled,
+                    outline=context_outline,
+                )
+                segments = clean_recommended_segments_with_ai(
+                    segments,
+                    recommended_reviews,
+                    options.ai_provider,
+                    options.ai_api_key,
+                    options.ai_model,
+                    status,
+                    check_cancelled,
+                    record_ai_usage,
+                    effort=cleanup_effort,
+                    outline=context_outline,
+                    **ai_base_kwargs,
+                )
+                finishing_stages["recommended_cleanup"] = "completed"
+                check_cancelled()
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+                finishing_stages["recommended_cleanup"] = "failed"
+                record_warning(
+                    "おすすめのJev判定・発話単位LLM整形を省略しました。元の文字起こしを保存します: "
+                    + details
+                )
         if options.clean_transcript and not options.finish_in_obsidian:
             try:
                 status("再校正に先立ち、会話全体のアウトラインを作成しています…")
@@ -11561,7 +12043,10 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             "aliased_segments": 0,
             "corrected_segments": 0,
         }
-        if options.detect_speaker_names and not options.finish_in_obsidian:
+        # Name identification does not rewrite the transcript, so it can run
+        # with the standard Obsidian finishing flow as well.  That makes the
+        # first result use verified names instead of diarization numbers.
+        if options.detect_speaker_names:
             set_stage("speaker_names", "話者名の確認", 10)
             status("文字校正とは独立した2段階処理で、自己紹介と話者ラベルを確認しています…")
             try:
@@ -11605,20 +12090,69 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 record_warning("AI話者名推定を省略しました。話者ラベルで保存します: " + details)
                 finishing_stages["speaker_identity"] = "failed"
             set_stage("speaker_names", "話者名の確認", 100)
+        segments, formatting_result = transcript_formatting_result(
+            imported_transcript,
+            segments,
+            mode=options.transcript_finishing_mode,
+            audio_preprocess=options.audio_preprocess,
+            speaker_names=speaker_names,
+            speaker_diagnostics=speaker_identity_diagnostics,
+            speaker_repair_summary=speaker_repair_summary,
+            finishing_stages=finishing_stages,
+            ai_usage=job.ai_usage,
+            jev_usage=jev_usage,
+        )
+        formatting_summary = formatting_result["summary"]
+        status(
+            "整形チェック完了: "
+            f"文字調整 {formatting_summary['text_change_count']}件 / "
+            f"AI文章置換 {formatting_summary['recommended_replacement_count']}件 / "
+            f"境界確認 {formatting_summary['boundary_warning_count']}件 / "
+            f"ノイズ候補 {formatting_summary['noise_candidate_count']}件 / "
+            f"話者統合 {formatting_summary['speaker_relabel_count']}発話"
+        )
         speaker_profiles = normalize_conversation_speaker_profiles(
             None,
             {str(item.get("speaker") or "UNKNOWN") for item in segments},
             speaker_names,
         )
-        speaker_profiles, speaker_registration_summary = link_detected_speakers_to_registry(
+        speaker_profiles, speaker_registration_summary = register_detected_speakers(
             speaker_profiles,
             speaker_names,
         )
+        if speaker_registration_summary["created"]:
+            status(
+                "自己紹介から確認した話者を話者管理に登録しました: "
+                + "、".join(
+                    speaker_names[label]
+                    for label in speaker_registration_summary["created"]
+                    if speaker_names.get(label)
+                )
+            )
         if speaker_registration_summary["temporary"]:
             status(
                 "台帳に一致しない話者を、この会話のみの一時話者として登録しました: "
                 + "、".join(speaker_registration_summary["temporary"].values())
             )
+        if options.finish_in_obsidian:
+            try:
+                # Work notes are researcher-owned after their first creation.
+                # Create them only after the non-text-changing identity pass,
+                # so their headers already show names without overwriting a
+                # note a researcher may later edit.
+                obsidian_workbench().prepare(
+                    job.id, options.source_name, segments, revision=0,
+                    provider=options.ai_provider, model=options.ai_model,
+                    ai_efforts=options.ai_efforts,
+                    detect_names=options.detect_speaker_names or options.ai_provider == "none",
+                    create_outline=options.create_outline or options.ai_provider == "none",
+                    jev_compare=options.jev_compare, ready=False,
+                    speaker_names=speaker_names,
+                )
+                obsidian_prepared = True
+                status("Whisperの原文と会話全文をObsidianに保存しました。仕上げは操作ノートから実行できます。")
+            except (OSError, ValueError) as exc:
+                record_warning("Obsidianの作業ノートを保存できませんでした。処理完了後に「Obsidianで仕上げ」から再試行してください: " + str(exc))
         session_profile = session_profile_from_media(options.input_path, check_cancelled)
         session_profile["session_type"] = CONVERSATION_MODES.get(
             options.conversation_mode, "meeting"
@@ -11653,8 +12187,13 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 finishing_stages["outline"] = "failed"
                 record_warning("AIアウトライン作成を省略しました。文字起こし結果は保存します: " + details)
             set_stage("outline", "議題アウトラインの作成", 100)
+        final_usage = normalize_ai_usage(job.ai_usage)
+        formatting_result["summary"]["llm_request_count"] = (
+            safe_token_count(final_usage.get("request_count"))
+            + safe_token_count(jev_usage.get("request_count"))
+        )
         meeting_minutes: dict[str, Any] | None = None
-        if options.conversation_mode == "meeting":
+        if options.conversation_mode == "meeting" and options.generate_meeting_minutes:
             set_stage("meeting_minutes", "会議議事録とタスク候補の作成", 20)
             status("会議のタスク・優先度・期限候補と分析サマリーを作成しています…")
             meeting_minutes = build_meeting_minutes(
@@ -11679,6 +12218,8 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             speaker_profiles,
             meeting_minutes,
             check_cancelled,
+            formatting_result=formatting_result,
+            write_word_cloud_file=options.write_word_cloud,
         )
         check_cancelled()
         set_stage("output", "結果ファイルの保存", 45)
@@ -11747,40 +12288,25 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
             speaker_profiles=speaker_profiles,
             ai_usage=job.ai_usage,
             meeting_minutes=meeting_minutes,
+            formatting_result=formatting_result,
         )
         publish_input_vault(persisted, whisper_vault_settings(options, language_code))
-        if meeting_minutes:
-            try:
-                with library_write_lock:
-                    archive_meeting_minutes(persisted)
-            except (OSError, ValueError, TypeError, LookupError, sqlite3.Error):
-                record_warning("会議議事録はアプリに保存済みですが、分析履歴として保存できませんでした。")
         if obsidian_prepared:
             try:
                 obsidian_workbench().activate(job.id, int(persisted["revision_count"] or 0), segments)
             except (OSError, ValueError) as exc:
                 record_warning("原文は保存済みです。「Obsidianで仕上げ」から作業状態の更新を再試行してください: " + str(exc))
-            if meeting_minutes:
-                try:
-                    publish_meeting_minutes_to_obsidian(persisted)
-                except (OSError, ValueError, TypeError) as exc:
-                    record_warning("会議議事録はアプリに保存済みですが、Obsidianへの保存を完了できませんでした: " + str(exc))
-        if not options.finish_in_obsidian and (options.clean_transcript or options.detect_speaker_names or options.create_outline):
             try:
-                with library_write_lock:
-                    archived = archive_ai_finishing(persisted, speaker_identity_segments, finishing_stages,
-                                                   options.ai_provider, options.ai_model, job.ai_usage,
-                                                   context_outline=context_outline,
-                                                   jev_usage=jev_usage)
-                if archived["vault_status"] != "completed":
-                    record_warning("AI仕上げの結果は保存済みです。Vaultへの書き出しは分析画面から再試行できます。")
-            except (OSError, ValueError, TypeError, sqlite3.Error):
-                record_warning("文字起こしは保存済みですが、AI仕上げの履歴を書き出せませんでした。")
+                publish_meeting_minutes_to_obsidian(persisted)
+            except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+                # Transcript persistence is authoritative; a meeting note can be retried later.
+                record_warning("会議議事録のObsidian公開を後で再試行してください: " + str(exc))
         with jobs_lock:
             job.segments = row_segments(persisted)
             job.speaker_names = speaker_names
             job.session_profile = row_session_profile(persisted)
             job.speaker_profiles = row_speaker_profiles(persisted, job.segments, speaker_names)
+            job.speaker_registration = speaker_registration_summary
             job.outline = outline
             try:
                 persisted_minutes = json_load(persisted["meeting_minutes_json"], {})
@@ -11788,6 +12314,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
                 persisted_minutes = meeting_minutes or {}
             job.meeting_minutes = normalize_meeting_minutes(persisted_minutes)
             job.emotion_analysis = emotion_analysis
+            job.formatting_result = formatting_result
             job.media_path = saved_media_path
             job.files = files
             job.language = language_code
@@ -12292,50 +12819,28 @@ def vault_registry():
     return VaultRegistry(DATABASE_FILE, PROJECT_DIRECTORY / "docs" / "program-vault")
 
 
+def vault_publications() -> VaultPublicationService:
+    return VaultPublicationService(
+        registry=vault_registry,
+        database_connection=database_connection,
+        preparation_view=preparation.view,
+        row_segments=row_segments,
+        row_session_profile=row_session_profile,
+        database_error=sqlite3.Error,
+        warn=lambda message, exc: app.logger.warning("%s: %s", message, exc),
+    )
+
+
 def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_kind: str | None = None) -> None:
-    """Mirror the input ledger into InputVault. The transcript itself stays in SQLite."""
-    if row is None:
-        return
-    try:
-        with database_connection() as connection:
-            prep_state = preparation.view(connection, row, row_segments(row))
-        vault_registry().publish_input(
-            item_id=str(row["id"]), title=str(row["source_name"]), segments=row_segments(row),
-            revision=int(row["revision_count"] or 0), session_profile=row_session_profile(row),
-            language=row["language"], media_path=Path(row["media_path"]) if row["media_path"] else None,
-            created_at=str(row["created_at"] or ""), whisper=whisper,
-            source_kind="whisper" if whisper else (source_kind or "saved"), preparation_state=prep_state)
-    except (OSError, ValueError, TypeError, LookupError, sqlite3.Error) as exc:
-        # The saved transcript is authoritative; a Vault failure must not fail the job or the save.
-        app.logger.warning("InputVaultを更新できませんでした: %s", exc)
+    vault_publications().publish_input(row, whisper, source_kind=source_kind)
 
 
 def retire_input_vault(item_id: str) -> None:
-    """Mark a deleted conversation's Input ledger. Saved runs and notes are kept as provenance."""
-    try:
-        vault_registry().retire_input(item_id)
-    except (OSError, ValueError, TypeError, LookupError) as exc:
-        app.logger.warning("InputVaultに削除を記録できませんでした: %s", exc)
+    vault_publications().retire_input(item_id)
 
 
 def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
-    """Non-secret transcription provenance. hf_token and AI keys never reach a Vault."""
-    vocabulary = list(options.custom_vocabulary)
-    return {
-        "model": options.model_name, "language": language, "device": options.device,
-        "diarization_device": options.diarization_device, "diarization_model": DIARIZATION_MODEL,
-        "audio_preprocess": options.audio_preprocess, "triple_pass": options.triple_pass,
-        "boost_quiet_speech": options.boost_quiet_speech, "vad_onset": options.vad_onset,
-        "vad_offset": options.vad_offset, "no_speech_threshold": options.no_speech_threshold,
-        "min_speakers": options.min_speakers, "max_speakers": options.max_speakers,
-        "emotion_analysis": options.emotion_analysis,
-        "emotion_model": options.emotion_model if options.emotion_analysis else "",
-        "conversation_mode": options.conversation_mode,
-        # The registered terms may name people or products: record only their count and hash.
-        "custom_vocabulary_terms": len(vocabulary),
-        "custom_vocabulary_sha256": hashlib.sha256(
-            json.dumps(vocabulary, ensure_ascii=False).encode("utf-8")).hexdigest() if vocabulary else "",
-    }
+    return whisper_settings(options, language, diarization_model=DIARIZATION_MODEL)
 
 
 def _update_library_from_payload_locked(
@@ -12481,10 +12986,17 @@ def _update_library_from_payload_locked(
         if edit_staging_identity(staging_dir) != preparing_identity:
             raise OSError('The published edit staging identity changed unexpectedly.')
         staging_identity = preparing_identity
+        formatting_result = json_load(row["formatting_result_json"], {})
+        if isinstance(formatting_result, dict) and formatting_result:
+            formatting_result = dict(formatting_result)
+            formatting_result["manual_edit_status"] = "edited_after_formatting"
+        else:
+            formatting_result = {}
         staged_files = write_outputs(
             source_name, staging_dir, new_segments, row["language"], new_names,
             bool(row["write_srt"]), True, outline, emotion_analysis, speaker_profiles,
             meeting_minutes, check_cancelled,
+            formatting_result=formatting_result,
         )
         write_edit_preparation_marker(
             staging_dir,
@@ -12651,6 +13163,7 @@ def _update_library_from_payload_locked(
                             else json_load(row["ai_usage_json"], {})
                         ),
                         meeting_minutes=meeting_minutes,
+                        formatting_result=formatting_result,
                     )
                     insert_training_events(connection, training_events)
                     if training_events:
@@ -13436,13 +13949,36 @@ def list_library():
     keyword = request.args.get("keyword", "").strip().casefold()
     speaker_filter = request.args.get("speaker", "").strip().casefold()
     emotion_filter = request.args.get("emotion", "").strip().casefold()
+    group_filter = request.args.get("group", "").strip()
     sort_key = request.args.get("sort", "updated_desc").strip()
     with database_connection() as connection:
         rows = connection.execute("SELECT * FROM library_items ORDER BY updated_at DESC").fetchall()
+        group_rows = connection.execute(
+            """
+            SELECT g.id, g.name, g.created_at, g.updated_at,
+                   COUNT(items.id) AS item_count
+            FROM library_groups AS g
+            LEFT JOIN library_items AS items ON items.group_id = g.id
+            GROUP BY g.id, g.name, g.created_at, g.updated_at
+            ORDER BY g.name COLLATE NOCASE, g.created_at
+            """
+        ).fetchall()
+
+    groups = [
+        {
+            "id": str(row["id"]),
+            "name": str(row["name"]),
+            "item_count": int(row["item_count"] or 0),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in group_rows
+    ]
+    group_names = {group["id"]: group["name"] for group in groups}
 
     all_speakers: set[str] = set()
     all_emotions: set[str] = set()
-    candidates: list[tuple[sqlite3.Row, int, list[str], list[str]]] = []
+    candidates: list[tuple[sqlite3.Row, int, list[str], list[str], str]] = []
     for row in rows:
         segments = row_segments(row)
         names = json_load(row["speaker_names_json"], {})
@@ -13464,7 +14000,12 @@ def list_library():
             continue
         if emotion_filter and not any(emotion_filter == value.casefold() for value in emotions):
             continue
-        candidates.append((row, match_count, speakers, emotions))
+        row_group_id = str(row["group_id"] or "")
+        if group_filter == "__ungrouped__" and row_group_id:
+            continue
+        if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
+            continue
+        candidates.append((row, match_count, speakers, emotions, group_names.get(row_group_id, "")))
 
     if sort_key == "created_desc":
         candidates.sort(key=lambda item: item[0]["created_at"], reverse=True)
@@ -13476,13 +14017,130 @@ def list_library():
         candidates.sort(key=lambda item: (item[1], item[0]["updated_at"]), reverse=True)
     elif sort_key == "name":
         candidates.sort(key=lambda item: str(item[0]["source_name"]).casefold())
+    elif sort_key == "group":
+        candidates.sort(key=lambda item: (
+            not bool(item[4]), item[4].casefold(), str(item[0]["source_name"]).casefold()
+        ))
     else:
         candidates.sort(key=lambda item: item[0]["updated_at"], reverse=True)
     return jsonify({
-        "items": [library_public(row, full=False, match_count=count) for row, count, _, _ in candidates],
+        "items": [
+            library_public(row, full=False, match_count=count, group_name=group_name)
+            for row, count, _, _, group_name in candidates
+        ],
         "total": len(candidates),
-        "facets": {"speakers": sorted(all_speakers), "emotions": sorted(all_emotions)},
+        "groups": groups,
+        "facets": {
+            "speakers": sorted(all_speakers),
+            "emotions": sorted(all_emotions),
+            "groups": groups,
+        },
     })
+
+
+def normalized_library_group_name(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("グループ名を入力してください。")
+    name = clean_single_line(value, 80)
+    if not name:
+        raise ValueError("グループ名を入力してください。")
+    return name
+
+
+@app.post("/api/library/groups")
+def create_library_group():
+    payload = request.get_json(silent=True)
+    try:
+        name = normalized_library_group_name(payload.get("name") if isinstance(payload, dict) else None)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    now = utc_now_iso()
+    group_id = uuid.uuid4().hex
+    try:
+        with library_write_lock, database_connection() as connection:
+            connection.execute(
+                "INSERT INTO library_groups (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (group_id, name, now, now),
+            )
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "同じ名前のグループがすでにあります。"}), 409
+    return jsonify({
+        "id": group_id, "name": name, "item_count": 0,
+        "created_at": now, "updated_at": now,
+    }), 201
+
+
+@app.put("/api/library/groups/<group_id>")
+def update_library_group(group_id: str):
+    payload = request.get_json(silent=True)
+    try:
+        name = normalized_library_group_name(payload.get("name") if isinstance(payload, dict) else None)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    now = utc_now_iso()
+    try:
+        with library_write_lock, database_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE library_groups SET name = ?, updated_at = ? WHERE id = ?",
+                (name, now, group_id),
+            )
+            if cursor.rowcount == 0:
+                return jsonify({"error": "グループが見つかりません。"}), 404
+            count_row = connection.execute(
+                "SELECT COUNT(*) AS item_count FROM library_items WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "同じ名前のグループがすでにあります。"}), 409
+    return jsonify({
+        "id": group_id, "name": name,
+        "item_count": int(count_row["item_count"] or 0), "updated_at": now,
+    })
+
+
+@app.delete("/api/library/groups/<group_id>")
+def delete_library_group(group_id: str):
+    with library_write_lock, database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT name FROM library_groups WHERE id = ?", (group_id,)
+        ).fetchone()
+        if row is None:
+            return jsonify({"error": "グループが見つかりません。"}), 404
+        cursor = connection.execute(
+            "UPDATE library_items SET group_id = '' WHERE group_id = ?", (group_id,)
+        )
+        connection.execute("DELETE FROM library_groups WHERE id = ?", (group_id,))
+    return jsonify({
+        "ok": True, "name": str(row["name"]), "unassigned_count": int(cursor.rowcount or 0),
+    })
+
+
+@app.put("/api/library/<item_id>/group")
+def assign_library_group(item_id: str):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("group_id", ""), str):
+        return jsonify({"error": "グループの指定が不正です。"}), 400
+    group_id = payload.get("group_id", "").strip()
+    with library_write_lock, database_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        item = connection.execute(
+            "SELECT id FROM library_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if item is None:
+            return jsonify({"error": "データが見つかりません。"}), 404
+        group_name = ""
+        if group_id:
+            group = connection.execute(
+                "SELECT name FROM library_groups WHERE id = ?", (group_id,)
+            ).fetchone()
+            if group is None:
+                return jsonify({"error": "グループが見つかりません。"}), 404
+            group_name = str(group["name"])
+        connection.execute(
+            "UPDATE library_items SET group_id = ? WHERE id = ?", (group_id, item_id)
+        )
+    return jsonify({"item_id": item_id, "group_id": group_id, "group_name": group_name})
 
 
 def comparison_rate(count: int | float, denominator: int | float) -> float:
@@ -13853,9 +14511,9 @@ def identify_library_speakers(
                 profile["display_name"] = name
                 speaker_profiles[label] = profile
                 applied_names[label] = name
-            speaker_profiles, registration_summary = link_detected_speakers_to_registry(
+            speaker_profiles, registration_summary = register_detected_speakers(
                 speaker_profiles,
-                detected_names,
+                applied_names,
             )
             combined_usage = merge_ai_usage(
                 json_load(latest["ai_usage_json"], {}),
@@ -13920,194 +14578,57 @@ def obsidian_workbench() -> ObsidianWorkbench:
     return ObsidianWorkbench(DATABASE_FILE)
 
 
+def obsidian_workflows() -> ObsidianWorkflowService:
+    """Build explicit dependencies for researcher-owned workbench operations."""
+    return ObsidianWorkflowService(SimpleNamespace(
+        sqlite_error=sqlite3.Error,
+        workbench=obsidian_workbench,
+        library_row=library_row,
+        row_session_profile=row_session_profile,
+        row_meeting_minutes=row_meeting_minutes,
+        row_segments=row_segments,
+        meeting_external_payload=meeting_external_payload,
+        meeting_tasks_csv_text=meeting_tasks_csv_text,
+        normalize_meeting_minutes=normalize_meeting_minutes,
+        library_write_lock=library_write_lock,
+        row_speaker_profiles=row_speaker_profiles,
+        update_library_item_locked=_update_library_from_payload_locked,
+        merge_ai_usage=merge_ai_usage,
+        json_load=json_load,
+        publish_input_vault=publish_input_vault,
+        archive_ai_finishing=archive_ai_finishing,
+        load_token_config=load_token_config,
+        configured_ai_credentials=configured_ai_credentials,
+        create_outline_with_ai=create_outline_with_ai,
+        clean_segments_with_ai=clean_segments_with_ai,
+        review_segments_with_jev=review_segments_with_jev,
+        attach_jev_comparison=attach_jev_comparison,
+        detect_speaker_names_with_ai=detect_speaker_names_with_ai,
+        apply_speaker_identity_repairs=apply_speaker_identity_repairs,
+    ))
+
+
 def meeting_minutes_fingerprint(minutes: dict[str, Any]) -> str:
-    normalized = normalize_meeting_minutes(minutes)
-    return hashlib.sha256(
-        json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    return obsidian_workflows().meeting_minutes_fingerprint(minutes)
 
 
 def publish_meeting_minutes_to_obsidian(row: sqlite3.Row) -> dict[str, Any]:
-    if row_session_profile(row).get("session_type") != "meeting":
-        raise ValueError("会議モードのデータではありません。")
-    minutes = row_meeting_minutes(row)
-    if not minutes:
-        raise ValueError("会議議事録はまだ作成されていません。")
-    workbench = obsidian_workbench()
-    segments = row_segments(row)
-    state = workbench.prepare(
-        str(row["id"]), str(row["source_name"]), segments,
-        revision=int(row["revision_count"] or 0), source_kind="saved_transcript",
-    )
-    if not state.get("ready"):
-        workbench.activate(str(row["id"]), int(row["revision_count"] or 0), segments)
-        state = workbench.load(str(row["id"])) or state
-    external = json.dumps(
-        meeting_external_payload(str(row["source_name"]), minutes, str(row["id"])),
-        ensure_ascii=False,
-        indent=2,
-    )
-    return workbench.publish_meeting_minutes(
-        state, minutes, task_csv=meeting_tasks_csv_text(minutes), external_json=external,
-    )
+    return obsidian_workflows().publish_meeting_minutes(row)
 
 
 def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
                            context: dict, provider: str, check: Callable) -> dict:
-    """Execute only explicit workbench actions, using configured credentials."""
-    item_id = state["item_id"]
-    row = library_row(item_id)
-    if row is None:
-        raise LookupError("アプリ側の会話が見つかりません。")
-    if int(row["revision_count"] or 0) != state["revision"]:
-        raise ValueError("アプリ側の会話が更新されています。作業ノートを保持して停止しました。新しい作業版をアプリから作成してください。")
-    check()
-    if action == "apply":
-        with library_write_lock:
-            check()
-            latest = library_row(item_id)
-            if latest is None or int(latest["revision_count"] or 0) != context["revision"]:
-                raise ValueError("AI処理後にアプリ側の会話が更新されました。反映を停止しました。")
-            profiles = row_speaker_profiles(latest, segments, context["names"])
-            for label, name in context["names"].items():
-                if label in profiles:
-                    profiles[label]["display_name"] = name
-            result = _update_library_from_payload_locked(item_id, {
-                "revision_count": context["revision"], "segments": segments,
-                "speaker_names": context["names"], "speaker_profiles": profiles,
-            }, record_training=False, outline_override=context.get("outline"),
-                ai_usage_override=merge_ai_usage(json_load(latest["ai_usage_json"], {}), state.get("pending_usage", {})),
-                check_cancelled=check)
-            publish_input_vault(library_row(item_id))
-            try:
-                archive_ai_finishing(library_row(item_id), context["before"], context["stages"],
-                    context["provider"], context["model"], context["usage"],
-                    context_outline=context["context_outline"],
-                    jev_usage=context.get("jev_usage"),
-                    request_id="obsidian-finishing-" + context["run_id"])
-            except (OSError, ValueError, TypeError, sqlite3.Error):
-                # The candidate package remains durable even if Vault publication fails.
-                state["archive_warning"] = "反映済みです。分析履歴の書き出しに失敗しました。作業結果JSONは保持しています。"
-            state["last_usage"] = state.get("pending_usage", {})
-            state["pending_usage"] = {}
-            return {"revision": result["revision_count"]}
-
-    config = load_token_config()
-    api_key, configured_model = configured_ai_credentials(config, provider)
-    model = configured_model
-    if not model or (provider != "lmstudio" and not api_key):
-        raise ValueError("アプリでAPIキーと使用モデルを設定してください。キーはObsidianに書かないでください。")
-    base_url = config.lmstudio_base_url if provider == "lmstudio" else ""
-    usage: dict = {}
-    def record_usage(sample):
-        nonlocal usage
-        usage = merge_ai_usage(usage, sample)
-        state["pending_usage"] = merge_ai_usage(state.get("pending_usage", {}), sample)
-        obsidian_workbench().save(state)
-    def status(message):
-        state["message"] = message
-        obsidian_workbench().save(state)
-        obsidian_workbench().publish_status(state)
-    names = json_load(row["speaker_names_json"], {})
-    if action == "outline" or not context.get("sections"):
-        context = create_outline_with_ai(segments, names, provider, api_key, model,
-            status, check, record_usage, base_url=base_url, ai_efforts=state.get("ai_efforts"))
-    if action == "outline":
-        return {"outline": context, "usage": usage}
-    revised = clean_segments_with_ai(segments, provider, api_key, model, status,
-        check, record_usage, base_url=base_url, ai_efforts=state.get("ai_efforts"), outline=context)
-    stages = {"outline_context": "completed", "cleanup": "completed",
-              "jev_comparison": "not_requested",
-              "speaker_identity": "not_requested", "outline": "not_requested"}
-    jev_usage: dict[str, Any] = {}
-    if state.get("jev_compare"):
-        reviews, jev_usage = review_segments_with_jev(
-            segments, config.typesafe_api_key, config.typesafe_model,
-            status, check, outline=context,
-        )
-        revised = attach_jev_comparison(revised, reviews)
-        stages["jev_comparison"] = "completed"
-    if state.get("detect_names"):
-        diagnostics = {}
-        detected = detect_speaker_names_with_ai(segments, provider, api_key, model,
-            check, record_usage, status, diagnostics.update, base_url=base_url, ai_efforts=state.get("ai_efforts"))
-        revised, names, _ = apply_speaker_identity_repairs(revised, {**names, **detected}, diagnostics)
-        stages["speaker_identity"] = "completed"
-    final_outline = None
-    if state.get("create_outline"):
-        final_outline = create_outline_with_ai(revised, names, provider, api_key, model,
-            status, check, record_usage, base_url=base_url, ai_efforts=state.get("ai_efforts"))
-        stages["outline"] = "completed"
-    check()
-    return {"segments": revised, "names": names, "outline": final_outline,
-            "context_outline": context, "stages": stages, "provider": provider,
-            "model": model, "usage": state.get("pending_usage", usage),
-            "jev_usage": jev_usage}
-
-
-@app.post("/api/library/<item_id>/obsidian-finishing")
-def prepare_obsidian_finishing_route(item_id: str):
-    if not local_path_access_allowed():
-        return jsonify({"error": "Obsidianの作業ノートは保存PCから開いてください。"}), 403
-    payload = request.get_json(silent=True) or {}
-    if not isinstance(payload, dict):
-        return jsonify({"error": "操作の指定が不正です。"}), 400
-    try:
-        with library_write_lock:
-            row = library_row(item_id)
-            if row is None:
-                return jsonify({"error": "会話が見つかりません。"}), 404
-            provider = str(payload.get("provider") or "none")
-            if provider not in {"none", "openai", "google", "lmstudio"}:
-                raise ValueError("AIプロバイダーが不正です。")
-            state = obsidian_workbench().prepare(item_id, row["source_name"], row_segments(row),
-                revision=int(row["revision_count"] or 0), provider=provider, source_kind="saved_transcript",
-                jev_compare=payload.get("jev_compare") is True,
-                ai_efforts=normalize_efforts(payload.get("ai_efforts")))
-            if not state.get("ready"):
-                obsidian_workbench().activate(item_id, int(row["revision_count"] or 0), row_segments(row))
-                state = obsidian_workbench().load(item_id)
-            return jsonify(obsidian_workbench().public(state))
-    except (OSError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
-
-
-@app.get("/api/library/<item_id>/obsidian-finishing")
-def obsidian_finishing_status_route(item_id: str):
-    if not local_path_access_allowed():
-        return jsonify({"error": "保存PCから確認してください。"}), 403
-    try:
-        state = obsidian_workbench().load(item_id)
-        return jsonify({"status": state.get("status", "ready"),
-                        "message": state.get("message", "")}) if state else jsonify({"status": "unprepared"})
-    except (OSError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
+    return obsidian_workflows().run_finishing(action, state, segments, context, provider, check)
 
 
 def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
-    stop = threading.Event()
-    def watch():
-        try:
-            obsidian_workbench().recover()
-            from .obsidian_migration import migrate
-            migrate(obsidian_workbench().database_file)
-        except Exception:
-            app.logger.exception("Obsidian作業状態の復旧に失敗しました。")
-            stop.set()
-            return
-        last_theme_sync = 0.0
-        while not stop.is_set():
-            try:
-                obsidian_workbench().poll_once(run_obsidian_finishing, stop.is_set)
-                if time.monotonic() - last_theme_sync > 10:
-                    obsidian_workbench().layout.sync_themes()
-                    last_theme_sync = time.monotonic()
-            except Exception:
-                app.logger.exception("Obsidianの操作ノートを読み込めませんでした。")
-            stop.wait(2)
-    worker = threading.Thread(target=watch, name="obsidian-finishing", daemon=True)
-    worker.start()
-    return stop, worker
+    from .obsidian_migration import migrate
+    return ObsidianWatcher(
+        workbench=obsidian_workbench,
+        engine=run_obsidian_finishing,
+        migrate=migrate,
+        log_exception=app.logger.exception,
+    ).start()
 
 
 _application_lifecycle: ApplicationLifecycle | None = None
@@ -14429,6 +14950,70 @@ def analysis_queries() -> AnalysisQueries:
     )
 
 
+PIPELINE_METHOD_DATASETS = {
+    "participation": ("speakers", "groups", "summary", "observations"),
+    "conversation_dynamics": ("transitions", "gaps", "overlaps", "timeline"),
+}
+
+
+def build_analysis_pipeline_snapshot(row: sqlite3.Row) -> dict[str, Any]:
+    """Capture one immutable input and its existing-analysis adapter view."""
+    analysis = group_analysis_for_row(row, include_research_rows=True)
+    return {
+        "schema_version": 1,
+        "input_hash": archive_source_stamp(row),
+        "source_revision": int(row["revision_count"] or 0),
+        "analysis_revision": int(row["analysis_revision"] or 0),
+        "analysis": analysis,
+        "archive_snapshot": archive_snapshot(row, analysis),
+    }
+
+
+def run_analysis_pipeline_method(step_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Adapt one existing method to the fixed pipeline snapshot."""
+    if step_id not in PIPELINE_METHOD_DATASETS:
+        raise ValueError("未対応の分析stepです。")
+    analysis = snapshot["analysis"]
+    datasets = {
+        name: analysis_csv_rows(analysis, name)
+        for name in PIPELINE_METHOD_DATASETS[step_id]
+    }
+    methods = method_results(analysis, datasets)
+    method = next((value for value in methods if value["method_id"] == step_id), None)
+    if method is None:
+        raise ValueError(f"{step_id}の既存分析結果を構築できません。")
+    return {
+        "method": method,
+        "datasets": {
+            name: {"fields": fields, "rows": rows}
+            for name, (fields, rows) in datasets.items()
+        },
+    }
+
+
+def analysis_pipeline_service() -> AnalysisPipelineService:
+    store = analysis_archive_store()
+
+    def public_run(value: dict[str, Any]) -> dict[str, Any]:
+        row = store.get(str(value.get("id") or ""))
+        if row is None:
+            raise LookupError("保存結果が見つかりません。")
+        return store.public(row, local=local_path_access_allowed())
+
+    return AnalysisPipelineService(
+        connect=database_connection,
+        find_item=library_row,
+        source_fingerprint=archive_source_stamp,
+        snapshot_builder=build_analysis_pipeline_snapshot,
+        method_runner=run_analysis_pipeline_method,
+        save_result=store.save,
+        publish_result=store.publish,
+        publication_outcomes=store.publication_outcomes,
+        public_run=public_run,
+        runtime_key=str(DATABASE_FILE.resolve()),
+    )
+
+
 def mark_analysis_run_stale(run_id: str) -> None:
     with database_connection() as connection:
         connection.execute("UPDATE analysis_runs SET stale=1 WHERE id=?", (run_id,))
@@ -14462,6 +15047,7 @@ def analysis_commands() -> AnalysisCommands:
         run_classification=run_segment_classifications_command,
         write_lock=library_write_lock,
         expose_local_paths=local_path_access_allowed(),
+        pipeline_service=analysis_pipeline_service(),
     )
 
 
@@ -15115,7 +15701,8 @@ def get_library_analysis(item_id: str):
     if row is None:
         return jsonify({"error": "処理済みデータが見つかりません。"}), 404
     try:
-        return jsonify(group_analysis_for_row(row))
+        execute = request.args.get("execute", "0").strip() in {"1", "true"}
+        return jsonify(group_analysis_for_row(row, execute=execute))
     except (ValueError, TypeError, OverflowError, sqlite3.Error):
         return jsonify({"error": "分析データを生成できません。元データを確認してください。"}), 500
 
@@ -15384,53 +15971,23 @@ def export_library_analysis_csv(item_id: str):
 
 
 def meeting_minutes_export_row(item_id: str) -> tuple[sqlite3.Row, dict[str, Any]]:
-    row = library_row(item_id)
-    if row is None:
-        raise LookupError("処理済みデータが見つかりません。")
-    if row_session_profile(row).get("session_type") != "meeting":
-        raise ValueError("会議モードのデータではありません。")
-    minutes = row_meeting_minutes(row)
-    if not minutes:
-        raise LookupError("会議議事録はまだ作成されていません。")
-    return row, minutes
+    return obsidian_workflows().meeting_minutes_export_row(item_id)
 
 
-@app.get("/api/library/<item_id>/meeting-obsidian")
-def meeting_obsidian_status(item_id: str):
-    if not local_path_access_allowed():
-        return jsonify({"error": "Obsidian連携は保存PCから操作してください。"}), 403
-    try:
-        _row, minutes = meeting_minutes_export_row(item_id)
-        workbench = obsidian_workbench()
-        state = workbench.load(item_id)
-        return jsonify(workbench.meeting_public(state, meeting_minutes_fingerprint(minutes)))
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, json.JSONDecodeError):
-        return jsonify({"error": "Obsidianの会議議事録の状態を確認できませんでした。"}), 500
-
-
-@app.post("/api/library/<item_id>/meeting-obsidian")
-def save_meeting_to_obsidian(item_id: str):
-    if not local_path_access_allowed():
-        return jsonify({"error": "Obsidian連携は保存PCから操作してください。"}), 403
-    try:
-        row, _minutes = meeting_minutes_export_row(item_id)
-        try:
-            with library_write_lock:
-                archive_meeting_minutes(row)
-        except (OSError, ValueError, TypeError, LookupError, sqlite3.Error):
-            # The meeting note is still published; its separate analysis run can be saved again later.
-            app.logger.warning("会議議事録を分析履歴として保存できませんでした。", exc_info=True)
-        return jsonify(publish_meeting_minutes_to_obsidian(row))
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (OSError, TypeError, json.JSONDecodeError):
-        return jsonify({"error": "会議議事録をObsidianへ保存できませんでした。"}), 500
+register_obsidian_routes(
+    app,
+    local_access_allowed=local_path_access_allowed,
+    library_row=library_row,
+    row_segments=row_segments,
+    workbench=obsidian_workbench,
+    normalize_efforts=normalize_efforts,
+    write_lock=library_write_lock,
+    meeting_export_row=meeting_minutes_export_row,
+    meeting_fingerprint=meeting_minutes_fingerprint,
+    archive_meeting_minutes=archive_meeting_minutes,
+    publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
+    log_warning=app.logger.warning,
+)
 
 
 @app.get("/api/library/<item_id>/meeting.json")
@@ -15955,13 +16512,40 @@ def start_transcription_job_command(
         provider = form.get("ai_provider", "none")
         if provider not in AI_PROVIDERS:
             raise ValueError("AI プロバイダーが不正です。")
+        finishing_mode_value = form.get("transcript_finishing_mode", "").strip()
+        transcript_finishing_mode = finishing_mode_value or "custom"
+        if transcript_finishing_mode not in TRANSCRIPT_FINISHING_MODES:
+            raise ValueError("文章整形モードの指定が不正です。")
         clean_transcript = parse_bool("clean_transcript", form=form)
         detect_names = parse_bool("detect_speaker_names", form=form)
         create_outline = parse_bool("create_outline", form=form)
         finish_in_obsidian = parse_bool(
-            "finish_in_obsidian", default=True, form=form
+            "finish_in_obsidian", default=not finishing_mode_value, form=form
         )
+        ai_efforts = normalize_efforts({
+            key: form.get("ai_effort_" + key, "auto")
+            for key in ("outline", "cleanup", "name_extract", "name_verify")
+        })
+        recommended_cleanup = False
         jev_compare = parse_bool("jev_compare", form=form)
+        if transcript_finishing_mode == "off":
+            clean_transcript = False
+            detect_names = False
+            create_outline = False
+            jev_compare = False
+            finish_in_obsidian = False
+        elif transcript_finishing_mode == "recommended":
+            # Jev triages each utterance and the configured cleanup effort
+            # controls how much context the finishing LLM may read and rewrite.
+            clean_transcript = False
+            create_outline = False
+            jev_compare = False
+        elif transcript_finishing_mode == "advanced":
+            clean_transcript = True
+            detect_names = True
+            finish_in_obsidian = False
+            if provider == "none":
+                raise ValueError("高度モードでは使用するAIを選択してください。")
         if provider == "none":
             clean_transcript = False
             detect_names = False
@@ -15977,12 +16561,19 @@ def start_transcription_job_command(
         token_config = load_token_config()
         if not token_config.huggingface_token:
             raise ValueError("tokens.json に huggingface_token を設定してください。")
+        recommended_cleanup = bool(
+            transcript_finishing_mode == "recommended"
+            and provider != "none"
+            and not finish_in_obsidian
+            and ai_efforts.get("cleanup") != "off"
+            and token_config.typesafe_api_key
+        )
         if jev_compare and not token_config.typesafe_api_key:
             raise ValueError("Jev比較には tokens.json の typesafe_api_key が必要です。")
         ai_api_key = ""
         ai_model = ""
         ai_base_url = ""
-        if clean_transcript or detect_names or create_outline:
+        if clean_transcript or recommended_cleanup or detect_names or create_outline:
             ai_api_key, ai_model = configured_ai_credentials(token_config, provider)
             if provider == "lmstudio":
                 ai_base_url = lmstudio_base_url(token_config.lmstudio_base_url)
@@ -16050,14 +16641,17 @@ def start_transcription_job_command(
             ai_model=ai_model,
             ai_base_url=ai_base_url,
             owns_output_dir=True,
-            ai_efforts=normalize_efforts({key: form.get("ai_effort_" + key, "auto")
-                                          for key in ("outline", "cleanup", "name_extract", "name_verify")}),
+            ai_efforts=ai_efforts,
             finish_in_obsidian=finish_in_obsidian,
             conversation_mode=conversation_mode,
             custom_vocabulary=custom_vocabulary,
+            recommended_cleanup=recommended_cleanup,
             jev_compare=jev_compare,
             jev_api_key=token_config.typesafe_api_key,
             jev_model=token_config.typesafe_model,
+            transcript_finishing_mode=transcript_finishing_mode,
+            write_word_cloud=parse_bool("write_word_cloud", form=form),
+            generate_meeting_minutes=parse_bool("generate_meeting_minutes", form=form),
         )
         job = JobRecord(
             id=job_id,

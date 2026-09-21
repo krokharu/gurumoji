@@ -14,11 +14,19 @@
   const message = document.querySelector('#interview-comparison-message');
   const result = document.querySelector('#interview-comparison-result');
   const refreshButton = document.querySelector('#interview-comparison-refresh');
+  const historyStatus = document.querySelector('#interview-comparison-history-status');
+  const historyList = document.querySelector('#interview-comparison-history-list');
+  const historyRefresh = document.querySelector('#interview-comparison-history-refresh');
   let catalog = [];
+  let savedRuns = [];
   let baseId = '';
   let selectedIds = new Set();
   let running = false;
   let catalogLoading = false;
+  let historyLoading = false;
+  let historySequence = 0;
+  let retryingRunId = '';
+  let historyMessage = '';
 
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -43,6 +51,10 @@
     return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
   };
   const number = value => new Intl.NumberFormat('ja-JP', {maximumFractionDigits: 1}).format(Number(value) || 0);
+  const dateText = value => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value || '') : date.toLocaleString('ja-JP');
+  };
 
   function selectedInOrder() {
     return [baseId, ...catalog.map(item => item.id).filter(id => id !== baseId && selectedIds.has(id))]
@@ -196,6 +208,100 @@
     return section;
   }
 
+  function renderComparisonHistory() {
+    historyList.replaceChildren();
+    historyRefresh.disabled = historyLoading || Boolean(retryingRunId);
+    historyStatus.textContent = historyLoading
+      ? '保存履歴を読み込んでいます…'
+      : historyMessage || `${savedRuns.length}件の保存履歴（直近100件）`;
+    historyStatus.classList.toggle('error', Boolean(historyMessage));
+    if (historyLoading && !savedRuns.length) return;
+    if (!savedRuns.length) {
+      historyList.append(element('p', 'interview-comparison-empty', '保存済みの比較はありません。比較を集計して保存すると、ここから成果物を開けます。'));
+      return;
+    }
+    savedRuns.forEach(run => {
+      const details = element('details', 'interview-comparison-history-run');
+      details.dataset.comparisonRun = run.id;
+      const memberNames = (run.member_ids || []).map(id => itemFor(id)?.source_name || id);
+      const state = run.status === 'writing' ? '保存中'
+        : run.vault_status === 'completed' ? '保存済み'
+        : 'Vault再試行が必要';
+      const summary = element('summary', '', `${dateText(run.created_at)} / ${memberNames.join('、') || '比較対象不明'} / ${state}`);
+      const body = element('div', 'interview-comparison-history-body');
+      if (run.stale) body.append(element('p', 'interview-comparison-history-notice', '元データが更新されています。この結果は保存時点の入力に基づきます。'));
+      if (run.error) body.append(element('p', 'interview-comparison-history-notice error', run.error));
+      const actions = element('div', 'interview-comparison-history-actions');
+      if (run.obsidian_uri) {
+        const open = element('a', 'secondary-button compact-button', 'Obsidianで開く');
+        open.href = run.obsidian_uri;
+        actions.append(open);
+      }
+      if (run.status !== 'writing' && (run.status !== 'completed' || run.vault_status !== 'completed')) {
+        const retry = element('button', 'secondary-button compact-button', retryingRunId === run.id ? '再試行中…' : 'Vaultへの保存を再試行');
+        retry.type = 'button';
+        retry.disabled = Boolean(retryingRunId);
+        retry.dataset.comparisonVaultRetry = run.id;
+        actions.append(retry);
+      }
+      if (actions.childNodes.length) body.append(actions);
+      const files = element('div', 'interview-comparison-history-files');
+      (run.artifacts || []).forEach(artifact => {
+        const link = element('a', 'analysis-export-link', artifact.name);
+        link.href = artifact.url;
+        link.download = '';
+        files.append(link);
+      });
+      body.append(files);
+      details.append(summary, body);
+      historyList.append(details);
+    });
+  }
+
+  async function loadComparisonHistory() {
+    const sequence = ++historySequence;
+    historyLoading = true;
+    historyMessage = '';
+    renderComparisonHistory();
+    try {
+      const response = await apiFetch('/api/library/interview-comparison/runs', {cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '保存済みの比較を取得できませんでした。');
+      if (sequence !== historySequence) return;
+      savedRuns = Array.isArray(data.runs) ? data.runs : [];
+    } catch (error) {
+      if (sequence === historySequence) historyMessage = error.message;
+    } finally {
+      if (sequence === historySequence) {
+        historyLoading = false;
+        renderComparisonHistory();
+      }
+    }
+  }
+
+  async function retryComparisonVault(runId) {
+    if (!runId || retryingRunId) return;
+    retryingRunId = runId;
+    historyMessage = '';
+    let retryError = '';
+    renderComparisonHistory();
+    try {
+      const response = await apiFetch(`/api/analysis/runs/${encodeURIComponent(runId)}/vault`, {method: 'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Vaultへの保存を再試行できませんでした。');
+      if (data.run?.vault_status !== 'completed') retryError = data.run?.error || 'Vaultの状態を確認してください。';
+    } catch (error) {
+      retryError = error.message;
+    } finally {
+      retryingRunId = '';
+      await loadComparisonHistory();
+      if (retryError) {
+        historyMessage = retryError;
+        renderComparisonHistory();
+      }
+    }
+  }
+
   // One request ID per displayed result: repeated clicks reuse the same saved run.
   let lastRequest = null;
   const requestId = () => {
@@ -217,8 +323,9 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '比較結果を保存できませんでした。');
       status.textContent = data.run.vault_status === 'completed'
-        ? '保存しました。ResearchVaultの「40-研究/インタビュー比較」とOrchestratorに記録しました。'
-        : '保存しました。Vaultへの書き出しは再試行が必要です。';
+        ? '保存しました。下の保存履歴から成果物とObsidianの記録を開けます。'
+        : '結果ファイルを保存しました。下の保存履歴からVaultへの書き出しを再試行してください。';
+      await loadComparisonHistory();
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;
@@ -283,6 +390,7 @@
       catalog.forEach(item => baseSelect.add(new Option(item.source_name || item.id, item.id)));
       baseSelect.value = baseId;
       renderTargets();
+      renderComparisonHistory();
     } catch (error) {
       catalog = [];
       baseId = '';
@@ -360,6 +468,12 @@
     updateSelectionUi();
   });
   refreshButton.addEventListener('click', loadCatalog);
+  historyRefresh.addEventListener('click', loadComparisonHistory);
+  historyList.addEventListener('click', event => {
+    const button = event.target.closest('[data-comparison-vault-retry]');
+    if (button) retryComparisonVault(button.dataset.comparisonVaultRetry);
+  });
   runButton.addEventListener('click', runComparison);
   loadCatalog();
+  loadComparisonHistory();
 })();

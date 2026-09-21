@@ -404,19 +404,53 @@ class VaultRegistry:
                             revision=int(run["source_revision"]), session_profile=source.get("session_profile"),
                             source_kind="saved")
             by_name = {artifact["name"]: artifact for artifact in artifacts}
-            statuses = {"snapshot": self._snapshot(data, run, snapshot, title, by_name.get("input.json"))}
+            outcomes: dict[str, list[str]] = {kind: [] for kind in GENERATED}
+            try:
+                outcomes["input"].append(
+                    self._snapshot(data, run, snapshot, title, by_name.get("input.json"))
+                )
+            except (OSError, ValueError, LookupError, TypeError):
+                outcomes["input"].append("failed")
             for method_id, method_title, datasets in METHODS:
-                self._method_card(data, method_id, method_title, datasets)
+                try:
+                    outcomes["orchestrator"].append(
+                        self._method_card(data, method_id, method_title, datasets)
+                    )
+                except (OSError, ValueError, LookupError, TypeError):
+                    outcomes["orchestrator"].append("failed")
             visuals = {}
             for method in result.get("methods", []):
                 if not re.fullmatch(r"[a-z_]+", str(method.get("method_id", ""))):
                     raise ValueError("手法IDが不正です。")
-                note_id = self._visual(data, run, title, method, by_name, table_fields, members)
-                if note_id:
-                    visuals[method["method_id"]] = note_id
-            statuses["run"] = self._run(data, run, title, result, artifacts, visuals, members)
-            self._finish(data, GENERATED)
-            return statuses
+                try:
+                    visual = self._visual(data, run, title, method, by_name, table_fields, members)
+                    if visual:
+                        note_id, status = visual
+                        visuals[method["method_id"]] = note_id
+                        outcomes["visualization"].append(status)
+                except (OSError, ValueError, LookupError, TypeError):
+                    outcomes["visualization"].append("failed")
+            try:
+                outcomes["orchestrator"].append(
+                    self._run(data, run, title, result, artifacts, visuals, members)
+                )
+            except (OSError, ValueError, LookupError, TypeError):
+                outcomes["orchestrator"].append("failed")
+            for kind in GENERATED:
+                try:
+                    self._finish(data, (kind,))
+                    outcomes[kind].append("unchanged")
+                except (OSError, ValueError, LookupError, TypeError):
+                    outcomes[kind].append("failed")
+
+            def aggregate(values: list[str]) -> str:
+                if "conflict" in values:
+                    return "conflict"
+                if any(value in {"failed", "missing"} for value in values):
+                    return "failed"
+                return "published"
+
+            return {kind: aggregate(values) for kind, values in outcomes.items()}
 
     def _snapshot(self, data: dict, run: dict, snapshot: dict, title: str, artifact: dict | None) -> str:
         item_id = str(run["item_id"])
@@ -479,14 +513,14 @@ class VaultRegistry:
             "status": "current", "tags": ["gurumoji/orchestrator", "gurumoji/method"]}, body)
 
     def _visual(self, data: dict, run: dict, title: str, method: dict, by_name: dict,
-                table_fields: dict[str, list[str]], members: list[dict]) -> str:
+                table_fields: dict[str, list[str]], members: list[dict]) -> tuple[str, str] | None:
         method_id = method["method_id"]
         if method.get("status") in {"not_run", "unavailable"}:
-            return ""  # Shared tables (e.g. insights) must not look like this method's output.
+            return None  # Shared tables (e.g. insights) must not look like this method's output.
         tables = [(name, by_name.get(f"tables/{name}.csv")) for name in method.get("datasets", [])]
         tables = [(name, artifact) for name, artifact in tables if artifact and artifact.get("rows")]
         if not tables:
-            return ""
+            return None
         group_id, group_title, _ = method_group(method_id)
         stale = bool(run.get("stale"))
         rows = sum(int(artifact["rows"]) for _, artifact in tables)
@@ -510,7 +544,7 @@ class VaultRegistry:
                  "## 解釈\n\n研究者が記入します。記入するとこのノートの自動更新は止まり、記入内容を保持します。\n")
         source_ids = [str(member.get("conversation_id")) for member in members] or [str(run["item_id"])]
         note_id = f"visual-{run['id']}-{method_id}"
-        self._write(data, "visualization", f"10-Visuals/run-{run['id']}/{method_id}.md", note_id, {
+        status = self._write(data, "visualization", f"10-Visuals/run-{run['id']}/{method_id}.md", note_id, {
             "note_type": "visual-spec", "title": f"{method['title']}：{title}",
             "summary": f"{method['title']}の図表仕様。{len(tables)}表・計{rows}行。状態：{label}" + ("（更新が必要）。" if stale else "。"),
             "source_ids": source_ids, "artifact_ids": [artifact["id"] for _, artifact in tables],
@@ -518,7 +552,7 @@ class VaultRegistry:
             "method_group": group_id, "revision": int(run["analysis_revision"]),
             "source_hash": "sha256:" + sha256(canonical(sorted(artifact["sha256"] for _, artifact in tables))),
             "status": "stale" if stale else "current", "tags": ["gurumoji/visualization"]}, body)
-        return note_id
+        return note_id, status
 
     def _run(self, data: dict, run: dict, title: str, result: dict, artifacts: list[dict],
              visuals: dict[str, str], members: list[dict]) -> str:

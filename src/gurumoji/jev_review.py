@@ -38,8 +38,9 @@ def _questions(batch: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                     "a correction to the automatic speech recognition transcript?"
                 ),
                 "correction_needed_when": (
-                    "Wrong, missing, duplicated, or hallucinated words; a broken phrase that is "
-                    "unlikely to be what the speaker said."
+                    "Wrong, missing, duplicated, or hallucinated words; meaningless text, audio "
+                    "noise rendered as words, or a broken/cut-off phrase unlikely to be what the "
+                    "speaker said."
                 ),
                 "no_correction_needed_when": (
                     "Natural hesitations, informal grammar, dialect, disagreement, repetition, "

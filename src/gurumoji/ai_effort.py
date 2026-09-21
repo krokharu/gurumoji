@@ -8,7 +8,8 @@ SCHEMA_STAGES = {"meeting_outline": "outline", "transcript_outline_context": "ou
                  # the outline control so local reasoning models can reserve
                  # generation tokens for the JSON findings.
                  "conversation_insights": "outline",
-                 "transcript_cleanup": "cleanup", "speaker_identity_extraction": "name_extract",
+                 "transcript_cleanup": "cleanup", "transcript_recommended_cleanup": "cleanup",
+                 "speaker_identity_extraction": "name_extract",
                  "speaker_identity_link_verification": "name_verify"}
 
 
