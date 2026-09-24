@@ -5495,7 +5495,7 @@ function renderAnalysisWorkspace() {
   if (!analysisState.data) return;
   const shell = document.querySelector('#analysis-shell');
   const empty = document.querySelector('#analysis-empty');
-  if (analysisState.data.executed === false) {
+  if (analysisState.data.executed === false && analysisState.mode === 'automatic') {
     if (shell) shell.hidden = true;
     if (empty) {
       empty.hidden = false;

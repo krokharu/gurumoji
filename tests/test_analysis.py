@@ -377,7 +377,7 @@ class AnalysisApiTests(unittest.TestCase):
                 "schema_version", "algorithm_version", "generated_at", "item",
                 "config", "annotations", "classification", "cautions",
                 "automatic", "manual", "segments", "exports", "research", "insights", "transformer",
-                "experts", "plan_items",
+                "experts", "plan_items", "executed",
                 "segment_classification",
             },
         )

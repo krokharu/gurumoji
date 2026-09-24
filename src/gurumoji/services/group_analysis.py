@@ -47,7 +47,6 @@ from ..text_utils import clean_multiline, clean_single_line, json_load, normaliz
 from ..transformer_analysis import (
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
     MAX_MANUAL_TOPICS,
-    TRANSFORMER_CSV_FIELDS,
     transformer_csv_sources,
     transformer_input_fingerprint,
 )
@@ -1573,6 +1572,7 @@ def group_analysis_for_row(
         "segments": timeline,
         "exports": {
             "json": f"/api/library/{row['id']}/analysis/export.json",
+            "xlsx": f"/api/library/{row['id']}/analysis/export.xlsx",
             "speakers": f"/api/library/{row['id']}/analysis/export.csv?dataset=speakers",
             "transitions": f"/api/library/{row['id']}/analysis/export.csv?dataset=transitions",
             "gaps": f"/api/library/{row['id']}/analysis/export.csv?dataset=gaps",
@@ -1654,14 +1654,6 @@ def group_analysis_for_row(
         if analysis["insights"].get("ai"):
             analysis["insights"]["stale"] = (
                 analysis["insights"]["ai"].get("fingerprint") != analysis["insights"]["fingerprint"])
-    for dataset in TRANSFORMER_CSV_FIELDS:
-        analysis["exports"][dataset] = (
-            f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
-        )
-    for dataset in ("segment_classifications", "segment_classification_crosstabs"):
-        analysis["exports"][dataset] = (
-            f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
-        )
-    for dataset in ("prepared_turns", "analysis_units", "analysis_plan", "codebook_history", "interaction_links"):
+    for dataset in ANALYSIS_CSV_FIELDS:
         analysis["exports"][dataset] = f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"
     return analysis

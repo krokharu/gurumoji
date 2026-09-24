@@ -8,6 +8,7 @@ import threading
 from unittest.mock import patch
 
 import app
+from gurumoji.web import system_routes
 import test_analysis as fixtures
 import test_browser_e2e as browser_support
 from gurumoji import transcript_preparation as preparation
@@ -291,7 +292,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(app, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
+            with patch.object(system_routes, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
                 for size in ('1360,900', '390,844'):
                     with self.subTest(size=size):
                         result = subprocess.run([browser, '--headless=new', '--disable-gpu', '--disable-background-networking',

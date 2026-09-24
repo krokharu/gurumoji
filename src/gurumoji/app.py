@@ -5527,15 +5527,15 @@ register_system_routes(
     runtime_info=runtime_info,
     local_llm_label=local_llm_label,
     local_llm_short_label=local_llm_short_label,
-    get_machine_profile=get_machine_profile,
-    load_token_config=load_token_config,
+    get_machine_profile=lambda: get_machine_profile(),
+    load_token_config=lambda path: load_token_config(path),
     lmstudio_connection_status=lmstudio_connection_status,
     local_path_access_allowed=local_path_access_allowed,
     load_custom_vocabulary=load_custom_vocabulary,
     save_custom_vocabulary=save_custom_vocabulary,
     available_ai_models=lambda provider, config: available_ai_models(provider, config),
     update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
-    system_activity_snapshot=system_activity_snapshot,
+    system_activity_snapshot=lambda: system_activity_snapshot(),
 )
 
 

@@ -61,7 +61,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       await new Promise(r => setTimeout(r, 40));
     }
     throw new Error('Timed out: ' + check.toString() + ' / ' + JSON.stringify(contentAnalysisState().run)
-      + ' / ' + contentAnalysisState().aiError + ' / ' + contentAnalysisState().pollError);
+      + ' / ' + contentAnalysisState().aiError + ' / ' + contentAnalysisState().pollError
+      + ' / execution=' + analysisExecutionState.status + ' / dialog=' + document.querySelector('#analysis-run-dialog-message')?.textContent);
   };
   const assert = (value, message) => { if (!value) throw new Error(message); };
   try {
