@@ -10,6 +10,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+from gurumoji.web import system_routes
 
 
 def browser_executable() -> str | None:
@@ -222,7 +223,7 @@ window.addEventListener('DOMContentLoaded', () => {
   } catch (error) { document.body.dataset.aiReviewTest = 'failed: ' + error.message; }
 });
 """
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
         def render(*args, **kwargs):
             return original_render(*args, **kwargs).replace('</body>',
@@ -235,7 +236,7 @@ window.addEventListener('DOMContentLoaded', () => {
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(app, 'render_template', side_effect=render), \
+            with patch.object(system_routes, 'render_template', side_effect=render), \
                     patch.object(app.app, 'send_static_file', side_effect=static), \
                     patch.object(app, 'get_machine_profile', return_value={}), \
                     patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
@@ -350,7 +351,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 """
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
         def render(*args, **kwargs):
             return original_render(*args, **kwargs).replace('</body>',
@@ -363,7 +364,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(app, 'render_template', side_effect=render), \
+            with patch.object(system_routes, 'render_template', side_effect=render), \
                     patch.object(app.app, 'send_static_file', side_effect=static), \
                     patch.object(app, 'get_machine_profile', return_value={}), \
                     patch.object(app, 'system_activity_snapshot', return_value={}), \
@@ -634,13 +635,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     expect('UX-09 no horizontal overflow', document.documentElement.scrollWidth <= window.innerWidth + 2,
       String(document.documentElement.scrollWidth));
 
-    // Recognition starts open; "変更" opens the requested additional panel.
+    // All detailed settings start closed; the summary opens only the requested panel.
     const panels = [...document.querySelectorAll('[data-settings-panel]')];
-    expect('recognition settings open by default', byId('panel-recognition').open
-      && panels.filter(panel => panel.open).length === 1, panels.filter(p => p.open).map(p => p.id).join());
+    expect('all settings closed by default', panels.length === 5 && panels.every(panel => !panel.open));
     document.querySelector('[data-open-panel="finishing"]').click();
     await pause(400);
-    expect('変更 opens requested panel', byId('panel-finishing').open && byId('panel-recognition').open);
+    expect('summary row opens requested panel', byId('panel-finishing').open && !byId('panel-recognition').open);
     byId('panel-finishing').open = false;
 
     // UX-06 / UX-07: the main task is placed first.
@@ -665,7 +665,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.body.dataset.uxFixesChecks = String(checks.length);
 });
 """
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
 
         def render(*args, **kwargs):
@@ -683,7 +683,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
                 try:
-                    with patch.object(app, 'render_template', side_effect=render), \
+                    with patch.object(system_routes, 'render_template', side_effect=render), \
                             patch.object(app.app, 'send_static_file', side_effect=static), \
                             patch.object(app, 'get_machine_profile', return_value={}), \
                             patch.object(app, 'load_token_config', return_value=app.TokenConfig()):

@@ -1,25 +1,25 @@
 /* Native radio controls keep effort selection keyboard and touch accessible. */
 const effortStages = [
-  ['outline', '全体アウトライン', '校正の参照用と、仕上げ後の議題整理', 'create-outline'],
-  ['cleanup', 'おすすめ文章整形', 'Jevの候補を発話単位で確認し、エフォートに応じた文脈で置換', 'clean-transcript'],
-  ['name_extract', '話者名の候補抽出', '自己紹介から氏名の候補を拾う', 'detect-names'],
-  ['name_verify', '話者リンクの再確認', '氏名と発話者の対応をもう一度確認', 'detect-names']
+  ['outline', '会話の流れを整理', '会話全体を確認し、話題ごとに整理します。', 'create-outline'],
+  ['cleanup', '文章の仕上げ', '必要な箇所をどの程度整えるか選びます。', 'clean-transcript'],
+  ['name_extract', '話者名を確認', '自己紹介から名前の候補を探します。', 'detect-names'],
+  ['name_verify', '話者を再確認', '名前と発話の対応を確認します。', 'detect-names']
 ];
-const effortLevels = [['low', '低'], ['medium', '中'], ['high', '高'], ['ultra', 'ultra']];
+const effortLevels = [['low', '低'], ['medium', '中'], ['high', '高'], ['ultra', '最大']];
 const cleanupEffortLevels = [['off', 'なし'], ['low', '小'], ['medium', '中'], ['high', '高'], ['ultra', 'MAX']];
 const effortDescriptions = {
-  off: '思考モードをOFFにします。対応していないモデルでは選べません。',
-  low: '短く考えて、速度と使用量を抑えます。',
-  medium: '時間と思考量のバランスを取ります。',
-  high: 'より長く考えます。時間・使用量が増える場合があります。',
-  ultra: '対応モデルで最大の思考量を使います。時間・使用量が大きく増える場合があります。'
+  off: 'AIによる詳しい検討を行いません。モデルによっては選べません。',
+  low: '短時間で確認します。',
+  medium: '標準的な詳しさで確認します。',
+  high: 'より詳しく確認します。処理時間や使用量が増える場合があります。',
+  ultra: '最も詳しく確認します。処理時間や使用量が大きく増える場合があります。'
 };
 const cleanupEffortDescriptions = {
-  off: '文章整形AIを実行せず、原文とローカルの安全な正規化だけを使います。',
-  low: '対象発話だけを読み、原文をできる限り残して致命的な誤りだけを最小修正します。',
-  medium: '対象発話だけを読み、意味不明・ノイズ・途切れ・明白な誤認識を文章として修正します。',
-  high: 'アウトラインと直前1発話を読み、必要時だけさらに前を1発話ずつ最大10回まで追加します。',
-  ultra: 'アウトラインと前後最大10発話を読み、会話の流れから予測できる文章への書き直しを許可します。'
+  off: 'AIで文章を整えず、認識結果を残します。',
+  low: '発話を一つずつ確認し、明らかな誤りだけを直します。',
+  medium: '発話を一つずつ確認し、誤認識や聞き取りにくい箇所を整えます。',
+  high: '直前の会話や話題を参考にして整えます。',
+  ultra: '前後の会話や話題を参考に、文章を詳しく整えます。'
 };
 let localEffortCapability = null;
 let localEffortModel = null;
@@ -31,10 +31,10 @@ if (effortRoot) {
     card.dataset.stage = key;
     const cleanup = key === 'cleanup';
     const thinkingMode = cleanup
-      ? `<div class="thinking-mode effort-options" hidden aria-hidden="true"><label><input type="radio" name="ai_thinking_mode_${key}" value="on" checked><span>ON</span></label><label><input type="radio" name="ai_thinking_mode_${key}" value="off"><span>OFF</span></label></div>`
-      : `<span class="effort-group-title">思考モード</span><div class="thinking-mode effort-options"><label><input type="radio" name="ai_thinking_mode_${key}" value="on" checked><span>ON</span></label><label><input type="radio" name="ai_thinking_mode_${key}" value="off"><span>OFF</span></label></div>`;
+      ? `<div class="thinking-mode effort-options" hidden aria-hidden="true"><label><input type="radio" name="ai_thinking_mode_${key}" value="on" checked><span>する</span></label><label><input type="radio" name="ai_thinking_mode_${key}" value="off"><span>しない</span></label></div>`
+      : `<span class="effort-group-title">AIで詳しく確認</span><div class="thinking-mode effort-options"><label><input type="radio" name="ai_thinking_mode_${key}" value="on" checked><span>する</span></label><label><input type="radio" name="ai_thinking_mode_${key}" value="off"><span>しない</span></label></div>`;
     const levels = cleanup ? cleanupEffortLevels : effortLevels;
-    card.innerHTML = `<legend>${title}</legend><p>${detail}</p><input type="hidden" name="ai_effort_${key}" value="medium">${thinkingMode}<span class="effort-group-title">${cleanup ? '文章整形エフォート' : 'エフォート'}</span><div class="effort-options">${levels.map(([value, label]) =>
+    card.innerHTML = `<legend>${title}</legend><p>${detail}</p><input type="hidden" name="ai_effort_${key}" value="medium">${thinkingMode}<span class="effort-group-title">${cleanup ? '文章の調整レベル' : '確認の詳しさ'}</span><div class="effort-options">${levels.map(([value, label]) =>
       `<label><input type="radio" name="ai_effort_choice_${key}" value="${value}" ${value === 'medium' ? 'checked' : ''}><span>${label}</span></label>`).join('')}</div><p class="effort-description" aria-live="polite"></p>`;
     effortRoot.append(card);
   });
@@ -136,8 +136,8 @@ function syncAiEffortSettings() {
     card.querySelector('input[type="hidden"]').value = level;
     card.dataset.effort = level;
     card.querySelector('.effort-description').textContent = card.disabled ? 'この処理を有効にすると設定できます。'
-      : binary ? 'このモデルは思考ON／OFFに対応します。ONではモデルの既定の思考量を使います。'
-      : local && !allowed.length ? 'このモデルは思考量の指定を公開していないため、モデル既定の動作を使用します。'
+      : binary ? 'このモデルでは、詳しい確認をするかどうか選べます。'
+      : local && !allowed.length ? 'このモデルは確認の詳しさを変更できないため、標準の設定を使用します。'
       : effortDescriptions[level];
   });
 }

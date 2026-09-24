@@ -1,0 +1,255 @@
+"""Provider-neutral JSON generation transport.
+
+This module deliberately has no Flask or application-global dependencies.  The
+composition root supplies the worker path and the cancellable subprocess
+runner, which keeps cancellation and test doubles at the application edge.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable
+
+from ...ai_effort import (
+    SCHEMA_STAGES,
+    effort_payload,
+    local_effort_payload,
+    normalize_efforts,
+)
+
+
+def lmstudio_base_url(value: str, default_base_url: str, loopback_hosts: set[str] | frozenset[str]) -> str:
+    """Validate and canonicalize the local-only OpenAI-compatible endpoint."""
+    raw = str(value or "").strip() or default_base_url
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("LM Studio の接続URLが不正です。") from exc
+    host = (parsed.hostname or "").casefold()
+    if (
+        parsed.scheme not in {"http", "https"}
+        or host not in loopback_hosts
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port is None
+        or not 1 <= port <= 65535
+    ):
+        raise ValueError(
+            "LM Studio の接続URLは http://127.0.0.1:1234/v1 "
+            "または http://[::1]:1234/v1 のように、このPCのループバックだけを指定してください。"
+        )
+    path = parsed.path.rstrip("/")
+    if path not in {"", "/v1"}:
+        raise ValueError("LM Studio の接続URLは /v1 までを指定してください。")
+    netloc = f"[{host}]" if host == "::1" else host
+    return urllib.parse.urlunsplit((parsed.scheme, f"{netloc}:{port}", "/v1", "", ""))
+
+
+def lmstudio_headers(api_key: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def post_json(
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    *,
+    worker_file: Path,
+    run_subprocess: Callable[..., Any],
+    timeout: int = 240,
+    check_cancelled: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """POST JSON in an isolated process so cancellation can stop network I/O."""
+    if not worker_file.is_file():
+        raise RuntimeError("AI API 通信ワーカーが見つかりません。")
+    timeout_seconds = max(1.0, min(600.0, float(timeout)))
+    worker_input = json.dumps(
+        {"url": url, "headers": headers, "payload": payload, "timeout": timeout_seconds},
+        ensure_ascii=False,
+    )
+    try:
+        completed = run_subprocess(
+            [sys.executable, "-I", str(worker_file)], input_text=worker_input,
+            timeout=timeout_seconds + 5, check_cancelled=check_cancelled,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("AI API の応答がタイムアウトしました。") from exc
+    if completed.returncode != 0:
+        raise RuntimeError("AI API 通信ワーカーを実行できませんでした。")
+    if len(completed.stdout.encode("utf-8")) > 10 * 1024 * 1024:
+        raise RuntimeError("AI API 通信ワーカーの応答が大きすぎます。")
+    try:
+        worker_result = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AI API 通信ワーカーの応答形式が不正です。") from exc
+    if not isinstance(worker_result, dict) or not worker_result.get("ok"):
+        kind = worker_result.get("kind") if isinstance(worker_result, dict) else ""
+        if kind == "http":
+            status_code = worker_result.get("status", "不明")
+            details = str(worker_result.get("details") or "")[:1500]
+            suffix = f": {details}" if details else ""
+            raise RuntimeError(f"API が HTTP {status_code} を返しました{suffix}")
+        if kind == "response_too_large":
+            raise RuntimeError("AI API の応答が大きすぎます。")
+        raise RuntimeError("AI API に接続できません。")
+    body = worker_result.get("body")
+    if not isinstance(body, str):
+        raise RuntimeError("AI API 通信ワーカーの応答形式が不正です。")
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("API から JSON ではない応答が返されました。") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("API 応答の形式が不正です。")
+    return parsed
+
+
+def extract_openai_text(response: dict[str, Any]) -> str:
+    if isinstance(response.get("output_text"), str):
+        return response["output_text"]
+    for item in response.get("output") or []:
+        for content in item.get("content") or []:
+            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                return content["text"]
+    raise RuntimeError("OpenAI API 応答に出力テキストがありません。")
+
+
+def extract_google_text(response: dict[str, Any]) -> str:
+    candidates = response.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"Google API に候補がありません: {response.get('promptFeedback') or response}")
+    parts = candidates[0].get("content", {}).get("parts") or []
+    text = "".join(str(part.get("text", "")) for part in parts if part.get("text"))
+    if not text:
+        raise RuntimeError("Google API 応答に出力テキストがありません。")
+    return text
+
+
+def extract_lmstudio_text(response: dict[str, Any]) -> str:
+    choices = response.get("choices") or []
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("LM Studio API 応答に候補がありません。")
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message") if isinstance(first.get("message"), dict) else {}
+    text = message.get("content")
+    if isinstance(text, str) and text.strip():
+        return text
+    raise RuntimeError("LM Studio API 応答に出力テキストがありません。")
+
+
+def safe_token_count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return 0
+    return max(0, min(10**12, int(value)))
+
+
+def normalize_ai_usage(value: Any, providers: set[str] | frozenset[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    provider = str(value.get("provider") or "").strip().casefold()
+    if provider not in providers:
+        return {}
+    return {
+        "provider": provider, "model": str(value.get("model") or "").strip()[:200],
+        "request_count": safe_token_count(value.get("request_count")),
+        "input_tokens": safe_token_count(value.get("input_tokens")),
+        "output_tokens": safe_token_count(value.get("output_tokens")),
+        "total_tokens": safe_token_count(value.get("total_tokens")),
+        "cached_tokens": safe_token_count(value.get("cached_tokens")),
+        "reasoning_tokens": safe_token_count(value.get("reasoning_tokens")),
+        "reported": bool(value.get("reported")),
+    }
+
+
+def merge_ai_usage(current_value: Any, sample_value: Any, providers: set[str] | frozenset[str]) -> dict[str, Any]:
+    current, sample = normalize_ai_usage(current_value, providers), normalize_ai_usage(sample_value, providers)
+    if not sample:
+        return current
+    if current and current["provider"] != sample["provider"]:
+        current = {}
+    return normalize_ai_usage({
+        "provider": sample["provider"], "model": sample["model"] or current.get("model", ""),
+        **{key: current.get(key, 0) + sample[key] for key in (
+            "request_count", "input_tokens", "output_tokens", "total_tokens", "cached_tokens", "reasoning_tokens"
+        )}, "reported": bool(current.get("reported") or sample["reported"]),
+    }, providers)
+
+
+def extract_ai_token_usage(provider: str, model: str, response: dict[str, Any], providers: set[str] | frozenset[str]) -> dict[str, Any]:
+    raw = response.get("usage" if provider != "google" else "usageMetadata")
+    usage = raw if isinstance(raw, dict) else {}
+    if provider == "openai":
+        source, details = usage, usage.get("input_tokens_details") if isinstance(usage.get("input_tokens_details"), dict) else {}
+        output_details = usage.get("output_tokens_details") if isinstance(usage.get("output_tokens_details"), dict) else {}
+        values = (source.get("input_tokens"), source.get("output_tokens"), source.get("total_tokens"), details.get("cached_tokens"), output_details.get("reasoning_tokens"))
+    elif provider == "google":
+        values = (usage.get("promptTokenCount"), usage.get("candidatesTokenCount"), usage.get("totalTokenCount"), usage.get("cachedContentTokenCount"), usage.get("thoughtsTokenCount"))
+    elif provider == "lmstudio":
+        prompt = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
+        completion = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
+        values = (usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"), prompt.get("cached_tokens") or prompt.get("cached_tokens_count"), completion.get("reasoning_tokens"))
+    else:
+        return {}
+    result = normalize_ai_usage({
+        "provider": provider, "model": model, "request_count": 1,
+        "input_tokens": safe_token_count(values[0]), "output_tokens": safe_token_count(values[1]),
+        "total_tokens": safe_token_count(values[2]), "cached_tokens": safe_token_count(values[3]),
+        "reasoning_tokens": safe_token_count(values[4]), "reported": bool(usage),
+    }, providers)
+    if result and not result["total_tokens"]:
+        result["total_tokens"] = result["input_tokens"] + result["output_tokens"] + result["reasoning_tokens"]
+    return result
+
+
+def call_ai_json(
+    provider: str, api_key: str, model: str, system_prompt: str, user_prompt: str,
+    schema_name: str, schema: dict[str, Any], *, post: Callable[..., dict[str, Any]],
+    lmstudio_base: Callable[[str], str], lmstudio_model_id: Callable[[Any], str],
+    lmstudio_reasoning: Callable[[str, str, str], dict[str, Any]],
+    providers: set[str] | frozenset[str],
+    extract_openai: Callable[[dict[str, Any]], str] = extract_openai_text,
+    extract_google: Callable[[dict[str, Any]], str] = extract_google_text,
+    extract_lmstudio: Callable[[dict[str, Any]], str] = extract_lmstudio_text,
+    check_cancelled: Callable[[], None] | None = None,
+    usage_callback: Callable[[dict[str, Any]], None] | None = None, base_url: str = "",
+    ai_efforts: dict | None = None,
+) -> dict[str, Any]:
+    reasoning = effort_payload(provider, model, schema_name, ai_efforts)
+    if provider == "openai":
+        response = post("https://api.openai.com/v1/responses", {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, {"model": model, "store": False, **reasoning, "input": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "text": {"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}}}, check_cancelled=check_cancelled)
+    elif provider == "google":
+        encoded_model = urllib.parse.quote(model, safe="-_.")
+        response = post(f"https://generativelanguage.googleapis.com/v1beta/models/{encoded_model}:generateContent", {"x-goog-api-key": api_key, "Content-Type": "application/json"}, {"systemInstruction": {"parts": [{"text": system_prompt}]}, "contents": [{"role": "user", "parts": [{"text": user_prompt}]}], "generationConfig": {**reasoning, "responseMimeType": "application/json", "responseJsonSchema": schema}}, check_cancelled=check_cancelled)
+    elif provider == "lmstudio":
+        endpoint = lmstudio_base(base_url)
+        level = normalize_efforts(ai_efforts).get(SCHEMA_STAGES.get(schema_name), "auto")
+        if level != "auto":
+            reasoning = local_effort_payload(level, lmstudio_reasoning(base_url, api_key, model))
+        response = post(f"{endpoint}/chat/completions", lmstudio_headers(api_key), {"model": lmstudio_model_id(model), "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], "response_format": {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": schema}}, "temperature": 0.1, "stream": False, **reasoning}, check_cancelled=check_cancelled)
+    else:
+        raise RuntimeError(f"未対応の AI プロバイダーです: {provider}")
+    usage = extract_ai_token_usage(provider, model, response, providers)
+    if usage_callback is not None:
+        usage_callback(usage)
+    if provider == "lmstudio" and any(choice.get("finish_reason") == "length" for choice in response.get("choices", [])):
+        raise RuntimeError("ローカルLLMの応答がトークン上限で途中終了しました。入力を小さくするか、LM Studioのコンテキスト長・出力上限を見直してください。")
+    text = extract_openai(response) if provider == "openai" else extract_google(response) if provider == "google" else extract_lmstudio(response)
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AI が有効な JSON を返しませんでした。") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("AI の出力形式が不正です。")
+    return result

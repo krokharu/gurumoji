@@ -105,6 +105,7 @@ const aiModelError = document.querySelector('#ai-model-error');
 const saveAiModelButton = document.querySelector('#save-ai-model-button');
 
 let tokenConfigSnapshot = {};
+let aiProviderManuallySelected = false;
 let aiModelCatalog = [];
 let activeAiModelProvider = '';
 
@@ -177,6 +178,7 @@ const analysisState = {
   segmentQuery: '',
   annotatedOnly: false,
   automaticScope: 'overall',
+  automaticPage: 'overview',
   speakerSort: 'speaking_desc',
   speakerAttributeFilter: '',
   selectedSpeaker: '',
@@ -252,7 +254,7 @@ const conversationModePresets = {
     triplePass: false,
     vadOnset: '0.35',
     vadOffset: '0.25',
-    hint: '会議モードの設定を適用しています。2〜10名を想定した標準前処理です。話者数や前処理は「認識・話者分離」で変更できます。'
+    hint: '会議向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
   },
   group_interview: {
     label: 'グループインタビューモード',
@@ -263,7 +265,7 @@ const conversationModePresets = {
     triplePass: false,
     vadOnset: '0.30',
     vadOffset: '0.22',
-    hint: 'グループインタビューモードの設定を適用しています。3〜12名の発話を拾いやすくする設定で、完了後はグループインタビューとして分析できます。'
+    hint: 'グループインタビュー向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
   },
   chat: {
     label: '雑談モード',
@@ -274,7 +276,7 @@ const conversationModePresets = {
     triplePass: false,
     vadOnset: '0.42',
     vadOffset: '0.30',
-    hint: '雑談モードの設定を適用しています。2〜6名を想定し、軽めの前処理で自然な会話を扱いやすくします。'
+    hint: '雑談向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
   }
 };
 
@@ -744,28 +746,31 @@ function updateCreateSummary() {
   const diarizationDevice = document.querySelector('#diarization-device');
   const transcriptionHardware = transcriptionDevice && transcriptionDevice.value === 'cuda' ? 'GPU (CUDA)' : 'CPU';
   const diarizationHardware = diarizationDevice && diarizationDevice.value === 'cuda' ? 'GPU (CUDA)' : 'CPU';
-  const gpuCapabilityMajor = Number(tokenConfigSnapshot.machine?.gpu?.capability_major) || 0;
-  const transcriptionAi = transcriptionDevice && transcriptionDevice.value === 'cuda' && gpuCapabilityMajor >= 7
-    ? 'WhisperX (faster-whisper)'
-    : 'OpenAI Whisper';
   const vocabularyTerms = vocabularyTermsFromInput();
-  const recognitionParts = [model, language, `前処理: ${preprocess}`];
-  if (boostQuietSpeech && boostQuietSpeech.checked) recognitionParts.push('小さい声対策');
-  if (triplePass && triplePass.checked) recognitionParts.push('詳細処理');
-  if (transcriptionDevice) recognitionParts.push(transcriptionDevice.value === 'cuda' ? 'GPU' : 'CPU');
-  const speakerRange = [minSpeakersInput && minSpeakersInput.value, maxSpeakersInput && maxSpeakersInput.value].filter(Boolean);
-  if (speakerRange.length === 2) recognitionParts.push(`話者 ${speakerRange[0]}〜${speakerRange[1]}名`);
   const recognitionExtras = [];
   if (vocabularyTerms.length) recognitionExtras.push(`単語登録 ${vocabularyTerms.length}語`);
   const finishExtras = [];
   if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
-  const enabledAiOptions = aiOptionInputs.filter(input => input.checked).length;
   const providerLabel = aiProvider && aiProvider.value !== 'none' ? selectedOptionText(aiProvider) : '';
   const finishingMode = selectedTranscriptFinishingMode();
-  let finishingLabel = {recommended: 'おすすめ（LLM最小）', advanced: '高度', off: '整形しない'}[finishingMode] || '個別設定';
-  finishExtras.push(`文章整形: ${finishingLabel}`);
-  if (providerLabel && enabledAiOptions) finishingLabel += ` / ${providerLabel}`;
-  if (finishInObsidian && finishInObsidian.checked) finishExtras.push('Obsidianにも保存');
+  const finishInVault = Boolean(finishInObsidian && finishInObsidian.checked && finishingMode === 'recommended');
+  const cleanupLevel = document.querySelector('[name="ai_effort_cleanup"]')?.value || 'medium';
+  const recommendedCleanup = finishingMode === 'recommended' && !finishInVault
+    && Boolean(tokenConfigSnapshot.typesafe) && cleanupLevel !== 'off';
+  const otherAiWork = Boolean(detectNames && detectNames.checked);
+  const finishNow = Boolean(providerLabel) && finishingMode !== 'off'
+    && (finishingMode === 'advanced' || recommendedCleanup || otherAiWork);
+  const configuredModel = finishNow ? String(tokenConfigSnapshot[`${aiProvider.value}_model`] || '').trim() : '';
+  const finishingState = finishNow ? 'する' : 'しない';
+  const finishingModel = finishNow
+    ? `${providerLabel} / ${configuredModel || 'モデル未設定'}`
+    : '使用モデルなし';
+  const finishingDetail = finishInVault
+    ? `${finishNow ? '話者を確認 / ' : ''}Obsidianに保存してあとで整える`
+    : (finishNow ? (finishingMode === 'advanced' ? '全文を整える' : (recommendedCleanup ? '必要な箇所を整える' : '話者を確認する')) : '認識結果をそのまま残す');
+  const finishingLabel = `${finishingState} / ${finishingModel}`;
+  finishExtras.push(`AI仕上げ: ${finishingState}`);
+  if (finishInVault) finishExtras.push('Obsidianに保存してあとで整える');
   if (jevCompare && jevCompare.checked) finishExtras.push('Jev修正要否比較');
   const emotionEnabled = Boolean(emotionAnalysis && emotionAnalysis.checked);
   if (emotionEnabled) finishExtras.push('感情分析');
@@ -776,7 +781,8 @@ function updateCreateSummary() {
   if (burnSubtitledVideo && burnSubtitledVideo.checked) { outputParts.push('字幕付き動画'); outputExtras.push('字幕付き動画'); }
   const extras = [...recognitionExtras, ...finishExtras, ...outputExtras];
   const summaryText = `${mode} / ${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
-  if (setupSummary) setupSummary.textContent = summaryText;
+  const launchText = `認識モデル ${model}・${transcriptionHardware} / 話者分離 ${diarizationHardware} / AI仕上げ ${finishingState}${finishInVault ? '（あとでObsidian）' : ''}`;
+  if (setupSummary) setupSummary.textContent = launchText;
   document.querySelectorAll('[data-setup-summary]').forEach(element => { element.textContent = summaryText; });
 
   const selectedFile = inputFile && inputFile.files && inputFile.files[0];
@@ -787,15 +793,22 @@ function updateCreateSummary() {
   const setText = (selector, value) => {
     document.querySelectorAll(selector).forEach(element => { element.textContent = value; });
   };
-  setText('[data-settings-value="recognition"]', recognitionParts.join(' / '));
+  setText('[data-choice-transcription-device]', transcriptionHardware);
+  setText('[data-choice-recognition-model]', `認識モデル ${model}`);
+  setText('[data-choice-recognition-detail]', `話者分離 ${diarizationHardware} / ${language} / 前処理 ${preprocess}`);
   setText('[data-settings-value="vocabulary"]', vocabularyTerms.length ? `${vocabularyTerms.length}語を登録` : '未登録');
-  setText('[data-settings-value="finishing"]', finishingLabel);
+  setText('[data-choice-finishing-state]', finishingState);
+  setText('[data-choice-finishing-model]', finishingModel);
+  setText('[data-choice-finishing-detail]', finishingDetail);
+  document.querySelectorAll('[data-choice-finishing-state]').forEach(element => element.classList.toggle('is-off', !finishNow));
+  document.querySelectorAll('[data-open-panel="finishing"]').forEach(element => element.dataset.active = finishNow ? 'true' : 'false');
   setText('[data-settings-value="emotion"]', emotionLabel);
   setText('[data-settings-value="output"]', outputParts.join(' / '));
   setText('[data-review-source]', sourceLabel);
-  setText('[data-review-transcription]', `文字起こし: ${transcriptionAi} / ${model} / ${transcriptionHardware}`);
+  setText('[data-review-transcription-compact]', `認識モデル ${model}・${transcriptionHardware} / 話者分離 ${diarizationHardware}`);
+  setText('[data-review-transcription]', `認識モデル: ${model} / ${transcriptionHardware}`);
   setText('[data-review-diarization]', `話者分離: pyannote.audio / ${diarizationHardware}`);
-  setText('[data-review-finish]', finishExtras.length ? finishExtras.join(' / ') : '追加処理なし');
+  setText('[data-review-finish]', `AI仕上げ ${finishingLabel}${finishInVault ? ' / Obsidianに保存してあとで整える' : ''}${emotionEnabled ? ` / 感情分析 ${emotionLabel}` : ''}`);
   setText('[data-review-output]', outputParts.join(' / '));
   setText('[data-flow-detail="1"]', hasSource ? sourceLabel : '未選択');
   setText('[data-flow-detail="2"]', `${mode} / ${model} / ${language}`);
@@ -2131,6 +2144,15 @@ function handleInputFileSelection() {
   setAlert(pathError, '');
   const file = inputFile.files && inputFile.files[0];
   if (file) {
+    if (!/\.(mp4|m4v|mov|mkv|wav|mp3|m4a|flac)$/i.test(file.name)) {
+      inputFile.value = '';
+      sourcePath.value = '';
+      hideSourcePreview();
+      pathDetail.textContent = 'ファイルが選択されていません';
+      setAlert(pathError, '対応している動画・音声ファイルを選択してください。', true);
+      updateCreateSummary();
+      return;
+    }
     sourcePath.value = '';
     pathDetail.textContent = browserFilePickerOnly
       ? `${file.name} / ${formatBytes(file.size)} — Colabへ一時アップロードして処理します`
@@ -2320,6 +2342,7 @@ async function loadConfig() {
       : 'トークンを認識できません。tokens.json を確認してください。';
     applyLmStudioDefaults(data);
     syncAiFields();
+    updateCreateSummary();
   } catch (error) {
     message.textContent = error.name === 'AbortError'
       ? '設定確認がタイムアウトしました。アプリを再起動して http://127.0.0.1:7860 を開き直してください。'
@@ -2335,7 +2358,7 @@ function applyLmStudioDefaults(config) {
   // transcription form ready to use it without requiring three more clicks.
   // Do not choose the local server when it is offline or a model was not
   // selected yet: either state would make the default form fail at submission.
-  if (!aiProvider || !config || !config.lmstudio || !String(config.lmstudio_model || '').trim()) return;
+  if (!aiProvider || aiProviderManuallySelected || aiProvider.value !== 'none' || !config || !config.lmstudio || !String(config.lmstudio_model || '').trim()) return;
   aiProvider.value = 'lmstudio';
   applyTranscriptFinishingPreset();
   syncAiFields();
@@ -2504,9 +2527,9 @@ function applyTranscriptFinishingPreset() {
   });
   if (finishingModeHint) {
     finishingModeHint.textContent = {
-      recommended: 'おすすめモードはJevが意味不明・ノイズ・途切れを発話ごとに判定し、疑わしい文章だけを「なし／小／中／高／MAX」の範囲でLLMが予測・置換します。',
-      advanced: '高度モードは全体文脈の再校正、自己紹介・話者統合、Jev比較を実行するため、AI呼び出しが増えます。',
-      off: '文字本文は変更せず、境界・ノイズ・句読点の確認候補だけを整形リザルトに残します。'
+      recommended: 'AI仕上げを使う場合は、必要な箇所だけ読みやすく整えます。Obsidianに保存する場合は、あとで仕上げられます。',
+      advanced: '文章全体を見直します。話者の確認や比較など、追加の処理も選べます。',
+      off: '文章は変更せず、認識結果をそのまま残します。'
     }[mode] || '';
   }
 }
@@ -2537,7 +2560,10 @@ listen(emotionAnalysis, 'change', () => {
   syncEmotionFields();
   updateCreateSummary();
 });
-listen(aiProvider, 'change', selectDefaultAiOptions);
+listen(aiProvider, 'change', () => {
+  aiProviderManuallySelected = true;
+  selectDefaultAiOptions();
+});
 function syncFinishingMode() {
   const mode = selectedTranscriptFinishingMode();
   document.querySelectorAll('[data-advanced-finishing-only]').forEach(row => {
@@ -2560,6 +2586,9 @@ transcriptFinishingModeInputs.forEach(input => listen(input, 'change', () => {
 }));
 [modelName, languageSelect, audioPreprocess, writeSrt, burnSubtitledVideo].forEach(input => {
   listen(input, 'change', updateCreateSummary);
+});
+listen(form, 'change', event => {
+  if (event.target.name === 'ai_effort_choice_cleanup') window.queueMicrotask(updateCreateSummary);
 });
 aiOptionInputs.forEach(input => listen(input, 'change', updateCreateSummary));
 listen(jevCompare, 'change', () => {
@@ -2865,8 +2894,7 @@ listen(form, 'submit', async event => {
   const provider = aiProvider ? aiProvider.value : 'none';
   if (selectedTranscriptFinishingMode() === 'advanced' && provider === 'none') {
     setAlert(formError, '高度モードでは OpenAI、Google Gemini、またはローカルLLMを選択してください。', true);
-    const finishSection = document.querySelector('#setup-finish');
-    if (finishSection) finishSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+    openSettingsPanel('finishing');
     return;
   }
   if (provider === 'none') aiOptionInputs.forEach(input => { input.checked = false; });
@@ -4239,11 +4267,41 @@ function renderEmotionSummary(summary) {
   view.hidden = false;
 }
 
+let activePlaybackSegmentId = null;
+
+function syncMediaPlayback(currentTime) {
+  if (!currentJob || !Array.isArray(currentJob.segments)) return;
+  const match = currentJob.segments.find(segment => {
+    const s = Number(segment.start || 0);
+    const e = Number(segment.end || 0);
+    return currentTime >= s && currentTime <= e;
+  });
+  const matchId = match ? match.id : null;
+  if (matchId === activePlaybackSegmentId) return;
+  activePlaybackSegmentId = matchId;
+
+  document.querySelectorAll('.segment.is-active-playback').forEach(el => {
+    el.classList.remove('is-active-playback');
+  });
+
+  if (matchId) {
+    const target = document.querySelector(`.segment[data-segment-id="${matchId}"]`);
+    if (target) {
+      target.classList.add('is-active-playback');
+      const autoScroll = document.querySelector('#media-autoscroll');
+      if (!autoScroll || autoScroll.checked) {
+        target.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      }
+    }
+  }
+}
+
 function renderMedia(job) {
   mediaPlayerHost.replaceChildren();
   mediaPlayer = null;
   playbackStopAt = null;
   selectedSegmentId = null;
+  activePlaybackSegmentId = null;
   if (!job.media_url) {
     mediaReview.hidden = true;
     return;
@@ -4257,6 +4315,7 @@ function renderMedia(job) {
       mediaPlayer.pause();
       playbackStopAt = null;
     }
+    syncMediaPlayback(mediaPlayer.currentTime);
   });
   mediaPlayerHost.append(mediaPlayer);
   mediaReview.hidden = false;
@@ -4905,11 +4964,15 @@ function renderSegments() {
     const textarea = document.createElement('textarea');
     textarea.value = segment.text || '';
     textarea.setAttribute('aria-label', `${speaker.textContent}の発話`);
+    const textPreview = document.createElement('p');
+    textPreview.className = 'segment-text-preview';
+    textPreview.textContent = segment.text || '';
     textarea.addEventListener('input', () => {
       segment.text = textarea.value;
+      textPreview.textContent = textarea.value;
       setCurrentJobDirty();
     });
-    body.append(fields, textarea);
+    body.append(fields, textPreview, textarea);
     if (segment.ai_review && Array.isArray(segment.ai_review.fragments)) {
       const review = document.createElement('details');
       review.className = 'segment-ai-review';
@@ -4926,6 +4989,7 @@ function renderSegments() {
       restore.addEventListener('click', () => {
         segment.text = segment.ai_review.original_text || '';
         textarea.value = segment.text;
+        textPreview.textContent = segment.text;
         setCurrentJobDirty();
       });
       review.append(summary, reasons, original, restore);
@@ -4954,7 +5018,20 @@ function renderSegments() {
     }
     row.append(meta, body);
     row.addEventListener('click', event => {
-      if (!event.target.closest('input, textarea, select, button, details') && currentJob.media_url) playSegment(segment.id);
+      const isButtonOrDetails = event.target.closest('button, details, select');
+      if (isButtonOrDetails) return;
+
+      // 行またはテキストエリアをクリックしたら選択行として展開
+      if (selectedSegmentId !== segment.id) {
+        selectedSegmentId = segment.id;
+        document.querySelectorAll('.segment').forEach(item => {
+          item.classList.toggle('selected', item.dataset.segmentId === segment.id);
+        });
+      }
+      // テキストエリア・入力欄自体のクリックでなければメディア再生も連動
+      if (!event.target.closest('textarea, input') && currentJob.media_url) {
+        playSegment(segment.id);
+      }
     });
     segmentEditor.append(row);
   });
@@ -5258,7 +5335,7 @@ function setAnalysisDirty(dirty, trackMutation = true) {
     sideStatus.classList.toggle('unsaved', analysisState.dirty);
     sideStatus.textContent = analysisState.dirty
       ? '設定・コードに未保存の変更があります'
-      : analysisState.data ? '保存済みデータから集計中' : '';
+      : analysisState.data ? '保存済みの分析結果を表示中' : '';
   }
   refreshInsightControls();
   refreshAnalysisStorage();
@@ -5444,8 +5521,6 @@ function renderAnalysisWorkspace() {
     analysisMobileContent.replaceChildren();
     analysisMobileContent.append(analysisModeContent(true));
   }
-  const shell = document.querySelector('#analysis-shell');
-  const empty = document.querySelector('#analysis-empty');
   if (shell) shell.hidden = false;
   if (empty) empty.hidden = true;
   setAnalysisDirty(analysisState.dirty, false);
@@ -5461,6 +5536,7 @@ function renderAnalysisWorkspace() {
         ? analysisMobileContent : analysisDesktopContent;
       const target = content && content.querySelector(`[data-analysis-anchor="${requestedAnalysisSection}"]`);
       const jump = content && content.querySelector(`[data-analysis-jump="${requestedAnalysisSection}"]`);
+      selectAnalysisPage(requestedAnalysisSection);
       if (jump) {
         content.querySelectorAll('[data-analysis-jump]').forEach(button => button.classList.toggle('active', button === jump));
       }
@@ -5469,885 +5545,7 @@ function renderAnalysisWorkspace() {
   }
 }
 
-// methodIds tags a panel with the analysis methods it belongs to, so the method view
-// can collect the same panels the long automatic view builds.
-function analysisCardPanel(titleText, classification, exportDataset = '', wide = false, methodIds = '') {
-  const panel = analysisElement('section', `analysis-panel${wide ? ' wide' : ''}`);
-  if (methodIds) panel.dataset.analysisMethod = methodIds;
-  const heading = analysisElement('header', 'analysis-panel-heading');
-  const titleGroup = analysisElement('div');
-  const badgeLabels = {automatic: '自動集計', configured: '要設定', manual: '要確認・解釈'};
-  titleGroup.append(
-    analysisElement('span', `analysis-kind ${classification}`, badgeLabels[classification] || classification),
-    analysisElement('h3', '', titleText)
-  );
-  heading.append(titleGroup);
-  if (exportDataset) {
-    const link = analysisExportLink('CSV', exportDataset);
-    if (link) heading.append(link);
-  }
-  const body = analysisElement('div', 'analysis-panel-body');
-  panel.append(heading, body);
-  return {panel, body};
-}
-
-function appendAnalysisMetric(container, label, value, note = '') {
-  const card = analysisElement('div', 'analysis-overview-metric');
-  card.append(analysisElement('span', '', label), analysisElement('strong', '', value));
-  if (note) card.append(analysisElement('small', '', note));
-  container.append(card);
-}
-
-function appendAnalysisBar(container, label, value, detail = '', color = '#1C6B50') {
-  const row = analysisElement('div', 'analysis-bar-row');
-  const heading = analysisElement('div', 'analysis-bar-heading');
-  heading.append(analysisElement('strong', '', label), analysisElement('span', '', detail));
-  const track = analysisElement('div', 'analysis-bar-track');
-  const fill = analysisElement('i');
-  const percent = boundedAnalysisPercent(value);
-  fill.style.width = `${percent}%`;
-  fill.style.backgroundColor = safeAnalysisColor(color);
-  track.setAttribute('role', 'img');
-  track.setAttribute('aria-label', `${label} ${percent.toFixed(1)}%`);
-  track.append(fill);
-  row.append(heading, track);
-  container.append(row);
-  return row;
-}
-
-function analysisSvgElement(tagName, attributes = {}, textValue = '') {
-  const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
-  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
-  if (textValue !== '') element.textContent = String(textValue);
-  return element;
-}
-
-function buildAnalysisLineSvg(series, bins) {
-  const svg = analysisSvgElement('svg', {
-    class: 'analysis-timeline-chart', viewBox: '0 0 760 300', role: 'img', tabindex: '0'
-  });
-  svg.append(
-    analysisSvgElement('title', {}, '時間帯別の発話量の折れ線グラフ'),
-    analysisSvgElement('desc', {}, '横軸が会話の時刻、縦軸が各時間帯に含まれる発話秒数です。点にカーソルを合わせると値を確認できます。')
-  );
-  const plot = {x: 58, y: 18, width: 674, height: 224};
-  const allValues = series.flatMap(item => item.values).map(value => Math.max(0, Number(value) || 0));
-  const maximum = Math.max(1, ...allValues);
-  [0, .25, .5, .75, 1].forEach(ratio => {
-    const y = plot.y + plot.height * (1 - ratio);
-    svg.append(
-      analysisSvgElement('line', {
-        x1: plot.x, x2: plot.x + plot.width, y1: y, y2: y, class: 'analysis-chart-grid'
-      }),
-      analysisSvgElement('text', {
-        x: plot.x - 10, y: y + 4, 'text-anchor': 'end', class: 'analysis-chart-axis-label'
-      }, (maximum * ratio).toFixed(maximum < 10 ? 1 : 0))
-    );
-  });
-  const count = Math.max(1, bins.length);
-  series.forEach(item => {
-    const points = item.values.map((rawValue, index) => {
-      const value = Math.max(0, Number(rawValue) || 0);
-      const x = plot.x + plot.width * (count === 1 ? .5 : index / (count - 1));
-      const y = plot.y + plot.height * (1 - value / maximum);
-      return {x, y, value, index};
-    });
-    const path = analysisSvgElement('path', {
-      d: points.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' '),
-      class: 'analysis-line-series', stroke: safeAnalysisColor(item.color),
-      'vector-effect': 'non-scaling-stroke'
-    });
-    svg.append(path);
-    points.forEach(point => {
-      const circle = analysisSvgElement('circle', {
-        cx: point.x, cy: point.y, r: bins.length > 45 ? 2.3 : 4,
-        class: 'analysis-line-point', fill: safeAnalysisColor(item.color)
-      });
-      const bin = bins[point.index] || {};
-      circle.append(analysisSvgElement('title', {}, `${item.label} / ${formatTime(bin.start || 0)}–${formatTime(bin.end || 0)} / ${point.value.toFixed(1)}秒`));
-      svg.append(circle);
-    });
-  });
-  const labelIndexes = [...new Set([0, Math.floor((count - 1) / 2), count - 1])];
-  labelIndexes.forEach(index => {
-    const bin = bins[index] || {};
-    const x = plot.x + plot.width * (count === 1 ? .5 : index / (count - 1));
-    const anchor = index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle';
-    svg.append(analysisSvgElement('text', {
-      x, y: 275, 'text-anchor': anchor, class: 'analysis-chart-axis-label'
-    }, formatTime(bin.start || 0)));
-  });
-  svg.append(analysisSvgElement('text', {
-    x: 17, y: 135, transform: 'rotate(-90 17 135)', 'text-anchor': 'middle', class: 'analysis-chart-axis-title'
-  }, '発話秒数'));
-  return svg;
-}
-
-function buildAnalysisTimelineChart(rawBins, speakerMetrics = []) {
-  const bins = Array.isArray(rawBins) ? rawBins : [];
-  const module = analysisElement('div', 'analysis-chart-module');
-  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
-  const explanation = analysisElement('div', 'analysis-chart-explanation');
-  explanation.append(
-    analysisElement('strong', '', '会話中の発話量を追う'),
-    analysisElement('span', '', '表示を切り替えて、全体の山と話者ごとの参加タイミングを比較できます。')
-  );
-  const switcher = analysisElement('div', 'analysis-chart-switch');
-  switcher.setAttribute('role', 'group');
-  switcher.setAttribute('aria-label', '時間推移グラフの表示');
-  const totalButton = analysisElement('button', 'active', '全体');
-  const speakerButton = analysisElement('button', '', '話者別');
-  [totalButton, speakerButton].forEach(button => button.type = 'button');
-  switcher.append(totalButton, speakerButton);
-  toolbar.append(explanation, switcher);
-  const stage = analysisElement('div', 'analysis-chart-stage');
-  const legend = analysisElement('div', 'analysis-chart-legend');
-  const note = analysisElement('p', 'analysis-chart-note');
-  module.append(toolbar, stage, legend, note);
-
-  const palette = ['#1C6B50', '#2F80ED', '#E87941', '#9B51E0', '#6C8B3C', '#C34F72'];
-  const metricMap = new Map((Array.isArray(speakerMetrics) ? speakerMetrics : []).map(item => [String(item.speaker), item]));
-  const speakerTotals = new Map();
-  bins.forEach(bin => (Array.isArray(bin.speakers) ? bin.speakers : []).forEach(item => {
-    const id = String(item.speaker || item.speaker_name || 'UNKNOWN');
-    speakerTotals.set(id, (speakerTotals.get(id) || 0) + Math.max(0, Number(item.seconds) || 0));
-  }));
-  const visibleSpeakers = [...speakerTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-
-  function render(mode) {
-    const speakerMode = mode === 'speakers';
-    totalButton.classList.toggle('active', !speakerMode);
-    speakerButton.classList.toggle('active', speakerMode);
-    totalButton.setAttribute('aria-pressed', String(!speakerMode));
-    speakerButton.setAttribute('aria-pressed', String(speakerMode));
-    const series = speakerMode
-      ? visibleSpeakers.map(([speaker], index) => {
-          const metric = metricMap.get(speaker) || {};
-          return {
-            id: speaker,
-            label: metric.speaker_name || (bins.flatMap(bin => bin.speakers || []).find(item => String(item.speaker) === speaker) || {}).speaker_name || speaker,
-            color: safeAnalysisColor(metric.color, palette[index % palette.length]),
-            values: bins.map(bin => Number(((bin.speakers || []).find(item => String(item.speaker) === speaker) || {}).seconds) || 0)
-          };
-        })
-      : [{
-          id: 'total', label: '全体', color: '#1C6B50',
-          values: bins.map(item => Number(item.speaking_seconds) || 0)
-        }];
-    stage.replaceChildren(buildAnalysisLineSvg(series, bins));
-    legend.replaceChildren();
-    series.forEach(item => {
-      const entry = analysisElement('span');
-      const marker = analysisElement('i');
-      marker.style.backgroundColor = safeAnalysisColor(item.color);
-      entry.append(marker, document.createTextNode(item.label));
-      legend.append(entry);
-    });
-    note.textContent = speakerMode
-      ? `発話時間が多い上位${visibleSpeakers.length}話者を表示しています。折れ線の高さは各時間帯の秒数で、累積値ではありません。`
-      : '時間帯ごとの総発話秒数です。重なり発話がある場合、時間帯の長さを超えることがあります。';
-  }
-  totalButton.addEventListener('click', () => render('total'));
-  speakerButton.addEventListener('click', () => render('speakers'));
-  render('total');
-  return module;
-}
-
-function analysisPValueText(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '—';
-  if (number < .001) return 'p < .001';
-  return `p = ${number.toFixed(3)}`;
-}
-
-function buildAnalysisCooccurrenceChart(rawEdges) {
-  const namespace = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(namespace, 'svg');
-  svg.classList.add('analysis-cooccurrence-chart');
-  svg.setAttribute('viewBox', '0 0 720 430');
-  svg.setAttribute('role', 'img');
-  const title = document.createElementNS(namespace, 'title');
-  title.textContent = '発話単位の語の共起ネットワーク';
-  const description = document.createElementNS(namespace, 'desc');
-  description.textContent = '同じ発話に現れた内容語をJaccard係数の強さで結んだ探索用ネットワークです。';
-  svg.append(title, description);
-  const edges = (Array.isArray(rawEdges) ? rawEdges : []).slice(0, 35);
-  const weights = new Map();
-  edges.forEach(edge => {
-    weights.set(edge.term_a, (weights.get(edge.term_a) || 0) + (Number(edge.jaccard) || 0));
-    weights.set(edge.term_b, (weights.get(edge.term_b) || 0) + (Number(edge.jaccard) || 0));
-  });
-  const nodes = [...weights.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 18)
-    .map(([term, weight], index, values) => {
-      const angle = -Math.PI / 2 + 2 * Math.PI * index / Math.max(1, values.length);
-      const ring = 145 + 28 * (index % 2);
-      return {
-        term, weight,
-        x: 360 + Math.cos(angle) * ring,
-        y: 215 + Math.sin(angle) * ring
-      };
-    });
-  const nodeMap = new Map(nodes.map(node => [node.term, node]));
-  const visibleEdges = edges.filter(edge => nodeMap.has(edge.term_a) && nodeMap.has(edge.term_b));
-  const maxJaccard = Math.max(.001, ...visibleEdges.map(edge => Number(edge.jaccard) || 0));
-  visibleEdges.forEach(edge => {
-    const source = nodeMap.get(edge.term_a);
-    const target = nodeMap.get(edge.term_b);
-    const line = document.createElementNS(namespace, 'line');
-    line.setAttribute('x1', String(source.x));
-    line.setAttribute('y1', String(source.y));
-    line.setAttribute('x2', String(target.x));
-    line.setAttribute('y2', String(target.y));
-    line.setAttribute('class', 'analysis-network-edge');
-    line.setAttribute('stroke-width', String(1 + 7 * (Number(edge.jaccard) || 0) / maxJaccard));
-    const tooltip = document.createElementNS(namespace, 'title');
-    tooltip.textContent = `${edge.term_a} × ${edge.term_b}: 共起 ${edge.cooccurrence_count}発話 / Jaccard ${Number(edge.jaccard || 0).toFixed(3)}`;
-    line.append(tooltip);
-    svg.append(line);
-  });
-  const maxWeight = Math.max(.001, ...nodes.map(node => node.weight));
-  nodes.forEach(node => {
-    const group = document.createElementNS(namespace, 'g');
-    group.setAttribute('class', 'analysis-network-node');
-    const radius = 12 + 13 * node.weight / maxWeight;
-    const circle = document.createElementNS(namespace, 'circle');
-    circle.setAttribute('cx', String(node.x));
-    circle.setAttribute('cy', String(node.y));
-    circle.setAttribute('r', String(radius));
-    const label = document.createElementNS(namespace, 'text');
-    label.setAttribute('x', String(node.x));
-    label.setAttribute('y', String(node.y + radius + 15));
-    label.setAttribute('text-anchor', 'middle');
-    label.textContent = node.term;
-    group.append(circle, label);
-    svg.append(group);
-  });
-  return svg;
-}
-
-function buildAnalysisTermTreeChart(rawEdges) {
-  const edges = (Array.isArray(rawEdges) ? rawEdges : []).slice(0, 60);
-  const weights = new Map();
-  edges.forEach(edge => {
-    const weight = Math.max(0, Number(edge.jaccard) || 0);
-    weights.set(String(edge.term_a), (weights.get(String(edge.term_a)) || 0) + weight);
-    weights.set(String(edge.term_b), (weights.get(String(edge.term_b)) || 0) + weight);
-  });
-  const nodeIds = [...weights.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).map(item => item[0]);
-  const nodeSet = new Set(nodeIds);
-  const candidates = edges
-    .filter(edge => nodeSet.has(String(edge.term_a)) && nodeSet.has(String(edge.term_b)))
-    .sort((a, b) => Number(b.jaccard || 0) - Number(a.jaccard || 0));
-  const parent = new Map(nodeIds.map(id => [id, id]));
-  const find = id => {
-    let value = id;
-    while (parent.get(value) !== value) value = parent.get(value);
-    let cursor = id;
-    while (parent.get(cursor) !== cursor) {
-      const next = parent.get(cursor);
-      parent.set(cursor, value);
-      cursor = next;
-    }
-    return value;
-  };
-  const treeEdges = [];
-  candidates.forEach(edge => {
-    const source = String(edge.term_a);
-    const target = String(edge.term_b);
-    const sourceRoot = find(source);
-    const targetRoot = find(target);
-    if (sourceRoot === targetRoot) return;
-    parent.set(targetRoot, sourceRoot);
-    treeEdges.push({...edge, source, target});
-  });
-  const adjacency = new Map(nodeIds.map(id => [id, []]));
-  treeEdges.forEach(edge => {
-    adjacency.get(edge.source).push({id: edge.target, edge});
-    adjacency.get(edge.target).push({id: edge.source, edge});
-  });
-  const components = [];
-  const componentSeen = new Set();
-  nodeIds.forEach(id => {
-    if (componentSeen.has(id)) return;
-    const values = [];
-    const queue = [id];
-    componentSeen.add(id);
-    while (queue.length) {
-      const current = queue.shift();
-      values.push(current);
-      (adjacency.get(current) || []).forEach(item => {
-        if (!componentSeen.has(item.id)) {
-          componentSeen.add(item.id);
-          queue.push(item.id);
-        }
-      });
-    }
-    components.push(values);
-  });
-  const positions = new Map();
-  const directedEdges = [];
-  let leafCursor = 0;
-  let maxDepth = 0;
-  const place = (id, from, depth) => {
-    maxDepth = Math.max(maxDepth, depth);
-    const children = (adjacency.get(id) || []).filter(item => item.id !== from);
-    const childPositions = children.map(item => {
-      directedEdges.push({source: id, target: item.id, edge: item.edge});
-      return place(item.id, id, depth + 1);
-    });
-    const y = childPositions.length
-      ? childPositions.reduce((sum, value) => sum + value, 0) / childPositions.length
-      : 54 + leafCursor++ * 66;
-    positions.set(id, {x: 80 + depth * 178, y, depth});
-    return y;
-  };
-  components
-    .sort((a, b) => b.length - a.length)
-    .forEach(component => {
-      const root = [...component].sort((a, b) => (weights.get(b) || 0) - (weights.get(a) || 0))[0];
-      place(root, '', 0);
-      leafCursor += .55;
-    });
-  const width = Math.max(760, 185 + maxDepth * 178);
-  const height = Math.max(310, 95 + leafCursor * 66);
-  const svg = analysisSvgElement('svg', {
-    class: 'analysis-term-tree', viewBox: `0 0 ${width} ${height}`, role: 'img', tabindex: '0'
-  });
-  svg.append(
-    analysisSvgElement('title', {}, '共起語の関連ツリー'),
-    analysisSvgElement('desc', {}, 'Jaccard係数が強い辺を優先して循環を除いた最大重み全域木です。語の因果関係や階層を示すものではありません。')
-  );
-  directedEdges.forEach(item => {
-    const source = positions.get(item.source);
-    const target = positions.get(item.target);
-    const middle = (source.x + target.x) / 2;
-    const path = analysisSvgElement('path', {
-      d: `M ${source.x + 62} ${source.y} C ${middle} ${source.y}, ${middle} ${target.y}, ${target.x - 62} ${target.y}`,
-      class: 'analysis-tree-edge', 'vector-effect': 'non-scaling-stroke'
-    });
-    path.append(analysisSvgElement('title', {}, `${item.source} × ${item.target} / Jaccard ${Number(item.edge.jaccard || 0).toFixed(3)}`));
-    svg.append(path);
-  });
-  positions.forEach((position, id) => {
-    const group = analysisSvgElement('g', {class: `analysis-tree-node${position.depth === 0 ? ' root' : ''}`});
-    const label = id.length > 11 ? `${id.slice(0, 10)}…` : id;
-    group.append(
-      analysisSvgElement('rect', {x: position.x - 62, y: position.y - 22, width: 124, height: 44, rx: 11}),
-      analysisSvgElement('text', {x: position.x, y: position.y + 4, 'text-anchor': 'middle'}, label),
-      analysisSvgElement('title', {}, `${id} / 接続強度合計 ${(weights.get(id) || 0).toFixed(3)}`)
-    );
-    svg.append(group);
-  });
-  return svg;
-}
-
-function buildAnalysisCooccurrenceExplorer(edges) {
-  const module = analysisElement('div', 'analysis-chart-module');
-  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
-  const explanation = analysisElement('div', 'analysis-chart-explanation');
-  explanation.append(
-    analysisElement('strong', '', '語の結びつきを探索する'),
-    analysisElement('span', '', '全体像はネットワーク、経路を追うときは関連ツリーが見やすくなります。')
-  );
-  const switcher = analysisElement('div', 'analysis-chart-switch');
-  switcher.setAttribute('role', 'group');
-  switcher.setAttribute('aria-label', '共起グラフの表示');
-  const networkButton = analysisElement('button', 'active', 'ネットワーク');
-  const treeButton = analysisElement('button', '', '関連ツリー');
-  [networkButton, treeButton].forEach(button => button.type = 'button');
-  switcher.append(networkButton, treeButton);
-  toolbar.append(explanation, switcher);
-  const stage = analysisElement('div', 'analysis-chart-stage analysis-network-stage');
-  const note = analysisElement('p', 'analysis-chart-note');
-  module.append(toolbar, stage, note);
-  const render = mode => {
-    const treeMode = mode === 'tree';
-    networkButton.classList.toggle('active', !treeMode);
-    treeButton.classList.toggle('active', treeMode);
-    networkButton.setAttribute('aria-pressed', String(!treeMode));
-    treeButton.setAttribute('aria-pressed', String(treeMode));
-    stage.replaceChildren(treeMode ? buildAnalysisTermTreeChart(edges) : buildAnalysisCooccurrenceChart(edges));
-    note.textContent = treeMode
-      ? 'Jaccard係数が強い結びつきを優先し、循環を除いて表示しています。左右の位置は概念上の上下関係を意味しません。'
-      : '円が大きい語ほど、表示中の他の語とのJaccard係数合計が大きいことを示します。';
-  };
-  networkButton.addEventListener('click', () => render('network'));
-  treeButton.addEventListener('click', () => render('tree'));
-  render('network');
-  return module;
-}
-
-function groupAnalysisDependencies(dependencies) {
-  const groups = new Map();
-  (Array.isArray(dependencies) ? dependencies : []).forEach(item => {
-    const key = `${item.segment_id || '—'}::${item.sentence_id || 1}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  return [...groups.entries()].map(([key, rows]) => {
-    rows.sort((a, b) => Number(a.token_id || 0) - Number(b.token_id || 0));
-    return {key, rows, label: `発話 ${rows[0].segment_id || '—'}・文 ${rows[0].sentence_id || 1}: ${rows.map(item => item.surface || '').join('').slice(0, 42)}`};
-  });
-}
-
-function buildAnalysisDependencyTree(rows) {
-  const visibleRows = (Array.isArray(rows) ? rows : []).slice(0, 28);
-  const nodes = new Map(visibleRows.map(item => [Number(item.token_id), {...item}]));
-  const children = new Map([...nodes.keys()].map(id => [id, []]));
-  const roots = [];
-  nodes.forEach((item, id) => {
-    const head = Number(item.head_token_id || 0);
-    if (!head || head === id || !nodes.has(head)) roots.push(id);
-    else children.get(head).push(id);
-  });
-  children.forEach(values => values.sort((a, b) => a - b));
-  const positions = new Map();
-  const renderedEdges = [];
-  const visited = new Set();
-  let leafCursor = 0;
-  let maxDepth = 0;
-  const place = (id, depth, trail = new Set()) => {
-    if (trail.has(id)) return 54 + leafCursor++ * 112;
-    if (visited.has(id)) return (positions.get(id) || {}).x || 54 + leafCursor++ * 112;
-    visited.add(id);
-    maxDepth = Math.max(maxDepth, depth);
-    const nextTrail = new Set(trail).add(id);
-    const childIds = (children.get(id) || []).filter(child => !nextTrail.has(child));
-    const childPositions = childIds.map(child => {
-      renderedEdges.push({source: id, target: child});
-      return place(child, depth + 1, nextTrail);
-    });
-    const x = childPositions.length
-      ? childPositions.reduce((sum, value) => sum + value, 0) / childPositions.length
-      : 64 + leafCursor++ * 112;
-    positions.set(id, {x, depth});
-    return x;
-  };
-  const orderedRoots = roots.length ? roots : [...nodes.keys()].slice(0, 1);
-  orderedRoots.forEach(root => place(root, 0));
-  nodes.forEach((item, id) => {
-    if (!visited.has(id)) place(id, 0);
-  });
-  const width = Math.max(760, 128 + Math.max(1, leafCursor - 1) * 112);
-  const height = Math.max(270, 126 + maxDepth * 94);
-  const svg = analysisSvgElement('svg', {
-    class: 'analysis-dependency-tree', viewBox: `0 0 ${width} ${height}`, role: 'img', tabindex: '0'
-  });
-  svg.append(
-    analysisSvgElement('title', {}, '文の係り受けツリー'),
-    analysisSvgElement('desc', {}, 'ROOTを上に置き、係り先から係る語へ線を伸ばしています。各ノードには表層形、依存関係、品詞を表示します。')
-  );
-  renderedEdges.forEach(edge => {
-    const source = positions.get(edge.source);
-    const target = positions.get(edge.target);
-    if (!source || !target) return;
-    const sourceY = 46 + source.depth * 94;
-    const targetY = 46 + target.depth * 94;
-    const middleY = (sourceY + targetY) / 2;
-    svg.append(analysisSvgElement('path', {
-      d: `M ${source.x} ${sourceY + 27} C ${source.x} ${middleY}, ${target.x} ${middleY}, ${target.x} ${targetY - 27}`,
-      class: 'analysis-dependency-edge', 'vector-effect': 'non-scaling-stroke'
-    }));
-  });
-  positions.forEach((position, id) => {
-    const item = nodes.get(id) || {};
-    const y = 46 + position.depth * 94;
-    const isRoot = !Number(item.head_token_id || 0) || Number(item.head_token_id) === id;
-    const group = analysisSvgElement('g', {class: `analysis-dependency-node${isRoot ? ' root' : ''}`});
-    const surface = String(item.surface || '—');
-    group.append(
-      analysisSvgElement('rect', {x: position.x - 48, y: y - 27, width: 96, height: 54, rx: 11}),
-      analysisSvgElement('text', {x: position.x, y: y - 3, 'text-anchor': 'middle', class: 'surface'}, surface.length > 9 ? `${surface.slice(0, 8)}…` : surface),
-      analysisSvgElement('text', {x: position.x, y: y + 15, 'text-anchor': 'middle', class: 'meta'}, `${isRoot ? 'ROOT' : item.dependency || 'dep'} · ${item.upos || 'X'}`),
-      analysisSvgElement('title', {}, `${surface} / 原形 ${item.lemma || '—'} / 係り先 ${item.head_surface || 'ROOT'}`)
-    );
-    svg.append(group);
-  });
-  if (rows.length > visibleRows.length) {
-    svg.append(analysisSvgElement('text', {x: width - 16, y: height - 14, 'text-anchor': 'end', class: 'analysis-tree-truncation'}, `先頭${visibleRows.length}語を表示`));
-  }
-  return svg;
-}
-
-function buildAnalysisDependencyExplorer(dependencies, compact) {
-  const groups = groupAnalysisDependencies(dependencies).slice(0, compact ? 12 : 30);
-  const module = analysisElement('div', 'analysis-dependency-explorer');
-  const toolbar = analysisElement('div', 'analysis-tree-toolbar');
-  const field = analysisElement('label');
-  field.append(analysisElement('span', '', '表示する文'));
-  const select = document.createElement('select');
-  groups.forEach((group, index) => select.add(new Option(group.label, String(index))));
-  field.append(select);
-  const controls = analysisElement('div', 'analysis-tree-pager');
-  const previous = analysisElement('button', '', '← 前の文');
-  const next = analysisElement('button', '', '次の文 →');
-  [previous, next].forEach(button => button.type = 'button');
-  controls.append(previous, next);
-  toolbar.append(field, controls);
-  const stage = analysisElement('div', 'analysis-tree-stage');
-  const status = analysisElement('p', 'analysis-chart-note');
-  module.append(toolbar, stage, status);
-  const render = rawIndex => {
-    const index = Math.min(Math.max(0, Number(rawIndex) || 0), Math.max(0, groups.length - 1));
-    select.value = String(index);
-    const group = groups[index];
-    stage.replaceChildren(buildAnalysisDependencyTree(group.rows));
-    previous.disabled = index === 0;
-    next.disabled = index === groups.length - 1;
-    status.textContent = `${index + 1} / ${groups.length}文・${group.rows.length}語。線は係り先から係る語へ向かう依存構造です。`;
-  };
-  select.addEventListener('change', () => render(select.value));
-  previous.addEventListener('click', () => render(Number(select.value) - 1));
-  next.addEventListener('click', () => render(Number(select.value) + 1));
-  render(0);
-  return module;
-}
-
-function buildAnalysisCorrelationTable(rows) {
-  const computed = rows.filter(item => item.status === 'computed' && Number.isFinite(Number(item.coefficient)));
-  const variables = [];
-  const labels = new Map();
-  computed.forEach(item => {
-    [[item.variable_a, item.label_a], [item.variable_b, item.label_b]].forEach(([id, label]) => {
-      if (!labels.has(id)) variables.push(id);
-      labels.set(id, label || id);
-    });
-  });
-  const values = new Map();
-  computed.forEach(item => {
-    values.set(`${item.variable_a}::${item.variable_b}`, item);
-    values.set(`${item.variable_b}::${item.variable_a}`, item);
-  });
-  const wrap = analysisElement('div', 'analysis-correlation-wrap');
-  const table = analysisElement('table', 'analysis-correlation-table');
-  const head = analysisElement('thead');
-  const headRow = analysisElement('tr');
-  headRow.append(analysisElement('th', '', '変数'));
-  variables.forEach(id => {
-    const th = analysisElement('th', '', labels.get(id));
-    th.title = labels.get(id);
-    headRow.append(th);
-  });
-  head.append(headRow);
-  const body = analysisElement('tbody');
-  variables.forEach(rowId => {
-    const row = analysisElement('tr');
-    row.append(analysisElement('th', '', labels.get(rowId)));
-    variables.forEach(columnId => {
-      const diagonal = rowId === columnId;
-      const item = values.get(`${rowId}::${columnId}`);
-      const coefficient = diagonal ? 1 : item ? Number(item.coefficient) : NaN;
-      const cell = analysisElement('td', 'analysis-correlation-cell', Number.isFinite(coefficient) ? coefficient.toFixed(2) : '—');
-      if (Number.isFinite(coefficient)) {
-        const strength = Math.abs(coefficient);
-        cell.style.setProperty('--correlation-strength', strength.toFixed(3));
-        cell.classList.add(coefficient < 0 ? 'negative' : 'positive');
-        cell.title = diagonal
-          ? `${labels.get(rowId)}（同一変数）`
-          : `${labels.get(rowId)} × ${labels.get(columnId)}: r = ${coefficient.toFixed(3)}, ${analysisPValueText(item.p_value)}, N = ${item.n || 0}`;
-      }
-      row.append(cell);
-    });
-    body.append(row);
-  });
-  table.append(head, body);
-  wrap.append(table);
-  return wrap;
-}
-
-function buildAnalysisCorrelationExplorer(correlations) {
-  const methods = [...new Set((Array.isArray(correlations) ? correlations : []).filter(item => item.status === 'computed').map(item => item.method))];
-  const module = analysisElement('div', 'analysis-chart-module');
-  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
-  const explanation = analysisElement('div', 'analysis-chart-explanation');
-  explanation.append(
-    analysisElement('strong', '', '変数間の相関を俯瞰する'),
-    analysisElement('span', '', '色の濃さが関連の強さ、緑が正、紫が負の相関です。')
-  );
-  const switcher = analysisElement('div', 'analysis-chart-switch');
-  switcher.setAttribute('role', 'group');
-  switcher.setAttribute('aria-label', '相関係数の種類');
-  const buttons = new Map();
-  methods.forEach(method => {
-    const button = analysisElement('button', '', method);
-    button.type = 'button';
-    buttons.set(method, button);
-    switcher.append(button);
-  });
-  toolbar.append(explanation, switcher);
-  const stage = analysisElement('div', 'analysis-correlation-stage');
-  const legend = analysisElement('div', 'analysis-correlation-legend');
-  legend.append(
-    analysisElement('span', '', '−1 強い負'),
-    analysisElement('i'),
-    analysisElement('span', '', '+1 強い正')
-  );
-  const note = analysisElement('p', 'analysis-chart-note', '相関は因果関係を示しません。発話単位の探索値として原文・散布図・標本数も確認してください。');
-  module.append(toolbar, stage, legend, note);
-  const render = method => {
-    buttons.forEach((button, key) => {
-      const active = key === method;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
-    stage.replaceChildren(buildAnalysisCorrelationTable(correlations.filter(item => item.method === method)));
-  };
-  buttons.forEach((button, method) => button.addEventListener('click', () => render(method)));
-  render(methods.includes('Pearson') ? 'Pearson' : methods[0]);
-  return module;
-}
-
-function buildAnalysisDescriptiveChart(rows) {
-  const chart = analysisElement('div', 'analysis-distribution-chart');
-  chart.setAttribute('aria-label', '記述統計の分布');
-  (Array.isArray(rows) ? rows : []).forEach(item => {
-    const minimum = Number(item.minimum);
-    const maximum = Number(item.maximum);
-    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return;
-    const span = Math.max(maximum - minimum, Number.EPSILON);
-    const position = value => {
-      const number = Number(value);
-      return Number.isFinite(number) ? boundedAnalysisPercent(100 * (number - minimum) / span) : 0;
-    };
-    const q1 = position(item.q1);
-    const q3 = position(item.q3);
-    const median = position(item.median);
-    const mean = position(item.mean);
-    const row = analysisElement('article', 'analysis-distribution-row');
-    const heading = analysisElement('header');
-    heading.append(
-      analysisElement('strong', '', item.label || item.variable),
-      analysisElement('span', '', `N=${item.n || 0}`)
-    );
-    const plot = analysisElement('div', 'analysis-distribution-plot');
-    plot.setAttribute('role', 'img');
-    plot.setAttribute('aria-label', `${item.label || item.variable}: 最小 ${analysisNumberText(minimum, 2)}、第1四分位 ${analysisNumberText(item.q1, 2)}、中央値 ${analysisNumberText(item.median, 2)}、平均 ${analysisNumberText(item.mean, 2)}、第3四分位 ${analysisNumberText(item.q3, 2)}、最大 ${analysisNumberText(maximum, 2)}`);
-    const range = analysisElement('i', 'analysis-distribution-range');
-    const box = analysisElement('i', 'analysis-distribution-box');
-    box.style.left = `${Math.min(q1, q3)}%`;
-    box.style.width = `${Math.max(1, Math.abs(q3 - q1))}%`;
-    const medianMark = analysisElement('i', 'analysis-distribution-median');
-    medianMark.style.left = `${median}%`;
-    const meanMark = analysisElement('i', 'analysis-distribution-mean');
-    meanMark.style.left = `${mean}%`;
-    meanMark.title = `平均 ${analysisNumberText(item.mean, 2)}`;
-    plot.append(range, box, medianMark, meanMark);
-    const scale = analysisElement('div', 'analysis-distribution-scale');
-    scale.append(
-      analysisElement('span', '', analysisNumberText(minimum, 2)),
-      analysisElement('span', '', `中央値 ${analysisNumberText(item.median, 2)}`),
-      analysisElement('span', '', analysisNumberText(maximum, 2))
-    );
-    row.append(heading, plot, scale);
-    chart.append(row);
-  });
-  const legend = analysisElement('div', 'analysis-distribution-legend');
-  legend.append(
-    analysisElement('span', 'box', '第1〜第3四分位'),
-    analysisElement('span', 'median', '中央値'),
-    analysisElement('span', 'mean', '平均')
-  );
-  chart.append(legend);
-  return chart;
-}
-
-function buildAnalysisFrequencyExplorer(frequencies, compact) {
-  const rows = Array.isArray(frequencies) ? frequencies : [];
-  const variables = [];
-  rows.forEach(item => {
-    const key = String(item.variable || 'unknown');
-    if (!variables.some(entry => entry.key === key)) {
-      variables.push({key, label: item.label || key});
-    }
-  });
-  const module = analysisElement('div', 'analysis-chart-module');
-  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
-  const explanation = analysisElement('div', 'analysis-chart-explanation');
-  explanation.append(
-    analysisElement('strong', '', 'カテゴリ別の構成割合'),
-    analysisElement('span', '', '項目を切り替えて、件数と全体に占める割合を確認できます。')
-  );
-  const selectLabel = analysisElement('label', 'analysis-chart-select');
-  selectLabel.append(analysisElement('span', '', '表示項目'));
-  const select = analysisElement('select');
-  variables.forEach(item => select.add(new Option(item.label, item.key)));
-  selectLabel.append(select);
-  toolbar.append(explanation, selectLabel);
-  const stage = analysisElement('div', 'analysis-frequency-stage');
-  module.append(toolbar, stage);
-  const render = variable => {
-    stage.replaceChildren();
-    rows.filter(item => String(item.variable || 'unknown') === variable)
-      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
-      .slice(0, compact ? 8 : 14)
-      .forEach(item => appendAnalysisBar(
-        stage,
-        item.value || '未設定',
-        Number(item.percent) || 0,
-        `${item.count || 0}件 / ${analysisNumberText(item.percent, 1, '%')}`,
-        '#438F70'
-      ));
-  };
-  select.addEventListener('change', () => render(select.value));
-  if (variables.length) render(variables[0].key);
-  return module;
-}
-
-function buildAnalysisEffectChart(tests, compact) {
-  const rows = (Array.isArray(tests) ? tests : [])
-    .filter(item => item.status === 'computed' && Number.isFinite(Number(item.effect_size)))
-    .slice(0, compact ? 10 : 24);
-  const chart = analysisElement('div', 'analysis-effect-chart');
-  const axis = analysisElement('div', 'analysis-effect-axis');
-  axis.append(
-    analysisElement('span', '', '0'),
-    analysisElement('span', '', '効果量 0.5'),
-    analysisElement('span', '', '1.0')
-  );
-  chart.append(axis);
-  rows.forEach(item => {
-    const effect = Math.abs(Number(item.effect_size));
-    const row = analysisElement('article', `analysis-effect-row${item.significant_0_05 ? ' significant' : ''}`);
-    const heading = analysisElement('header');
-    heading.append(
-      analysisElement('strong', '', item.outcome_label || item.outcome || item.test),
-      analysisElement('span', '', `${item.effect_name || 'effect'}=${analysisNumberText(effect, 3)} / p ${analysisPValueText(item.p_value)}`)
-    );
-    const track = analysisElement('div', 'analysis-effect-track');
-    track.setAttribute('role', 'img');
-    track.setAttribute('aria-label', `${item.outcome_label || item.outcome}: 効果量 ${analysisNumberText(effect, 3)}、p値 ${analysisPValueText(item.p_value)}`);
-    const fill = analysisElement('i');
-    fill.style.width = `${boundedAnalysisPercent(effect * 100)}%`;
-    track.append(fill);
-    row.append(heading, track);
-    chart.append(row);
-  });
-  return chart;
-}
-
-function buildAnalysisCrosstabExplorer(crosstabs, compact) {
-  const rows = Array.isArray(crosstabs) ? crosstabs : [];
-  const tables = [];
-  rows.forEach(item => {
-    const key = String(item.table_id || item.table_label || 'table');
-    if (!tables.some(entry => entry.key === key)) {
-      tables.push({key, label: item.table_label || key});
-    }
-  });
-  const palette = ['#1C6B50', '#74A57F', '#E2A45E', '#6B8FD4', '#9B70B6', '#D97872'];
-  const module = analysisElement('div', 'analysis-chart-module');
-  const toolbar = analysisElement('div', 'analysis-chart-toolbar');
-  const explanation = analysisElement('div', 'analysis-chart-explanation');
-  explanation.append(
-    analysisElement('strong', '', '項目の組み合わせを割合で比較'),
-    analysisElement('span', '', '各行を100%として、回答・分類の構成差を色分けします。')
-  );
-  const selectLabel = analysisElement('label', 'analysis-chart-select');
-  selectLabel.append(analysisElement('span', '', 'クロス集計'));
-  const select = analysisElement('select');
-  tables.forEach(item => select.add(new Option(item.label, item.key)));
-  selectLabel.append(select);
-  toolbar.append(explanation, selectLabel);
-  const stage = analysisElement('div', 'analysis-crosstab-stage');
-  const legend = analysisElement('div', 'analysis-chart-legend');
-  module.append(toolbar, stage, legend, analysisElement('p', 'analysis-chart-note', '色の幅は行内割合です。件数が少ない行は割合が大きく変動するため、詳細表の度数も確認してください。'));
-  const render = tableId => {
-    stage.replaceChildren();
-    legend.replaceChildren();
-    const tableRows = rows.filter(item => String(item.table_id || item.table_label || 'table') === tableId);
-    const columnValues = [...new Set(tableRows.map(item => String(item.column_value || '未設定')))];
-    const rowValues = [...new Set(tableRows.map(item => String(item.row_value || '未設定')))];
-    columnValues.forEach((value, index) => {
-      const entry = analysisElement('span');
-      const marker = analysisElement('i');
-      marker.style.backgroundColor = palette[index % palette.length];
-      entry.append(marker, document.createTextNode(value));
-      legend.append(entry);
-    });
-    rowValues.slice(0, compact ? 8 : 14).forEach(value => {
-      const item = analysisElement('article', 'analysis-crosstab-row');
-      const values = columnValues.map(column => tableRows.find(row => String(row.row_value || '未設定') === value && String(row.column_value || '未設定') === column));
-      const total = values.reduce((sum, row) => sum + Number(row?.count || 0), 0);
-      item.append(analysisElement('strong', '', `${value}（${total}件）`));
-      const bar = analysisElement('div', 'analysis-stacked-bar');
-      bar.setAttribute('role', 'img');
-      bar.setAttribute('aria-label', `${value}: ${values.map((row, index) => `${columnValues[index]} ${row?.count || 0}件`).join('、')}`);
-      values.forEach((row, index) => {
-        const count = Number(row?.count || 0);
-        const percent = total ? 100 * count / total : 0;
-        const part = analysisElement('i');
-        part.style.width = `${percent}%`;
-        part.style.backgroundColor = palette[index % palette.length];
-        part.title = `${columnValues[index]} ${count}件（${percent.toFixed(1)}%）`;
-        bar.append(part);
-      });
-      item.append(bar);
-      stage.append(item);
-    });
-  };
-  select.addEventListener('change', () => render(select.value));
-  if (tables.length) render(tables[0].key);
-  return module;
-}
-
-function analysisSectionHeading(anchor, eyebrow, titleText, description) {
-  const section = analysisElement('section', 'analysis-section-heading wide');
-  section.dataset.analysisAnchor = anchor;
-  section.append(
-    analysisElement('span', '', eyebrow),
-    analysisElement('h2', '', titleText),
-    analysisElement('p', '', description)
-  );
-  return section;
-}
-
-function buildAnalysisNavigation() {
-  const nav = analysisElement('nav', 'analysis-insight-nav');
-  nav.setAttribute('aria-label', '分析ダッシュボード内の移動');
-  [
-    ['overview', '概要'],
-    ['content', '見解・文脈検索'],
-    ['conversation', '会話推移'],
-    ['language', '言語構造'],
-    ['statistics', '統計'],
-    ['exports', '出力・検証']
-  ].forEach(([anchor, label], index) => {
-    const button = analysisElement('button', index === 0 ? 'active' : '', label);
-    button.type = 'button';
-    button.dataset.analysisJump = anchor;
-    if (index === 0) button.setAttribute('aria-current', 'true');
-    nav.append(button);
-  });
-  return nav;
-}
-
-function syncAnalysisNavigationToScroll() {
-  analysisNavigationFrame = 0;
-  if (!analysisCard || analysisCard.hidden || analysisState.mode !== 'automatic') return;
-  const mobile = window.matchMedia('(max-width: 959px)').matches;
-  const content = mobile ? analysisMobileContent : analysisDesktopContent;
-  if (!content) return;
-  const anchors = [...content.querySelectorAll('[data-analysis-anchor]')];
-  if (!anchors.length) return;
-  const threshold = mobile ? 235 : 105;
-  let activeAnchor = anchors[0].dataset.analysisAnchor;
-  anchors.forEach(anchor => {
-    if (anchor.getBoundingClientRect().top <= threshold) activeAnchor = anchor.dataset.analysisAnchor;
-  });
-  content.querySelectorAll('[data-analysis-jump]').forEach(button => {
-    const active = button.dataset.analysisJump === activeAnchor;
-    button.classList.toggle('active', active);
-    if (active) button.setAttribute('aria-current', 'true');
-    else button.removeAttribute('aria-current');
-  });
-}
-
-function scheduleAnalysisNavigationSync() {
-  if (analysisNavigationFrame) return;
-  analysisNavigationFrame = window.requestAnimationFrame(syncAnalysisNavigationToScroll);
-}
+// Shared analysis charts and navigation are in analysis-visualizations.js.
 
 function appendResearchAnalysis(grid, compact) {
   const research = (analysisState.data && analysisState.data.research) || {};
@@ -7048,352 +6246,7 @@ function renderSpeakerAnalysis(compact) {
   return fragment;
 }
 
-// The expert's own account of a method: scope, conditions, procedure and literature.
-function buildExpertDetails(expert, {open = false} = {}) {
-  const box = analysisElement('details', 'analysis-expert');
-  box.open = open;
-  box.append(analysisElement('summary', '',
-    `${expert.role || ''}の専門家：${expert.title || expert.method_id || '不明'}（${expert.status_label || ''}・${expert.selection_label || ''}）`));
-  const school = (expert.school || {}).default || {};
-  if (school.label) {
-    box.append(analysisElement('p', 'analysis-caption', `採用する流派：${school.label} / 分析単位：${expert.analysis_unit || '—'}`));
-  }
-  const appendList = (heading, rows, ordered) => {
-    if (!rows.length) return;
-    const list = analysisElement(ordered ? 'ol' : 'ul', 'analysis-inline-list');
-    rows.forEach(text => list.append(analysisElement('li', '', text)));
-    box.append(analysisElement('strong', '', heading), list);
-  };
-  appendList('この手法で扱う範囲', expert.scope || []);
-  appendList('担当外（引き継ぎ先）', (expert.out_of_scope || [])
-    .map(item => item.handoff ? `${item.text}（${item.handoff}）` : item.text));
-  appendList('満たさない・判定できない条件', (expert.checks || [])
-    .filter(check => check.result === 'fail' || check.result === 'not_evaluable')
-    .map(check => `${check.severity === 'block' && check.result === 'fail' ? '分析を始めない' : '要確認'}：${check.message}`));
-  appendList('研究者が確認する項目', (expert.quality_checks || [])
-    .filter(check => check.result === 'human').map(check => check.message));
-  appendList('手順と担当', (expert.procedure || []).map(step => `${step.title}（${step.actor_label}）`), true);
-  appendList('示してはいけない結論', expert.prohibited_conclusions || []);
-  const references = (expert.references || []).map(item => item.id).join('、');
-  if (references) {
-    box.append(analysisElement('p', 'analysis-caption',
-      `方法論の根拠：${references}（${expert.definition_note} 第${expert.definition_version}版、知識の確認日 ${expert.knowledge_verified}）`));
-  }
-  if ((expert.missing_references || []).length) {
-    box.append(analysisElement('p', 'analysis-caption', `見つからない文献ノート：${expert.missing_references.join('、')}`));
-  }
-  if ((expert.open_issues || []).length) {
-    box.append(analysisElement('p', 'analysis-caption', `専門家定義の未解決事項：${expert.open_issues.length}件`));
-  }
-  return box;
-}
-
-// Result panels are built by the existing views and tagged with their method, so the
-// method view shows the same panels without a second implementation.
-const METHOD_PANEL_SOURCES = {qualitative_coding: 'manual'};
-const METHOD_EXTERNAL_NOTES = {
-  outline: '議題・アウトラインの作成と編集は文字起こし画面で行います。',
-  ai_finishing: 'AI仕上げの実行と変更記録の確認は文字起こし画面で行います。',
-  kwic: '「自動分析」の文脈検索で語を検索すると、この手法の結果が出ます。'
-};
-
-function analysisMethodState() {
-  if (!analysisState.methods || analysisState.methods.itemId !== analysisState.itemId) {
-    analysisState.methods = {itemId: analysisState.itemId, loading: false, error: '', data: null, selected: ''};
-  }
-  return analysisState.methods;
-}
-
-function invalidateAnalysisMethodOverview() {
-  const state = analysisMethodState();
-  state.data = null;
-  state.error = '';
-}
-
-async function loadAnalysisMethodOverview() {
-  const state = analysisMethodState();
-  const itemId = analysisState.itemId;
-  if (!itemId || state.loading || state.data) return;
-  state.loading = true;
-  state.error = '';
-  try {
-    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/methods`, {cache: 'no-store'});
-    const payload = await readJsonResponse(response);
-    if (!response.ok) throw new Error(payload.error || '手法別の分析状態を取得できませんでした。');
-    if (analysisState.itemId !== itemId) return;
-    state.data = payload;
-    const methods = Array.isArray(payload.methods) ? payload.methods : [];
-    if (!methods.some(method => method.method_id === state.selected)) {
-      state.selected = ((methods.find(method => method.produced) || methods[0] || {}).method_id) || '';
-    }
-  } catch (error) {
-    state.error = error.message;
-  } finally {
-    state.loading = false;
-    if (analysisState.itemId === itemId && analysisState.mode === 'methods') renderAnalysisWorkspace();
-  }
-}
-
-function methodResultPanels(methodId, compact) {
-  const scope = analysisState.automaticScope;
-  analysisState.automaticScope = 'overall';
-  try {
-    const source = METHOD_PANEL_SOURCES[methodId] === 'manual'
-      ? renderManualAnalysis(compact)
-      : renderAutomaticAnalysis(compact);
-    return [...source.querySelectorAll(`[data-analysis-method~="${methodId}"]`)];
-  } finally {
-    analysisState.automaticScope = scope;
-  }
-}
-
-function buildMethodDetail(method, overview, compact) {
-  const nodes = [];
-  const header = analysisElement('div', `analysis-method-header ${method.verdict}`);
-  header.append(
-    analysisElement('h3', '', method.title),
-    analysisElement('p', 'analysis-method-verdict', `${method.verdict_label}（結果の状態：${method.status_label}）`)
-  );
-  if (method.verdict_reason) header.append(analysisElement('p', 'analysis-section-help', method.verdict_reason));
-  const counts = Object.entries(method.result_counts || {});
-  if (counts.length) {
-    const metrics = analysisElement('div', 'analysis-mini-metrics');
-    counts.forEach(([dataset, total]) => appendAnalysisMetric(metrics, dataset, `${total}件`));
-    header.append(metrics);
-  }
-  header.append(analysisElement('p', 'analysis-caption', `分析単位：${method.analysis_unit || '—'}`));
-  nodes.push(header);
-
-  const expert = (overview.experts || {})[method.expert_id];
-  if (expert) {
-    if (method.expert_scope === 'preconditions') {
-      nodes.push(analysisElement('p', 'analysis-section-help',
-        'この手法の結果がないため、結果に対する判定ではなく、実行前に満たす条件を表示しています。'));
-    }
-    nodes.push(buildExpertDetails(expert, {open: true}));
-  } else if (method.expert_note) {
-    nodes.push(analysisElement('p', 'analysis-section-help', method.expert_note));
-  }
-  if (METHOD_EXTERNAL_NOTES[method.method_id]) {
-    nodes.push(analysisElement('p', 'analysis-section-help', METHOD_EXTERNAL_NOTES[method.method_id]));
-  }
-
-  const panels = methodResultPanels(method.method_id, compact);
-  if (panels.length) nodes.push(...panels);
-  else if (method.produced) nodes.push(analysisElement('p', 'analysis-no-data', 'この手法の結果は保存記録とCSVで確認します。'));
-  else nodes.push(analysisElement('p', 'analysis-no-data', 'まだ結果がありません。上の条件を確認してから実行してください。'));
-
-  if ((method.limitations || []).length) {
-    const details = analysisElement('details', 'analysis-cautions');
-    details.append(analysisElement('summary', '', '限界と追加確認'));
-    const list = analysisElement('ul');
-    method.limitations.forEach(value => list.append(analysisElement('li', '', value)));
-    details.append(list);
-    nodes.push(details);
-  }
-  const exportBox = analysisElement('div', 'analysis-inline-exports');
-  (method.datasets || []).forEach(dataset => {
-    const link = analysisExportLink(`${dataset} CSV`, dataset, 'analysis-inline-export');
-    if (link) exportBox.append(link);
-  });
-  if (exportBox.childNodes.length) nodes.push(exportBox);
-  return nodes;
-}
-
-function renderMethodAnalysis(compact) {
-  const fragment = document.createDocumentFragment();
-  const state = analysisMethodState();
-  const intro = analysisElement('div', 'analysis-result-intro');
-  intro.append(
-    analysisElement('span', 'analysis-kind automatic', '手法別'),
-    analysisElement('h2', '', '分析手法ごとの結果と担当専門家'),
-    analysisElement('p', '', '手法ごとに、結果が出ているか、担当の専門家が示す適用条件を満たしているかを確認します。判定は保存済みのデータに対するもので、解釈の妥当性を保証しません。')
-  );
-  const refresh = analysisElement('button', 'secondary-button compact-button', '↻ 手法別の状態を再取得');
-  refresh.type = 'button';
-  refresh.dataset.analysisMethodsRefresh = 'true';
-  intro.append(refresh);
-  fragment.append(intro);
-
-  if (state.error) {
-    fragment.append(analysisElement('p', 'content-inline-notice', state.error));
-    return fragment;
-  }
-  if (!state.data) {
-    loadAnalysisMethodOverview();
-    fragment.append(analysisElement('p', 'analysis-section-help', '手法別の状態を読み込んでいます…'));
-    return fragment;
-  }
-
-  const overview = state.data;
-  const methods = new Map((overview.methods || []).map(method => [method.method_id, method]));
-  const summary = analysisElement('div', 'analysis-method-summary');
-  [
-    ['ok', '結果あり・条件を満たす'], ['check', '結果あり・要確認'], ['stop', '結果あり・この条件では使わない'],
-    ['no_expert', '結果あり・担当専門家なし'], ['none', '結果なし']
-  ].forEach(([key, label]) => {
-    const chip = analysisElement('span', `analysis-method-chip ${key}`);
-    chip.append(
-      analysisElement('strong', '', String((overview.summary || {})[key] || 0)),
-      analysisElement('small', '', label)
-    );
-    summary.append(chip);
-  });
-  fragment.append(summary);
-
-  const layout = analysisElement('div', 'analysis-method-layout');
-  const list = analysisElement('nav', 'analysis-method-list');
-  list.setAttribute('aria-label', '分析手法の選択');
-  (overview.groups || []).forEach(group => {
-    const section = analysisElement('section', 'analysis-method-group');
-    section.append(analysisElement('h3', '', group.title));
-    (group.method_ids || []).forEach(methodId => {
-      const method = methods.get(methodId);
-      if (!method) return;
-      const button = analysisElement('button', `analysis-method-button ${method.verdict}`);
-      button.type = 'button';
-      button.dataset.analysisMethodSelect = methodId;
-      if (methodId === state.selected) {
-        button.classList.add('active');
-        button.setAttribute('aria-current', 'true');
-      }
-      button.append(
-        analysisElement('strong', '', method.title),
-        analysisElement('span', 'analysis-method-verdict', method.verdict_label),
-        analysisElement('small', '', method.verdict_reason || method.status_label)
-      );
-      section.append(button);
-    });
-    list.append(section);
-  });
-  layout.append(list);
-
-  const detail = analysisElement('div', 'analysis-method-detail');
-  const selected = methods.get(state.selected) || (overview.methods || [])[0];
-  if (selected) buildMethodDetail(selected, overview, compact).forEach(node => detail.append(node));
-  else detail.append(analysisElement('p', 'analysis-no-data', '表示できる手法がありません。'));
-  layout.append(detail);
-  fragment.append(layout);
-  return fragment;
-}
-
-function buildSegmentClassificationPanel(compact) {
-  const state = (analysisState.data || {}).segment_classification || {};
-  const result = state.result || null;
-  const summary = state.summary || {};
-  const panel = analysisCardPanel(
-    '発話種別・重要度・要確認・機密らしさ', 'automatic',
-    'segment_classifications', true, 'segment_classification'
-  );
-  panel.body.append(analysisElement(
-    'p', 'analysis-section-help',
-    'テンプレート規則、Jev（LLM）、既存Transformer話題を別々の提案として比較します。自動値は手動確定値を上書きしません。'
-  ));
-  if (state.stale) panel.body.append(analysisElement(
-    'p', 'analysis-orphan-warning', '文字起こし、コードブック、手動分析、またはTransformer結果が変わったため再実行が必要です。'
-  ));
-  const metrics = analysisElement('div', 'analysis-mini-metrics');
-  appendAnalysisMetric(metrics, '対象', `${summary.segment_count || 0}発話`);
-  appendAnalysisMetric(metrics, '手動確認済み', `${summary.manual_reviewed_count || 0}件`);
-  appendAnalysisMetric(metrics, 'Jev重要度 高', `${summary.high_importance_count || 0}件`);
-  appendAnalysisMetric(metrics, 'Jev要確認 高', `${summary.high_review_count || 0}件`);
-  appendAnalysisMetric(metrics, 'Jev機密らしさ 高', `${summary.high_sensitivity_count || 0}件`);
-  panel.body.append(metrics);
-
-  const actions = analysisElement('div', 'segment-classification-actions');
-  const run = analysisElement(
-    'button', 'primary-button small',
-    segmentClassificationInProgress ? 'Jevで判定中…' : 'テンプレート＋Jev＋Transformerで判定'
-  );
-  run.type = 'button';
-  run.disabled = segmentClassificationInProgress || analysisState.dirty;
-  run.dataset.runSegmentClassification = 'true';
-  actions.append(run);
-  if (analysisState.dirty) actions.append(analysisElement('small', '', '手動変更を保存してから実行してください。'));
-  panel.body.append(actions);
-
-  const rows = result && Array.isArray(result.segments) ? result.segments : [];
-  if (!rows.length) {
-    panel.body.append(analysisElement('p', 'analysis-no-data', `分類結果はまだありません。画面上部の「分析を実行」から${summary.segment_count || 0}発話を一括判定できます。`));
-  } else {
-    const ranked = [...rows].sort((a, b) => {
-      const score = row => Math.max(
-        Number((row.llm || {}).importance_score) || 0,
-        Number((row.llm || {}).review_score) || 0,
-        Number((row.llm || {}).sensitivity_score) || 0
-      );
-      return score(b) - score(a) || Number(a.utterance_order || 0) - Number(b.utterance_order || 0);
-    }).slice(0, compact ? 8 : 20);
-    const wrap = analysisElement('div', 'analysis-table-wrap');
-    const table = analysisElement('table', 'analysis-table');
-    const head = analysisElement('thead');
-    const headRow = analysisElement('tr');
-    ['発話', '話者', 'テンプレート', 'Jev', 'Transformer話題', '重要', '要確認', '機密'].forEach(value => headRow.append(analysisElement('th', '', value)));
-    head.append(headRow);
-    const body = analysisElement('tbody');
-    ranked.forEach(value => {
-      const row = analysisElement('tr');
-      row.append(
-        analysisElement('td', '', `#${value.utterance_order || '—'}`),
-        analysisElement('td', '', value.speaker_name || value.speaker || '—'),
-        analysisElement('td', '', (value.template || {}).dialogue_act_label || '—'),
-        analysisElement('td', '', (value.llm || {}).dialogue_act_label || '—'),
-        analysisElement('td', '', (value.transformer || {}).topic_label || '—'),
-        analysisElement('td', '', (value.llm || {}).importance_score ?? '—'),
-        analysisElement('td', '', (value.llm || {}).review_score ?? '—'),
-        analysisElement('td', '', (value.llm || {}).sensitivity_score ?? '—')
-      );
-      body.append(row);
-    });
-    table.append(head, body);
-    wrap.append(table);
-    panel.body.append(wrap, analysisElement('p', 'analysis-caption', '表は3スコアの高い順に表示。全件とクロス集計はCSVで出力できます。'));
-  }
-  const exports = analysisElement('div', 'segment-classification-actions');
-  const rowsLink = analysisExportLink('全発話の比較CSV', 'segment_classifications', 'analysis-inline-export');
-  const crossLink = analysisExportLink('クロス集計CSV', 'segment_classification_crosstabs', 'analysis-inline-export');
-  if (rowsLink) exports.append(rowsLink);
-  if (crossLink) exports.append(crossLink);
-  panel.body.append(exports);
-  return panel.panel;
-}
-
-async function runSegmentClassification({useJev = true, quiet = false} = {}) {
-  if (!analysisState.itemId || !analysisState.data || segmentClassificationInProgress || analysisState.dirty) return;
-  segmentClassificationInProgress = true;
-  renderAnalysisWorkspace();
-  if (!quiet) setAlert(
-    document.querySelector('#analysis-message'),
-    useJev
-      ? 'Jevへ発話本文と短い前後文脈を送り、分類候補を作成しています。'
-      : 'テンプレートと保存済みTransformer結果から分類候補を作成しています。'
-  );
-  try {
-    const item = analysisState.data.item || {};
-    const response = await apiFetch(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/classifications`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        request_id: createSubmissionId(),
-        source_revision: Number(item.revision_count || 0),
-        analysis_revision: Number(item.analysis_revision || 0),
-        use_jev: Boolean(useJev)
-      })
-    });
-    const payload = await readJsonResponse(response);
-    if (!response.ok) throw new Error(payload.error || '発話分類を実行できませんでした。');
-    analysisState.data.segment_classification = payload.segment_classification;
-    invalidateAnalysisMethodOverview();
-    const warning = payload.archive_warning ? ` ${payload.archive_warning}` : '';
-    if (!quiet) setAlert(document.querySelector('#analysis-message'), `発話分類を保存しました。${warning}`, Boolean(payload.archive_warning));
-    return {ok: true, payload};
-  } catch (error) {
-    if (!quiet) setAlert(document.querySelector('#analysis-message'), error.message, true);
-    return {ok: false, error: error.message};
-  } finally {
-    segmentClassificationInProgress = false;
-    renderAnalysisWorkspace();
-  }
-}
+// Method-specific analysis rendering is in analysis-method-view.js.
 
 function renderAutomaticAnalysis(compact) {
   const fragment = document.createDocumentFragment();
@@ -7419,8 +6272,6 @@ function renderAutomaticAnalysis(compact) {
     return fragment;
   }
 
-  fragment.append(buildInsightSummary(), buildSegmentClassificationPanel(compact), buildTransformerAnalysisPanel(), buildAnalysisStorage(), buildContentExplorer());
-
   const metrics = analysisElement('div', 'analysis-overview');
   appendAnalysisMetric(metrics, '会話時間', formatTime(overview.session_duration || 0));
   appendAnalysisMetric(metrics, '対象発話', `${overview.included_segment_count || 0}件`, `全${overview.segment_count || 0}件`);
@@ -7441,7 +6292,17 @@ function renderAutomaticAnalysis(compact) {
     fragment.append(box);
   }
 
-  fragment.append(buildAnalysisNavigation());
+  const summary = analysisElement('section', 'analysis-page');
+  summary.dataset.analysisPage = 'overview';
+  summary.setAttribute('aria-label', '概要');
+  const observationsBox = fragment.querySelector('.analysis-observations');
+  if (observationsBox) summary.append(observationsBox);
+  summary.append(buildInsightSummary());
+  const contentPage = analysisElement('section', 'analysis-page');
+  contentPage.dataset.analysisPage = 'content';
+  contentPage.setAttribute('aria-label', '内容・文脈検索');
+  contentPage.append(buildContentExplorer(), buildSegmentClassificationPanel(compact), buildTransformerAnalysisPanel());
+  fragment.append(buildAnalysisNavigation(), summary, contentPage);
 
   const grid = analysisElement('div', 'analysis-grid');
   grid.append(analysisSectionHeading(
@@ -7606,7 +6467,20 @@ function renderAutomaticAnalysis(compact) {
     ['timeline', '時間推移 CSV'],
     ['groups', '属性比較 CSV']
   ]));
-  fragment.append(grid);
+  // Keep existing panels and controls mounted when switching sections. This
+  // preserves search input, running-job status, and the method view's panels.
+  let page;
+  [...grid.children].forEach(node => {
+    if (node.dataset.analysisAnchor) {
+      page = analysisElement('section', 'analysis-page analysis-grid');
+      page.dataset.analysisPage = node.dataset.analysisAnchor;
+      page.setAttribute('aria-label', node.querySelector('h2')?.textContent || '分析結果');
+      fragment.append(page);
+    }
+    if (page) page.append(node);
+  });
+  fragment.querySelector('[data-analysis-page="exports"]')?.append(buildAnalysisStorage());
+  applyAnalysisPage(fragment, analysisState.automaticPage);
 
   const cautions = Array.isArray(data.cautions) ? data.cautions : [];
   if (cautions.length) {
@@ -8813,6 +7687,10 @@ listen(analysisCard, 'click', event => {
   const jump = event.target.closest('[data-analysis-jump]');
   if (jump) {
     const content = jump.closest('.analysis-content');
+    if (content?.querySelector('[data-analysis-page]')) {
+      selectAnalysisPage(jump.dataset.analysisJump);
+      return;
+    }
     const target = content && content.querySelector(`[data-analysis-anchor="${jump.dataset.analysisJump}"]`);
     if (target) {
       content.querySelectorAll('[data-analysis-jump]').forEach(button => {
@@ -9008,4 +7886,3 @@ function applyRouteFromLocation({fromHistory = false, initial = false} = {}) {
 
 window.addEventListener('popstate', () => applyRouteFromLocation({fromHistory: true}));
 applyRouteFromLocation({initial: true});
-showView(['new', 'library', 'speakers', 'analysis'].includes(requestedView) ? requestedView : 'new');

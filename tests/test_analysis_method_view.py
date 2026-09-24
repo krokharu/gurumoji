@@ -10,6 +10,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+from gurumoji.web import system_routes
 import research_analysis
 from gurumoji.analysis_method_registry import METHODS, SEPARATE_RUN_METHODS
 from test_browser_e2e import browser_executable
@@ -107,6 +108,7 @@ class MethodOverviewApiTests(MethodViewFixture):
     def test_the_interface_offers_the_method_tab_and_tags_every_result_panel(self):
         html = (app.APP_DIRECTORY / "templates" / "index.html").read_text(encoding="utf-8")
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script += (app.APP_DIRECTORY / "static" / "analysis-method-view.js").read_text(encoding="utf-8")
         content = (app.APP_DIRECTORY / "static" / "analysis-content.js").read_text(encoding="utf-8")
         self.assertEqual(html.count('data-analysis-mode="methods"'), 2)
         for needle in ("function renderMethodAnalysis", "data-analysis-method-select", "buildExpertDetails"):
@@ -159,7 +161,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 """
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
 
         def render(*args, **kwargs):
@@ -175,7 +177,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(app, "render_template", side_effect=render), \
+            with patch.object(system_routes, "render_template", side_effect=render), \
                     patch.object(app.app, "send_static_file", side_effect=static), \
                     patch.object(app, "get_machine_profile", return_value={}), \
                     patch.object(app, "load_token_config", return_value=app.TokenConfig()):

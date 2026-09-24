@@ -38,6 +38,7 @@ function currentAnalysisContent() {
 }
 
 function jumpToContentSearch() {
+  selectAnalysisPage('content');
   currentAnalysisContent()?.querySelector('[data-analysis-anchor="content"]')?.scrollIntoView({block: 'start'});
 }
 
@@ -164,8 +165,8 @@ function buildInsightSummary() {
     article.append(evidenceDetails(finding.segment_ids || []));
     panel.body.append(article);
   });
-  const ai = analysisElement('section', 'content-ai-section');
-  ai.append(analysisElement('h3', '', 'AIで内容・意見を整理'));
+  const ai = analysisElement('details', 'content-ai-section');
+  ai.append(analysisElement('summary', '', 'AIで内容・意見を整理'));
   const toolbar = analysisElement('div', 'content-ai-toolbar');
   const label = analysisElement('label', 'field');
   label.append(analysisElement('span', '', '見解を生成するAI'));

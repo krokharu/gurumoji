@@ -10,8 +10,8 @@ class AnalysisTriggerSuppressionTests(unittest.TestCase):
     def setUp(self):
         self.client = app.app.test_client()
 
-    @patch("app.is_research_analysis_cached", return_value=False)
-    @patch("app.enrich_research_analysis")
+    @patch("app.group_analysis.is_research_analysis_cached", return_value=False)
+    @patch("app.group_analysis.enrich_research_analysis")
     @patch("app.library_row")
     def test_get_analysis_without_execute_does_not_call_enrich_research_analysis(
         self, mock_library_row, mock_enrich, mock_cached
@@ -42,8 +42,8 @@ class AnalysisTriggerSuppressionTests(unittest.TestCase):
         self.assertIsNone(data.get("research"))
         mock_enrich.assert_not_called()
 
-    @patch("app.is_research_analysis_cached", return_value=False)
-    @patch("app.enrich_research_analysis")
+    @patch("app.group_analysis.is_research_analysis_cached", return_value=False)
+    @patch("app.group_analysis.enrich_research_analysis")
     @patch("app.library_row")
     def test_get_analysis_with_execute_triggers_enrich_research_analysis(
         self, mock_library_row, mock_enrich, mock_cached

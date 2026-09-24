@@ -16,7 +16,8 @@ class UiDefaultsTests(unittest.TestCase):
             "複数回処理やエフェクトを加えて精度を上げます。注意：処理時間が増えます",
             page,
         )
-        self.assertIn("文章整形 <em>任意</em>", page)
+        self.assertIn("文章を整える", page)
+        self.assertIn("AIで整える場合は、使用するサービスとモデルを確認してください。", page)
         self.assertIn('name="transcript_finishing_mode" type="radio" value="recommended" checked', page)
         self.assertIn("TXT は常に作成", page)
         self.assertNotIn("JSON（常時）", page)
@@ -32,13 +33,12 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("パスと保存先を指定", page)
         self.assertIn("処理装置・話者数・無音判定", page)
         self.assertIn('id="setup-ready-state"', page)
-        # Recognition is the first setting and starts open; other panels open on request.
+        # All settings panels start collapsed in the redesigned input workspace.
         self.assertIn('id="settings-summary"', page)
         for panel in ("recognition", "vocabulary", "finishing", "emotion", "output"):
             self.assertIn(f'data-open-panel="{panel}"', page)
             self.assertRegex(page, rf'<details[^>]*data-settings-panel="{panel}"')
-        self.assertRegex(page, r'<details[^>]*data-settings-panel="recognition"[^>]*\bopen\b')
-        for panel in ("vocabulary", "finishing", "emotion", "output"):
+        for panel in ("recognition", "vocabulary", "finishing", "emotion", "output"):
             self.assertNotRegex(page, rf'<details[^>]*data-settings-panel="{panel}"[^>]*\bopen\b')
         self.assertIn('id="flow-steps"', page)
         self.assertIn('class="primary-button launch-button"', page)
@@ -115,14 +115,13 @@ class UiDefaultsTests(unittest.TestCase):
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
         effort_script = (app.APP_DIRECTORY / "static" / "ai-effort.js").read_text(encoding="utf-8")
 
-        self.assertIn("listen(aiProvider, 'change', selectDefaultAiOptions);", script)
+        self.assertIn("listen(aiProvider, 'change', () => {", script)
+        self.assertIn("aiProviderManuallySelected = true;", script)
         self.assertIn("function applyTranscriptFinishingPreset()", script)
         self.assertIn("mode === 'advanced' && hasAi", script)
         self.assertIn("mode !== 'off' && hasAi", script)
         self.assertIn("mode === 'advanced' && hasAi && Boolean(tokenConfigSnapshot.typesafe)", script)
         self.assertIn("[['off', 'なし'], ['low', '小'], ['medium', '中'], ['high', '高'], ['ultra', 'MAX']]", effort_script)
-        self.assertIn("前を1発話ずつ最大10回", effort_script)
-        self.assertIn("前後最大10発話", effort_script)
         self.assertIn("if (aiProvider.value === 'none') input.checked = false;", script)
         self.assertIn("function applyLmStudioDefaults(config)", script)
         self.assertIn("config.lmstudio || !String(config.lmstudio_model || '').trim()", script)
@@ -261,8 +260,14 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("手動実行", page)
         self.assertIn("バックグラウンドで続ける", page)
         self.assertIn("analysis-execution.js", page)
+        self.assertIn("analysis-visualizations.js", page)
+        self.assertLess(page.index("analysis-visualizations.js"), page.index("app.js"))
+        self.assertIn("analysis-method-view.js", page)
+        self.assertLess(page.index("analysis-method-view.js"), page.index("app.js"))
 
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script += (app.APP_DIRECTORY / "static" / "analysis-visualizations.js").read_text(encoding="utf-8")
+        script += (app.APP_DIRECTORY / "static" / "analysis-method-view.js").read_text(encoding="utf-8")
         self.assertIn("async function loadAnalysisCatalog(", script)
         self.assertIn("async function loadAnalysisItem(", script)
         self.assertIn("function renderAutomaticAnalysis(", script)
@@ -646,7 +651,8 @@ class UiDefaultsTests(unittest.TestCase):
         # The launch review exposes the actual audio AI and CPU/GPU selected for each stage.
         self.assertIn('data-review-transcription', page)
         self.assertIn('data-review-diarization', page)
-        self.assertIn('WhisperX (faster-whisper)', script)
+        self.assertIn('data-choice-transcription-device', page)
+        self.assertIn("認識モデル ${model}", script)
         self.assertIn('pyannote.audio', script)
         # Each review card, including its text, is one large actionable button.
         self.assertEqual(page.count('class="launch-review-card"'), 4)
@@ -659,8 +665,10 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn(".primary-button { width: auto; margin: 0;", styles)
         # UX-21 / UX-22: no decorative English labels on every card.
         self.assertNotIn('class="eyebrow"', page)
-        # Recognition is the first and initially open settings panel; others open on request.
-        self.assertIn('id="panel-recognition" class="settings-panel" data-settings-panel="recognition" open', page)
+        # Settings disclosures start closed and open only when requested.
+        for panel in ("recognition", "vocabulary", "finishing", "emotion", "output"):
+            self.assertRegex(page, rf'<details[^>]*data-settings-panel="{panel}"')
+            self.assertNotRegex(page, rf'<details[^>]*data-settings-panel="{panel}"[^>]*\bopen\b')
         self.assertIn("function openSettingsPanel(name", script)
 
 

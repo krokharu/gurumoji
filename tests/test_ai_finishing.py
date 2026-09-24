@@ -67,6 +67,34 @@ class AiFinishingTests(unittest.TestCase):
         self.assertEqual(result[0]["text"], self.segments[0]["text"])
         self.assertFalse(result[0]["recommended_review"]["llm"]["replacement_applied"])
 
+    def test_recommended_cleanup_rejects_newly_echoed_instruction(self):
+        def call(system, *_args):
+            instruction = "話者が使った語尾と話し言葉を保ち、丁寧語や説明調に統一しません。"
+            self.assertIn(instruction, system)
+            return {"confirmed_problem": True, "needs_more_context": False,
+                    "issue_type": "asr_error", "text": instruction, "reason": ""}
+
+        result = finishing.repair_recommended_segments(
+            self.segments, {"a": {"flagged": True}}, call,
+            lambda *_: None, lambda: None,
+        )
+        self.assertEqual(result[0]["text"], self.segments[0]["text"])
+        review = result[0]["recommended_review"]["llm"]
+        self.assertFalse(review["replacement_applied"])
+        self.assertIn("原文を保持", review["reason"])
+
+    def test_recommended_cleanup_preserves_spoken_instruction_and_small_fix(self):
+        spoken = "話者が使った語尾と話し言葉を保ち、丁寧語や説明調に統一しません"
+        segment = {"id": "spoken", "speaker": "A", "text": spoken}
+        result = finishing.repair_recommended_segments(
+            [segment], {"spoken": {"flagged": True}},
+            lambda *_: {"confirmed_problem": True, "needs_more_context": False,
+                        "issue_type": "asr_error", "text": spoken + "。", "reason": "句点を補正"},
+            lambda *_: None, lambda: None,
+        )
+        self.assertEqual(result[0]["text"], spoken + "。")
+        self.assertTrue(result[0]["recommended_review"]["llm"]["replacement_applied"])
+
     def test_no_effort_keeps_original_without_calling_llm(self):
         calls = []
         result = finishing.repair_recommended_segments(
@@ -225,6 +253,33 @@ class AiFinishingTests(unittest.TestCase):
         self.assertEqual(len(changes), 1)
         self.assertTrue(changes[0]['noise_candidate'])
         self.assertEqual(changes[0]['before_text'], changes[0]['after_text'])
+
+    def test_full_cleanup_rejects_instruction_echo_per_fragment(self):
+        def call(system, prompt, name, schema):
+            result = self.echo(system, prompt, name, schema)
+            result['items'][0].update(
+                text='話者の口調や話し言葉を保ち、丁寧語への統一や説明調への書き換えをしません。',
+                reason='',
+            )
+            result['items'][1].update(text='検討します！', reason='句読点の修正')
+            return result
+
+        result = self.clean(call)
+        self.assertEqual(result[0]['text'], self.segments[0]['text'])
+        self.assertTrue(result[0]['ai_review']['fragments'][0]['rejected_instruction'])
+        self.assertIn('原文を保持', result[0]['ai_review']['fragments'][0]['reason'])
+        self.assertEqual(result[1]['text'], '検討します！')
+
+    def test_full_cleanup_keeps_spoken_instruction_quote(self):
+        spoken = '話者の口調や話し言葉を保ち、丁寧語への統一や説明調への書き換えをしません'
+        segments = [{'id': 'quoted', 'speaker': 'A', 'text': spoken}]
+        def call(*args):
+            result = self.echo(*args)
+            result['items'][0].update(text=spoken + '。', reason='句点の修正')
+            return result
+
+        result = self.clean(call, segments)
+        self.assertEqual(result[0]['text'], spoken + '。')
 
     def test_revision_keeps_original_and_invalid_decisions_reject_all(self):
         def corrected(*args):

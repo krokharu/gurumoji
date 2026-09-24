@@ -44,8 +44,8 @@
         <small class="app-brand-version">v{{ app_version }}</small>
       </a>
       <nav class="app-nav" aria-label="画面の切り替え" role="tablist">
-        <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="create-view" aria-selected="true">＋ 新規作成</button>
-        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="library-card" aria-selected="false">処理済みデータ</button>
+        <button id="show-new-button" class="view-tab active" type="button" role="tab" aria-controls="create-view" aria-selected="true">動画・音声を文字起こし</button>
+        <button id="show-library-button" class="view-tab" type="button" role="tab" aria-controls="processed-data-hub library-card analysis-card" aria-selected="false">文字起こし結果</button>
         <button id="show-analysis-button" class="view-tab" type="button" role="tab" aria-controls="analysis-card" aria-selected="false">分析・可視化</button>
         <button id="show-speakers-button" class="view-tab" type="button" role="tab" aria-controls="speaker-registry-card" aria-selected="false">話者管理</button>
       </nav>
@@ -53,6 +53,10 @@
         <button id="job-chip" class="job-chip" type="button" hidden>
           <i class="job-chip-dot" aria-hidden="true"></i>
           <span id="job-chip-label">処理中</span>
+        </button>
+        <button id="analysis-job-chip" class="job-chip analysis-job-chip" type="button" hidden>
+          <i class="job-chip-dot" aria-hidden="true"></i>
+          <span id="analysis-job-chip-label">分析中</span>
         </button>
         <div class="app-status desktop-only" aria-label="トークン設定状況">
           <span id="status-hf" class="status-pill loading">Hugging Face</span>
@@ -72,6 +76,10 @@
   </header>
 
   <main class="app-main">
+    <nav id="processed-data-hub" class="processed-data-hub" aria-label="処理済みデータの切り替え" role="tablist" hidden>
+      <button id="show-library-list-button" class="processed-data-tab active" type="button" role="tab" aria-controls="library-card" aria-selected="true">データ一覧</button>
+      <button id="show-library-analysis-button" class="processed-data-tab" type="button" role="tab" aria-controls="analysis-card" aria-selected="false">分析・可視化</button>
+    </nav>
     <!-- ===== 新規作成：ファイル → 設定 → 開始 ===== -->
     <section id="create-view" class="view create-view" role="tabpanel" aria-labelledby="show-new-button">
       <section id="progress-card" class="progress-card" hidden aria-live="polite">
@@ -96,7 +104,10 @@
             </div>
           </div>
         </div>
-        <section id="progress-ai-usage" class="ai-token-usage" aria-label="AIトークン使用量" hidden>
+        <details id="progress-system-details" class="progress-details-accordion">
+          <summary>詳細システム情報とログ（AIトークン使用量 / システム負荷 / 処理ログ）</summary>
+          <div class="progress-details-body">
+<section id="progress-ai-usage" class="ai-token-usage" aria-label="AIトークン使用量" hidden>
           <div class="ai-token-heading">
             <div><span class="ai-token-mark" aria-hidden="true">AI</span><div><small>AI TOKEN USAGE</small><strong data-ai-provider>AI</strong></div></div>
             <span data-ai-model></span>
@@ -147,6 +158,8 @@
           <summary>処理ログ</summary>
           <pre id="progress-log"></pre>
         </details>
+          </div>
+        </details>
         <div class="progress-actions">
           <button id="cancel-button" class="secondary-button danger" type="button">処理を中止</button>
           <button id="progress-dismiss" class="secondary-button" type="button" hidden>この表示を閉じる</button>
@@ -157,8 +170,8 @@
         <header class="view-header">
           <div>
             <p class="view-kicker">新しい文字起こし</p>
-            <h1>ファイルを選んで、文字起こしを始める</h1>
-            <p>おすすめ設定を自動で用意しています。設定は変えたい項目だけ開いて変更できます。</p>
+            <h1>動画・音声を文字にする</h1>
+            <p>ファイルを選んで、設定を確認するだけ。</p>
           </div>
         </header>
 
@@ -192,7 +205,7 @@
               {% if runtime.colab %}
               <p>端末からColabへアップロードするか、Google Drive上のパスを指定します</p>
               {% else %}
-              <p>このPC上の動画・音声を選びます。ファイルはアップロードせず、このPC内だけで処理します</p>
+              <p>このPCの動画・音声を選択します</p>
               {% endif %}
             </div>
           </div>
@@ -200,13 +213,14 @@
             <input id="input-file" class="visually-hidden" name="input_file" type="file" accept=".mp4,.m4v,.mov,.mkv,.wav,.mp3,.m4a,.flac">
             <div class="drop-zone-icon" aria-hidden="true">＋</div>
             <div class="drop-zone-copy">
-              <strong>音声・動画ファイルを選択</strong>
+              <strong>動画・音声をここにドロップ</strong>
               <span class="desktop-only">ここへドラッグ＆ドロップ、またはボタンから選択</span>
               <span class="mobile-only">端末から音声・動画を選択</span>
               <small>MP4 / MOV / MKV / WAV / MP3 / M4A / FLAC</small>
             </div>
             <button id="browse-path-button" class="secondary-button browse-button" type="button" data-picker-mode="{{ 'native' if runtime.native_file_dialog else 'browser' }}">{{ 'ファイルを選択' if runtime.native_file_dialog else '端末からアップロード' }}</button>
           </div>
+          <div class="selected-file-label">選択したファイル</div>
           <div id="path-detail" class="path-detail file-selection-status" role="status">ファイルが選択されていません</div>
           <div id="path-error" class="alert error" role="alert" hidden></div>
           <div id="source-preview" class="source-preview" hidden>
@@ -245,7 +259,7 @@
             <span class="step">2</span>
             <div>
               <h2>設定を確認する</h2>
-              <p>会話の種類を選ぶと、話者数と音声前処理をまとめて調整します。ほかの設定はおすすめ値のままで開始できます。</p>
+              <p>まずはおすすめ設定で始められます。</p>
             </div>
           </div>
 
@@ -256,28 +270,28 @@
                 <input name="conversation_mode" type="radio" value="meeting" checked>
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">会</i>
-                  <strong>会議モード</strong>
-                  <small>定例・商談・打合せ向け。2〜10名を想定し、議題や決定事項を追いやすくします。</small>
+                  <strong>会議</strong>
+                  <small>定例・商談（2〜10名）</small>
                 </span>
               </label>
               <label class="conversation-mode-option">
                 <input name="conversation_mode" type="radio" value="group_interview">
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">問</i>
-                  <strong>グループインタビューモード</strong>
-                  <small>座談会・フォーカスグループ向け。3〜12名を想定し、参加者ごとの発話を扱いやすくします。</small>
+                  <strong>グループインタビュー</strong>
+                  <small>座談会（3〜12名）</small>
                 </span>
               </label>
               <label class="conversation-mode-option">
                 <input name="conversation_mode" type="radio" value="chat">
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">談</i>
-                  <strong>雑談モード</strong>
-                  <small>少人数の自然な会話向け。2〜6名を想定し、軽めの前処理で会話の雰囲気を保ちます。</small>
+                  <strong>雑談</strong>
+                  <small>少人数の会話（2〜6名）</small>
                 </span>
               </label>
             </div>
-            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">会議モードの設定を適用しています。話者数や前処理は「認識・話者分離」で変更できます。</p>
+            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">会議向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。</p>
             <button id="conversation-mode-reset" class="conversation-mode-reset" type="button" hidden>このモードの推奨値に戻す</button>
           </fieldset>
 
@@ -286,9 +300,9 @@
               <strong>現在の設定</strong>
               <span>変えたい項目の「変更」を押すと、その設定だけが開きます。</span>
             </div>
-            <button type="button" class="settings-summary-row" data-open-panel="recognition">
-              <span class="settings-summary-label">認識・話者分離</span>
-              <strong data-settings-value="recognition">おすすめ設定</strong>
+            <button type="button" class="settings-summary-row settings-summary-feature" data-open-panel="recognition">
+              <span class="settings-summary-label">文字起こし</span>
+              <strong class="settings-choice" data-settings-value="recognition"><span class="settings-choice-main"><span class="settings-choice-badge" data-choice-transcription-device>CPU</span><span data-choice-recognition-model>base</span></span><small data-choice-recognition-detail>話者分離 CPU</small></strong>
               <em>変更</em>
             </button>
             <button type="button" class="settings-summary-row" data-open-panel="vocabulary">
@@ -296,9 +310,9 @@
               <strong data-settings-value="vocabulary">未登録</strong>
               <em>変更</em>
             </button>
-            <button type="button" class="settings-summary-row" data-open-panel="finishing">
+            <button type="button" class="settings-summary-row settings-summary-feature" data-open-panel="finishing" data-active="false">
               <span class="settings-summary-label">AI仕上げ</span>
-              <strong data-settings-value="finishing">Obsidianで仕上げ（標準）</strong>
+              <strong class="settings-choice" data-settings-value="finishing"><span class="settings-choice-main"><span class="settings-choice-badge is-off" data-choice-finishing-state>しない</span><span data-choice-finishing-model>使用モデルなし</span></span><small data-choice-finishing-detail>Obsidianに保存してあとで整える</small></strong>
               <em>変更</em>
             </button>
             <button type="button" class="settings-summary-row" data-open-panel="emotion">
@@ -343,7 +357,7 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span>音声前処理</span>
+                    <span>動画・音声前処理</span>
                     <select name="audio_preprocess">
                       <option value="none">加工なし</option>
                       <option value="light">軽め — 音量調整と低域カット</option>
@@ -432,18 +446,36 @@
 
             <details id="panel-finishing" class="settings-panel" data-settings-panel="finishing">
               <summary>
-                <span>AI仕上げ <em>任意</em></span>
-                <small>Obsidianでの仕上げ、話者特定、アウトライン、思考モード</small>
+                <span>文字起こしの整え方 <em>任意</em></span>
+                <small>文章を整えるか、認識結果をそのまま残すかを選びます</small>
               </summary>
               <div id="setup-finish" class="settings-panel-body">
+                <fieldset class="finishing-mode-picker">
+                  <legend>AI仕上げ</legend>
+                  <div class="finishing-mode-options">
+                    <label class="finishing-mode-option">
+                      <input name="transcript_finishing_mode" type="radio" value="recommended" checked>
+                      <span><strong>必要な箇所を整える</strong><small>AIを使う場合、聞き取りにくい箇所などを確認して読みやすく整えます。</small></span>
+                    </label>
+                    <label class="finishing-mode-option">
+                      <input name="transcript_finishing_mode" type="radio" value="advanced">
+                      <span><strong>全文を整える</strong><small>全文を文脈に合わせて整え、追加機能も設定できます。</small></span>
+                    </label>
+                    <label class="finishing-mode-option">
+                      <input name="transcript_finishing_mode" type="radio" value="off">
+                      <span><strong>しない</strong><small>認識結果をそのまま保存します。</small></span>
+                    </label>
+                  </div>
+                  <p id="finishing-mode-hint" class="conversation-mode-hint">AIで整える場合は、使用するサービスとモデルを確認してください。</p>
+                </fieldset>
                 <div class="ai-box">
                   <label class="check-row obsidian-mode">
                     <input name="finish_in_obsidian" type="hidden" value="0">
                     <input id="finish-in-obsidian" name="finish_in_obsidian" type="checkbox" value="1" checked>
-                    <span><strong>Obsidianに保存して仕上げ（標準）</strong><small>録音1件の全文を1ノートに保存します。Obsidianの操作ノートでアウトライン作成・AI仕上げ・アプリへの反映を選べます</small></span>
+                    <span><strong>Obsidianに保存してあとで整える</strong><small>文字起こし全文と作業ノートを保存します。文章の仕上げは後から行えます。</small></span>
                   </label>
                   <label class="field provider-field">
-                    <span>使用する API</span>
+                    <span>AI仕上げに使うサービス</span>
                     <select id="ai-provider" name="ai_provider">
                       <option value="none" selected>使用しない</option>
                       <option value="openai">OpenAI</option>
@@ -452,29 +484,29 @@
                     </select>
                   </label>
                   <div class="check-stack">
-                    <label class="check-row" data-app-finishing-only hidden>
+                    <label class="check-row" data-app-finishing-only data-advanced-finishing-only hidden>
                       <input id="clean-transcript" name="clean_transcript" type="checkbox">
                       <span><strong>全体と前後の文脈で再校正・ノイズ判定</strong><small>参照用アウトラインを先に作成。意味や話し方を保持し、ノイズ候補は理由付きで残します</small></span>
                     </label>
-                    <label class="check-row">
-                      <input id="detect-names" name="detect_speaker_names" type="checkbox">
-                      <span><strong>自己紹介から話者を特定・リンク</strong><small>文字校正とは別に、候補抽出とリンク再確認を2回処理します</small></span>
+                    <label class="check-row" data-speaker-finishing-option>
+                      <input id="detect-names" name="detect_speaker_names" type="checkbox" checked>
+                      <span><strong>自己紹介から話者を特定・登録</strong><small>初回の文字起こしで確認できた自己紹介は話者管理へ登録し、以後は番号でなく名前で表示します。候補抽出とリンク再確認を2回処理します</small></span>
                     </label>
-                    <label class="check-row">
+                    <label class="check-row" data-advanced-finishing-only hidden>
                       <input id="create-outline" name="create_outline" type="checkbox">
                       <span><strong>根拠付きのアウトラインを出力</strong><small>仕上げ後の会話から議題を整理します。オフでも再校正用のアウトラインは内部で作成します</small></span>
                     </label>
-                    <label class="check-row" id="jev-compare-row">
+                    <label class="check-row" id="jev-compare-row" data-advanced-finishing-only hidden>
                       <input id="jev-compare" name="jev_compare" type="checkbox">
                       <span><strong>現行AIとJevを両方実行して比較</strong><small>同じ校正前発話を使い、それぞれの「修正が必要／修正不要」を4区分で可視化します</small></span>
                     </label>
-                    <small id="jev-config-status" class="field-note">TypeSafe APIキーを確認しています…</small>
+                    <small id="jev-config-status" class="field-note">おすすめのJev判定に使うTypeSafe APIキーを確認しています…</small>
                   </div>
                 </div>
-                <p class="privacy-note">AI 機能では文字起こしテキストだけを処理します。{{ local_llm_short_label }} を選ぶとテキストはこの実行環境内のローカルLLMだけで処理され、音声・動画は送信しません。Jev比較を選ぶと、同じ文字起こしテキストをTypeSafe APIにも送信します。</p>
+                <p class="privacy-note">AI 機能では文字起こしテキストだけを処理します。{{ local_llm_short_label }} を選ぶとLLM確認はこの実行環境内だけで処理され、音声・動画は送信しません。おすすめの修正要否判定またはJev比較では、文字起こしテキストをTypeSafe APIにも送信します。</p>
                 <details class="effort-details">
-                  <summary><span>処理ごとの思考モードとエフォート</span><small>低・中・高・ultra</small></summary>
-                  <div class="effort-intro"><p>各カードで思考モードをON／OFFにし、ONの場合は考える量を選びます。高い設定ほど時間とトークン使用量が増える場合があります。Obsidianでの仕上げにも引き継ぎます。モデルによって使える設定は異なります。</p></div>
+                  <summary><span>AIの調整レベル</span><small>文章の仕上げや各処理の強さを選ぶ</small></summary>
+                  <div class="effort-intro"><p>文章を整える範囲や、各処理でAIが確認する詳しさを選べます。高い設定ほど処理に時間がかかり、使用量が増える場合があります。</p></div>
                   <div id="ai-effort-settings"></div>
                 </details>
               </div>
@@ -526,38 +558,49 @@
           <div class="section-heading">
             <span class="step">3</span>
             <div>
-              <h2>内容を確認して開始する</h2>
-              <p>開始後は処理状況をこの画面と画面上部の表示で確認できます。</p>
+              <h2>文字起こしを開始</h2>
+              <div class="launch-summary">
+                <strong id="setup-ready-state">ファイルを選択してください</strong>
+                <span id="setup-summary">おすすめ設定を自動で準備します</span>
+              </div>
             </div>
           </div>
-          <div class="launch-review" aria-label="設定内容の確認">
-            <div>
+          <div class="launch-mobile-review mobile-only" aria-label="開始前の確認">
+            <div><span>入力ファイル</span><strong data-review-source>未選択</strong></div>
+            <div><span>文字起こし</span><strong data-review-transcription-compact>認識 base・CPU / 話者分離 CPU</strong></div>
+            <div><span>AI仕上げ</span><strong data-review-finish>しない・使用モデルなし</strong></div>
+            <div><span>出力</span><strong data-review-output>TXT / JSON / SRT</strong></div>
+          </div>
+           <details class="launch-review-details">
+             <summary>入力と設定の詳細を確認</summary>
+             <div class="launch-review" aria-label="設定内容の確認">
+            <button class="launch-review-card" type="button" data-flow-jump="1">
               <span>入力ファイル</span>
               <strong data-review-source>未選択</strong>
-              <button type="button" data-flow-jump="1">変更</button>
-            </div>
-            <div>
-              <span>認識・話者分離</span>
-              <strong data-review-recognition>おすすめ設定</strong>
-              <button type="button" data-open-panel="recognition">変更</button>
-            </div>
-            <div>
-              <span>仕上げ・感情分析</span>
-              <strong data-review-finish>Obsidianで仕上げ</strong>
-              <button type="button" data-open-panel="finishing">変更</button>
-            </div>
-            <div>
+              <span class="launch-review-action" aria-hidden="true">変更 →</span>
+            </button>
+            <button class="launch-review-card" type="button" data-open-panel="recognition">
+              <span>音声処理（AI・処理装置）</span>
+              <strong class="launch-review-values">
+                <span data-review-transcription>文字起こし: OpenAI Whisper / base / CPU</span>
+                <span data-review-diarization>話者分離: pyannote.audio / CPU</span>
+              </strong>
+              <span class="launch-review-action" aria-hidden="true">変更 →</span>
+            </button>
+            <button class="launch-review-card" type="button" data-open-panel="finishing">
+              <span>AI仕上げ・感情分析</span>
+              <strong data-review-finish>しない・使用モデルなし</strong>
+              <span class="launch-review-action" aria-hidden="true">変更 →</span>
+            </button>
+            <button class="launch-review-card" type="button" data-open-panel="output">
               <span>出力形式</span>
               <strong data-review-output>TXT / JSON / SRT</strong>
-              <button type="button" data-open-panel="output">変更</button>
-            </div>
-          </div>
+              <span class="launch-review-action" aria-hidden="true">変更 →</span>
+            </button>
+             </div>
+           </details>
           <div id="form-error" class="alert error" role="alert" hidden></div>
-          <div class="launch-bar">
-            <div class="launch-summary">
-              <strong id="setup-ready-state">ファイルを選択してください</strong>
-              <span id="setup-summary">おすすめ設定を自動で準備します</span>
-            </div>
+           <div class="launch-bar">
             <button id="start-button" class="primary-button launch-button" type="submit" disabled>
               <span>文字起こしを開始</span><span aria-hidden="true">→</span>
             </button>
@@ -576,7 +619,7 @@
     </section>
 
     <!-- ===== 処理済みデータ ===== -->
-    <section id="library-card" class="view library-card" role="tabpanel" aria-labelledby="show-library-button" hidden>
+    <section id="library-card" class="view library-card" role="tabpanel" aria-labelledby="show-library-list-button" hidden>
       <header class="view-header library-header">
         <div>
           <p class="view-kicker">処理済みデータ</p>
@@ -585,6 +628,7 @@
         </div>
         <div class="library-header-actions">
           <button id="library-refresh-button" class="secondary-button compact-button" type="button">↻ 更新</button>
+          <button id="manage-library-groups-button" class="secondary-button compact-button" type="button">グループ管理</button>
           <button id="add-record-button" class="secondary-button" type="button">空のデータを追加</button>
           <button id="library-create-new-button" class="primary-button small" type="button">＋ 新しい文字起こし</button>
         </div>
@@ -621,11 +665,16 @@
               <select id="library-emotion"><option value="">すべての感情</option></select>
             </label>
             <label class="field">
+              <span>グループ</span>
+              <select id="library-group"><option value="">すべてのグループ</option><option value="__ungrouped__">未分類</option></select>
+            </label>
+            <label class="field">
               <span>並べ替え</span>
               <select id="library-sort">
                 <option value="updated_desc">更新が新しい順</option>
                 <option value="created_desc">作成が新しい順</option>
                 <option value="name">名前順</option>
+                <option value="group">グループ順</option>
                 <option value="speaker">話者別</option>
                 <option value="emotion">感情別</option>
                 <option value="keyword">キーワード一致数順</option>
@@ -663,7 +712,7 @@
             <button id="result-analysis-button" class="primary-button small analysis-jump-button" type="button">分析・可視化 →</button>
           </div>
         </div>
-        <details id="session-outline" class="session-outline" open>
+        <details id="session-outline" class="session-outline">
           <summary><span class="session-outline-mark">OUTLINE</span><strong>アウトライン（予定と結果）</strong><span id="session-outline-headline" class="session-outline-headline"></span></summary>
           <div id="session-outline-content" class="session-outline-content"></div>
         </details>
@@ -688,10 +737,19 @@
                 <button id="previous-segment-button" class="secondary-button" type="button">← 前の発話</button>
                 <button id="replay-segment-button" class="secondary-button" type="button">選択箇所を再生</button>
                 <button id="next-segment-button" class="secondary-button" type="button">次の発話 →</button>
+                <label class="mini-check media-autoscroll-label"><input id="media-autoscroll" type="checkbox" checked><span>自動追従</span></label>
               </div>
             </div>
           </aside>
           <div class="transcript-main">
+            <section id="formatting-result" class="formatting-result" aria-labelledby="formatting-result-title" hidden>
+              <div class="formatting-result-head">
+                <div><span>FORMATTING RESULT</span><h3 id="formatting-result-title">文章整形リザルト</h3></div>
+                <strong id="formatting-result-mode"></strong>
+              </div>
+              <div id="formatting-result-metrics" class="formatting-result-metrics"></div>
+              <div id="formatting-result-details" class="formatting-result-details"></div>
+            </section>
             <section id="jev-comparison-summary" class="jev-comparison-summary" aria-live="polite" hidden></section>
             <div class="editor-toolbar">
               <label class="field"><span>本文キーワード</span><input id="segment-keyword" type="search" placeholder="発話内を検索"></label>
@@ -711,11 +769,11 @@
           <div class="conversation-profile-head">
             <div>
               <h3>会話プロファイルと話者連携</h3>
-              <p>グループインタビュー／会議ごとの役割、条件、フィールドノートを管理します。参加者の台帳は<button class="link-button" type="button" data-result-destination="speakers">話者管理</button>で編集します。</p>
+              <p>グループインタビュー／会議ごとの役割、条件、フィールドノートを管理します。表示名はこの表で修正でき、各発話の話者も名前で選び直せます。参加者の台帳は<button class="link-button" type="button" data-result-destination="speakers">話者管理</button>で編集します。</p>
             </div>
             <div class="speaker-identity-actions">
               <label class="field"><span>話者特定AI</span><select id="speaker-identity-provider"><option value="openai">OpenAI</option><option value="google">Google Gemini</option><option value="lmstudio">{{ local_llm_label }}</option></select></label>
-              <button id="rerun-speaker-identification" class="secondary-button" type="button">自己紹介から話者名を再特定</button>
+              <button id="rerun-speaker-identification" class="secondary-button" type="button">自己紹介から話者を再特定・登録</button>
               <a id="conversation-speaker-export" class="secondary-button" href="#" download>会話話者CSV</a>
               <small id="speaker-identity-status">空欄の話者名だけに反映します。</small>
             </div>
@@ -843,10 +901,17 @@
           <p>誰がどれくらい話したか、よく使われた言葉、会話の流れや統計を、グラフと表で確認できます。</p>
         </div>
         <div class="analysis-header-actions">
-          <a id="analysis-xlsx-export" class="primary-button" href="#" download hidden>Excel（標準出力）</a>
-          <a id="analysis-json-export" class="secondary-button" href="#" download hidden>全分析JSON</a>
-          <button id="analysis-refresh-button" class="secondary-button compact-button" type="button">↻ 再集計</button>
+          <button id="analysis-run-button" class="primary-button compact-button" type="button">分析を実行</button>
+          <button id="analysis-refresh-button" class="analysis-legacy-run-control" type="button" tabindex="-1" aria-hidden="true">再集計</button>
           <button id="analysis-open-item-button" class="secondary-button compact-button" type="button" hidden>文字起こしを開く</button>
+          <details class="analysis-more-actions">
+            <summary>出力・実行設定</summary>
+            <div>
+              <a id="analysis-xlsx-export" class="secondary-button" href="#" download hidden>Excel（標準出力）</a>
+              <a id="analysis-json-export" class="secondary-button" href="#" download hidden>全分析JSON</a>
+              <button id="analysis-run-settings-button" class="secondary-button compact-button" type="button">詳細設定</button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -874,15 +939,52 @@
         <p>文字起こし済みデータを選ぶと、ローカルで自動集計と可視化を行います。</p>
       </div>
 
+      <section id="analysis-execution-view" class="analysis-execution-view" aria-labelledby="analysis-execution-title" hidden>
+        <header class="analysis-execution-heading">
+          <div>
+            <p class="view-kicker">分析の実行状況</p>
+            <h2 id="analysis-execution-title">分析を実行しています</h2>
+            <p id="analysis-execution-summary">固定した計画に沿って処理しています。</p>
+          </div>
+          <strong id="analysis-execution-percent">0%</strong>
+        </header>
+        <div id="analysis-execution-track" class="analysis-execution-track" role="progressbar" aria-label="分析全体の進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+        <ol id="analysis-execution-stages" class="analysis-execution-stages" aria-label="分析の段階"></ol>
+        <section class="analysis-execution-current" aria-live="polite">
+          <div id="analysis-execution-orbit" class="analysis-execution-orbit" aria-hidden="true"><i></i><b></b></div>
+          <div>
+            <small id="analysis-execution-state-label">開始準備</small>
+            <h3 id="analysis-execution-current-title">入力と設定を確認しています</h3>
+            <p id="analysis-execution-message">分析対象を固定しています。</p>
+          </div>
+        </section>
+        <div class="analysis-execution-meta">
+          <span>経過時間 <strong id="analysis-execution-elapsed">0:00</strong></span>
+          <span>実行方法 <strong id="analysis-execution-mode">自動実行</strong></span>
+          <span>外部送信 <strong id="analysis-execution-external">なし</strong></span>
+        </div>
+        <details class="analysis-execution-log-details">
+          <summary>詳細ログ</summary>
+          <pre id="analysis-execution-log" tabindex="0"></pre>
+        </details>
+        <div class="analysis-execution-actions">
+          <button id="analysis-execution-background" class="secondary-button" type="button">バックグラウンドで続ける</button>
+          <button id="analysis-execution-review" class="secondary-button" type="button" hidden>実行設定を見直す</button>
+          <button id="analysis-execution-results" class="primary-button" type="button" hidden>結果を見る</button>
+          <button id="analysis-execution-cancel" class="secondary-button danger" type="button">分析を中止</button>
+        </div>
+      </section>
+
       <div id="analysis-shell" class="analysis-shell" hidden>
         <div class="analysis-desktop-layout desktop-only">
           <aside class="analysis-sidebar">
             <div class="analysis-sidebar-heading">
               <span>ANALYSIS WORKSPACE</span>
-              <strong>分析の境界を明確に</strong>
-              <p>数値で分かることと、研究者の確認が必要なことを分けて表示します。</p>
+              <strong>分析ワークスペース</strong>
             </div>
-            <div class="analysis-boundary-list">
+            <details class="analysis-reading-guide">
+              <summary>分析結果の読み方</summary>
+              <div class="analysis-boundary-list">
               <article class="automatic">
                 <span>自動集計</span>
                 <strong>データから計算</strong>
@@ -898,7 +1000,8 @@
                 <strong>文脈を人が判断</strong>
                 <p>合意・対立、沈黙の意味、重要引用、テーマは発話を読んで確定します。</p>
               </article>
-            </div>
+              </div>
+            </details>
             <div class="analysis-mode-switch" role="group" aria-label="分析表示">
               <button type="button" data-analysis-mode="automatic" aria-pressed="true">自動分析</button>
               <button type="button" data-analysis-mode="manual" aria-pressed="false">設定・手動分析</button>
@@ -910,10 +1013,10 @@
         </div>
 
         <div class="analysis-mobile-layout mobile-only">
-          <div class="analysis-mobile-boundary">
-            <strong>自動集計と人の解釈を分離</strong>
+          <details class="analysis-mobile-boundary">
+            <summary>分析結果の読み方</summary>
             <p>自動値は意味や影響力を断定しません。設定・コード・解釈は手動で保存します。</p>
-          </div>
+          </details>
           <div class="analysis-mode-switch mobile" role="group" aria-label="分析表示">
             <button type="button" data-analysis-mode="automatic" aria-pressed="true">自動分析</button>
             <button type="button" data-analysis-mode="manual" aria-pressed="false">設定・手動</button>
@@ -955,6 +1058,16 @@
           </div>
           <div id="interview-comparison-message" class="alert" role="alert" hidden></div>
           <div id="interview-comparison-result" class="interview-comparison-result" hidden></div>
+          <section class="interview-comparison-history" aria-labelledby="interview-comparison-history-title">
+            <div class="interview-comparison-history-heading">
+              <div>
+                <h4 id="interview-comparison-history-title">保存済みの比較</h4>
+                <small id="interview-comparison-history-status" role="status">保存履歴を読み込んでいます…</small>
+              </div>
+              <button id="interview-comparison-history-refresh" class="secondary-button compact-button" type="button">↻ 保存履歴を更新</button>
+            </div>
+            <div id="interview-comparison-history-list" class="interview-comparison-history-list"></div>
+          </section>
         </section>
       </details>
     </section>
@@ -1007,7 +1120,6 @@
               <th scope="col">守秘同意</th>
               <th scope="col">タグ</th><th scope="col">事前アンケート回答</th><th scope="col">備考</th><th scope="col">操作</th>
             </tr>
-          </thead>
           <tbody id="speaker-registry-body"></tbody>
         </table>
       </div>
@@ -1133,8 +1245,53 @@
     <div class="finishing-orbit" aria-hidden="true"></div>
     <div><strong>ObsidianのAI仕上げ</strong><p data-obsidian-detail></p></div>
   </div>
+  <script src="{{ url_for('static', filename='analysis-visualizations.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='analysis-method-view.js') }}" defer></script>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   <script src="{{ url_for('static', filename='interview-comparison.js') }}" defer></script>
   <script src="{{ url_for('static', filename='ai-effort.js') }}" defer></script>
+
+  <dialog id="library-group-dialog" class="app-dialog library-group-dialog" aria-labelledby="library-group-dialog-title">
+    <form id="library-group-create-form" method="dialog">
+      <div class="app-dialog-header">
+        <h2 id="library-group-dialog-title">グループ管理</h2>
+        <p>処理済みデータを目的・プロジェクトごとに分類します。</p>
+      </div>
+      <div id="library-group-message" class="alert" hidden></div>
+      <label class="field">
+        <span>グループ名</span>
+        <input id="library-group-name" type="text" placeholder="例：2026年春 評価実験" required>
+      </label>
+      <div class="app-dialog-actions">
+        <button id="close-library-group-dialog" class="secondary-button" type="button">閉じる</button>
+        <button class="primary-button small" type="submit">グループを作成</button>
+      </div>
+      <div id="library-group-list" class="library-group-list"></div>
+    </form>
+  </dialog>
+
+  <dialog id="analysis-run-dialog" class="app-dialog analysis-run-dialog" aria-labelledby="analysis-run-dialog-title">
+    <form id="analysis-run-form" method="dialog">
+      <div class="app-dialog-header">
+        <h2 id="analysis-run-dialog-title">分析の実行設定</h2>
+        <p>自動実行または手動実行の設定を選択します。</p>
+      </div>
+      <div id="analysis-run-dialog-message" class="alert" hidden></div>
+      <div class="analysis-run-mode-picker">
+        <label><input name="analysis_run_mode" type="radio" value="automatic" checked><span>自動実行</span></label>
+        <label><input name="analysis_run_mode" type="radio" value="manual"><span>手動実行</span></label>
+      </div>
+      <div id="analysis-manual-definition" class="analysis-manual-definition" hidden>
+        <label class="field"><span>定義名</span><input id="analysis-definition-name" type="text"></label>
+        <label class="field"><span>説明</span><input id="analysis-definition-description" type="text"></label>
+      </div>
+      <div class="app-dialog-actions">
+        <button id="close-analysis-run-dialog" class="secondary-button" type="button">閉じる</button>
+        <button id="analysis-run-start" class="primary-button small" type="submit">開始</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='analysis-execution.js') }}" defer></script>
 </body>
 </html>

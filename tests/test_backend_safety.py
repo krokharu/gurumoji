@@ -611,7 +611,7 @@ class AtomicAuxiliaryArtifactTests(unittest.TestCase):
                 patch.object(app, "TRAINING_AUDIO_DIRECTORY", training / "audio"),
                 patch.object(app, "TRAINING_JSONL_FILE", jsonl),
                 patch.object(app, "TRAINING_MANIFEST_FILE", manifest),
-                patch.object(app, "write_training_exports", side_effect=OSError("locked")),
+                patch.object(app.training_corpus, "write_training_exports", side_effect=OSError("locked")),
                 patch.object(app.app.logger, "exception") as logged,
             ):
                 app.initialize_library()

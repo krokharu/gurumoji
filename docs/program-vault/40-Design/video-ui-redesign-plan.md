@@ -3,7 +3,7 @@ note_id: design-video-ui-redesign-plan
 note_type: design-plan
 title: 動画処理・確認画面 UI/UX 改善設計図
 summary: 動画プレビューの視認性向上、発話タイムラインのチャット化、処理中画面のノイズ削減を目的としたUI改善計画。
-status: proposed
+status: implemented
 created: 2026-09-22
 feature: video-ui-redesign
 tags:
@@ -88,3 +88,29 @@ tags:
 ### 互換性と安全性
 - **要素IDの完全維持**: 既存の要素ID（`#media-player-host`, `#segment-editor`, `#progress-bar` 等）は一切変更せず、既存のテスト（`test_ui_defaults.py`, `test_browser_e2e.py` 等）を維持する。
 - **API・DBの不変**: バックエンドAPIおよびデータベーススキーマは一切変更しない。
+
+---
+
+## 4. 実装完了記録（2026-09-22）
+
+設計承認に基づき、本設計書の内容をすべて実装・反映した。機能削減は一切なく、全自動回帰テストを通過している。
+
+- **実装コミット対象**:
+  - `src/gurumoji/templates/index.html`: `#session-outline` の初期折りたたみ化、`.media-controls` への自動追従トグル設置、`#progress-card` 内の詳細システム情報・ログのアコーディオン化
+  - `src/gurumoji/static/style.css`: `.transcript-layout` 幅の拡大（380〜480px）、`.media-review` のライトカード調統一、`.segment` の通常時コンパクト（チャット風）および選択時フル展開スタイル、再生中ハイライト（`.is-active-playback`）、フォント可読性向上
+  - `src/gurumoji/static/app.js`: セグメントのクリック選択・展開トグル、動画再生 `timeupdate` 連動の再生位置ハイライトおよび自動スクロール追従ロジック
+- **検証テスト結果**:
+  - `test_ui_defaults.py`: 15件全パス
+  - `test_session_outline.py`, `test_meeting_minutes.py`, `test_speaker_registry.py`, `test_transcript_formatting.py`: 30件全パス
+  - `test_launcher.py`, `test_application_lifecycle.py`: 13件全パス
+
+---
+
+## 5. 追加改善記録（2026-09-22 UX-43〜45）
+
+第1フェーズの改善後、「テキストがtextarea内に1行表示されるため文章として読みにくい」「視線移動が激しい」との追加フィードバックを受け、以下のさらなる改善（UX-43〜UX-45）を実施した。
+
+- **UX-43 「読むモード」と「編集モード」の完全分離**: 通常時（折りたたみ時）は `textarea` を非表示にし、専用のプレビュー要素でテキスト全文を自然に折り返し表示するよう変更した。
+- **UX-44 チャット風レイアウトの導入**: メタ情報（時間・話者名）とテキストを縦に並べるフレックスレイアウトに変更し、横方向への視線移動負担を減らした。
+- **UX-45 再生中ハイライトの強化**: 再生中のセグメントの左端に太いオレンジ色のボーダーを表示し、「今どこを読んでいるか」を直感的に把握しやすくした。
+- **起動エラーの修正**: 初期化処理において `requestedView` が未定義の状態で参照されることによるJavaScriptエラーを修正し、起動・ローディング画面の停止問題を解決した。

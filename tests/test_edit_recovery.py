@@ -251,7 +251,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                 (self.item_id,),
             )
         with patch.object(
-            app,
+            app.edit_transactions,
             'remove_edit_directory_contents',
             side_effect=OSError('simulated locked backup'),
         ):
@@ -297,7 +297,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                 (self.item_id,),
             )
         with patch.object(
-            app,
+            app.edit_transactions,
             'remove_edit_directory_contents',
             side_effect=OSError('simulated locked backup'),
         ):
@@ -340,7 +340,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
             'speaker_names': {'S1': 'Speaker'},
         }
         with patch.object(
-            app,
+            app.edit_transactions,
             'remove_edit_directory_contents',
             side_effect=OSError('simulated locked discard'),
         ):
@@ -665,7 +665,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                     app.safe_edit_relative_path(value)
 
     def test_discovery_rejects_reparse_ancestor_of_output_root(self):
-        with patch.object(app, 'path_has_reparse_ancestor', return_value=True):
+        with patch.object(app.edit_transactions, 'path_has_reparse_ancestor', return_value=True):
             with self.assertRaisesRegex(OSError, 'Unsafe default output directory'):
                 app.discover_edit_transaction_staging_dirs(
                     include_database_outputs=False,
@@ -683,7 +683,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                 return True
             return real_check(candidate)
 
-        with patch.object(app, 'path_is_link_or_reparse', side_effect=mark_linked):
+        with patch.object(app.edit_transactions, 'path_is_link_or_reparse', side_effect=mark_linked):
             found = app.discover_edit_transaction_staging_dirs(
                 include_database_outputs=False,
             )
@@ -701,7 +701,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                 return True
             return real_check(candidate)
 
-        with patch.object(app, 'path_is_link_or_reparse', side_effect=mark_staging):
+        with patch.object(app.edit_transactions, 'path_is_link_or_reparse', side_effect=mark_staging):
             with self.assertRaisesRegex(OSError, 'reparse point'):
                 app.discover_edit_transaction_staging_dirs(
                     include_database_outputs=False,
@@ -906,7 +906,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
             raise OSError('simulated final cleanup conflict')
 
         with patch.object(
-            app,
+            app.edit_transactions,
             'remove_edit_directory_contents',
             side_effect=recreate_during_cleanup,
         ):
@@ -978,7 +978,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
         with (
             patch.object(app, 'write_outputs', side_effect=fail_write_outputs),
             patch.object(
-                app,
+                app.edit_transactions,
                 'remove_edit_directory_contents',
                 side_effect=OSError('simulated locked stage'),
             ),
@@ -1076,7 +1076,7 @@ class EditTransactionRecoveryTests(unittest.TestCase):
             patch.object(app.os, 'name', 'posix'),
             patch.object(app.os, 'replace', wraps=real_replace),
             patch.object(
-                app,
+                app.durable_files,
                 'sync_rename_metadata',
                 side_effect=OSError(errno.EIO, 'simulated directory I/O failure'),
             ),

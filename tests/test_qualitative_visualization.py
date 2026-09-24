@@ -8,6 +8,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+from gurumoji.web import system_routes
 import test_analysis as fixtures
 import test_browser_e2e as browser_support
 
@@ -37,7 +38,7 @@ class QualitativeVisualizationTests(unittest.TestCase):
         browser = browser_support.browser_executable()
         if not browser:
             self.skipTest('Chromium browser required')
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
         driver = r'''
 window.addEventListener('error', event => { document.body.dataset.visualError = event.message; });
@@ -130,7 +131,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(app, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
+            with patch.object(system_routes, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
                 result = subprocess.run([browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
                     '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
                     '--force-device-scale-factor=1', f'--window-size={size}',

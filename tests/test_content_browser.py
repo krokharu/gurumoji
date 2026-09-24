@@ -9,6 +9,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+from gurumoji.web import system_routes
 import test_browser_e2e as browser_support
 import test_content_analysis as content_support
 
@@ -37,7 +38,7 @@ class ContentBrowserTests(unittest.TestCase):
         browser = browser_support.browser_executable()
         if not browser:
             self.skipTest("Edge, Chrome or Chromium is required")
-        original_render = app.render_template
+        original_render = system_routes.render_template
         original_static = app.app.send_static_file
         original_worker = app.run_analysis_insight_job
         worker_done = threading.Event()
@@ -222,7 +223,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             return content_support.finding(["E0001"], text="新しい見解")
 
         try:
-            with patch.object(app, "render_template", side_effect=render), \
+            with patch.object(system_routes, "render_template", side_effect=render), \
                  patch.object(app.app, "send_static_file", side_effect=serve_static), \
                  patch.object(app, "get_machine_profile", return_value=machine), \
                  patch.object(app, "load_token_config", return_value=app.TokenConfig(openai_api_key="test-key")), \

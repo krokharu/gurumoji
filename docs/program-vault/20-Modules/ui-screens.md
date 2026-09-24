@@ -21,8 +21,11 @@ tags:
 
 統計セクションは数値表だけでなく、記述統計の最小値・四分位・中央値・平均・最大値を示す分布図、カテゴリ別割合バー、統計検定の効果量バー、クロス集計の100%積み上げグラフを先に表示する。正確な値と前提条件を確認できるよう、従来の表は各グラフ直下の詳細表示に残す。
 
-- **実装：** `src/gurumoji/templates/index.html`、`static/app.js`（`showView`、`routeHash`、`parseRouteHash`、`confirmLeave`、`setItemTab`、`openSettingsPanel`、`renderFlowSteps`、`updateJobChip`）、`static/analysis-execution.js`、`static/style.css`、`static/ai-effort.css`
-- **検証：** `tests/test_ui_defaults.py`、`tests/test_browser_e2e.py`、`tests/test_content_browser.py`、`tests/test_machine_profile.py`
+2026-09-22に[[40-Design/video-ui-redesign-plan]]（UX-35〜UX-42）を実装した。動画確認画面（`#/data/<id>`）の動画プレビュー幅を380〜480pxに拡大、動画枠の配色をライトカードに統一、発話リストを通常時コンパクト（チャット風タイムライン）・選択時フル展開に変更、再生中のハイライトと自動追従トグルを追加した。新規処理中画面（`#/new`）の進捗表示から計器・ログをアコーディオンに格納し、視覚的ノイズを削減した。
+
+- **実装：** `src/gurumoji/templates/index.html`、`static/app.js`（`renderMedia`、`syncMediaPlayback`、`renderSegments`、`playSegment`）、`static/style.css`（`.transcript-layout`、`.media-review`、`.segment`、`.progress-details-accordion`）
+- **検証：** `tests/test_ui_defaults.py`、`tests/test_session_outline.py`、`tests/test_meeting_minutes.py`、`tests/test_speaker_registry.py`、`tests/test_transcript_formatting.py`、`tests/test_launcher.py`、`tests/test_application_lifecycle.py`
+
 
 ## 画面とURL
 

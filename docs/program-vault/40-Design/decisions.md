@@ -405,3 +405,12 @@ tags:
 - **決定：** 「結果を見る／比較する／分析を組む／データ・出力」を分析画面内の主入口にする。結果は検索・形式・手法・状態で探し、選択したrunの固定結果を中央に表示する。根拠は開閉式のペインで確認し、結果から比較・追加分析へ移る。
 - **結果・影響：** ADR-116の手法別UIは既存部品・状態APIとして再利用し、移行後は新入口へ統合する。上部ナビ、既存URL・根拠リンク、未保存確認は互換維持する。旧表示は移行中の戻り口として残し、新旧の全結果を二重描画しない。表示・比較ではAIを実行せず、計画・試行・実行を分ける。UI-0〜4として段階導入し、型・相談・履歴の不足APIは各FLOW段階と接続する。
 - **関連：** [[40-Design/core-handler-routing-reorganization-plan]]、[[20-Modules/ui-screens]]、[[40-Design/ui-ux-issues]]
+
+### ADR-119 文字起こしの外部連携を `app.py` から分離する
+
+- **状態：** accepted、着手済み（2026-09-22）
+- **背景：** `app.py` にAI通信、AI仕上げ、音声前処理、ASRの発話整形、出力生成が同居し、単一ファイルが肥大化していた。今回の目的は互換層を増やすことではなく、`app.py` の実装行を減らすことである。
+- **決定：** AI通信は `services/ai/client.py`、AI整文・Jev・アウトラインは `services/ai/transcript_finishing.py`、ffmpeg音声前処理は `services/transcription/audio.py` へ置く。アプリ側は設定値と実行時依存を組み立てるだけにし、移設済みの旧実装を残さない。残る発話整形、議事録、字幕・出力、感情推論、文字起こしrunnerも同じ規則で段階的に移す。
+- **理由：** Flask、SQLite、外部AI、ffmpeg、ジョブ状態の依存を一つのモジュールへ固定せず、個別にテスト・再利用できるようにするため。
+- **結果・影響：** 既存のHTTP endpoint、ジョブ取消、SQLite・Vaultの確定順序は変更しない。テストの差し替えは移設先の依存注入へ移し、`app.py` の再export・互換ラッパーを恒久的なAPIにしない。
+- **関連：** [[40-Design/core-handler-routing-reorganization-plan]]、[[20-Modules/module-map]]
