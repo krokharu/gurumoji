@@ -191,8 +191,8 @@ function buildInsightSummary() {
   status.setAttribute('role', 'status');
   const output = analysisElement('div', 'content-ai-output');
   output.dataset.insightOutput = 'true';
-  ai.append(toolbar, analysisElement('p', 'analysis-caption', '保存済みの発話・話者名・研究質問を選択したAIへ送信します。LM Studioを選ぶとこのPCのローカルLLMだけで処理します。生成した見解は下書きとして保存します。'), status, output);
-  panel.body.append(ai);
+  ai.append(toolbar, analysisElement('p', 'analysis-caption', '保存済みの発話・話者名・研究質問を選択したAIへ送信します。LM Studioを選ぶとこのPCのローカルLLMだけで処理します。生成した見解は下書きとして保存します。'));
+  panel.body.append(ai, status, output);
   // Render after the panel is attached by renderAnalysisWorkspace.
   return panel.panel;
 }

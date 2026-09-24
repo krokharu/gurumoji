@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1120" viewBox="0 0 1440 1120">
+<title>Gurumoji 分析画面改善案・サンプルデータ</title>
+<rect x="0" y="0" width="1440" height="1120" rx="0" fill="#f4f5f0" stroke="#d9ddd5"/>
+<rect x="0" y="0" width="1440" height="64" rx="0" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="80" y="40" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="18" font-weight="700" fill="#18211d">GURUMOJI</text>
+<text x="330" y="40" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#18211d">文字起こし     データ一覧     分析・可視化     話者管理</text>
+<text x="1080" y="40" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">画面改善案 / サンプルデータ</text>
+<rect x="80" y="88" width="1280" height="1008" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="100" y="125" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="700" fill="#1c6b50">分析・可視化</text>
+<text x="100" y="160" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="28" font-weight="700" fill="#18211d">会話データの分析結果</text>
+<text x="100" y="189" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#526159">発話量・言葉・会話の流れを確認</text>
+<rect x="878" y="118" width="130" height="44" rx="12" fill="#1c6b50" stroke="#d9ddd5"/>
+<text x="892" y="146" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#ffffff">分析を実行</text>
+<rect x="1018" y="118" width="150" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="1032" y="146" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">文字起こしを開く</text>
+<rect x="1178" y="118" width="158" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="1192" y="146" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">出力・実行設定</text>
+<rect x="100" y="216" width="1240" height="88" rx="12" fill="#f2f5ef" stroke="#d9ddd5"/>
+<text x="114" y="242" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="700" fill="#526159">分析対象</text>
+<text x="114" y="275" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#18211d">架空の座談会.wav　（発話24件）</text>
+<text x="810" y="247" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#1c6b50">現在の対象：架空の座談会.wav</text>
+<text x="810" y="275" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">発話24件 / 02:23 / 保存済み</text>
+<rect x="100" y="326" width="200" height="354" rx="12" fill="#f2f5ef" stroke="#d9ddd5"/>
+<text x="116" y="356" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="15" font-weight="700" fill="#18211d">分析ワークスペース</text>
+<rect x="116" y="380" width="168" height="44" rx="12" fill="#1c6b50" stroke="#d9ddd5"/>
+<text x="130" y="408" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#ffffff">自動分析</text>
+<rect x="116" y="434" width="168" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="130" y="462" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">設定・手動分析</text>
+<rect x="116" y="488" width="168" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="130" y="516" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">手法別</text>
+<text x="116" y="576" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">保存済みの結果を表示中</text>
+<text x="116" y="636" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#1c6b50">▸ 分析結果の読み方</text>
+<text x="324" y="350" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="20" font-weight="700" fill="#18211d">会話全体の分析結果</text>
+<text x="324" y="380" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">概要から傾向をつかみ、根拠の発話を確認</text>
+<rect x="324" y="400" width="1012" height="48" rx="12" fill="#e9f2e6" stroke="#d9ddd5"/>
+<text x="338" y="430" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#13513c">インタビュー全体</text>
+<text x="931.1999999999999" y="430" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#526159">話者ごと</text>
+<rect x="324.0" y="464" width="192.8" height="78" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="336.0" y="489" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">会話時間</text>
+<text x="336.0" y="521" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="24" font-weight="700" fill="#13513c">02:23</text>
+<rect x="528.8" y="464" width="192.8" height="78" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="540.8" y="489" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">対象発話</text>
+<text x="540.8" y="521" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="24" font-weight="700" fill="#13513c">24件</text>
+<rect x="733.6" y="464" width="192.8" height="78" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="745.6" y="489" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">話者</text>
+<text x="745.6" y="521" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="24" font-weight="700" fill="#13513c">4人</text>
+<rect x="938.4000000000001" y="464" width="192.8" height="78" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="950.4000000000001" y="489" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">参加者</text>
+<text x="950.4000000000001" y="521" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="24" font-weight="700" fill="#13513c">3人</text>
+<rect x="1143.2" y="464" width="192.8" height="78" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="1155.2" y="489" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="13" font-weight="400" fill="#526159">総発話時間</text>
+<text x="1155.2" y="521" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="24" font-weight="700" fill="#13513c">02:00</text>
+<rect x="324.0" y="562" width="163.66666666666666" height="44" rx="12" fill="#1c6b50" stroke="#d9ddd5"/>
+<text x="338.0" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#ffffff">概要</text>
+<rect x="492.66666666666663" y="562" width="163.66666666666666" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="506.66666666666663" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">内容・文脈検索</text>
+<rect x="661.3333333333333" y="562" width="163.66666666666666" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="675.3333333333333" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">会話推移</text>
+<rect x="830.0" y="562" width="163.66666666666666" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="844.0" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">言語構造</text>
+<rect x="998.6666666666666" y="562" width="163.66666666666666" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="1012.6666666666666" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">統計</text>
+<rect x="1167.3333333333333" y="562" width="163.66666666666666" height="44" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="1181.3333333333333" y="590" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#526159">出力・検証</text>
+<rect x="324" y="628" width="1012" height="174" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="342" y="658" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="18" font-weight="700" fill="#18211d">分析結果の見解</text>
+<text x="342" y="693" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="15" font-weight="700" fill="#13513c">複数の話者が使っている言葉</text>
+<text x="342" y="721" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#18211d">「改善」は3人・8発話に現れます。</text>
+<text x="342" y="746" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#526159">賛否や使われ方は文脈で確認します。</text>
+<text x="342" y="779" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#1c6b50">▸ 根拠の発話を確認（8件）</text>
+<rect x="324" y="820" width="1012" height="52" rx="12" fill="#fffef9" stroke="#d9ddd5"/>
+<text x="342" y="852" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="700" fill="#13513c">▸ AIで内容・意見を整理</text>
+<text x="324" y="910" font-family="Yu Gothic UI, Noto Sans JP, sans-serif" font-size="14" font-weight="400" fill="#526159">改善点：概要を先頭に／目的別に切り替え／説明と追加操作を折りたたみ／本文14px以上</text>
+</svg>

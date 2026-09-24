@@ -6263,7 +6263,7 @@ function renderAutomaticAnalysis(compact) {
       : '会話全体の分析結果'),
     analysisElement('p', '', speakerScope
       ? '話者を選び、発話量・時間推移・内容語・話者交替・登録属性を個別に確認します。属性は比較や並べ替えのための記述情報です。'
-      : '保存済みの全発話から、会話全体の流れ・言語構造・統計を計算します。重要性、影響力、合意や感情を確定するものではありません。')
+      : '概要から傾向をつかみ、気になる項目を選んで根拠の発話を確認できます。')
   );
   fragment.append(intro, buildAnalysisScopeSwitch());
 

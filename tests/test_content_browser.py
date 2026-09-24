@@ -107,7 +107,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     await waitFor(() => !!currentAnalysisContent().querySelector('.content-ai-output .content-finding'));
     const host = currentAnalysisContent();
     assert(!!host.querySelector('.content-insight-summary'), 'summary missing');
-    assert(host.querySelector('.content-insight-summary').compareDocumentPosition(host.querySelector('.analysis-overview')) & Node.DOCUMENT_POSITION_FOLLOWING, 'summary order');
+    assert(host.querySelector('.analysis-overview').compareDocumentPosition(host.querySelector('.content-insight-summary')) & Node.DOCUMENT_POSITION_FOLLOWING, 'overview must precede detailed findings');
+    assert(host.querySelector('[data-analysis-page="overview"]').hidden === false, 'overview initially visible');
+    const originalQuery = host.querySelector('[data-kwic-query]');
+    for (const section of ['conversation', 'language', 'statistics', 'exports', 'content', 'overview']) {
+      const button = host.querySelector(`[data-analysis-jump="${section}"]`);
+      button.click();
+      assert(host.querySelector(`[data-analysis-page="${section}"]`).hidden === false, section + ' section missing');
+      assert(host.querySelectorAll('[data-analysis-page]:not([hidden])').length === 1, 'multiple sections visible');
+      assert(button.getAttribute('aria-pressed') === 'true', 'section selection not announced');
+      assert(host.querySelector('[data-kwic-query]') === originalQuery, 'switching sections recreated controls');
+    }
     assert(!window.injected && !host.querySelector('.content-ai-output img'), 'AI output was not escaped');
     assert(host.querySelector('.content-ai-output').textContent.includes('保存済みAI見解'), 'saved AI missing');
     assert(host.querySelectorAll('.analysis-distribution-row').length > 0, 'descriptive statistics chart missing');
@@ -117,6 +127,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     await waitFor(() => analysisStorageState().runs.length > 0);
     assert(host.querySelector('.analysis-archive-run'), 'saved archive missing');
     if (GENERATE_ONLY) {
+      host.querySelector('.content-ai-section').open = true;
       const previous = analysisState.data.insights.ai.request_id;
       const originalFetch = apiFetch;
       let failedOnce = false;
@@ -156,6 +167,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     assert(savedRun.artifacts.some(a => a.name === 'manifest.json'), 'manifest link missing');
     await saveAnalysisPackage();
     assert(analysisStorageState().runs.filter(r => r.kind === 'text_analysis').length === 1, 'duplicate archive');
+    host.querySelector('[data-analysis-jump="content"]').click();
     const query = host.querySelector('[data-kwic-query]');
     query.value = '価格'; query.dispatchEvent(new Event('input', {bubbles:true}));
     host.querySelector('.content-kwic-form').requestSubmit();
