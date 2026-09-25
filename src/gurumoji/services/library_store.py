@@ -51,9 +51,12 @@ def make_library_store(
 
     def library_public(
         row: sqlite3.Row, *, full: bool = True, match_count: int | None = None,
-        group_name: str | None = None,
+        group_name: str | None = None, segments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        segments = row_segments(row)
+        # The list passes the utterances it already parsed (PERF-01); a full view
+        # always reads them itself because it returns their IDs.
+        if segments is None or full:
+            segments = row_segments(row)
         speaker_names = json_load(row["speaker_names_json"], {})
         if not isinstance(speaker_names, dict):
             speaker_names = {}

@@ -45,6 +45,29 @@ class LibraryGroupApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         return response.get_json()
 
+    def test_list_matches_the_item_view_and_parses_each_transcript_once(self):
+        # PERF-01: the list reuses its parsed utterances and never derives utterance IDs.
+        segments = [
+            {"speaker": "SPEAKER_01", "start": 0, "end": 2.5, "text": "議題を始めます",
+             "emotions": {"kushinada": {"label_ja": "中立"}}},
+            "壊れた行",
+            {"speaker": "SPEAKER_00", "start": 3, "end": 7.25, "text": "賛成です"},
+        ]
+        app.upsert_library_item(
+            item_id="delta", source_name="D会議", output_dir=Path(self.temp.name) / "delta",
+            media_path=None, language="ja", segments=segments, speaker_names={"SPEAKER_01": "司会"},
+            outline=None, emotion_analysis=None, files=[], write_srt=False, write_json=True)
+        from gurumoji.services import library_rows
+        with patch.object(library_rows, "ensure_segment_ids", wraps=library_rows.ensure_segment_ids) as ids:
+            listed = self.client.get("/api/library?keyword=議題").get_json()
+        ids.assert_not_called()
+        self.assertEqual([item["id"] for item in listed["items"]], ["delta"])
+        entry = listed["items"][0]
+        expected = app.library_public(app.library_row("delta"), full=False, match_count=1, group_name="")
+        self.assertEqual(entry, expected)
+        self.assertEqual((entry["segment_count"], entry["duration"], entry["speakers"], entry["emotions"]),
+                         (2, 7.25, ["司会", "話者 1"], ["中立"]))
+
     def test_groups_can_be_created_assigned_filtered_and_sorted(self):
         research = self.create_group("調査A")
         meetings = self.create_group("会議")

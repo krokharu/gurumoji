@@ -124,7 +124,6 @@ def register_library_routes(
         group_filter = request.args.get("group", "").strip()
         sort_key = request.args.get("sort", "updated_desc").strip()
         with database_connection() as connection:
-            rows = connection.execute("SELECT * FROM library_items ORDER BY updated_at DESC").fetchall()
             group_rows = connection.execute(
                 """
                 SELECT g.id, g.name, g.created_at, g.updated_at,
@@ -135,49 +134,57 @@ def register_library_routes(
                 ORDER BY g.name COLLATE NOCASE, g.created_at
                 """
             ).fetchall()
+            groups = [
+                {
+                    "id": str(row["id"]),
+                    "name": str(row["name"]),
+                    "item_count": int(row["item_count"] or 0),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in group_rows
+            ]
+            group_names = {group["id"]: group["name"] for group in groups}
 
-        groups = [
-            {
-                "id": str(row["id"]),
-                "name": str(row["name"]),
-                "item_count": int(row["item_count"] or 0),
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-            for row in group_rows
-        ]
-        group_names = {group["id"]: group["name"] for group in groups}
-
-        all_speakers: set[str] = set()
-        all_emotions: set[str] = set()
-        candidates: list[tuple[sqlite3.Row, int, list[str], list[str], str]] = []
-        for row in rows:
-            segments = row_segments(row)
-            names = json_load(row["speaker_names_json"], {})
-            if not isinstance(names, dict):
-                names = {}
-            speakers = sorted({
-                str(names.get(str(item.get("speaker") or "")) or default_speaker_name(item.get("speaker")))
-                for item in segments if item.get("speaker")
-            })
-            emotions = sorted({value for item in segments for value in emotion_values(item)})
-            all_speakers.update(speakers)
-            all_emotions.update(emotions)
-            searchable_segments = [str(item.get("text") or "") for item in segments]
-            match_count = sum(1 for text_value in searchable_segments if keyword and keyword in text_value.casefold())
-            source_match = bool(keyword and keyword in str(row["source_name"]).casefold())
-            if keyword and not match_count and not source_match:
-                continue
-            if speaker_filter and not any(speaker_filter == value.casefold() for value in speakers):
-                continue
-            if emotion_filter and not any(emotion_filter == value.casefold() for value in emotions):
-                continue
-            row_group_id = str(row["group_id"] or "")
-            if group_filter == "__ungrouped__" and row_group_id:
-                continue
-            if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
-                continue
-            candidates.append((row, match_count, speakers, emotions, group_names.get(row_group_id, "")))
+            all_speakers: set[str] = set()
+            all_emotions: set[str] = set()
+            candidates: list[tuple[dict[str, Any], int, list[str], list[str], str]] = []
+            # PERF-01: rows are read one at a time and each transcript is parsed once;
+            # only the small list entry is kept, never every full row.
+            for row in connection.execute("SELECT * FROM library_items ORDER BY updated_at DESC"):
+                raw_segments = json_load(row["segments_json"], [])
+                # The list never returns utterance IDs, so they are not derived here.
+                segments = [item for item in raw_segments if isinstance(item, dict)] \
+                    if isinstance(raw_segments, list) else []
+                names = json_load(row["speaker_names_json"], {})
+                if not isinstance(names, dict):
+                    names = {}
+                speakers = sorted({
+                    str(names.get(str(item.get("speaker") or "")) or default_speaker_name(item.get("speaker")))
+                    for item in segments if item.get("speaker")
+                })
+                emotions = sorted({value for item in segments for value in emotion_values(item)})
+                all_speakers.update(speakers)
+                all_emotions.update(emotions)
+                match_count = sum(
+                    1 for item in segments if keyword and keyword in str(item.get("text") or "").casefold()
+                )
+                source_match = bool(keyword and keyword in str(row["source_name"]).casefold())
+                if keyword and not match_count and not source_match:
+                    continue
+                if speaker_filter and not any(speaker_filter == value.casefold() for value in speakers):
+                    continue
+                if emotion_filter and not any(emotion_filter == value.casefold() for value in emotions):
+                    continue
+                row_group_id = str(row["group_id"] or "")
+                if group_filter == "__ungrouped__" and row_group_id:
+                    continue
+                if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
+                    continue
+                group_name = group_names.get(row_group_id, "")
+                public = library_public(row, full=False, match_count=match_count,
+                                        group_name=group_name, segments=segments)
+                candidates.append((public, match_count, speakers, emotions, group_name))
 
         if sort_key == "created_desc":
             candidates.sort(key=lambda item: item[0]["created_at"], reverse=True)
@@ -196,10 +203,7 @@ def register_library_routes(
         else:
             candidates.sort(key=lambda item: item[0]["updated_at"], reverse=True)
         return jsonify({
-            "items": [
-                library_public(row, full=False, match_count=count, group_name=group_name)
-                for row, count, _, _, group_name in candidates
-            ],
+            "items": [public for public, _, _, _, _ in candidates],
             "total": len(candidates),
             "groups": groups,
             "facets": {
