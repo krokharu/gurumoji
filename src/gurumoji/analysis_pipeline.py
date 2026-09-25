@@ -654,7 +654,6 @@ class AnalysisPipelineService:
                 for value in json.loads(pipeline["plan_json"])["steps"]
             }
             with self.connect() as connection:
-                steps = [step for step in _latest_steps(connection, pipeline_id) if step["milestone"] == milestone]
                 connection.execute(
                     "UPDATE analysis_pipeline_requests SET current_milestone=?,updated_at=? WHERE pipeline_id=?",
                     (milestone, utc_now(), pipeline_id),

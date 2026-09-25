@@ -717,7 +717,6 @@ def build_focus_group_analysis_plan(
     )
     has_transcript = bool(timeline)
     has_order = has_transcript and all(item.get("id") and item.get("speaker") for item in timeline)
-    has_times = has_transcript and any(item.get("valid_time") for item in timeline)
     has_comparison_axis = config.get("group_by") != "none" or bool(session_profile.get("comparison_group"))
     selected = str(config.get("analysis_method") or "auto")
     primary = "qualitative_content" if selected == "auto" else selected

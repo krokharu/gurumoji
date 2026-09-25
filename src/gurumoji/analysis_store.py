@@ -543,8 +543,6 @@ class AnalysisStore:
                     return self.get(run_id)
                 snapshot, result = self._read_package(run_id)
                 item_id = run["item_id"]
-                library_id = snapshot["library_id"]
-                item_key = uuid.uuid5(uuid.NAMESPACE_URL, library_id + item_id).hex
                 title = str(snapshot.get("title") or item_id)
                 run_dir = self.layout.analysis_dir(item_id, title, run_id)
                 originals = {s["id"]: s for s in snapshot.get("original_source", {}).get("segments", [])}
