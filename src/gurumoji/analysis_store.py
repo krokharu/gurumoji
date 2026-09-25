@@ -12,7 +12,6 @@ import html
 import io
 import json
 import logging
-import os
 import re
 import threading
 import uuid
@@ -97,20 +96,13 @@ def safe_path(root: Path, relative: str) -> Path:
 
 
 def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if create_only:
-            # Publish the complete file without replacing a concurrently created note.
-            os.link(temporary, path)
-        else:
-            os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    """Vault and store writes share services.durable_files (ARCH-04, OBS-17).
+
+    ``create_only`` publishes the complete file without replacing a concurrently
+    created note (FileExistsError).
+    """
+    from .services.durable_files import write_bytes_atomically
+    write_bytes_atomically(path, data, create_only=create_only)
 
 
 def markdown(value) -> str:

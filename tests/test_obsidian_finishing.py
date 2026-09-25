@@ -301,16 +301,17 @@ class ObsidianWorkbenchTests(unittest.TestCase):
 
     def test_create_only_write_preserves_a_concurrent_file(self):
         from gurumoji import analysis_store
+        from gurumoji.services import durable_files
         target = self.workbench.note_path('concurrent.md')
-        original_link = analysis_store.os.link
-        def concurrent_create(source, destination):
+        original_move = durable_files.durable_move
+        def concurrent_create(source, destination, **kwargs):
             destination.write_bytes(b'Human concurrent edit')
-            original_link(source, destination)
-        with patch.object(analysis_store.os, 'link', side_effect=concurrent_create):
+            original_move(source, destination, **kwargs)
+        with patch.object(durable_files, 'durable_move', side_effect=concurrent_create):
             with self.assertRaises(FileExistsError):
                 analysis_store.write_atomic(target, b'Generated note', create_only=True)
         self.assertEqual(target.read_bytes(), b'Human concurrent edit')
-        self.assertFalse(list(target.parent.glob('.concurrent.md.*.tmp')))
+        self.assertFalse(list(target.parent.glob('.concurrent*.tmp*')))
 
     def test_notes_do_not_add_per_utterance_ai_calls_or_markdown_overhead(self):
         segments = [{**self.segments[0], 'id': f's{i}', 'text': f'発話{i}'} for i in range(100)]

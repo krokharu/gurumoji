@@ -94,7 +94,7 @@ tags:
 | 分析のCSV：都度エクスポート／固定保存の成果物 | 「今の値」と「再現用に固定した値」 | UIの文言で区別する |
 | Vaultノートの台帳：SQLite `obsidian_notes`／`interviews.json`／`vaults.json`／`state.json` | モジュールごとに段階的に追加された | 書き込みの判定を共通化する（OBS-04） |
 | Frontmatterの生成・解析 | 同上 | 1組に統合する（OBS-06） |
-| 原子的書き込み関数 | `analysis_store` と `app.py` で個別に実装した | 1つに統合する（ARCH-04） |
+| 原子的書き込み関数 | `analysis_store` と `app.py` で個別に実装した | `durable_files.write_bytes_atomically` に統合済み（ARCH-04）。ロック中の再試行つき（OBS-17） |
 | AI入力の分割：`analysis_insights.bounded_batches`／`ai_finishing.fragments` | 用途ごとに実装した | 未使用だった `chunk_segments` は削除した（ARCH-06） |
 
 ## Legacy：過去の方式・互換用
