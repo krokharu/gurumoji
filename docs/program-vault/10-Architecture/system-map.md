@@ -113,9 +113,9 @@ flowchart LR
 
 1. `DELETE /api/library/<id>` → `_delete_library_item_locked` を呼ぶ。
 2. メディアとサムネイルを隔離フォルダーへ移す。
-3. SQLiteの行と準備履歴を削除し、tombstoneを記録する。
+3. 削除する行（会話・逐語録の版と準備・取り込み来歴・置き換えるtombstone）を `library_trash.snapshot_rows` で写し、SQLiteの行と準備履歴を削除し、tombstoneを記録する。同じトランザクションのコミット前に、ゴミ箱の保留manifest（`<data>/trash/<日時-ID>/manifest.pending.json`）を書く。
 4. `retire_input_vault` を呼ぶ。InputVaultの台帳を `deleted` にし、ResearchVaultでは `ObsidianLayout.mark_deleted` が `interviews.json` と概要ノート・一覧を「アプリから削除済み」にする（OBS-11）。同じIDで再取り込みされると `publish_input_vault` が `clear_deleted` で元の状態に戻す。
-5. 隔離フォルダーを `rmtree` で恒久削除する。
+5. 隔離したファイルをゴミ箱の項目へ移し、`manifest.json` を確定する（DATA-01）。ゴミ箱の一覧・復元・完全削除は `GET /api/library/trash`、`POST /api/library/trash/<id>/restore`、`DELETE /api/library/trash/<id>`。復元はファイルを戻してから行とtombstoneを戻し、`publish_input_vault` でVaultの削除表示を外す。起動時は `recover_delete_quarantines` が保留項目を完了させ、保持日数（`MOJIOKOSI_TRASH_RETENTION_DAYS`、既定30日、0で自動削除なし）を過ぎた項目を完全に削除する。
 
 出力ファイル、`analysis_store`、ResearchVault、`obsidian_workbench` は削除せずに残る。
 
@@ -144,6 +144,7 @@ flowchart LR
 | `<data>/obsidian/ResearchVault` | 研究者が読むノート・仕上げ作業台 | `ObsidianLayout`、`ObsidianWorkbench`、`AnalysisStore` の3か所で個別に算出 |
 | `<data>/obsidian/{InputVault,VisualizationVault,OrchestratorVault}` | IDでつなぐ台帳型のVault。2026-09-14時点では実データで未生成 | `obsidian_layout/vaults.json` |
 | `<data>/obsidian_layout` | `interviews.json`（インタビューコード・管理ノートのhash）、`vaults.json`、移行記録・バックアップ | `ObsidianLayout.registry`、`VaultRegistry.catalog_file` |
+| `<data>/trash/<日時-ID>/` | 削除した会話のメディア・サムネイルと、削除した行を記録した `manifest.json`（DATA-01） | `app.trash_directory`（DBファイルの隣） |
 | `<data>/obsidian_workbench/<key>/` | 仕上げの `state.json`、過去の `state-*.json`、`source-*.json`、`result-*.json` | `ObsidianWorkbench.root` |
 | `runtime/output` | 文字起こしの出力。`MOJIOKOSI_OUTPUT_DIR` で変更できる | `DEFAULT_OUTPUT_DIRECTORY` |
 | `runtime/uploads`, `models`, `logs` | 一時アップロード・インスタンスロック、モデル、ログ | `app.py`、ランチャー |

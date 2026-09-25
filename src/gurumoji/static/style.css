@@ -2361,3 +2361,11 @@ button.status-pill:hover { border-color: var(--green); }
   #analysis-card .analysis-target-status { display: none; }
   #analysis-card .analysis-result-intro h2 { font-size: 1.25rem; }
 }
+
+/* DATA-01: trash for deleted conversations */
+.library-trash { margin-top: 16px; }
+.library-trash summary { cursor: pointer; font-weight: 600; }
+.library-trash-note { margin: 8px 0; font-size: 0.9em; }
+.library-trash-list { display: grid; gap: 6px; }
+.library-trash-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.library-trash-row span { flex: 1 1 240px; overflow-wrap: anywhere; }

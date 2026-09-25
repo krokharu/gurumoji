@@ -3363,6 +3363,67 @@ function renderLibraryOverview(items) {
   });
 }
 
+// DATA-01: deleted conversations wait in the trash until restored, purged or expired.
+async function loadLibraryTrash() {
+  const panel = document.querySelector('#library-trash');
+  if (!panel) return;
+  const list = panel.querySelector('[data-trash-list]');
+  try {
+    const response = await apiFetch('/api/library/trash', {cache: 'no-store'});
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || 'ゴミ箱を読み込めませんでした。');
+    const entries = data.entries || [];
+    const days = Number(data.retention_days || 0);
+    panel.querySelector('[data-trash-summary]').textContent = `（${entries.length}件・${formatBytes(data.total_bytes || 0)}）`;
+    panel.querySelector('[data-trash-note]').textContent = days
+      ? `削除した会話はここに移り、${days}日後に自動で完全に削除されます。それまでは復元できます。`
+      : '削除した会話はここに移り、完全に削除するまで残ります（自動削除なし）。';
+    list.replaceChildren();
+    if (!entries.length) {
+      list.textContent = 'ゴミ箱は空です。';
+      return;
+    }
+    entries.forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'library-trash-row';
+      const label = document.createElement('span');
+      label.textContent = `${entry.source_name || entry.item_id} / 削除 ${formatDate(entry.deleted_at)}`
+        + `${entry.expires_at ? ` / 自動削除 ${formatDate(entry.expires_at)}` : ''} / ${formatBytes(entry.bytes || 0)}`;
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'secondary-button compact-button';
+      restore.textContent = '復元';
+      restore.disabled = !entry.restorable;
+      restore.addEventListener('click', () => changeLibraryTrash(entry, 'restore'));
+      const purge = document.createElement('button');
+      purge.type = 'button';
+      purge.className = 'secondary-button compact-button danger';
+      purge.textContent = '完全に削除';
+      purge.addEventListener('click', () => changeLibraryTrash(entry, 'purge'));
+      row.append(label, restore, purge);
+      list.append(row);
+    });
+  } catch (error) {
+    list.textContent = error.message;
+  }
+}
+
+async function changeLibraryTrash(entry, action) {
+  const name = entry.source_name || entry.item_id;
+  if (action === 'purge' && !window.confirm(`「${name}」をゴミ箱から完全に削除しますか？\n元に戻せません。`)) return;
+  const message = document.querySelector('#library-message');
+  try {
+    const url = `/api/library/trash/${encodeURIComponent(entry.id)}${action === 'restore' ? '/restore' : ''}`;
+    const response = await apiFetch(url, {method: action === 'restore' ? 'POST' : 'DELETE'});
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || '操作できませんでした。');
+    if (action === 'restore') await loadLibrary(); else await loadLibraryTrash();
+    setAlert(message, `「${name}」：${data.message}`);
+  } catch (error) {
+    setAlert(message, error.message, true);
+  }
+}
+
 async function loadLibrary() {
   const list = document.querySelector('#library-list');
   const message = document.querySelector('#library-message');
@@ -3389,6 +3450,7 @@ async function loadLibrary() {
     renderLibraryOverview(items);
     renderLibraryItems(items);
     updateLibraryFilterState();
+    loadLibraryTrash();
     if (!trainingStatusLoaded) loadTrainingStatus();
   } catch (error) {
     if (error.name === 'AbortError') return;
@@ -3869,7 +3931,7 @@ function deleteRecoveryNote(data) {
 }
 
 async function deleteLibraryItem(itemId, name) {
-  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n保存メディアも削除されます。出力ファイルと学習履歴は残ります。`)) return;
+  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n会話と保存メディアはゴミ箱に移り、保持期間を過ぎると自動で完全に削除されます。それまではゴミ箱から復元できます。出力ファイルと学習履歴は残ります。`)) return;
   try {
     if (currentJobId === itemId && mediaPlayer) {
       mediaPlayer.pause();
@@ -3903,7 +3965,7 @@ async function deleteLibraryItem(itemId, name) {
     const cleanupWarning = data.cleanup_warning || '';
     setAlert(
       document.querySelector('#library-message'),
-      `「${name}」を削除しました。${cleanupWarning}${recoveryNote}`,
+      `「${name}」をゴミ箱に移しました。${cleanupWarning}${recoveryNote}`,
       Boolean(cleanupWarning || recoveryNote)
     );
   } catch (error) {

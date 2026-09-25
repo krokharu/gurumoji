@@ -82,6 +82,7 @@ from .services.ai import client as ai_client
 from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
+from .services import library_trash
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -1219,12 +1220,54 @@ _update_library_from_payload_locked = make_library_update(
 )
 
 
+def trash_directory() -> Path:
+    # Beside the database, like analysis_store, so a relocated library keeps its trash.
+    return Path(DATABASE_FILE).parent / "trash"
+
+
+def trash_retention_days() -> int:
+    return library_trash.retention_days(
+        os.environ.get("MOJIOKOSI_TRASH_RETENTION_DAYS", str(library_trash.DEFAULT_RETENTION_DAYS)))
+
+
+def _trash_move(source: Path, target: Path) -> None:
+    durable_move(source, target, replace_existing=False)
+
+
 def recover_delete_quarantines() -> list[str]:
-    return edit_transactions.recover_delete_quarantines(
+    def row_exists(item_id: str) -> bool:
+        with database_connection() as connection:
+            return connection.execute("SELECT 1 FROM library_items WHERE id=?", (item_id,)).fetchone() is not None
+
+    # Committed deletes reach the trash first; the quarantine recovery then sees nothing left.
+    warnings = library_trash.recover_pending(trash_directory(), row_exists=row_exists, move=_trash_move)
+    warnings += edit_transactions.recover_delete_quarantines(
         connect=database_connection,
         media_directory=MEDIA_DIRECTORY,
         thumbnail_directory=THUMBNAIL_DIRECTORY,
     )
+    for entry_id in library_trash.purge_expired(trash_directory(), trash_retention_days()):
+        app.logger.info("保持期間を過ぎたゴミ箱の項目を完全に削除しました: %s", entry_id)
+    return warnings
+
+
+def list_library_trash() -> dict[str, Any]:
+    days = trash_retention_days()
+    entries = library_trash.list_entries(trash_directory(), days)
+    return {"entries": entries, "retention_days": days, "total_bytes": sum(e["bytes"] for e in entries)}
+
+
+def restore_library_trash(entry_id: str) -> str:
+    item_id = library_trash.restore(
+        trash_directory(), entry_id, connect=database_connection,
+        targets={"media": MEDIA_DIRECTORY, "thumbnail": THUMBNAIL_DIRECTORY}, move=_trash_move)
+    # Clears the ResearchVault deletion mark and republishes the InputVault ledger.
+    publish_input_vault(library_row(item_id))
+    return item_id
+
+
+def purge_library_trash(entry_id: str) -> None:
+    library_trash.purge(trash_directory(), entry_id)
 
 
 def discover_edit_transaction_staging_dirs(
@@ -1654,6 +1697,8 @@ _delete_library_item_locked = make_library_deletion(
     local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
     reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
     retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
+    trash_directory=lambda: trash_directory(),
+    trash_retention_days=lambda: trash_retention_days(),
 )
 
 
@@ -1826,6 +1871,9 @@ def create_app() -> Flask:
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         runtime_info=runtime_info,
         upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+        list_library_trash=lambda: list_library_trash(),
+        restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
+        purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
     )
     return flask_app
 

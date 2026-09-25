@@ -51,7 +51,7 @@ tags:
 | 会話プロファイル・会話話者連携 | Implemented | 作業画面「会話・話者」／`PUT /api/library/<id>`、`GET …/speakers.csv` | `normalize_session_profile`、`normalize_conversation_speaker_profiles` | `library_items` のJSON列 | InputVaultの会話種別 |
 | 出力ファイル（TXT／JSON／SRT／アウトライン／感情CSV／ワードクラウド） | Implemented | ダウンロードリンク／`GET /api/jobs/<id>/files/<name>`、`GET /api/library/<id>/files/<name>` | `write_outputs`、`write_word_cloud` | `runtime/output` | なし |
 | メディア保管・再生・サムネイル | Implemented | 作業画面「発話の確認・編集」、新規作成のファイル選択／`GET …/media`、`GET …/thumbnail`、`POST /api/source-thumbnail`、`POST /api/select-input` | `archive_media`、`stream_library_media`、`generate_video_thumbnail` | `<data>/media`、`thumbnails` | 相対パスとサイズをInputVaultへ |
-| データ削除 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>` | `_delete_library_item_locked`（隔離 → DB削除 → `rmtree`） | tombstone | `retire_input_vault`（台帳を `deleted` にする）。ResearchVaultは概要・一覧の状態だけ「アプリから削除済み」にし、ノートは残す |
+| データ削除 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>` | `_delete_library_item_locked`（隔離 → DB削除 → `services/library_trash` のゴミ箱へ移動。復元・完全削除・保持期間後の自動削除） | tombstone | `retire_input_vault`（台帳を `deleted` にする）。ResearchVaultは概要・一覧の状態だけ「アプリから削除済み」にし、ノートは残す |
 | 出力JSONの自動取り込み | Implemented | 起動時 | `import_existing_outputs`、`repair_output_import_provenance` | `output_import_provenance`、`output_import_tombstones` | InputVault（`imported`） |
 | リクエストのセキュリティ | Implemented | 全API | `enforce_request_security`（Host、CSRFヘッダー、リモート認証、サイズ上限） | なし | なし |
 | AI接続・モデル選択 | Implemented | 上部バーのトークン表示と「接続と処理装置」／`GET /api/ai/models`、`PUT /api/ai/model`、`GET /api/ai/lmstudio-reasoning` | `available_ai_models`、`update_token_model`、`call_ai_json`、`ai_http_worker.py` | `config/tokens.json` | APIキーは書かない |

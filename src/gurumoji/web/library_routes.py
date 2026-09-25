@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request, send_file
 
 from ..handlers.analysis_commands import ComparisonRequestError
 from ..services.durable_files import path_is_within
+from ..services.library_trash import TrashError
 from ..services.library_rows import emotion_values
 from ..services.media_files import media_kind
 from ..services.transcription.segments import default_speaker_name
@@ -41,6 +42,9 @@ def register_library_routes(
     row_segments: Any,
     runtime_info: Any,
     upsert_library_item: Any,
+    list_library_trash: Callable[[], dict[str, Any]],
+    restore_library_trash: Callable[[str], str],
+    purge_library_trash: Callable[[str], None],
 ) -> None:
     def select_input_file():
         if not local_path_access_allowed():
@@ -278,6 +282,33 @@ def register_library_routes(
         with library_write_lock:
             return _delete_library_item_locked(item_id)
 
+    # DATA-01: deleted conversations wait in the trash until restored, purged or expired.
+    def list_trash():
+        try:
+            return jsonify(list_library_trash())
+        except OSError:
+            return jsonify({"error": "ゴミ箱を読み込めませんでした。"}), 500
+
+    def restore_trash_entry(entry_id: str):
+        with library_write_lock:
+            try:
+                item_id = restore_library_trash(entry_id)
+            except TrashError as exc:
+                return jsonify({"error": str(exc)}), 409
+            except (OSError, sqlite3.Error, ValueError, KeyError):
+                return jsonify({"error": "ゴミ箱から復元できませんでした。ゴミ箱の項目は残っています。"}), 500
+        return jsonify({"ok": True, "item_id": item_id, "message": "ゴミ箱から復元しました。"})
+
+    def purge_trash_entry(entry_id: str):
+        with library_write_lock:
+            try:
+                purge_library_trash(entry_id)
+            except TrashError as exc:
+                return jsonify({"error": str(exc)}), 404
+            except OSError:
+                return jsonify({"error": "ゴミ箱の項目を完全に削除できませんでした。"}), 500
+        return jsonify({"ok": True, "message": "ゴミ箱の項目を完全に削除しました。"})
+
     def stream_library_media(item_id: str):
         row = library_row(item_id)
         if row is None or not row["media_path"]:
@@ -317,6 +348,9 @@ def register_library_routes(
         ('/api/library/<item_id>', 'get_library_item', get_library_item, 'GET'),
         ('/api/library/<item_id>/thumbnail', 'library_thumbnail', library_thumbnail, 'GET'),
         ('/api/library/<item_id>', 'delete_library_item', delete_library_item, 'DELETE'),
+        ('/api/library/trash', 'list_library_trash', list_trash, 'GET'),
+        ('/api/library/trash/<entry_id>/restore', 'restore_library_trash', restore_trash_entry, 'POST'),
+        ('/api/library/trash/<entry_id>', 'purge_library_trash', purge_trash_entry, 'DELETE'),
         ('/api/library/<item_id>/media', 'stream_library_media', stream_library_media, 'GET'),
         ('/api/library/<item_id>/files/<path:filename>', 'download_library_file', download_library_file, 'GET'),
     )
