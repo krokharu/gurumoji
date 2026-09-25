@@ -219,6 +219,8 @@ class ObsidianLayout:
             if path.exists():
                 actual = hashlib.sha256(path.read_bytes()).hexdigest()
                 if actual != data["managed"].get(relative):
+                    reason = "未管理の既存ノート" if relative not in data["managed"] else "人が編集したノート"
+                    warn_once(("skip", relative), f"{reason}のため生成ノートを更新しませんでした: {relative}")
                     return False
             encoded = text.encode()
             if not path.exists() or path.read_bytes() != encoded:

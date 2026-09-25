@@ -74,7 +74,7 @@ from .web.job_routes import register_job_routes
 from .web.obsidian_routes import register_obsidian_routes
 from .web.speaker_routes import register_speaker_routes
 from .web.system_routes import register_system_routes
-from .services.obsidian_watcher import ObsidianWatcher
+from .services.obsidian_watcher import ObsidianWatcher, WatcherStatus
 from .services.obsidian_workflows import ObsidianWorkflowService
 from .services.transcription_reporting import TranscriptionReporter
 from .services.vault_publication import VaultPublicationService, whisper_settings
@@ -522,6 +522,7 @@ def runtime_info() -> dict[str, Any]:
         "native_file_dialog": native_file_dialog,
         "browser_upload": not native_file_dialog,
         "ephemeral_storage": colab and not str(DATA_DIRECTORY).startswith("/content/drive/"),
+        "obsidian_watcher": OBSIDIAN_WATCHER_STATUS.snapshot(),
     }
 
 
@@ -1377,6 +1378,9 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
     return obsidian_workflows().run_finishing(action, state, segments, context, provider, check)
 
 
+OBSIDIAN_WATCHER_STATUS = WatcherStatus()
+
+
 def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     from .obsidian_migration import migrate
     return ObsidianWatcher(
@@ -1384,6 +1388,7 @@ def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
         engine=run_obsidian_finishing,
         migrate=migrate,
         log_exception=app.logger.exception,
+        status=OBSIDIAN_WATCHER_STATUS,
     ).start()
 
 

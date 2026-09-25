@@ -77,7 +77,7 @@ obsidian-safety-vault/
 | `.obsidian` を変更しない | `test_obsidian_layout.py`（ワークスペース編集の保持） | 一部 | 既存Vaultの `core-plugins.json`・`appearance.json` を変更しないこと（OBS-03、ADR-103 の採用後） |
 | ファイル名：禁止文字・末尾・同名・長さ | なし | なし | `register`、`graph_node_path` の規則とパス長の上限（OBS-14） |
 | CSRF：ブラウザー由来のPOST | `test_interview_comparison.py`: `test_browser_requests_require_csrf_and_save_the_displayed_input_version`、`test_browser_e2e.py`: `test_comparison_and_unsaved_navigation_regressions` | あり | Origin／Sec-Fetchヘッダーと実ブラウザーで比較・保存を検証。`apiFetch`内部の`window.fetch`は許可する |
-| 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops` | 一部 | `recover`・`migrate` が失敗したときに状態として公開されること（OBS-09）、操作ログに本文が含まれないこと（OBS-15） |
+| 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops`、`test_watcher_reports_stop_reason_and_polling_errors` | 一部 | スキップのログに本文が含まれないことの自動確認（OBS-15）。実ブラウザーでの表示確認 |
 
 ## 追加するテストケース（期待する結果）
 

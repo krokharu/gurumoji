@@ -3,9 +3,10 @@ import json
 import re
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import app
 from gurumoji import ai_finishing
@@ -263,6 +264,45 @@ class ObsidianWorkbenchTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
         self.assertEqual([call[0] for call in self.calls], ['outline'])
         self.assertEqual(self.workbench.load('recording')['status'], 'completed')
+
+    def test_watcher_reports_stop_reason_and_polling_errors(self):
+        from gurumoji.services.obsidian_watcher import ObsidianWatcher, WatcherStatus
+        broken = WatcherStatus()
+        failing = MagicMock()
+        failing.recover.side_effect = OSError(13, 'Permission denied', '/Users/alice/secret/ResearchVault')
+        stop, worker = ObsidianWatcher(workbench=lambda: failing, engine=self.engine, migrate=lambda _: None,
+                                       log_exception=lambda _: None, status=broken).start()
+        worker.join(timeout=5)
+        value = broken.snapshot()
+        self.assertEqual(value['state'], 'stopped')
+        self.assertIn('Permission denied', value['reason'])
+        self.assertNotIn('alice', value['reason'])  # no file path on screen
+        self.assertTrue(stop.is_set())
+
+        flaky = WatcherStatus()
+        polled = threading.Event()
+        workbench = MagicMock(database_file='x')
+        def poll(*_args):
+            polled.set()
+            raise ValueError('台帳を読めません\n詳細行')
+        workbench.poll_once.side_effect = poll
+        stop, worker = ObsidianWatcher(workbench=lambda: workbench, engine=self.engine, migrate=lambda _: None,
+                                       log_exception=lambda _: None, status=flaky).start()
+        try:
+            self.assertTrue(polled.wait(5))
+            for _ in range(50):
+                if flaky.snapshot()['last_error']:
+                    break
+                time.sleep(0.02)
+            value = flaky.snapshot()
+            self.assertEqual(value['state'], 'running')
+            self.assertEqual(value['last_error'], 'ValueError: 台帳を読めません')
+        finally:
+            stop.set()
+            worker.join(timeout=5)
+        self.assertEqual(flaky.snapshot()['state'], 'stopped')
+        runtime = app.app.test_client().get('/api/config').get_json()['runtime']
+        self.assertIn(runtime['obsidian_watcher']['state'], {'not_started', 'starting', 'running', 'stopped'})
 
     def test_ready_gate_and_new_revision_preserve_old_notes(self):
         self.state['ready'] = False

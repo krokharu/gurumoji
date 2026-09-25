@@ -2333,6 +2333,29 @@ function applyMachineProfile(machine) {
   updateCreateSummary();
 }
 
+// OBS-09: a stopped Obsidian watcher is shown with its reason instead of failing silently.
+function applyWatcherStatus(status) {
+  const value = status && typeof status === 'object' ? status : {};
+  const labels = {
+    running: ['ready', 'Obsidian監視 ✓', '操作ノートのチェックを監視しています。'],
+    starting: ['loading', 'Obsidian監視', '起動中です。'],
+    stopped: ['missing', 'Obsidian監視 停止', '停止しています。'],
+    not_started: ['missing', 'Obsidian監視', 'このプロセスでは監視を起動していません。'],
+  };
+  const [state, label, fallback] = labels[value.state] || labels.not_started;
+  let detail = String(value.reason || fallback);
+  if (value.last_error) detail += ` 直近のエラー: ${value.last_error}（${value.last_error_at || ''}）。ログを確認してください。`;
+  document.querySelectorAll('[data-status-watcher]').forEach(pill => {
+    pill.classList.remove('loading', 'ready', 'missing');
+    pill.classList.add(value.last_error && state === 'ready' ? 'missing' : state);
+    pill.textContent = label;
+    pill.title = detail;
+  });
+  document.querySelectorAll('[data-watcher-detail]').forEach(element => {
+    element.textContent = detail;
+  });
+}
+
 async function loadConfig() {
   const message = document.querySelector('#token-message');
   if (!message) return;
@@ -2345,6 +2368,7 @@ async function loadConfig() {
     applyMachineProfile(data.machine);
     const runtime = data.runtime || {};
     browserFilePickerOnly = Boolean(runtime.browser_upload);
+    applyWatcherStatus(runtime.obsidian_watcher);
     if (browsePathButton) {
       browsePathButton.dataset.pickerMode = browserFilePickerOnly ? 'browser' : 'native';
       updateBrowseButtonLabel();
