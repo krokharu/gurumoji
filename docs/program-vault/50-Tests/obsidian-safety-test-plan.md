@@ -93,7 +93,7 @@ obsidian-safety-vault/
    - 期待：編集した全文とほかの初期ノートが残り、復元確認のエラーで停止する。別パスの新規作成や既存ノートの自動採用はしない。
 4. **Vaultの入れ子（OBS-10）**
    - 準備：`<data>/obsidian/.obsidian` を作る。
-   - 期待：`publish_input` と `publish_navigation` がエラーで停止し、ファイルを作らない。
+   - 期待：保存は止めず（選別で全保存停止案は不採用）、`VaultRegistry.nesting_warnings` と `GET /api/config` の `vault_warnings` が該当するVaultと親フォルダーを返す。親の `.obsidian` は変更しない（`test_four_vaults.py`: `test_vault_opened_inside_a_parent_vault_is_reported_not_blocked`、`test_backend_safety.py`: `test_config_reports_nested_vaults_without_local_paths_for_remote_viewers`）。
 5. **ファイル名（OBS-14）**
    - 入力：`CON`、`a:b*c?`、末尾が `.` や空白、260文字に近いタイトル、同じタイトルが2件。
    - 期待：保存できる。上書きしない。パスが上限以内になる。

@@ -140,6 +140,29 @@ def run_members(snapshot: dict) -> list[dict]:
     return [member for member in members if isinstance(member, dict)] if isinstance(members, list) else []
 
 
+def nested_vault_warnings(roots: dict[str, Path], data_dir: Path) -> list[dict]:
+    """Report Vault roots that sit inside a folder Obsidian opened as a Vault (OBS-10).
+
+    Nothing is stopped, moved or deleted: the parent Vault may be the researcher's,
+    so the app only explains how to open each Vault on its own.
+    """
+    warnings = []
+    for title, root in roots.items():
+        for parent in Path(root).parents:
+            if (parent / ".obsidian").is_dir():
+                try:
+                    shown = "<data>/" + parent.relative_to(data_dir).as_posix()
+                except ValueError:
+                    shown = parent.name or str(parent)
+                warnings.append({"vault": title, "parent": shown, "parent_path": str(parent),
+                                 "message": f"{title} が、Obsidianで保管庫として開かれた「{shown}」の中にあります。"
+                                            f"親の保管庫では {title} のノートが検索・グラフに混ざります。"
+                                            f"Obsidianでは {title} のフォルダーを直接開いてください。"
+                                            "親フォルダーの .obsidian はアプリでは削除しません。"})
+                break
+    return warnings
+
+
 class VaultRegistry:
     def __init__(self, database_file: Path, software_root: Path | None = None):
         self.data = Path(database_file).parent
@@ -182,6 +205,15 @@ class VaultRegistry:
         if len({roots[kind] for kind in GENERATED}) != len(GENERATED):
             raise ValueError("Vaultの保存先が重複しています。")
         return roots
+
+    def nesting_warnings(self, research_root: Path) -> list[dict]:
+        roots = {"ResearchVault": research_root}
+        try:
+            data = self.load()
+            roots.update({data["vaults"][kind]["title"] + "Vault": self.root(kind, data) for kind in GENERATED})
+        except (OSError, ValueError, KeyError):
+            pass  # An unreadable catalog is reported by the writers; still check ResearchVault.
+        return nested_vault_warnings(roots, self.data)
 
     def run_status(self, run_id: str) -> str | None:
         entry = self.load()["notes"].get("orchestrator-run-" + run_id)

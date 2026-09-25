@@ -2325,6 +2325,7 @@ async function loadConfig() {
     tokenConfigSnapshot = data && typeof data === 'object' ? data : {};
     applyMachineProfile(data.machine);
     applyObsidianWatcherStatus(data.obsidian_watcher);
+    applyVaultNestingWarnings(data.vault_warnings);
     const runtime = data.runtime || {};
     browserFilePickerOnly = Boolean(runtime.browser_upload);
     if (browsePathButton) {
@@ -2399,6 +2400,15 @@ function applyObsidianWatcherStatus(watcher) {
   });
   document.querySelectorAll('[data-obsidian-watcher-detail]').forEach(detail => {
     detail.textContent = [watcher.message, watcher.detail].filter(Boolean).join(' ');
+  });
+}
+
+// OBS-10: a Vault opened inside another Vault mixes notes into the parent's search and graph.
+function applyVaultNestingWarnings(warnings) {
+  const list = Array.isArray(warnings) ? warnings : [];
+  document.querySelectorAll('[data-vault-nesting]').forEach(row => { row.hidden = !list.length; });
+  document.querySelectorAll('[data-vault-nesting-detail]').forEach(detail => {
+    detail.textContent = list.map(warning => warning.message).join(' ');
   });
 }
 
