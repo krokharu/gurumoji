@@ -171,12 +171,12 @@ flowchart LR
 | 保存先・上限・ポート・リモート公開・モデル名など | 環境変数 `MOJIOKOSI_*`（約25種） | 起動前に利用者が設定する |
 | APIキー・使用モデル・LM StudioのURL | `config/tokens.json` | 手作業。モデルは画面の選択ダイアログからも書き込まれる（`update_token_model`） |
 | 単語登録 | `<data>/custom_vocabulary.json` | `PUT /api/custom-vocabulary` |
-| 文字起こしの既定値 | 分散している（下の注を参照） | 各所 |
-| AIエフォート | ブラウザーの `localStorage`（`gurumoji.ai-efforts`）と、会話ごとの `obsidian_workbench` の `state.json` | `ai-effort.js`、`prepare` |
+| 文字起こしの既定値 | `services/transcription/options.py`（`DEFAULT_*`、`CONVERSATION_MODE_PRESETS`） | コード。フォームと `GET /api/config` の `job_defaults` はここから作る（CFG-03） |
+| AIエフォート | 既定値：ブラウザーの `localStorage`（`gurumoji.ai-efforts`）。会話の仕上げの正本：`obsidian_workbench` の `state.json` | `ai-effort.js`、`prepare`（アプリで開いた時点の既定値をその会話に保存し、状態ノートに表示する。CFG-04） |
 | 仕上げで使うAIプロバイダー | 操作ノートの `provider` プロパティ（Obsidian側） | 研究者 |
 | 分析条件・コードブック | `library_items.analysis_config_json`（会話ごと） | `PUT …/analysis` |
 | Vault保存先 | 生成Vaultは `vaults.json` の `root`。ResearchVaultとSoftwareはコード内で算出 | 設定UIなし |
 
-注：文字起こしの既定値は、`views/create.html` の初期値、`app.js` の会話モード設定（`conversationModePresets`）、`JobOptions` の既定、`parse_bool` の既定、`recommend_machine_settings` に分散している。
+注：録音の種類・「Obsidianで仕上げ」・録音の種類ごとの推奨値は `options.py` に1つにまとめた（CFG-03）。端末に合わせた推奨（`recommend_machine_settings`）は別の責務として残す。
 
 関連：[[10-Architecture/overview]]、[[20-Modules/feature-inventory]]、[[20-Modules/obsidian-integration]]、[[30-Data/current-storage]]、[[40-Design/storage-policy]]。

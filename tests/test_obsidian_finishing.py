@@ -38,6 +38,12 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         self.workbench.prepare('recording', '会議.wav', self.segments, revision=0)
         self.assertEqual(self.workbench.load('recording')['ai_efforts']['name_verify'], 'low')
         self.assertEqual(read_text(self.workbench.note_path(self.state['work'])), original)
+        # CFG-04: the saved per-conversation value is what Obsidian shows and the app reports.
+        status = read_text(self.workbench.note_path(self.state['status_note']))
+        self.assertIn('AIの詳しさ：会話の流れを整理：自動、文章の仕上げ：高、話者名を確認：自動、話者を再確認：低', status)
+        public = self.workbench.public(self.workbench.load('recording'))
+        self.assertEqual(public['ai_efforts']['cleanup'], 'high')
+        self.assertIn('文章の仕上げ：高', public['ai_efforts_label'])
 
     def test_jev_comparison_option_is_written_and_parsed(self):
         workbench = ObsidianWorkbench(Path(self.temporary.name) / 'jev.sqlite3')

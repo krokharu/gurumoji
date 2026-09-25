@@ -5,7 +5,7 @@ Generated versions are separate notes so editing a note cannot be overwritten by
 """
 from __future__ import annotations
 
-from .ai_effort import normalize_efforts
+from .ai_effort import describe_efforts, normalize_efforts
 
 import copy
 import hashlib
@@ -344,9 +344,10 @@ class ObsidianWorkbench:
         existing = self.load(item_id)
         if existing and (existing["revision"] == revision or existing["status"] == "running"):
             if existing["status"] != "running":
-                if update_efforts:
+                if update_efforts and existing.get("ai_efforts") != ai_efforts:
                     existing["ai_efforts"] = ai_efforts
                     self.save(existing)
+                    self.publish_status(existing)
                 self.refresh_paths(existing)
             return existing
         version = uuid.uuid4().hex
@@ -419,6 +420,9 @@ class ObsidianWorkbench:
 
     def public(self, state: dict) -> dict:
         return {"status": state["status"], "message": state["message"],
+                # This conversation's saved efforts are what its Obsidian operations use (CFG-04).
+                "ai_efforts": normalize_efforts(state.get("ai_efforts")),
+                "ai_efforts_label": describe_efforts(state.get("ai_efforts")),
                 "path": str(self.note_path(state["control"])),
                 "uri": "obsidian://open?path=" + quote(str(self.note_path(state["control"]).resolve()), safe="")}
 
@@ -484,7 +488,9 @@ class ObsidianWorkbench:
                 f"- 操作：[[{state['control'][:-3]}]]",
                 f"- 編集する会話：[[{state['work'][:-3]}]]",
                 f"- 編集する全体アウトライン：[[{state['outline'][:-3]}]]",
-                f"- 保存原文：[[{state['original_note'][:-3]}]]"]
+                f"- 保存原文：[[{state['original_note'][:-3]}]]",
+                # The app's effort setting is only a default; this saved value is what runs here (CFG-04).
+                f"- AIの詳しさ：{describe_efforts(state.get('ai_efforts'))}（アプリの「Obsidianで仕上げ」を開いた時点の設定。変更するときはアプリで設定してから開き直してください）"]
         if state.get("result_note"):
             body.append(f"- 仕上げ結果：[[{state['result_note'][:-3]}]]")
         if state.get("final_outline_note"):

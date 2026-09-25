@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 
@@ -64,9 +65,15 @@ class UiDefaultsTests(unittest.TestCase):
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
         self.assertIn("const conversationModePresets", script)
         self.assertIn("function applyConversationMode", script)
-        self.assertIn("group_interview", script)
-        self.assertIn("minSpeakers: 3", script)
-        self.assertIn("maxSpeakers: 12", script)
+        # CFG-03: the presets are rendered from the server's job defaults, not kept in app.js.
+        self.assertNotIn("minSpeakers: 3", script)
+        presets = json.loads(re.search(
+            r'<script id="conversation-mode-presets" type="application/json">(.*?)</script>', page, re.S)[1])
+        self.assertEqual((presets["group_interview"]["minSpeakers"], presets["group_interview"]["maxSpeakers"]), (3, 12))
+        self.assertEqual(set(presets), {"meeting", "group_interview", "chat"})
+        defaults = app.app.test_client().get("/api/config").get_json()["job_defaults"]
+        self.assertEqual((defaults["conversation_mode"], defaults["finish_in_obsidian"]), ("meeting", True))
+        self.assertEqual(defaults["conversation_mode_presets"], presets)
 
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".conversation-mode-options", styles)
@@ -77,6 +84,18 @@ class UiDefaultsTests(unittest.TestCase):
         for mode in ("meeting", "group_interview", "chat"):
             self.assertIn(f'.create-view[data-conversation-mode="{mode}"]', styles)
         self.assertIn('--green: #1c6b50', styles.split('.create-view[data-conversation-mode="group_interview"]', 1)[1].split('}', 1)[0])
+
+    def test_changing_the_server_default_changes_the_rendered_form(self):
+        from unittest.mock import patch
+        from gurumoji.services.transcription import options
+
+        with patch.object(options, "DEFAULT_CONVERSATION_MODE", "chat"), \
+                patch.object(options, "DEFAULT_FINISH_IN_OBSIDIAN", False):
+            page = app.app.test_client().get("/").data.decode("utf-8")
+        self.assertIn('name="conversation_mode" type="radio" value="chat" checked', page)
+        self.assertNotIn('value="meeting" checked', page)
+        self.assertIn('data-conversation-mode="chat"', page)
+        self.assertNotRegex(page, r'id="finish-in-obsidian"[^>]*checked')
 
     def test_meeting_mode_has_visual_minutes_and_handoff_actions(self):
         response = app.app.test_client().get("/")

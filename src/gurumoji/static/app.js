@@ -249,41 +249,14 @@ const mobileStepContent = {
   3: {label: '開始', next: '開始'}
 };
 
-const conversationModePresets = {
-  meeting: {
-    label: '会議モード',
-    minSpeakers: 2,
-    maxSpeakers: 10,
-    audioPreprocess: 'standard',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.35',
-    vadOffset: '0.25',
-    hint: '会議向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
-  },
-  group_interview: {
-    label: 'グループインタビューモード',
-    minSpeakers: 3,
-    maxSpeakers: 12,
-    audioPreprocess: 'standard',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.30',
-    vadOffset: '0.22',
-    hint: 'グループインタビュー向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
-  },
-  chat: {
-    label: '雑談モード',
-    minSpeakers: 2,
-    maxSpeakers: 6,
-    audioPreprocess: 'light',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.42',
-    vadOffset: '0.30',
-    hint: '雑談向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
+// Recording-type presets come from the server's single set of job defaults (CFG-03).
+const conversationModePresets = (() => {
+  try {
+    return JSON.parse(document.querySelector('#conversation-mode-presets')?.textContent || '{}');
+  } catch (_) {
+    return {};
   }
-};
+})();
 
 loadConfig();
 loadCustomVocabulary();
@@ -691,7 +664,13 @@ function selectedConversationMode() {
   const selected = conversationModeInputs.find(input => input.checked);
   return selected && conversationModePresets[selected.value]
     ? selected.value
-    : 'meeting';
+    : defaultConversationMode();
+}
+
+// The radio the server rendered as checked is the default recording type.
+function defaultConversationMode() {
+  const rendered = conversationModeInputs.find(input => input.defaultChecked);
+  return rendered ? rendered.value : Object.keys(conversationModePresets)[0];
 }
 
 // Settings a conversation mode writes. A value the user changed by hand is kept
@@ -754,8 +733,9 @@ function setSpeakerCountFixed(fixed, {restoreRange = true} = {}) {
 }
 
 function applyConversationMode(mode = selectedConversationMode()) {
-  const preset = conversationModePresets[mode] || conversationModePresets.meeting;
-  if (createView) createView.dataset.conversationMode = conversationModePresets[mode] ? mode : 'meeting';
+  const preset = conversationModePresets[mode] || conversationModePresets[defaultConversationMode()];
+  if (!preset) return;
+  if (createView) createView.dataset.conversationMode = conversationModePresets[mode] ? mode : defaultConversationMode();
   const keptLabels = [];
   conversationModeFields.forEach(field => {
     const presetValue = field.property === 'checked' ? preset[field.key] : String(preset[field.key]);
@@ -790,7 +770,7 @@ function updateCreateSummary() {
   document.querySelectorAll('[data-setup-ready]').forEach(element => { element.textContent = readyMessage; });
 
   const modePreset = conversationModePresets[selectedConversationMode()];
-  const mode = modePreset ? modePreset.label : '会議モード';
+  const mode = modePreset ? modePreset.label : '';
   const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
   const language = selectedOptionText(languageSelect) || '自動判定';
   const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
@@ -5338,7 +5318,7 @@ listen(document.querySelector('#obsidian-finishing-button'), 'click', async () =
     });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '作業ノートを開けませんでした。');
-    setAlert(message, '作業ノートを用意しました。Gurumojiを起動したまま操作してください。 ');
+    setAlert(message, `作業ノートを用意しました。Gurumojiを起動したまま操作してください。${data.ai_efforts_label ? `この会話のAIの詳しさ：${data.ai_efforts_label}。` : ''} `);
     const link = document.createElement('a');
     link.href = data.uri;
     link.textContent = 'Obsidianで操作ノートを開く';

@@ -19,6 +19,7 @@ from ..ai.client import normalize_ai_usage
 from ..ai.settings import AI_MODEL_PROVIDERS
 from ..durable_files import path_is_within
 from ..media_files import media_kind
+from .options import DEFAULT_CONVERSATION_MODE
 
 
 @dataclass
@@ -28,7 +29,7 @@ class JobRecord:
     output_dir: Path
     write_srt: bool
     write_json: bool
-    conversation_mode: str = "meeting"
+    conversation_mode: str = DEFAULT_CONVERSATION_MODE
     burn_subtitled_video: bool = False
     status: str = "queued"
     progress: int = 0

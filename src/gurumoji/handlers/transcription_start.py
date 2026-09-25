@@ -29,6 +29,8 @@ from ..services.transcription.options import (
     ACTIVE_JOB_STATUSES,
     AIST_EMOTION_MODEL_CHOICES,
     CONVERSATION_MODES,
+    DEFAULT_CONVERSATION_MODE,
+    DEFAULT_FINISH_IN_OBSIDIAN,
     JobOptions,
     LANGUAGES,
     MODEL_NAMES,
@@ -99,7 +101,7 @@ def make_transcription_start(
             if language not in LANGUAGES:
                 raise ValueError("言語が不正です。")
             audio_preprocess = parse_audio_preprocess(form=form)
-            conversation_mode = form.get("conversation_mode", "meeting").strip()
+            conversation_mode = form.get("conversation_mode", DEFAULT_CONVERSATION_MODE).strip()
             if conversation_mode not in CONVERSATION_MODES:
                 raise ValueError("会話モードが不正です。")
             custom_vocabulary = normalize_custom_vocabulary(
@@ -152,8 +154,11 @@ def make_transcription_start(
             clean_transcript = parse_bool("clean_transcript", form=form)
             detect_names = parse_bool("detect_speaker_names", form=form)
             create_outline = parse_bool("create_outline", form=form)
+            # A client that names a finishing mode but omits the box keeps the old "off" meaning.
             finish_in_obsidian = parse_bool(
-                "finish_in_obsidian", default=not finishing_mode_value, form=form
+                "finish_in_obsidian",
+                default=DEFAULT_FINISH_IN_OBSIDIAN and not finishing_mode_value,
+                form=form,
             )
             ai_efforts = normalize_efforts({
                 key: form.get("ai_effort_" + key, "auto")

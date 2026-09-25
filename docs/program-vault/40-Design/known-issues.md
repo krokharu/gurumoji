@@ -94,8 +94,8 @@ tags:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | CFG-01 | 中 | 設定の置き場所が分散している | [[10-Architecture/system-map]] の「設定の所在」 | 同じ設定に正本が複数できる | 設定の種類ごとに正本を1つに決める（下表） | 未対応 | 保留：設定ごとの責務を維持 |
 | CFG-02 | 中 | 秘密情報と利用者設定が同じファイルにあり、UIが秘密ファイルを書き換える | `config/tokens.json` に、APIキーと `openai_model` などの使用モデルが同居している。`update_token_model` がこのファイルを書き換える | 秘密ファイルの破損リスク。共有してよい設定と秘密が分けられない | 使用モデルは秘密ではない設定ファイルへ段階的に移す（読み込みは新旧両対応、書き込みは新しい方だけ） | 未対応 | 保留：移行・復元仕様が必要 |
-| CFG-03 | 低 | 既定値が複数の場所に書かれている | 「Obsidianで仕上げ」の既定が、`JobOptions`・`parse_bool("finish_in_obsidian", default=True)`・`index.html` の `checked` の3か所。会話モードは `app.js` にだけある | 既定を変えるときに漏れる | サーバー側の既定を `GET /api/config` で返し、UIはそれを使う | 未対応 | 保留：既定値を変更する際に統合 |
-| CFG-04 | 低 | AIエフォートが2か所にある | `localStorage`、`state.json` | 画面とObsidianで値が食い違う | 正本を会話ごとの `state.json`（仕上げ）とアプリ設定のどちらかに決める | 未対応 | 保留：既定値と実行別指定を区別してから |
+| CFG-03 | 低 | 既定値が複数の場所に書かれている | 「Obsidianで仕上げ」の既定が、`JobOptions`・`parse_bool("finish_in_obsidian", default=True)`・`index.html` の `checked` の3か所。会話モードは `app.js` にだけある | 既定を変えるときに漏れる | サーバー側の既定を `GET /api/config` で返し、UIはそれを使う | 対応済み（2026-09-25。新規ジョブの既定（録音の種類・「Obsidianで仕上げ」・録音の種類ごとの推奨値）を `services/transcription/options.py` の1か所にまとめた。フォームはそこから描画し、`GET /api/config` の `job_defaults` でも返す。開始処理の省略時の値も同じ定数を使う） | 保留：既定値を変更する際に統合 |
+| CFG-04 | 低 | AIエフォートが2か所にある | `localStorage`、`state.json` | 画面とObsidianで値が食い違う | 正本を会話ごとの `state.json`（仕上げ）とアプリ設定のどちらかに決める | 対応済み（2026-09-25。会話ごとの `state.json` を、その会話のObsidian仕上げの正本にした。画面の設定（`localStorage`）は新しく開くときの既定値だけ。アプリで「Obsidianで仕上げ」を開くと画面の設定をその会話に保存し、状態ノートとアプリのメッセージに使う値を表示する） | 保留：既定値と実行別指定を区別してから |
 
 設定ごとの正本（案）：
 

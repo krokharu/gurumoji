@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from flask import Flask, jsonify, render_template, request
 
+from ..services.transcription.options import job_defaults
+
 
 def register_system_routes(
     app: Flask,
@@ -44,6 +46,7 @@ def register_system_routes(
             runtime=runtime,
             local_llm_label=local_llm_label(),
             local_llm_short_label=local_llm_short_label(),
+            job_defaults=job_defaults(),
         )
 
     def watcher_public() -> dict[str, Any]:
@@ -67,6 +70,7 @@ def register_system_routes(
                 "machine": machine,
                 "runtime": runtime_info(),
                 "obsidian_watcher": watcher_public(),
+                "job_defaults": job_defaults(),
             })
         except RuntimeError as exc:
             return jsonify({
