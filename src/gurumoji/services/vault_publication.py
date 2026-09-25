@@ -53,7 +53,12 @@ class VaultPublicationService:
             )
         except (OSError, ValueError, TypeError, LookupError, self.database_error) as exc:
             self.warn("InputVault を更新できませんでした", exc)
-        self._research_status(str(row["id"]), deleted=False)
+        try:
+            item_id = str(row["id"])
+        except (TypeError, LookupError, IndexError) as exc:
+            self.warn("ResearchVault の削除状態を確認できませんでした", exc)
+            return
+        self._research_status(item_id, deleted=False)
 
     def retire_input(self, item_id: str) -> None:
         """Record deletion in the InputVault ledger without deleting provenance."""
