@@ -277,7 +277,9 @@ class InputAndExportSafetyTests(unittest.TestCase):
             "/api/jobs", method="POST", data={"vad_onset": "nan"}
         ):
             with self.assertRaises(ValueError):
-                app.parse_optional_float("vad_onset", 0.35, 0.05, 0.95)
+                app.parse_optional_float(
+                    "vad_onset", 0.35, 0.05, 0.95, form=app.request.form
+                )
 
     def test_unc_paths_are_rejected_without_accessing_the_share(self):
         self.assertTrue(app.is_unc_path(r"\\server\share\meeting.wav"))

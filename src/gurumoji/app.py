@@ -372,7 +372,7 @@ from .services.transcription.audio import (
 from .text_utils import (
     validate_json_value,
 )
-from .web.request_parsing import (
+from .handlers.form_fields import (
     parse_audio_preprocess,
     parse_bool,
     parse_optional_float,
@@ -462,6 +462,31 @@ from .web.security import (
     sanitize_remote_json_payload,
 )
 from .web.security import make_request_guards, register_request_security
+from .services.transcription.diarization import (
+    DIARIZATION_MODEL,
+    configure_huggingface_hub_compatibility,
+    configure_speechbrain_lazy_import_compatibility,
+    create_diarization_pipeline,
+    diarization_access_error_message,
+    is_diarization_access_error,
+)
+from .services.subprocesses import (
+    run_cancellable_subprocess,
+)
+from .services.transcription.vocabulary import (
+    normalize_custom_vocabulary,
+    whisper_vocabulary_prompt,
+)
+from .services.transcription.vocabulary import make_custom_vocabulary_store
+from .services.transcription.options import (
+    ACTIVE_JOB_STATUSES,
+    AIST_EMOTION_MODEL_CHOICES,
+    CONVERSATION_MODES,
+    JobOptions,
+    LANGUAGES,
+    MODEL_NAMES,
+)
+from .handlers.transcription_start import make_transcription_start
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -498,14 +523,6 @@ DATABASE_FILE = DATA_DIRECTORY / "library.sqlite3"
 INSTANCE_LOCK_FILE = UPLOAD_DIRECTORY / ".gurumoji.instance.lock"
 DATA_INSTANCE_LOCK_FILE = DATA_DIRECTORY / ".gurumoji.instance.lock"
 TOKEN_FILE = PROJECT_DIRECTORY / "config" / TOKEN_FILE_NAME
-DIARIZATION_MODEL = os.environ.get(
-    "MOJIOKOSI_DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1"
-)
-DIARIZATION_ACCESS_REPOS = (
-    DIARIZATION_MODEL,
-    "pyannote/segmentation-3.0",
-    "pyannote/speaker-diarization-community-1",
-)
 
 
 MAX_MEDIA_UPLOAD_BYTES = positive_env_int(
@@ -530,27 +547,11 @@ ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
 REMOTE_ACCESS_TOKEN = os.environ.get("MOJIOKOSI_ACCESS_TOKEN", "").strip()
-ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "committing"})
-MODEL_NAMES = {"tiny", "base", "small", "medium", "large-v3"}
-LANGUAGES = {None, "ja", "en", "zh", "ko"}
-AIST_EMOTION_MODEL_CHOICES = {"kushinada", "izanami", "both"}
 MAX_LOG_LINES = 200
 NORMAL_VAD_ONSET = 0.5
 NORMAL_VAD_OFFSET = 0.363
 NORMAL_NO_SPEECH_THRESHOLD = 0.6
-CUSTOM_VOCABULARY_MAX_TERMS = 100
-CUSTOM_VOCABULARY_MAX_TERM_LENGTH = 80
-# Whisper's initial prompt shares a short context window with the beginning of
-# the audio.  Keeping this compact makes registered terms useful without
-# crowding out the first utterance, especially for Japanese where one token can
-# be close to one visible character.
-WHISPER_VOCABULARY_PROMPT_MAX_CHARACTERS = 220
 WHISPER_SAMPLE_RATE = 16000
-CONVERSATION_MODES = {
-    "meeting": "meeting",
-    "group_interview": "focus_group",
-    "chat": "chat",
-}
 
 
 class AnalysisConflictError(RuntimeError):
@@ -623,52 +624,6 @@ register_request_security(
     admit_transcription_job=admit_transcription_job,
     release_job_admission=release_job_admission,
 )
-
-
-@dataclass(frozen=True)
-class JobOptions:
-    input_path: Path
-    work_dir: Path
-    source_name: str
-    output_dir: Path
-    model_name: str
-    language: str | None
-    hf_token: str
-    audio_preprocess: str
-    min_speakers: int | None
-    max_speakers: int | None
-    device: str
-    diarization_device: str
-    triple_pass: bool
-    boost_quiet_speech: bool
-    vad_onset: float
-    vad_offset: float
-    no_speech_threshold: float
-    write_srt: bool
-    write_json: bool
-    burn_subtitled_video: bool
-    ai_provider: str
-    clean_transcript: bool
-    detect_speaker_names: bool
-    create_outline: bool
-    emotion_analysis: bool
-    emotion_model: str
-    ai_api_key: str = ""
-    ai_model: str = ""
-    ai_base_url: str = ""
-    owns_output_dir: bool = False
-    finish_in_obsidian: bool = True
-    ai_efforts: dict = field(default_factory=normalize_efforts)
-    num_speakers: int | None = None
-    conversation_mode: str = "meeting"
-    custom_vocabulary: tuple[str, ...] = ()
-    recommended_cleanup: bool = False
-    jev_compare: bool = False
-    jev_api_key: str = ""
-    jev_model: str = JEV_DEFAULT_MODEL
-    transcript_finishing_mode: str = "custom"
-    write_word_cloud: bool = False
-    generate_meeting_minutes: bool = False
 
 
 @dataclass
@@ -1334,230 +1289,10 @@ def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
 )
 
 
-def configure_huggingface_hub_compatibility() -> None:
-    """Bridge legacy pyannote callers to Hugging Face Hub v1's token API."""
-    import huggingface_hub
-
-    original_download = huggingface_hub.hf_hub_download
-    if "use_auth_token" in inspect.signature(original_download).parameters:
-        return
-    if getattr(original_download, "_mojiokosi_compat", False):
-        return
-
-    def hf_hub_download_compat(*args: Any, **kwargs: Any) -> Any:
-        legacy_token = kwargs.pop("use_auth_token", None)
-        if legacy_token is not None:
-            kwargs.setdefault("token", legacy_token)
-        return original_download(*args, **kwargs)
-
-    hf_hub_download_compat._mojiokosi_compat = True  # type: ignore[attr-defined]
-    huggingface_hub.hf_hub_download = hf_hub_download_compat
-
-
-def configure_speechbrain_lazy_import_compatibility() -> None:
-    try:
-        from speechbrain.utils.importutils import LazyModule
-    except ImportError:
-        return
-    if getattr(LazyModule, "_mojiokosi_windows_inspect_compat", False):
-        return
-    original_getattr = LazyModule.__getattr__
-
-    def lazy_module_getattr_compat(self: Any, attr: str) -> Any:
-        if attr == "__file__" and self.lazy_module is None:
-            raise AttributeError(attr)
-        return original_getattr(self, attr)
-
-    LazyModule.__getattr__ = lazy_module_getattr_compat
-    LazyModule._mojiokosi_windows_inspect_compat = True
-
-
-def diarization_access_error_message(model_name: str) -> str:
-    repo_lines = "\n".join(f"https://huggingface.co/{repo_id}" for repo_id in DIARIZATION_ACCESS_REPOS)
-    return (
-        f"話者分離モデル {model_name} にアクセスできません。\n\n"
-        "tokens.json の Hugging Face read token を確認し、以下のモデルページで"
-        f"利用規約への同意を完了してください。\n\n{repo_lines}"
-    )
-
-
-def is_diarization_access_error(exc: Exception) -> bool:
-    status_code = getattr(getattr(exc, "response", None), "status_code", None)
-    message = str(exc)
-    return (
-        (exc.__class__.__name__ in {"GatedRepoError", "RepositoryNotFoundError", "HfHubHTTPError"}
-         and status_code in {401, 403, 404})
-        or "Cannot access gated repo" in message
-        or "401 Client Error" in message
-        or "403 Client Error" in message
-        or "'NoneType' object has no attribute 'to'" in message
-    )
-
-
-def create_diarization_pipeline(pipeline_class: Any, token: str, device: str) -> Any:
-    parameters = inspect.signature(pipeline_class).parameters
-    kwargs: dict[str, Any] = {"device": device}
-    if "model_name" in parameters:
-        kwargs["model_name"] = DIARIZATION_MODEL
-    if "token" in parameters:
-        kwargs["token"] = token
-    else:
-        kwargs["use_auth_token"] = token
-    return pipeline_class(**kwargs)
-
-
-def _stop_subprocess(process: subprocess.Popen[str]) -> None:
-    """Best-effort termination used for cancellation and timeout paths."""
-    if process.poll() is not None:
-        return
-    try:
-        process.terminate()
-    except OSError:
-        return
-    try:
-        process.communicate(timeout=3)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate()
-
-
-def run_cancellable_subprocess(
-    command: list[str],
-    *,
-    cwd: str | None = None,
-    env: dict[str, str] | None = None,
-    input_text: str | None = None,
-    timeout: float | None = None,
-    check_cancelled: Callable[[], None] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run a child process while regularly honoring job cancellation."""
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.PIPE if input_text is not None else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    started_at = time.monotonic()
-    pending_input = input_text
-    while True:
-        try:
-            if check_cancelled is not None:
-                check_cancelled()
-            remaining = None if timeout is None else timeout - (time.monotonic() - started_at)
-            if remaining is not None and remaining <= 0:
-                _stop_subprocess(process)
-                raise subprocess.TimeoutExpired(command, timeout)
-            wait_seconds = 0.25 if remaining is None else min(0.25, remaining)
-            communication_input = pending_input
-            pending_input = None
-            communicate_kwargs: dict[str, Any] = {"timeout": wait_seconds}
-            if communication_input is not None:
-                communicate_kwargs["input"] = communication_input
-            stdout, stderr = process.communicate(**communicate_kwargs)
-            if check_cancelled is not None:
-                check_cancelled()
-            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-        except subprocess.TimeoutExpired:
-            if timeout is not None and time.monotonic() - started_at >= timeout:
-                _stop_subprocess(process)
-                raise subprocess.TimeoutExpired(command, timeout)
-        except BaseException:
-            _stop_subprocess(process)
-            raise
-
-
-def normalize_custom_vocabulary(values: Any) -> tuple[str, ...]:
-    """Validate and deduplicate user terms while preserving their display form."""
-    if values is None:
-        return ()
-    if isinstance(values, str):
-        candidates: list[Any] = values.splitlines()
-    elif isinstance(values, (list, tuple)):
-        candidates = list(values)
-    else:
-        raise ValueError("登録語は1行ごとの文字列または配列で指定してください。")
-
-    terms: list[str] = []
-    seen: set[str] = set()
-    for value in candidates:
-        if not isinstance(value, str):
-            raise ValueError("登録語には文字列だけを指定してください。")
-        # NFC preserves the user's intended visible notation while avoiding
-        # duplicates created solely by composed/decomposed Unicode forms.
-        term = unicodedata.normalize("NFC", value).strip()
-        term = re.sub(r"[\t\r\n]+", " ", term)
-        if not term:
-            continue
-        if len(term) > CUSTOM_VOCABULARY_MAX_TERM_LENGTH:
-            raise ValueError(
-                f"登録語は1語あたり{CUSTOM_VOCABULARY_MAX_TERM_LENGTH}文字以内にしてください。"
-            )
-        key = term.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        terms.append(term)
-        if len(terms) > CUSTOM_VOCABULARY_MAX_TERMS:
-            raise ValueError(
-                f"登録語は{CUSTOM_VOCABULARY_MAX_TERMS}語までにしてください。"
-            )
-    return tuple(terms)
-
-
-def load_custom_vocabulary() -> tuple[str, ...]:
-    """Read the local, application-wide recognition vocabulary safely."""
-    with custom_vocabulary_lock:
-        try:
-            payload = json.loads(CUSTOM_VOCABULARY_FILE.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return ()
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            # A damaged settings file must never prevent transcription. The UI
-            # will show an empty list, which users can save again if desired.
-            return ()
-    if not isinstance(payload, dict):
-        return ()
-    try:
-        return normalize_custom_vocabulary(payload.get("terms", []))
-    except ValueError:
-        return ()
-
-
-def save_custom_vocabulary(values: Any) -> tuple[str, ...]:
-    """Persist the recognition vocabulary as non-secret local settings."""
-    terms = normalize_custom_vocabulary(values)
-    payload = {"version": 1, "terms": list(terms)}
-    with custom_vocabulary_lock:
-        atomic_write_text(
-            CUSTOM_VOCABULARY_FILE,
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    return terms
-
-
-def whisper_vocabulary_prompt(values: Any) -> str:
-    """Build a compact initial prompt accepted by Whisper and WhisperX."""
-    terms = normalize_custom_vocabulary(values)
-    if not terms:
-        return ""
-    prefix = "用語・固有名詞: "
-    suffix = "。"
-    available = WHISPER_VOCABULARY_PROMPT_MAX_CHARACTERS - len(prefix) - len(suffix)
-    selected: list[str] = []
-    used = 0
-    for term in terms:
-        addition = len(term) + (1 if selected else 0)
-        if used + addition > available:
-            break
-        selected.append(term)
-        used += addition
-    return f"{prefix}{'、'.join(selected)}{suffix}" if selected else ""
+load_custom_vocabulary, save_custom_vocabulary = make_custom_vocabulary_store(
+    custom_vocabulary_file=lambda: CUSTOM_VOCABULARY_FILE,
+    custom_vocabulary_lock=custom_vocabulary_lock,
+)
 
 
 _audio_processor = transcription_audio.AudioProcessor(
@@ -1772,50 +1507,6 @@ link_detected_speakers_to_registry, register_detected_speakers = make_speaker_re
     list_speaker_registry=lambda *args, **kwargs: list_speaker_registry(*args, **kwargs),
     persist_speaker_registry_record=lambda *args, **kwargs: persist_speaker_registry_record(*args, **kwargs),
 )
-
-
-def normalize_outline_sections(
-    raw_sections: Any,
-    chunk: list[tuple[int, dict[str, Any]]],
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_sections, list):
-        raise RuntimeError("AI のアウトライン出力形式が不正です。")
-    starts = [float(item.get("start", 0)) for _, item in chunk]
-    ends = [float(item.get("end", item.get("start", 0))) for _, item in chunk]
-    chunk_start = min(starts) if starts else 0.0
-    chunk_end = max(ends) if ends else chunk_start
-    normalized: list[dict[str, Any]] = []
-    for raw in raw_sections:
-        if not isinstance(raw, dict):
-            continue
-        title = str(raw.get("title", "")).strip()
-        bullets = raw.get("bullets")
-        if not title or not isinstance(bullets, list):
-            continue
-        cleaned_bullets = [
-            str(bullet).strip()
-            for bullet in bullets[:8]
-            if isinstance(bullet, str) and str(bullet).strip()
-        ]
-        if not cleaned_bullets:
-            continue
-        try:
-            start = float(raw.get("start", chunk_start))
-        except (TypeError, ValueError):
-            start = chunk_start
-        try:
-            end = float(raw.get("end", chunk_end))
-        except (TypeError, ValueError):
-            end = chunk_end
-        start = max(0.0, start)
-        end = max(start, end)
-        normalized.append({
-            "title": title[:120],
-            "start": round(start, 2),
-            "end": round(end, 2),
-            "bullets": [bullet[:320] for bullet in cleaned_bullets],
-        })
-    return normalized
 
 
 # The composition boundary passes dependencies into the Flask-free service.
@@ -3185,325 +2876,25 @@ def _delete_library_item_locked(item_id: str):
     return jsonify(result)
 
 
-def start_transcription_job_command(
-    form: Any, upload: Any, *, admission_id: str | None
-) -> tuple[dict[str, Any], int]:
-    upload_dir: Path | None = None
-    reserved_output_dir: Path | None = None
-    registered_job_id: str | None = None
-    try:
-        with jobs_lock:
-            if any(job.status in ACTIVE_JOB_STATUSES for job in jobs.values()):
-                raise JobRequestError(
-                    "別の文字起こしを処理中です。完了または中止までお待ちください。",
-                    409,
-                )
-        source_path_raw = form.get("source_path", "").strip().strip('"')
-        direct_input_path: Path | None = None
-        if source_path_raw:
-            if not local_path_access_allowed():
-                raise ValueError("Direct local paths are disabled for remote access; upload the media instead.")
-            direct_input_path = resolve_local_media_path(source_path_raw)
-            original_name = direct_input_path.name
-        elif upload is not None and upload.filename:
-            original_name = Path(upload.filename).name
-        else:
-            raise ValueError("処理する音声・動画ファイルを選択してください。")
-        original_name = normalize_source_name(original_name)
-        if Path(original_name).suffix.lower() not in ALLOWED_EXTENSIONS:
-            raise ValueError("対応形式は MP4/MOV/MKV/WAV/MP3/M4A/FLAC です。")
-
-        model_name = form.get("model_name", "base")
-        if model_name not in MODEL_NAMES:
-            raise ValueError("認識モデルが不正です。")
-        language_raw = form.get("language", "ja").strip()
-        language = language_raw or None
-        if language not in LANGUAGES:
-            raise ValueError("言語が不正です。")
-        audio_preprocess = parse_audio_preprocess(form=form)
-        conversation_mode = form.get("conversation_mode", "meeting").strip()
-        if conversation_mode not in CONVERSATION_MODES:
-            raise ValueError("会話モードが不正です。")
-        custom_vocabulary = normalize_custom_vocabulary(
-            form.get("custom_vocabulary", "")
-        )
-        # Save here as well as from the UI's background save so a term entered
-        # immediately before pressing start is retained for the next job.
-        save_custom_vocabulary(custom_vocabulary)
-        device = form.get("device", "cuda")
-        diarization_device = form.get("diarization_device", "cpu")
-        if device not in {"cpu", "cuda"} or diarization_device not in {"cpu", "cuda"}:
-            raise ValueError("処理装置の指定が不正です。")
-        machine = get_machine_profile()
-        if (device == "cuda" or diarization_device == "cuda") and not machine["gpu"]["cuda_available"]:
-            raise ValueError(
-                "このマシンではGPU (CUDA)を利用できません。"
-                "文字起こし装置と話者分離装置をCPUに設定してください。"
-            )
-        min_speakers = parse_optional_int("min_speakers", form=form)
-        max_speakers = parse_optional_int("max_speakers", form=form)
-        num_speakers = parse_optional_int("num_speakers", form=form)
-        if min_speakers and max_speakers and min_speakers > max_speakers:
-            raise ValueError("最少話者数は最多話者数以下にしてください。")
-        triple_pass = parse_bool("triple_pass", form=form)
-        boost_quiet_speech = parse_bool("boost_quiet_speech", default=True, form=form)
-        if boost_quiet_speech or triple_pass:
-            vad_onset = parse_optional_float(
-                "vad_onset", 0.35, 0.05, 0.95, form=form
-            )
-            vad_offset = parse_optional_float(
-                "vad_offset", 0.25, 0.05, 0.95, form=form
-            )
-            if vad_offset > vad_onset:
-                raise ValueError("VAD offset は onset 以下にしてください。")
-            # Keep quiet speech discoverable without accepting nearly silent
-            # hallucinations, which often duplicate or tear adjacent turns.
-            no_speech_threshold = 0.8
-        else:
-            vad_onset = 0.5
-            vad_offset = 0.363
-            no_speech_threshold = 0.6
-
-        provider = form.get("ai_provider", "none")
-        if provider not in AI_PROVIDERS:
-            raise ValueError("AI プロバイダーが不正です。")
-        finishing_mode_value = form.get("transcript_finishing_mode", "").strip()
-        transcript_finishing_mode = finishing_mode_value or "custom"
-        if transcript_finishing_mode not in TRANSCRIPT_FINISHING_MODES:
-            raise ValueError("文章整形モードの指定が不正です。")
-        clean_transcript = parse_bool("clean_transcript", form=form)
-        detect_names = parse_bool("detect_speaker_names", form=form)
-        create_outline = parse_bool("create_outline", form=form)
-        finish_in_obsidian = parse_bool(
-            "finish_in_obsidian", default=not finishing_mode_value, form=form
-        )
-        ai_efforts = normalize_efforts({
-            key: form.get("ai_effort_" + key, "auto")
-            for key in ("outline", "cleanup", "name_extract", "name_verify")
-        })
-        recommended_cleanup = False
-        jev_compare = parse_bool("jev_compare", form=form)
-        if transcript_finishing_mode == "off":
-            clean_transcript = False
-            detect_names = False
-            create_outline = False
-            jev_compare = False
-            finish_in_obsidian = False
-        elif transcript_finishing_mode == "recommended":
-            # Jev triages each utterance and the configured cleanup effort
-            # controls how much context the finishing LLM may read and rewrite.
-            clean_transcript = False
-            create_outline = False
-            jev_compare = False
-        elif transcript_finishing_mode == "advanced":
-            clean_transcript = True
-            detect_names = True
-            finish_in_obsidian = False
-            if provider == "none":
-                raise ValueError("高度モードでは使用するAIを選択してください。")
-        if provider == "none":
-            clean_transcript = False
-            detect_names = False
-            create_outline = False
-            jev_compare = False
-        elif jev_compare:
-            # The comparison needs a result from the existing finishing AI.
-            clean_transcript = True
-        emotion_analysis = parse_bool("emotion_analysis", form=form)
-        emotion_model = form.get("emotion_model", "kushinada").strip() or "kushinada"
-        if emotion_model not in AIST_EMOTION_MODEL_CHOICES:
-            raise ValueError("感情分析モデルの指定が不正です。")
-        token_config = load_token_config()
-        if not token_config.huggingface_token:
-            raise ValueError("tokens.json に huggingface_token を設定してください。")
-        recommended_cleanup = bool(
-            transcript_finishing_mode == "recommended"
-            and provider != "none"
-            and not finish_in_obsidian
-            and ai_efforts.get("cleanup") != "off"
-            and token_config.typesafe_api_key
-        )
-        if jev_compare and not token_config.typesafe_api_key:
-            raise ValueError("Jev比較には tokens.json の typesafe_api_key が必要です。")
-        ai_api_key = ""
-        ai_model = ""
-        ai_base_url = ""
-        if clean_transcript or recommended_cleanup or detect_names or create_outline:
-            ai_api_key, ai_model = configured_ai_credentials(token_config, provider)
-            if provider == "lmstudio":
-                ai_base_url = lmstudio_base_url(token_config.lmstudio_base_url)
-                if not ai_model:
-                    raise ValueError(local_llm_model_required_message())
-            elif not ai_api_key:
-                raise ValueError(
-                    f"tokens.json に {ai_provider_label(provider)} のAPIキーを設定してください。"
-                )
-
-        output_raw = form.get("output_dir", "").strip().strip('"')
-        if output_raw and not local_path_access_allowed():
-            raise ValueError("Custom output paths are disabled for remote access.")
-        output_root = prepare_output_root(output_raw)
-
-        job_id = str(admission_id or uuid.uuid4().hex)
-        output_dir = job_output_directory(output_root, original_name, job_id)
-        output_dir.mkdir(exist_ok=False)
-        reserved_output_dir = output_dir
-        upload_dir = UPLOAD_DIRECTORY / job_id
-        UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        upload_dir.mkdir(parents=True, exist_ok=False)
-        safe_name = safe_media_filename(original_name, fallback_stem="input")
-        input_path = upload_dir / safe_name
-        try:
-            if direct_input_path is not None:
-                copy_file_limited(direct_input_path, input_path, MAX_MEDIA_UPLOAD_BYTES)
-            else:
-                assert upload is not None
-                save_upload_limited(upload, input_path, MAX_MEDIA_UPLOAD_BYTES)
-            if not input_path.is_file() or input_path.stat().st_size == 0:
-                raise ValueError("アップロードされたファイルが空です。")
-        except Exception:
-            shutil.rmtree(upload_dir, ignore_errors=True)
-            raise
-
-        options = JobOptions(
-            input_path=input_path,
-            work_dir=upload_dir,
-            source_name=original_name,
-            output_dir=output_dir,
-            model_name=model_name,
-            language=language,
-            hf_token=token_config.huggingface_token,
-            audio_preprocess=audio_preprocess,
-            min_speakers=min_speakers,
-            max_speakers=max_speakers,
-            num_speakers=num_speakers,
-            device=device,
-            diarization_device=diarization_device,
-            triple_pass=triple_pass,
-            boost_quiet_speech=boost_quiet_speech,
-            vad_onset=vad_onset,
-            vad_offset=vad_offset,
-            no_speech_threshold=no_speech_threshold,
-            write_srt=parse_bool("write_srt", form=form),
-            write_json=True,
-            burn_subtitled_video=parse_bool("burn_subtitled_video", form=form),
-            ai_provider=provider,
-            clean_transcript=clean_transcript,
-            detect_speaker_names=detect_names,
-            create_outline=create_outline,
-            emotion_analysis=emotion_analysis,
-            emotion_model=emotion_model,
-            ai_api_key=ai_api_key,
-            ai_model=ai_model,
-            ai_base_url=ai_base_url,
-            owns_output_dir=True,
-            ai_efforts=ai_efforts,
-            finish_in_obsidian=finish_in_obsidian,
-            conversation_mode=conversation_mode,
-            custom_vocabulary=custom_vocabulary,
-            recommended_cleanup=recommended_cleanup,
-            jev_compare=jev_compare,
-            jev_api_key=token_config.typesafe_api_key,
-            jev_model=token_config.typesafe_model,
-            transcript_finishing_mode=transcript_finishing_mode,
-            write_word_cloud=parse_bool("write_word_cloud", form=form),
-            generate_meeting_minutes=parse_bool("generate_meeting_minutes", form=form),
-        )
-        job = JobRecord(
-            id=job_id,
-            source_name=original_name,
-            output_dir=output_dir,
-            write_srt=options.write_srt,
-            write_json=True,
-            conversation_mode=conversation_mode,
-            burn_subtitled_video=options.burn_subtitled_video,
-        )
-        with jobs_lock:
-            jobs[job_id] = job
-            registered_job_id = job_id
-        thread = threading.Thread(
-            target=run_transcription_job,
-            args=(job, options),
-            name=f"transcription-{job_id[:8]}",
-            daemon=True,
-        )
-        try:
-            thread.start()
-        except Exception as exc:
-            with jobs_lock:
-                jobs.pop(job_id, None)
-                registered_job_id = None
-            shutil.rmtree(upload_dir, ignore_errors=True)
-            if reserved_output_dir is not None:
-                remove_owned_directory(reserved_output_dir, ignore_errors=True)
-            raise RuntimeError(f"Could not start the transcription worker: {exc}") from exc
-        return job.public(), 202
-    except RequestEntityTooLarge:
-        if registered_job_id:
-            with jobs_lock:
-                jobs.pop(registered_job_id, None)
-        if upload_dir is not None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
-        if reserved_output_dir is not None:
-            remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        raise
-    except JobRequestError:
-        if registered_job_id:
-            with jobs_lock:
-                jobs.pop(registered_job_id, None)
-        if upload_dir is not None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
-        if reserved_output_dir is not None:
-            remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        raise
-    except ValueError as exc:
-        if registered_job_id:
-            with jobs_lock:
-                jobs.pop(registered_job_id, None)
-        if upload_dir is not None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
-        if reserved_output_dir is not None:
-            remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        raise JobRequestError(str(exc), 400) from exc
-    except (RuntimeError, OSError) as exc:
-        if registered_job_id:
-            with jobs_lock:
-                jobs.pop(registered_job_id, None)
-        if upload_dir is not None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
-        if reserved_output_dir is not None:
-            remove_owned_directory(reserved_output_dir, ignore_errors=True)
-        raise JobRequestError(str(exc), 500) from exc
-
-
-def admission_job_public(job_id: str) -> dict[str, Any]:
-    return {
-        "id": job_id,
-        "source_name": "",
-        "output_dir": "",
-        "status": "admitting",
-        "progress": 0,
-        "stage": "admitting",
-        "stage_label": "送信データの受付",
-        "stage_progress": 0,
-        "message": "送信データを受け付けています…",
-        "logs": [],
-        "segments": [],
-        "speaker_names": {},
-        "session_profile": {},
-        "speaker_profiles": {},
-        "write_srt": False,
-        "write_json": True,
-        "burn_subtitled_video": False,
-        "outline": None,
-        "emotion_analysis": None,
-        "media_url": None,
-        "media_kind": None,
-        "files": [],
-        "error": "",
-        "output_warning": "",
-        "revision_count": 0,
-    }
+start_transcription_job_command, admission_job_public = make_transcription_start(
+    JobRecord=JobRecord,
+    MAX_MEDIA_UPLOAD_BYTES=MAX_MEDIA_UPLOAD_BYTES,
+    TRANSCRIPT_FINISHING_MODES=TRANSCRIPT_FINISHING_MODES,
+    upload_directory=lambda: UPLOAD_DIRECTORY,
+    configured_ai_credentials=lambda *args, **kwargs: configured_ai_credentials(*args, **kwargs),
+    copy_file_limited=lambda *args, **kwargs: copy_file_limited(*args, **kwargs),
+    get_machine_profile=lambda *args, **kwargs: get_machine_profile(*args, **kwargs),
+    jobs=jobs,
+    jobs_lock=jobs_lock,
+    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+    local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
+    prepare_output_root=lambda *args, **kwargs: prepare_output_root(*args, **kwargs),
+    remove_owned_directory=lambda *args, **kwargs: remove_owned_directory(*args, **kwargs),
+    resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
+    run_transcription_job=lambda *args, **kwargs: run_transcription_job(*args, **kwargs),
+    save_custom_vocabulary=lambda *args, **kwargs: save_custom_vocabulary(*args, **kwargs),
+    save_upload_limited=lambda *args, **kwargs: save_upload_limited(*args, **kwargs),
+)
 
 
 register_library_group_routes(
