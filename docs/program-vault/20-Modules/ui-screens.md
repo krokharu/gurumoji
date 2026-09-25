@@ -23,7 +23,7 @@ tags:
 
 2026-09-22に[[40-Design/video-ui-redesign-plan]]（UX-35〜UX-42）を実装した。動画確認画面（`#/data/<id>`）の動画プレビュー幅を380〜480pxに拡大、動画枠の配色をライトカードに統一、発話リストを通常時コンパクト（チャット風タイムライン）・選択時フル展開に変更、再生中のハイライトと自動追従トグルを追加した。新規処理中画面（`#/new`）の進捗表示から計器・ログをアコーディオンに格納し、視覚的ノイズを削減した。
 
-- **実装：** `src/gurumoji/templates/index.html`、`static/app.js`（`renderMedia`、`syncMediaPlayback`、`renderSegments`、`playSegment`）、`static/style.css`（`.transcript-layout`、`.media-review`、`.segment`、`.progress-details-accordion`）
+- **実装：** `src/gurumoji/templates/views/result.html`・`views/create.html`（処理中カード）、`static/app.js`（`renderMedia`、`syncMediaPlayback`、`renderSegments`、`playSegment`）、`static/style.css`（`.transcript-layout`、`.media-review`、`.segment`、`.progress-details-accordion`）
 - **検証：** `tests/test_ui_defaults.py`、`tests/test_session_outline.py`、`tests/test_meeting_minutes.py`、`tests/test_speaker_registry.py`、`tests/test_transcript_formatting.py`、`tests/test_launcher.py`、`tests/test_application_lifecycle.py`
 
 
