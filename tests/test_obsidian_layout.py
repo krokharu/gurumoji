@@ -9,7 +9,7 @@ from contextlib import closing
 
 from gurumoji.obsidian_layout import ObsidianLayout, unpack, pack, GLOBAL_QUERY, interview_query
 from gurumoji.obsidian_finishing import ObsidianWorkbench, read_text, parse_transcript
-from gurumoji.obsidian_migration import migrate, rewrite_links
+from gurumoji.obsidian_migration import migrate, plan_migration, rewrite_links
 
 
 class ObsidianLayoutTests(unittest.TestCase):
@@ -284,6 +284,30 @@ class ObsidianLayoutTests(unittest.TestCase):
         report = migrate(self.database)
         self.assertEqual(report['backup'], before['backup'])
         self.assertFalse(pending.exists())
+
+    def test_migration_removes_only_the_folders_it_emptied(self):
+        self.seed_legacy()
+        mine = self.layout.vault / '研究者の空フォルダー/下位'
+        mine.mkdir(parents=True)
+        migrate(self.database)
+        self.assertFalse((self.layout.vault / '25-Sources').exists())
+        self.assertTrue(mine.is_dir())
+
+    def test_migration_plan_matches_migrate_and_writes_nothing(self):
+        self.seed_legacy()
+        def snapshot():
+            return {p.relative_to(self.database.parent).as_posix(): p.read_bytes()
+                    for p in self.database.parent.rglob('*') if p.is_file()}
+        before = snapshot()
+        plan = plan_migration(self.database)
+        self.assertEqual(snapshot(), before)
+        self.assertTrue(plan['needed'])
+        self.assertEqual(plan['moves'], 2)
+        # Only the home note: the quoted link in the source note stays literal.
+        self.assertEqual(plan['link_rewrites'], 1)
+        self.assertEqual(plan['existing_targets'], [])
+        self.assertEqual(migrate(self.database)['mapping'], plan['mapping'])
+        self.assertFalse(plan_migration(self.database)['needed'])
 
     def test_legacy_fences_and_quote_literals_are_never_rewritten(self):
         original = '~~~text\n[[old]]\n~~~\n> [[old]]\n\n[[old#^s-61|引用]]\n'
