@@ -49,12 +49,36 @@ class AiModelSettingsTests(unittest.TestCase):
                 token_file,
             )
 
-            stored = json.loads(token_file.read_text(encoding="utf-8"))
-            self.assertEqual(stored["google_model"], "gemini-flash-latest")
-            self.assertEqual(stored["google_api_key"], "test-google-secret")
-            self.assertEqual(stored["openai_api_key"], "test-openai-secret")
-            self.assertEqual(stored["custom_setting"], {"keep": True})
+            # CFG-02: the secrets file is never rewritten; the choice goes to ai_models.json.
+            self.assertEqual(json.loads(token_file.read_text(encoding="utf-8")), original)
+            models = json.loads((token_file.parent / "ai_models.json").read_text(encoding="utf-8"))
+            self.assertEqual(models, {"google_model": "gemini-flash-latest"})
             self.assertEqual(config.google_model, "gemini-flash-latest")
+            self.assertEqual(config.google_api_key, "test-google-secret")
+            # A model not chosen in the app still comes from tokens.json.
+            self.assertEqual(config.openai_model, "gpt-test")
+
+    def test_a_model_cleared_in_the_model_file_does_not_fall_back_to_tokens(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            token_file = Path(temporary_directory) / "tokens.json"
+            token_file.write_text(json.dumps({"lmstudio_model": "old-model", "openai_model": "gpt-old"}),
+                                  encoding="utf-8")
+            (token_file.parent / "ai_models.json").write_text(
+                json.dumps({"lmstudio_model": "", "openai_model": ""}), encoding="utf-8")
+            config = app.load_token_config(token_file)
+            self.assertEqual(config.lmstudio_model, "")
+            self.assertEqual(config.openai_model, "gpt-5.6-luna")
+
+    def test_unreadable_model_file_is_reported_without_touching_tokens(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            token_file = Path(temporary_directory) / "tokens.json"
+            token_file.write_text(json.dumps({"openai_model": "gpt-test"}), encoding="utf-8")
+            (token_file.parent / "ai_models.json").write_text("{", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "ai_models.json"):
+                app.load_token_config(token_file)
+            with self.assertRaisesRegex(RuntimeError, "ai_models.json"):
+                app.update_token_model("openai", "gpt-new", token_file)
+            self.assertEqual(json.loads(token_file.read_text(encoding="utf-8")), {"openai_model": "gpt-test"})
 
     def test_lmstudio_default_is_local_loopback_and_model_ids_may_contain_slashes(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -67,11 +91,11 @@ class AiModelSettingsTests(unittest.TestCase):
                 token_file,
             )
 
-            stored = json.loads(token_file.read_text(encoding="utf-8"))
+            stored = json.loads((token_file.parent / "ai_models.json").read_text(encoding="utf-8"))
             self.assertEqual(config.lmstudio_base_url, "http://127.0.0.1:1234/v1")
             self.assertEqual(config.lmstudio_model, "qwen/qwen3-8b-instruct")
             self.assertEqual(stored["lmstudio_model"], "qwen/qwen3-8b-instruct")
-            self.assertEqual(stored["custom_setting"], True)
+            self.assertEqual(json.loads(token_file.read_text(encoding="utf-8")), {"custom_setting": True})
 
     def test_lmstudio_url_only_accepts_local_loopback(self):
         self.assertEqual(
@@ -161,8 +185,12 @@ class AiModelSettingsTests(unittest.TestCase):
                 )
                 self.assertEqual(updated.status_code, 200)
                 stored = json.loads(token_file.read_text(encoding="utf-8"))
-                self.assertEqual(stored["google_model"], "gemini-2.5-flash")
+                self.assertEqual(stored["google_model"], "gemini-flash-latest")
                 self.assertEqual(stored["google_api_key"], "test-google-secret")
+                models = json.loads((token_file.parent / "ai_models.json").read_text(encoding="utf-8"))
+                self.assertEqual(models["google_model"], "gemini-2.5-flash")
+                self.assertEqual(client.get("/api/ai/models?provider=google").get_json()["selected_model"],
+                                 "gemini-2.5-flash")
 
     def test_page_exposes_clickable_model_picker(self):
         page = app.app.test_client().get("/").data.decode("utf-8")

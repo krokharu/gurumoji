@@ -5,6 +5,8 @@ __pycache__/
 
 # Local credentials and environment overrides
 config/tokens.json
+# Model choices written by the app (not secret, but specific to this PC).
+config/ai_models.json
 .env
 .env.*
 !.env.example

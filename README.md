@@ -94,8 +94,8 @@ Python をGUIから新規導入した直後だけは、PATHを読み直すため
 - `google_api_key` は Google Gemini の AI 仕上げを使う場合だけ必要です。
 - `typesafe_api_key` は、Jevで各発話を「修正が必要／修正不要」の二択判定にかけ、現行AIの結果と比較する場合だけ必要です。`typesafe_model` の既定値は `jev-latest` です。Jevには音声・動画ではなく文字起こしテキストだけを送信します。
 - `lmstudio_base_url` はループバック上のOpenAI互換ローカルLLMサーバーです。WindowsではLM Studio、ColabノートブックではOllamaを使用します。省略時は `http://127.0.0.1:1234/v1` です。
-- `lmstudio_model` は画面上部のローカルLLM接続ライトをクリックして選択すると保存されます。`lmstudio_api_key` は、ローカルサーバー側でAPI認証を有効にした場合だけ設定します。キー名は従来版との互換性のため維持しています。
-- モデル ID は必要に応じて同じファイル内で変更できます。
+- `lmstudio_model` は画面上部のローカルLLM接続ライトをクリックして選択すると `config/ai_models.json` に保存されます。`lmstudio_api_key` は、ローカルサーバー側でAPI認証を有効にした場合だけ設定します。キー名は従来版との互換性のため維持しています。
+- モデル ID（`openai_model`・`google_model`・`lmstudio_model`・`typesafe_model`）を画面やセットアップ画面で選ぶと、秘密ではない `config/ai_models.json` に保存し、`tokens.json` は書き換えません。`ai_models.json` にあるモデルが優先され、ないものは `tokens.json` の値を使います。手で変更する場合は `ai_models.json` を編集してください。
 - `config/tokens.json` は Git の除外対象です。第三者へ渡したり、画面共有へ映したりしないでください。
 - ファイルを編集した後、Web UI の再起動は不要です。文字起こし開始時に読み直します。
 

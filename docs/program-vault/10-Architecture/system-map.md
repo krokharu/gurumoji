@@ -169,7 +169,8 @@ flowchart LR
 | 設定 | 保存先 | 書き込む処理 |
 | --- | --- | --- |
 | 保存先・上限・ポート・リモート公開・モデル名など | 環境変数 `MOJIOKOSI_*`（約25種） | 起動前に利用者が設定する |
-| APIキー・使用モデル・LM StudioのURL | `config/tokens.json` | 手作業。モデルは画面の選択ダイアログからも書き込まれる（`update_token_model`） |
+| APIキー・LM StudioのURL | `config/tokens.json` | 手作業、またはセットアップ画面。アプリは書き込まない |
+| 使用モデル | `config/ai_models.json`（なければ `tokens.json` の値を読む） | 画面の選択ダイアログ（`update_token_model`）とセットアップ画面（CFG-02） |
 | 単語登録 | `<data>/custom_vocabulary.json` | `PUT /api/custom-vocabulary` |
 | 文字起こしの既定値 | `services/transcription/options.py`（`DEFAULT_*`、`CONVERSATION_MODE_PRESETS`） | コード。フォームと `GET /api/config` の `job_defaults` はここから作る（CFG-03） |
 | AIエフォート | 既定値：ブラウザーの `localStorage`（`gurumoji.ai-efforts`）。会話の仕上げの正本：`obsidian_workbench` の `state.json` | `ai-effort.js`、`prepare`（アプリで開いた時点の既定値をその会話に保存し、状態ノートに表示する。CFG-04） |
