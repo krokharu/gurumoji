@@ -85,5 +85,79 @@ class ApplicationLifecycleTests(unittest.TestCase):
         self.assertEqual(calls[-1], "release")
 
 
+class FakeWorkbench:
+    database_file = "library.sqlite3"
+
+    def __init__(self, *, recover_error=None, poll_errors=()):
+        self.recover_error = recover_error
+        self.poll_errors = list(poll_errors)
+        self.polls = 0
+        self.polled = threading.Event()
+        self.layout = self
+
+    def recover(self):
+        if self.recover_error:
+            raise self.recover_error
+
+    def poll_once(self, engine, stopping):
+        self.polls += 1
+        if self.poll_errors:
+            error = self.poll_errors.pop(0)
+            if error:
+                raise error
+        self.polled.set()
+
+    def sync_themes(self):
+        pass
+
+
+class ObsidianWatcherStatusTests(unittest.TestCase):
+    def run_watcher(self, workbench):
+        from gurumoji.services.obsidian_watcher import ObsidianWatcher, WatcherStatus
+        status = WatcherStatus()
+        logged = []
+        stop, worker = ObsidianWatcher(
+            workbench=lambda: workbench,
+            engine=lambda *args: {},
+            migrate=lambda database_file: None,
+            log_exception=logged.append,
+            status=status,
+        ).start()
+        self.addCleanup(lambda: (stop.set(), worker.join(timeout=5)))
+        return status, stop, worker, logged
+
+    def test_not_started_is_reported_before_the_watcher_runs(self):
+        from gurumoji.services.obsidian_watcher import WatcherStatus
+        snapshot = WatcherStatus().snapshot()
+        self.assertEqual(snapshot["state"], "not_started")
+        self.assertFalse(snapshot["active"])
+
+    def test_startup_recovery_failure_is_visible_after_the_thread_exits(self):
+        status, _stop, worker, logged = self.run_watcher(
+            FakeWorkbench(recover_error=OSError("state.json is locked"))
+        )
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        snapshot = status.snapshot()
+        self.assertEqual(snapshot["state"], "failed")
+        self.assertFalse(snapshot["active"])
+        self.assertIn("再起動", snapshot["message"])
+        self.assertEqual(snapshot["detail"], "OSError: state.json is locked")
+        self.assertTrue(snapshot["last_error_at"])
+        self.assertEqual(logged, ["Obsidian workbench recovery failed"])
+
+    def test_polling_error_is_reported_and_cleared_by_the_next_success(self):
+        workbench = FakeWorkbench(poll_errors=[ValueError("broken note")])
+        status, stop, worker, _logged = self.run_watcher(workbench)
+        self.assertTrue(workbench.polled.wait(10))
+        snapshot = status.snapshot()
+        self.assertEqual(snapshot["state"], "running")
+        self.assertEqual(snapshot["detail"], "")
+        self.assertTrue(snapshot["last_error_at"])
+        stop.set()
+        worker.join(timeout=5)
+        self.assertEqual(status.snapshot()["state"], "stopped")
+
+
 if __name__ == "__main__":
     unittest.main()

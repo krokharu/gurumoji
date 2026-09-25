@@ -2343,6 +2343,7 @@ async function loadConfig() {
     const data = await readJsonResponse(response);
     tokenConfigSnapshot = data && typeof data === 'object' ? data : {};
     applyMachineProfile(data.machine);
+    applyObsidianWatcherStatus(data.obsidian_watcher);
     const runtime = data.runtime || {};
     browserFilePickerOnly = Boolean(runtime.browser_upload);
     if (browsePathButton) {
@@ -2404,6 +2405,20 @@ async function loadConfig() {
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+function applyObsidianWatcherStatus(watcher) {
+  // OBS-09: a watcher that stopped at startup must not look like an idle one.
+  if (!watcher || typeof watcher !== 'object' || !watcher.state) return;
+  const failed = ['failed', 'polling_failed'].includes(watcher.state);
+  document.querySelectorAll('[data-obsidian-watcher-pill]').forEach(pill => {
+    pill.classList.remove('loading', 'ready', 'missing');
+    pill.classList.add(watcher.state === 'running' ? 'ready' : failed ? 'missing' : 'loading');
+    pill.textContent = watcher.state === 'running' ? 'Obsidian監視 ✓' : 'Obsidian監視';
+  });
+  document.querySelectorAll('[data-obsidian-watcher-detail]').forEach(detail => {
+    detail.textContent = [watcher.message, watcher.detail].filter(Boolean).join(' ');
+  });
 }
 
 function applyLmStudioDefaults(config) {

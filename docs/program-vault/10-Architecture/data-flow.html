@@ -185,7 +185,7 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
             ["2","スレッドで文字起こしを実行する","run_transcription_job"],
             ["3","FFmpeg前処理 → WhisperX → pyannote → 任意の感情分析","services/transcription/*"],
             ["4a","既定（Obsidianで仕上げる）：保存原文・全文・操作ノート・状態ノートを書く","ObsidianWorkbench.prepare"],
-            ["4b","仕上げを無効にした場合だけ、ジョブ内でAI校正・話者特定・アウトラインを実行する","clean_segments_with_ai ほか"],
+            ["4b","「おすすめ」「高度」モードなど、Obsidianで仕上げない場合は、ジョブ内でAI校正・話者特定・アウトラインを実行する","run_full_cleanup（流れ4の5と共通の手順）ほか"],
             ["5","TXT／JSON／SRTなどを出力する","services/outputs.py write_outputs"],
             ["6","逐語録をSQLiteに保存し、メディアを移す","services/library_store.py upsert_library_item"],
             ["7","InputVaultの台帳を更新する","publish_input_vault"],
@@ -215,7 +215,7 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
             ["2","作業台の状態と、操作ノート・全文をResearchVaultに書く","ObsidianWorkbench.prepare"],
             ["3","研究者が操作ノートにチェックを付け、providerを選ぶ","Obsidian側の編集"],
             ["4","2秒ごとに操作ノートを読む","ObsidianWorkbench.poll_once"],
-            ["5","選ばれたAI処理を実行する","run_obsidian_finishing → call_ai_json"],
+            ["5","選ばれたAI処理を実行する。全体アウトライン → 全文校正 → Jev比較の手順はジョブ内の仕上げと共通","run_obsidian_finishing → run_full_cleanup"],
             ["6","結果を新しいパスのノートと result-*.json に書く","obsidian_finishing.py"],
             ["7","「結果をアプリへ反映」ではrevisionと元ノートのfingerprintを再確認する","_update_library_from_payload_locked"],
             ["8","逐語録を更新し、InputVaultの台帳を更新する","publish_input_vault"],
@@ -238,7 +238,7 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
      steps:[["1","ランチャーからアプリを起動する","run.bat → scripts/run_launcher.ps1 → python -m gurumoji.app"],
             ["2","単一インスタンスのロック、DB初期化、編集トランザクション・削除隔離・学習データの回復","initialize_application"],
             ["3","既存の出力JSONを取り込み、来歴を修復する","services/output_import.py"],
-            ["4","常駐watcherを起動する","start_obsidian_watcher"],
+            ["4","常駐watcherを起動する。稼働・停止の状態と停止理由は画面の「Obsidian監視」に出る","start_obsidian_watcher · WatcherStatus"],
             ["5","作業台の recover と旧階層の migrate を実行し、その後Flaskを起動する","obsidian_migration.py"]]}
   ];
 

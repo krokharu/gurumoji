@@ -209,6 +209,31 @@ class RequestSecurityTests(unittest.TestCase):
             app.HIDDEN_LOCAL_PATH_MESSAGE,
         )
 
+    def test_config_reports_a_stopped_obsidian_watcher(self):
+        from gurumoji.services.obsidian_watcher import WatcherStatus
+        status = WatcherStatus()
+        status.set("failed", "OSError: C:/Users/researcher/data is locked")
+        token = "remote-token-for-tests-1234567890"
+        with (
+            patch.object(app, "obsidian_watcher_status", status),
+            patch.object(app, "load_token_config", return_value=app.TokenConfig()),
+        ):
+            local = self.client.get("/api/config").get_json()["obsidian_watcher"]
+            with (
+                patch.object(app, "REMOTE_ACCESS_ENABLED", True),
+                patch.object(app, "REMOTE_ACCESS_TOKEN", token),
+                patch.object(app, "REMOTE_LOCAL_PATHS_ENABLED", False),
+            ):
+                remote = self.client.get(
+                    "/api/config",
+                    headers={"Authorization": f"Bearer {token}", "Host": "localhost"},
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).get_json()["obsidian_watcher"]
+        self.assertEqual(local["state"], "failed")
+        self.assertIn("locked", local["detail"])
+        self.assertEqual(remote["state"], "failed")
+        self.assertNotIn("detail", remote)
+
     def test_sensitive_responses_are_not_cached_and_have_security_headers(self):
         response = self.client.get("/api/config")
         self.assertEqual(response.status_code, 200)

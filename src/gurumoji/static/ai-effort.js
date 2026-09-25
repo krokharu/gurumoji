@@ -168,10 +168,15 @@ setInterval(async () => {
     if (!response.ok) throw new Error('status unavailable');
     const state = await response.json();
     if (itemId !== currentJobId) { panel.hidden = true; return; }
-    panel.hidden = ['unprepared', 'ready'].includes(state.status);
-    panel.setAttribute('aria-busy', String(state.status === 'running'));
-    panel.querySelector('.finishing-orbit').hidden = state.status !== 'running';
-    panel.querySelector('[data-obsidian-detail]').textContent = state.message;
+    // A prepared workbench is inert while the watcher is stopped (OBS-09); say so.
+    const watcher = state.watcher && typeof state.watcher === 'object' ? state.watcher : {};
+    const watcherDown = state.status !== 'unprepared' && watcher.state === 'failed';
+    panel.hidden = !watcherDown && ['unprepared', 'ready'].includes(state.status);
+    panel.setAttribute('aria-busy', String(!watcherDown && state.status === 'running'));
+    panel.querySelector('.finishing-orbit').hidden = watcherDown || state.status !== 'running';
+    panel.querySelector('[data-obsidian-detail]').textContent = watcherDown
+      ? [watcher.message, watcher.detail].filter(Boolean).join(' ')
+      : state.message;
   } catch (_) { panel.hidden = true; }
   finally { obsidianPollBusy = false; }
 }, 3000);
