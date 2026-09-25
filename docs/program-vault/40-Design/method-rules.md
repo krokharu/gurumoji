@@ -3,7 +3,7 @@ note_id: design-analysis-method-rules
 note_type: registration-rules
 title: 分析手法ごとのObsidian登録規約
 status: proposed
-updated: 2026-09-20
+updated: 2026-09-25
 schema_version: 1
 tags:
   - gurumoji/analysis
@@ -88,6 +88,15 @@ tags:
 5. 手順・判定・禁止事項を変えたら `definition_version` を上げ、文献を再確認したら `knowledge_verified` を更新する。知識hash（同じフォルダーの7ノート、`common_notes`、`literature` の文献ノート）は自動で計算され、変わると保存済みの専門家モードのAI見解は「更新が必要」になる。
 6. `readiness` の `literature_checked`、`procedure_documented`、`integrated`、`sample_verified` は、確認できた場合だけ `true` にする。文献ノートの解決と未解決事項の有無は、アプリが計算して表示する。
 7. `tests/test_method_experts.py` で、定義の検証、文献の解決、手法との対応を確認する。
+
+### ローカル限定の知識（ADR-120）
+
+Git管理下の `50-Analysis-Methods` は実行環境間で共有する「ベース」である。実行環境ごとに知識を追加・変更したい場合は、`<data>/local_knowledge/50-Analysis-Methods/…`（`<data>` は `MOJIOKOSI_DATA_DIR`、既定は `runtime/data`）に、上記と同じ相対パスでノートを置く。`runtime/` はGit管理対象外（`.gitignore`）なので、このディレクトリはコミットされず環境ごとに内容を変えられる。
+
+- 新しい専門家フォルダーをそこに置けば、ベースに存在しない専門家として追加される（`source: local`）。
+- 既存の専門家フォルダーと同じ相対パスのノート（例：`10-Experts/thematic-analysis/02-Procedure.md`）を置けば、そのノートだけがベースを上書きする（`source: local_override`）。知識hashは上書き後の内容から計算され直す。
+- `local_knowledge` が存在しない環境では、すべてベースから解決され、挙動は変わらない。
+- 論文原本などの資料そのものはここにもGitにも置かない。研究者が内容を理解したうえで書いた要約ノート（本ノートの形式）だけを置く。
 
 | 判定名 | 読む値 | パラメーター |
 | --- | --- | --- |
