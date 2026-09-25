@@ -22,7 +22,7 @@ import yaml
 
 from .analysis_method_registry import (COMMON_EXPORT_FIELDS, METHOD_GROUPS, METHOD_STATUS_LABELS,
                                        METHODS, REGISTRY_VERSION)
-from .analysis_store import canonical, markdown, safe_path, write_atomic
+from .vault_files import canonical, markdown, safe_path, write_atomic
 
 SCHEMA_VERSION = 1
 VAULT_LOCK = threading.RLock()

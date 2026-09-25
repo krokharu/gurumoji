@@ -32,7 +32,7 @@ from typing import Callable, Iterable
 
 import yaml
 
-from .analysis_store import parse_frontmatter, safe_path, write_atomic
+from .vault_files import parse_frontmatter, safe_path, write_atomic
 
 CHANGE_LOG_NAME = "note_changes.jsonl"
 CHANGE_LOG_LIMIT = 5 * 1024 * 1024

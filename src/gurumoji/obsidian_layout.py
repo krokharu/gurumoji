@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from .analysis_store import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
+from .vault_files import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 

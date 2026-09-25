@@ -11,7 +11,7 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-from .analysis_store import safe_path, write_atomic
+from .vault_files import safe_path, write_atomic
 from .obsidian_layout import ObsidianLayout, HOME, unpack, pack
 from .vault_note_policy import NoteWrite, append_change
 

@@ -122,5 +122,25 @@ class SharedLocationTests(unittest.TestCase):
             with patch.dict("os.environ", {"MOJIOKOSI_PORT": invalid}):
                 self.assertEqual(local_app_url(), "http://127.0.0.1:7860")
 
+
+class LayeringTests(unittest.TestCase):
+    def test_vault_writers_depend_on_the_bottom_layer_not_on_each_other(self):
+        # ARCH-02: vault_files is the bottom layer; the Vault writers never import
+        # analysis_store at module level, so the store can import them one way.
+        import ast
+        package = Path(__file__).resolve().parents[1] / "src" / "gurumoji"
+
+        def top_level_imports(name):
+            tree = ast.parse((package / f"{name}.py").read_text(encoding="utf-8"))
+            return {node.module for node in tree.body
+                    if isinstance(node, ast.ImportFrom) and node.level and node.module}
+
+        self.assertEqual(top_level_imports("vault_files"), set())
+        for name in ("obsidian_layout", "obsidian_finishing", "vault_registry", "vault_note_policy",
+                     "obsidian_migration"):
+            imports = top_level_imports(name)
+            self.assertIn("vault_files", imports, name)
+            self.assertNotIn("analysis_store", imports, name)
+
 if __name__ == "__main__":
     unittest.main()

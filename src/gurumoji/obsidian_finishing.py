@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 import yaml
 
-from .analysis_store import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
+from .vault_files import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 
 COMMANDS = {"outline": "アウトラインを作成", "finish": "AI仕上げを実行",
             "apply": "結果をアプリへ反映"}
