@@ -43,6 +43,11 @@ def fragments(segments: list[dict]) -> list[dict]:
     return records
 
 
+def cleanup_batches(prompt_records: list[dict]) -> list[list[dict]]:
+    """Batch by the characters actually sent, not by a small fixed note count."""
+    return bounded_batches(prompt_records, max_chars=10000, max_items=160)
+
+
 def outline_context(outline: dict, call: Callable, status: Callable,
                     check_cancelled: Callable) -> list[dict]:
     """Include the entire outline; reduce all sections when it exceeds the budget."""
@@ -86,7 +91,7 @@ def clean_transcript(segments: list[dict], call: Callable, status: Callable,
     records = fragments(segments)
     # Batch by the content actually sent, rather than storage metadata or note count.
     prompt_records = [{key: row[key] for key in ("id", "speaker", "text")} for row in records]
-    batches = bounded_batches(prompt_records, max_chars=10000, max_items=160)
+    batches = cleanup_batches(prompt_records)
     replacements: dict[int, list[str]] = {}
     reviews: dict[int, list[dict]] = {}
     system = (

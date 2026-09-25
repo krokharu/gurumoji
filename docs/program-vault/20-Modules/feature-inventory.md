@@ -95,7 +95,7 @@ tags:
 | Vaultノートの台帳：SQLite `obsidian_notes`／`interviews.json`／`vaults.json`／`state.json` | モジュールごとに段階的に追加された | 書き込みの判定を共通化する（OBS-04） |
 | Frontmatterの生成・解析 | 同上 | 1組に統合する（OBS-06） |
 | 原子的書き込み関数 | `analysis_store` と `app.py` で個別に実装した | 1つに統合する（ARCH-04） |
-| AI入力の分割：`chunk_segments`／`analysis_insights.bounded_batches`／`ai_finishing.fragments` | 用途ごとに実装した | `chunk_segments` はテストからしか参照されていない |
+| AI入力の分割：`analysis_insights.bounded_batches`／`ai_finishing.fragments` | 用途ごとに実装した | 未使用だった `chunk_segments` は削除した（ARCH-06） |
 
 ## Legacy：過去の方式・互換用
 
@@ -105,7 +105,7 @@ tags:
 | 旧形式の作業ノート（```` ```text ```` ブロック）の解析 | 互換 | `obsidian_finishing.BLOCK` | 旧ノートがある限り残す |
 | 操作ノート本文に書く `provider:` 行 | 互換 | `ObsidianWorkbench.selection` の正規表現 | 同上 |
 | `src/app.py` ほか5件の互換import | 互換 | テスト約20ファイルが `import app` などで使用 | 削除不可。テストのimportを移すまで残す |
-| `chunk_segments` | Deprecated候補 | 本体からは呼ばれず、`tests/test_ai_scaling.py` だけが参照 | 下記「削除判断の確認項目」を満たしてから整理する |
+| `chunk_segments` | 削除済み | 2026-09-25に削除（ARCH-06）。全文校正の分割は `ai_finishing.cleanup_batches` がテスト対象 | ― |
 | `legacy_training_events` | 互換 | `repair_training_artifacts` が使用 | 残す |
 | 空データ追加の `window.prompt` による代替手段 | 互換 | `<dialog>` が使えないブラウザー向け | 残す（UIの統一時に再検討） |
 
