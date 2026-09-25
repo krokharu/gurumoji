@@ -1,0 +1,107 @@
+{
+  "viewports": {
+    "1440x900": {
+      "requested_viewport": [
+        1440,
+        900
+      ],
+      "actual_viewport": [
+        1440,
+        900
+      ],
+      "document_width": 1440,
+      "form_visible": true,
+      "all_panels_closed": true,
+      "no_horizontal_overflow": true,
+      "cta_rect": {
+        "top": 731.296875,
+        "bottom": 786.296875,
+        "width": 300
+      },
+      "cta_visible": true,
+      "cta_initially_disabled": true
+    },
+    "1280x800": {
+      "requested_viewport": [
+        1280,
+        800
+      ],
+      "actual_viewport": [
+        1280,
+        800
+      ],
+      "document_width": 1280,
+      "form_visible": true,
+      "all_panels_closed": true,
+      "no_horizontal_overflow": true,
+      "cta_rect": {
+        "top": 731.296875,
+        "bottom": 786.296875,
+        "width": 300
+      },
+      "cta_visible": true,
+      "cta_initially_disabled": true
+    },
+    "390x844": {
+      "requested_viewport": [
+        390,
+        844
+      ],
+      "actual_viewport": [
+        390,
+        844
+      ],
+      "document_width": 390,
+      "form_visible": true,
+      "all_panels_closed": true,
+      "no_horizontal_overflow": true,
+      "cta_rect": {
+        "top": 0,
+        "bottom": 0,
+        "width": 0
+      },
+      "cta_visible": false,
+      "cta_initially_disabled": true
+    }
+  },
+  "interactions": {
+    "default_finishing_is_off_with_model_absent": true,
+    "gpu_and_model_are_visible": true,
+    "cpu_selection_is_visible": true,
+    "provider_model_and_enabled_state_are_visible": true,
+    "off_mode_hides_unused_model": true,
+    "explicit_none_survives_config_refresh": true,
+    "settings_row_opens_panel": true,
+    "summary_updates": true,
+    "panel_can_close": true,
+    "invalid_file_feedback": true,
+    "valid_file_selected": true,
+    "invalid_recognition_reopens_panel_without_post": true,
+    "invalid_finishing_reopens_panel_without_post": true,
+    "mocked_submit_once": true,
+    "mocked_payload_has_selected_file": true,
+    "mocked_method_post": true,
+    "mocked_posts_count": 1
+  },
+  "mobile": {
+    "starts_on_file_step": true,
+    "drop_selects_file": true,
+    "settings_step_visible": true,
+    "settings_step_active": true,
+    "settings_no_overflow": true,
+    "keyboard_opens_settings": true,
+    "start_step_visible": true,
+    "start_step_active": true,
+    "start_no_overflow": true,
+    "review_shows_file": true
+  },
+  "fonts": {
+    "setting_label": 15,
+    "setting_value": 15,
+    "mode_title": 15,
+    "mode_help": 13,
+    "panel_title": 15,
+    "panel_help": 13
+  },
+  "font_size_pass": true
+}
