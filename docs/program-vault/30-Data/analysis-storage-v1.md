@@ -62,7 +62,7 @@ ResearchVaultの会話は`10-インタビュー/I###-<名前>/`にまとめる�
 
 プロパティは単純なYAML値にし、大量のIDや入れ子の結果はJSONに置く。リンクはVault内のノートパスとブロックIDで生成する。[Obsidian公式：プロパティ](https://help.obsidian.md/properties)、[内部リンクとブロック参照](https://help.obsidian.md/links)
 
-各CSV／JSONにはアプリで取得するリンクと、保存PC上で開くローカルファイルのリンクを付ける。音声リンクとアプリからの取得にはサーバーの起動が必要。PCや配置を変えた場合はローカルファイルリンクの再出力が必要になる。「Obsidianで開く」はローカルパスへのアクセスが許可された環境で表示する。[Obsidian公式：URI](https://help.obsidian.md/uri)
+各CSV／JSONにはアプリで取得するリンクだけを付ける。端末固有の `file:///` パスは、PCのユーザー名などがVaultに残り、移動で切れるため書かない（OBS-12）。音声リンクとアプリからの取得にはサーバーの起動が必要。「Obsidianで開く」はローカルパスへのアクセスが許可された環境で表示する。[Obsidian公式：URI](https://help.obsidian.md/uri)
 
 ## AI仕上げと分析の規約
 

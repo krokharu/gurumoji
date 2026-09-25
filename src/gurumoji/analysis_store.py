@@ -551,7 +551,6 @@ class AnalysisStore:
                 refs = self.source_notes(source, item_id, title, run["app_url"])
                 artifact_rows = self.artifacts(run_id)
                 links = {a["name"]: f"[{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in artifact_rows}
-                local_links = {a["name"]: f"[ローカルファイル]({safe_path(self.root, a['path']).absolute().as_uri()})" for a in artifact_rows}
                 main = frontmatter(f"analysis-{run_id}", title + "：保存済み分析", conversation_id=item_id,
                                    analysis_id=run_id, input_snapshot_id=run["snapshot_id"],
                                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
@@ -617,7 +616,7 @@ class AnalysisStore:
                     text += links["parameters.json"] + " / " + links["result.json"] + "\n\n"
                     for dataset in method.get("datasets", []):
                         name = f"tables/{dataset}.csv"
-                        if name in links: text += f"- {links[name]} / {local_links[name]}\n"
+                        if name in links: text += f"- {links[name]}\n"
                     text += "\n## 限界と追加確認\n\n" + "\n".join("- " + markdown(v) for v in method.get("limitations", [])) + "\n"
                     self.write_note(target + ".md", f"analysis-{run_id}-{method_id}", item_id, text,
                                     graph_kind="analysis_result", graph_scope="detail")
@@ -626,7 +625,7 @@ class AnalysisStore:
                     main += "\n## 可視化用の分析ツリー\n\n"
                     main += "アウトライン、分析種別、結果の順にグラフでたどれます。\n\n"
                     main += "\n".join("- " + value for value in tree_links) + "\n"
-                main += "\n## 再現用ファイル\n\n" + "\n".join("- " + value + " / " + local_links[name] for name, value in links.items()) + "\n"
+                main += "\n## 再現用ファイル\n\n" + "\n".join("- " + value for value in links.values()) + "\n"
                 main += "\n研究者のメモはインタビューの概要から研究メモを開いて記録してください。\n"
                 note_path = f"{run_dir}/analysis-{run_id}.md"
                 self.write_note(note_path, f"analysis-{run_id}", item_id, main,
