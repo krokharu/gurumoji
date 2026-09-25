@@ -82,6 +82,7 @@ from .services.ai import client as ai_client
 from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
+from .services.media_trash import purge_expired_trash, trash_media
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -329,6 +330,10 @@ JOB_TTL_SECONDS = positive_env_int(
 )
 ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
     "MOJIOKOSI_ORPHAN_GRACE_SECONDS", 15 * 60, minimum=60, maximum=7 * 86400
+)
+# Days a deleted conversation's original media stays in <data>/trash; 0 erases at once.
+TRASH_RETENTION_DAYS = positive_env_int(
+    "MOJIOKOSI_TRASH_RETENTION_DAYS", 30, minimum=0, maximum=3650
 )
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
@@ -1179,6 +1184,14 @@ def retire_input_vault(item_id: str) -> None:
     vault_publications().retire_input(item_id)
 
 
+def retire_research_vault(item_id: str) -> None:
+    """Mark the ResearchVault overview as deleted; its notes stay as records (OBS-11)."""
+    try:
+        obsidian_workbench().layout.mark_deleted(item_id)
+    except (OSError, ValueError, TypeError, LookupError) as exc:
+        app.logger.warning("ResearchVault に削除を記録できませんでした: %s", exc)
+
+
 def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
     return whisper_settings(options, language, diarization_model=DIARIZATION_MODEL)
 
@@ -1212,12 +1225,27 @@ _update_library_from_payload_locked = make_library_update(
 )
 
 
+def trash_directory() -> Path:
+    # Beside media so the move stays a rename on the same volume.
+    return MEDIA_DIRECTORY.parent / "trash"
+
+
+def _discard_deleted_media(path: Path, item_id: str) -> None:
+    trash_media(trash_directory(), item_id, "", [path],
+                retention_days=TRASH_RETENTION_DAYS, move=durable_move)
+
+
 def recover_delete_quarantines() -> list[str]:
     return edit_transactions.recover_delete_quarantines(
         connect=database_connection,
         media_directory=MEDIA_DIRECTORY,
         thumbnail_directory=THUMBNAIL_DIRECTORY,
+        discard_media=_discard_deleted_media if TRASH_RETENTION_DAYS > 0 else None,
     )
+
+
+def purge_media_trash() -> list[str]:
+    return purge_expired_trash(trash_directory(), TRASH_RETENTION_DAYS)
 
 
 def discover_edit_transaction_staging_dirs(
@@ -1401,7 +1429,7 @@ def application_lifecycle() -> ApplicationLifecycle:
             initialize_library=lambda: initialize_library(repair_provenance=False),
             recover_edits=lambda: recover_edit_transactions(),
             repair_provenance=repair_provenance,
-            recover_deletes=lambda: recover_delete_quarantines(),
+            recover_deletes=lambda: recover_delete_quarantines() + purge_media_trash(),
             repair_training=lambda: repair_training_artifacts(),
             cleanup_uploads=lambda: cleanup_orphaned_uploads(),
             import_outputs=lambda: import_existing_outputs(),
@@ -1647,6 +1675,9 @@ _delete_library_item_locked = make_library_deletion(
     local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
     reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
     retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
+    trash_directory=lambda: trash_directory(),
+    trash_retention_days=lambda: TRASH_RETENTION_DAYS,
+    retire_research_vault=lambda *args, **kwargs: retire_research_vault(*args, **kwargs),
 )
 
 

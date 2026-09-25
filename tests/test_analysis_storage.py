@@ -53,6 +53,10 @@ class AnalysisStorageTests(unittest.TestCase):
         # Graph result nodes deliberately retain compact finding previews.
         self.assertIn('graph_kind: analysis_result', notes)
         self.assertIn('先頭10行まで', notes)
+        # OBS-12: notes carry a portable location, never the PC's absolute path.
+        self.assertNotIn('file://', notes)
+        self.assertNotIn(str(self.store.root.resolve()), notes)
+        self.assertIn('保存先 `analysis_store/runs/' + run['id'] + '/result.json`', notes)
 
     def test_moved_interview_folder_keeps_catalog_ownership(self):
         run = self.save().get_json()['run']

@@ -3860,7 +3860,7 @@ function deleteRecoveryNote(data) {
 }
 
 async function deleteLibraryItem(itemId, name) {
-  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n保存メディアも削除されます。出力ファイルと学習履歴は残ります。`)) return;
+  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n元の音声・動画はゴミ箱へ移し、保持期間（既定30日）が過ぎたら完全に削除します。出力ファイル・分析結果・Obsidianのノート・学習履歴は残ります。`)) return;
   try {
     if (currentJobId === itemId && mediaPlayer) {
       mediaPlayer.pause();
@@ -3892,9 +3892,12 @@ async function deleteLibraryItem(itemId, name) {
     showView('library');
     await loadLibrary();
     const cleanupWarning = data.cleanup_warning || '';
+    const trashNote = data.trash && data.trash.expires_at
+      ? ` 元の音声・動画は${new Date(data.trash.expires_at).toLocaleDateString('ja-JP')}までゴミ箱に保管します。`
+      : '';
     setAlert(
       document.querySelector('#library-message'),
-      `「${name}」を削除しました。${cleanupWarning}${recoveryNote}`,
+      `「${name}」を削除しました。${trashNote}${cleanupWarning}${recoveryNote}`,
       Boolean(cleanupWarning || recoveryNote)
     );
   } catch (error) {

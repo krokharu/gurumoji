@@ -134,6 +134,7 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/library.sqlite3</code></td><td>正本の逐語録（<code>library_items</code>）、版、話者台帳、分析条件、AI要求、固定保存の台帳、Obsidianノート台帳、tombstone</td><td>文字起こし・編集保存・分析・削除</td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>runtime/output</code></td><td>TXT／JSON／SRT、アウトライン、感情分析。起動時に既存JSONを取り込む</td><td><code>write_outputs</code>、編集トランザクション</td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/media</code>・<code>thumbnails</code></td><td>元の音声・動画、再生成できるサムネイル</td><td>文字起こし・削除</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/trash</code></td><td>削除した会話の元の音声・動画と <code>trash.json</code>（既定30日保管）</td><td>削除、起動時の期限切れ消去</td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/analysis_store</code></td><td>不変の入力スナップショット、実行結果、表CSV、manifest</td><td><code>AnalysisStore.save</code></td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/obsidian_workbench</code></td><td>仕上げの <code>state.json</code>、<code>source-*.json</code>、<code>result-*.json</code></td><td><code>ObsidianWorkbench</code></td></tr>
           <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/ResearchVault</code></td><td>研究者が読むノート、操作ノート、分析ノート、テーマ</td><td>仕上げ・分析の公開・テーマ同期</td></tr>
@@ -226,17 +227,17 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
             ["2","10秒ごとに研究メモのリンクを読む","ObsidianLayout.sync_themes"],
             ["3","20-テーマ のノートのプロパティと関連欄を書き換える","obsidian_layout.py"]]},
     {id:"delete", n:"6", name:"削除", trigger:"ライブラリーから会話を削除したとき",
-     e:[["ui","api","1"],["api","del","2"],["del","media","3"],["del","db","4"],["del","iv","5"]],
+     e:[["ui","api","1"],["api","del","2"],["del","media","3"],["del","db","4"],["del","iv","5"],["del","rv","5"]],
      steps:[["1","削除を要求する","DELETE /api/library/<id>"],
             ["2","排他的に削除処理を始める","_delete_library_item_locked"],
-            ["3","メディアとサムネイルを隔離フォルダーへ移し、最後に恒久削除する","隔離 → rmtree"],
+            ["3","メディアとサムネイルを隔離フォルダーへ移す。削除確定後、元メディアはゴミ箱（既定30日保管）へ、サムネイルは消去","隔離 → <data>/trash · services/media_trash.py"],
             ["4","SQLiteの行と準備履歴を削除し、tombstoneを記録する","output_import_tombstones"],
-            ["5","InputVaultから取り下げる","retire_input_vault"]],
-     note:"出力ファイル、analysis_store、ResearchVault、obsidian_workbench は削除されずに残る。"},
+            ["5","InputVaultから取り下げ、ResearchVaultの概要と一覧を「アプリから削除済み」にする","retire_input_vault · ObsidianLayout.mark_deleted"]],
+     note:"出力ファイル、analysis_store、ResearchVaultのノート、obsidian_workbench は記録として残る。ゴミ箱の保持期間が過ぎたメディアは、次の起動時に完全に削除される。"},
     {id:"boot", n:"7", name:"起動", trigger:"run.bat でアプリを起動したとき",
      e:[["boot","init","1"],["init","db","2"],["out","init","3"],["init","watch","4"],["watch","rv","5"]],
      steps:[["1","ランチャーからアプリを起動する","run.bat → scripts/run_launcher.ps1 → python -m gurumoji.app"],
-            ["2","単一インスタンスのロック、DB初期化、編集トランザクション・削除隔離・学習データの回復","initialize_application"],
+            ["2","単一インスタンスのロック、DB初期化、編集トランザクション・削除隔離・学習データの回復、期限切れのゴミ箱の消去","initialize_application"],
             ["3","既存の出力JSONを取り込み、来歴を修復する","services/output_import.py"],
             ["4","常駐watcherを起動する。稼働・停止の状態と停止理由は画面の「Obsidian監視」に出る","start_obsidian_watcher · WatcherStatus"],
             ["5","作業台の recover と旧階層の migrate を実行し、その後Flaskを起動する","obsidian_migration.py"]]}

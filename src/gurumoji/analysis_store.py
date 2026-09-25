@@ -553,7 +553,8 @@ class AnalysisStore:
                 refs = self.source_notes(source, item_id, title, run["app_url"])
                 artifact_rows = self.artifacts(run_id)
                 links = {a["name"]: f"[{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in artifact_rows}
-                local_links = {a["name"]: f"[ローカルファイル]({safe_path(self.root, a['path']).absolute().as_uri()})" for a in artifact_rows}
+                # No file:/// URI: it names the PC user and breaks when the Vault moves (OBS-12).
+                local_links = {a["name"]: f"保存先 `analysis_store/{a['path']}`" for a in artifact_rows}
                 main = frontmatter(f"analysis-{run_id}", title + "：保存済み分析", conversation_id=item_id,
                                    analysis_id=run_id, input_snapshot_id=run["snapshot_id"],
                                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
