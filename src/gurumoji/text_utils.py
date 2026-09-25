@@ -8,6 +8,7 @@ root.
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -54,3 +55,33 @@ def normalize_attributes(value: Any) -> dict[str, str]:
             continue
         attributes[key] = clean_multiline(raw_value, 2000)
     return attributes
+
+
+def validate_json_value(value: Any, *, maximum_nodes: int = 2_000_000) -> None:
+    remaining = [maximum_nodes]
+
+    def visit(current: Any, depth: int) -> None:
+        remaining[0] -= 1
+        if remaining[0] < 0:
+            raise ValueError("The JSON payload contains too many values.")
+        if depth > 24:
+            raise ValueError("The JSON payload is nested too deeply.")
+        if current is None or isinstance(current, (bool, int, str)):
+            return
+        if isinstance(current, float):
+            if not math.isfinite(current):
+                raise ValueError("NaN and Infinity are not valid input values.")
+            return
+        if isinstance(current, list):
+            for item in current:
+                visit(item, depth + 1)
+            return
+        if isinstance(current, dict):
+            for key, item in current.items():
+                if not isinstance(key, str):
+                    raise ValueError("JSON object keys must be strings.")
+                visit(item, depth + 1)
+            return
+        raise ValueError("The JSON payload contains an unsupported value type.")
+
+    visit(value, 0)

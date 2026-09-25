@@ -351,6 +351,47 @@ from .text_utils import (
 )
 from . import transcript_preparation as preparation
 from . import method_experts
+from .services.library_rows import (
+    emotion_values,
+    ensure_segment_ids,
+    interview_comparison_identity,
+    normalize_conversation_speaker_profiles,
+    normalize_session_profile,
+    normalize_source_name,
+    row_meeting_minutes,
+    row_original_segments,
+    row_segments,
+    row_session_outline,
+    row_session_profile,
+    row_speaker_profiles,
+    stable_segment_id,
+)
+from .services.transcription.audio import (
+    AUDIO_PREPROCESS_PRESETS,
+)
+from .text_utils import (
+    validate_json_value,
+)
+from .web.request_parsing import (
+    parse_audio_preprocess,
+    parse_bool,
+    parse_optional_float,
+    parse_optional_int,
+)
+from .services.word_cloud import (
+    write_word_cloud,
+)
+from .web.library_group_routes import register_library_group_routes
+from .web.training_routes import register_training_routes
+from .web.export_routes import register_export_routes
+from .web.analysis_view_routes import register_analysis_view_routes
+from .web.ai_routes import register_ai_routes
+from .services.machine_profile import (
+    detect_machine_profile,
+    get_machine_profile,
+    recommend_machine_settings,
+    system_activity_snapshot,
+)
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -434,40 +475,6 @@ AI_PROVIDER_LABELS = {
     "lmstudio": "LM Studio（ローカル）",
 }
 AIST_EMOTION_MODEL_CHOICES = {"kushinada", "izanami", "both"}
-AUDIO_PREPROCESS_PRESETS: dict[str, dict[str, Any]] = {
-    "none": {
-        "label": "加工なし",
-        "filters": [],
-    },
-    "light": {
-        "label": "軽め",
-        "filters": [
-            "highpass=f=70",
-            "lowpass=f=7800",
-            "loudnorm=I=-18:LRA=11:TP=-1.5",
-        ],
-    },
-    "standard": {
-        "label": "おすすめ",
-        "filters": [
-            "highpass=f=70",
-            "lowpass=f=7800",
-            "afftdn=nr=8:nf=-55:tn=1",
-            "speechnorm=e=3:r=0.00001:l=1",
-            "loudnorm=I=-18:LRA=11:TP=-1.5",
-        ],
-    },
-    "strong": {
-        "label": "強め",
-        "filters": [
-            "highpass=f=80",
-            "lowpass=f=7600",
-            "afftdn=nr=14:nf=-50:tn=1",
-            "speechnorm=e=6.25:r=0.00001:l=1",
-            "loudnorm=I=-18:LRA=11:TP=-1.5",
-        ],
-    },
-}
 MAX_LOG_LINES = 200
 NORMAL_VAD_ONSET = 0.5
 NORMAL_VAD_OFFSET = 0.363
@@ -480,7 +487,6 @@ CUSTOM_VOCABULARY_MAX_TERM_LENGTH = 80
 # be close to one visible character.
 WHISPER_VOCABULARY_PROMPT_MAX_CHARACTERS = 220
 WHISPER_SAMPLE_RATE = 16000
-SESSION_TYPES = {"focus_group", "meeting", "interview", "workshop", "chat", "other"}
 CONVERSATION_MODES = {
     "meeting": "meeting",
     "group_interview": "focus_group",
@@ -960,12 +966,8 @@ transformer_jobs_lock = threading.RLock()
 transformer_cancel_events: dict[str, threading.Event] = {}
 training_lock = threading.Lock()
 file_dialog_lock = threading.Lock()
-machine_profile_lock = threading.Lock()
 token_config_lock = threading.Lock()
 custom_vocabulary_lock = threading.Lock()
-machine_profile_cache: dict[str, Any] | None = None
-system_activity_lock = threading.Lock()
-system_activity_previous_io: tuple[float, int, int, int, int] | None = None
 _job_admission_id: str | None = None
 _instance_lock_streams: list[Any] = []
 _instance_lock_guard = threading.Lock()
@@ -1109,302 +1111,6 @@ def release_instance_lock() -> None:
         _instance_lock_streams = []
 
 
-def total_system_memory_gib() -> float:
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            class MemoryStatusEx(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong),
-                    ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong),
-                    ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong),
-                    ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
-
-            status = MemoryStatusEx()
-            status.dwLength = ctypes.sizeof(status)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-                return round(status.ullTotalPhys / (1024**3), 1)
-        except (AttributeError, OSError, ValueError):
-            pass
-    try:
-        page_size = int(os.sysconf("SC_PAGE_SIZE"))
-        page_count = int(os.sysconf("SC_PHYS_PAGES"))
-        return round(page_size * page_count / (1024**3), 1)
-    except (AttributeError, OSError, TypeError, ValueError):
-        return 0.0
-
-
-def recommend_machine_settings(
-    cpu_threads: int,
-    memory_gib: float,
-    cuda_available: bool,
-    vram_gib: float = 0.0,
-    capability_major: int = 0,
-) -> dict[str, str]:
-    if cuda_available:
-        if capability_major < 7:
-            model_name = "base" if vram_gib >= 4 else "tiny"
-            reason = "旧世代CUDA GPUのため、互換性を優先した軽量設定です。"
-        elif vram_gib >= 11.5:
-            model_name = "large-v3"
-            reason = "VRAM 12 GB以上のCUDA GPUを活かす最高精度設定です。"
-        elif vram_gib >= 7.5:
-            model_name = "medium"
-            reason = "VRAM 8 GB以上のCUDA GPU向け高精度設定です。"
-        elif vram_gib >= 5.5:
-            model_name = "small"
-            reason = "VRAM容量と精度のバランスを取ったGPU設定です。"
-        elif vram_gib >= 3.5:
-            model_name = "base"
-            reason = "VRAM 4 GB級GPUで安定性を優先した設定です。"
-        else:
-            model_name = "tiny"
-            reason = "GPUメモリが少ないため、最軽量モデルを推奨します。"
-        diarization_device = "cuda" if capability_major >= 7 and vram_gib >= 7.5 else "cpu"
-        return {
-            "model_name": model_name,
-            "device": "cuda",
-            "diarization_device": diarization_device,
-            "reason": reason,
-        }
-
-    if memory_gib >= 16 and cpu_threads >= 8:
-        model_name = "small"
-        reason = "CUDAを利用できないため、CPUとRAMを活かす高精度寄りの設定です。"
-    elif memory_gib >= 8 and cpu_threads >= 4:
-        model_name = "base"
-        reason = "CUDAを利用できないため、CPUで安定しやすい標準設定です。"
-    else:
-        model_name = "tiny"
-        reason = "CUDAを利用できずCPU/RAMも限られるため、最軽量設定です。"
-    return {
-        "model_name": model_name,
-        "device": "cpu",
-        "diarization_device": "cpu",
-        "reason": reason,
-    }
-
-
-def detect_machine_profile() -> dict[str, Any]:
-    cpu_threads = max(1, os.cpu_count() or 1)
-    cpu_name = (
-        platform.processor()
-        or os.environ.get("PROCESSOR_IDENTIFIER", "")
-        or platform.machine()
-        or "CPU"
-    ).strip()
-    memory_gib = total_system_memory_gib()
-    gpu: dict[str, Any] = {
-        "cuda_available": False,
-        "name": "",
-        "vram_gib": 0.0,
-        "cuda_version": "",
-        "capability": "",
-        "device_count": 0,
-        "reason": "PyTorchでCUDAを利用できません。",
-    }
-    try:
-        import torch
-
-        gpu["torch_version"] = str(getattr(torch, "__version__", ""))
-        gpu["cuda_version"] = str(getattr(torch.version, "cuda", "") or "")
-        gpu["cuda_available"] = bool(torch.cuda.is_available())
-        if gpu["cuda_available"]:
-            gpu["device_count"] = int(torch.cuda.device_count())
-            properties = torch.cuda.get_device_properties(0)
-            capability = torch.cuda.get_device_capability(0)
-            gpu.update({
-                "name": str(properties.name),
-                "vram_gib": round(properties.total_memory / (1024**3), 1),
-                "capability": f"{capability[0]}.{capability[1]}",
-                "capability_major": int(capability[0]),
-                "reason": "",
-            })
-        elif not gpu["cuda_version"]:
-            gpu["reason"] = "インストール済みPyTorchがCUDA対応ではありません。"
-        else:
-            gpu["reason"] = "CUDA対応PyTorchからGPUを使用できません。ドライバーを確認してください。"
-    except Exception as exc:
-        gpu["reason"] = f"GPU診断に失敗しました: {exc}"
-
-    recommended = recommend_machine_settings(
-        cpu_threads,
-        memory_gib,
-        bool(gpu["cuda_available"]),
-        float(gpu["vram_gib"]),
-        int(gpu.get("capability_major", 0)),
-    )
-    return {
-        "checked_at": utc_now_iso(),
-        "cpu": {
-            "available": True,
-            "name": cpu_name,
-            "logical_threads": cpu_threads,
-        },
-        "memory_gib": memory_gib,
-        "gpu": gpu,
-        "recommended": recommended,
-    }
-
-
-def get_machine_profile(*, refresh: bool = False) -> dict[str, Any]:
-    global machine_profile_cache
-    with machine_profile_lock:
-        if machine_profile_cache is None or refresh:
-            machine_profile_cache = detect_machine_profile()
-        return {
-            **machine_profile_cache,
-            "cpu": dict(machine_profile_cache["cpu"]),
-            "gpu": dict(machine_profile_cache["gpu"]),
-            "recommended": dict(machine_profile_cache["recommended"]),
-        }
-
-
-def nvidia_activity_snapshot() -> dict[str, Any]:
-    executable = shutil.which("nvidia-smi")
-    if not executable:
-        return {
-            "available": False,
-            "utilization_percent": None,
-            "memory_used_gib": None,
-            "memory_total_gib": None,
-            "memory_percent": None,
-        }
-    try:
-        completed = subprocess.run(
-            [
-                executable,
-                "--id=0",
-                "--query-gpu=utilization.gpu,memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=2,
-            check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if completed.returncode != 0:
-            raise RuntimeError("nvidia-smi failed")
-        first_line = next(
-            (line.strip() for line in completed.stdout.splitlines() if line.strip()),
-            "",
-        )
-        values = [float(value.strip()) for value in first_line.split(",")]
-        if len(values) != 3:
-            raise ValueError("unexpected nvidia-smi response")
-        utilization, memory_used_mib, memory_total_mib = values
-        memory_percent = (
-            100.0 * memory_used_mib / memory_total_mib
-            if memory_total_mib > 0
-            else 0.0
-        )
-        return {
-            "available": True,
-            "utilization_percent": round(max(0.0, min(100.0, utilization)), 1),
-            "memory_used_gib": round(memory_used_mib / 1024, 2),
-            "memory_total_gib": round(memory_total_mib / 1024, 2),
-            "memory_percent": round(max(0.0, min(100.0, memory_percent)), 1),
-        }
-    except (OSError, RuntimeError, StopIteration, subprocess.TimeoutExpired, ValueError):
-        return {
-            "available": False,
-            "utilization_percent": None,
-            "memory_used_gib": None,
-            "memory_total_gib": None,
-            "memory_percent": None,
-        }
-
-
-def system_activity_snapshot() -> dict[str, Any]:
-    global system_activity_previous_io
-    now = time.monotonic()
-    cpu: dict[str, Any] = {"available": False, "utilization_percent": None}
-    memory: dict[str, Any] = {
-        "available": False,
-        "utilization_percent": None,
-        "used_gib": None,
-        "total_gib": None,
-    }
-    disk: dict[str, Any] = {
-        "available": False,
-        "read_active": False,
-        "write_active": False,
-        "read_mib_per_second": 0.0,
-        "write_mib_per_second": 0.0,
-    }
-    try:
-        import psutil
-
-        # Flask's threaded development server may handle every poll on a new
-        # thread. psutil keeps the non-blocking baseline per thread, so
-        # interval=None can return the meaningless first-call value (0.0) on
-        # every request. A short blocking sample is thread-independent.
-        cpu_percent = float(psutil.cpu_percent(interval=0.1))
-        virtual_memory = psutil.virtual_memory()
-        total_bytes = int(virtual_memory.total)
-        available_bytes = int(virtual_memory.available)
-        cpu = {
-            "available": True,
-            "utilization_percent": round(max(0.0, min(100.0, cpu_percent)), 1),
-        }
-        memory = {
-            "available": True,
-            "utilization_percent": round(
-                max(0.0, min(100.0, float(virtual_memory.percent))), 1
-            ),
-            "used_gib": round((total_bytes - available_bytes) / (1024**3), 1),
-            "total_gib": round(total_bytes / (1024**3), 1),
-        }
-        io_counters = psutil.Process(os.getpid()).io_counters()
-        read_bytes = int(getattr(io_counters, "read_bytes", 0) or 0)
-        write_bytes = int(getattr(io_counters, "write_bytes", 0) or 0)
-        read_count = int(getattr(io_counters, "read_count", 0) or 0)
-        write_count = int(getattr(io_counters, "write_count", 0) or 0)
-        with system_activity_lock:
-            previous = system_activity_previous_io
-            system_activity_previous_io = (
-                now,
-                read_bytes,
-                write_bytes,
-                read_count,
-                write_count,
-            )
-        if previous is None:
-            elapsed = 0.0
-            read_delta = 0
-            write_delta = 0
-        else:
-            elapsed = max(0.001, now - previous[0])
-            read_delta = max(0, read_bytes - previous[1])
-            write_delta = max(0, write_bytes - previous[2])
-        disk = {
-            "available": True,
-            "read_active": read_delta > 0 or (previous is not None and read_count > previous[3]),
-            "write_active": write_delta > 0 or (previous is not None and write_count > previous[4]),
-            "read_mib_per_second": round(read_delta / elapsed / (1024**2), 2) if elapsed else 0.0,
-            "write_mib_per_second": round(write_delta / elapsed / (1024**2), 2) if elapsed else 0.0,
-        }
-    except (AttributeError, ImportError, OSError, ValueError):
-        pass
-    return {
-        "sampled_at": utc_now_iso(),
-        "cpu": cpu,
-        "memory": memory,
-        "gpu": nvidia_activity_snapshot(),
-        "disk": disk,
-    }
-
-
 def media_kind(path: Path | None) -> str | None:
     if path is None:
         return None
@@ -1471,36 +1177,6 @@ def copy_file_limited(source: Path, target: Path, maximum: int) -> int:
         target.unlink(missing_ok=True)
         raise ValueError("The selected media file is empty.")
     return total
-
-
-def validate_json_value(value: Any, *, maximum_nodes: int = 2_000_000) -> None:
-    remaining = [maximum_nodes]
-
-    def visit(current: Any, depth: int) -> None:
-        remaining[0] -= 1
-        if remaining[0] < 0:
-            raise ValueError("The JSON payload contains too many values.")
-        if depth > 24:
-            raise ValueError("The JSON payload is nested too deeply.")
-        if current is None or isinstance(current, (bool, int, str)):
-            return
-        if isinstance(current, float):
-            if not math.isfinite(current):
-                raise ValueError("NaN and Infinity are not valid input values.")
-            return
-        if isinstance(current, list):
-            for item in current:
-                visit(item, depth + 1)
-            return
-        if isinstance(current, dict):
-            for key, item in current.items():
-                if not isinstance(key, str):
-                    raise ValueError("JSON object keys must be strings.")
-                visit(item, depth + 1)
-            return
-        raise ValueError("The JSON payload contains an unsupported value type.")
-
-    visit(value, 0)
 
 
 def is_colab_runtime() -> bool:
@@ -1909,18 +1585,6 @@ def initialize_library(*, repair_provenance: bool = True) -> None:
                 )
 
 
-
-def normalize_source_name(value: Any) -> str:
-    if not isinstance(value, str):
-        raise ValueError("Invalid source name.")
-    if any(ord(character) < 32 or ord(character) == 127 for character in value):
-        raise ValueError("Source names cannot contain control characters.")
-    cleaned = value.strip()
-    if not cleaned or len(cleaned) > 255:
-        raise ValueError("Source names must contain between 1 and 255 characters.")
-    return cleaned
-
-
 def speaker_registry_snapshot(
     *,
     include_inactive: bool = True,
@@ -1979,241 +1643,10 @@ def import_speaker_registry_csv(
         save_records=save_speaker_registry_records,
     )
 
-def stable_segment_id(item_id: str, index: int, segment: dict[str, Any]) -> str:
-    existing = str(segment.get("id") or "").strip()
-    if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", existing):
-        return existing
-    seed = f"{item_id}:{index}:{segment.get('start', 0)}:{segment.get('end', 0)}"
-    return uuid.uuid5(uuid.NAMESPACE_URL, seed).hex
-
-
-def ensure_segment_ids(item_id: str, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    used: set[str] = set()
-    for index, raw in enumerate(segments):
-        if not isinstance(raw, dict):
-            continue
-        segment = dict(raw)
-        segment_id = stable_segment_id(item_id, index, segment)
-        if segment_id in used:
-            segment_id = uuid.uuid4().hex
-        segment["id"] = segment_id
-        used.add(segment_id)
-        normalized.append(segment)
-    return normalized
-
 
 def library_row(item_id: str) -> sqlite3.Row | None:
     with database_connection() as connection:
         return connection.execute("SELECT * FROM library_items WHERE id = ?", (item_id,)).fetchone()
-
-
-def row_segments(row: sqlite3.Row) -> list[dict[str, Any]]:
-    raw = json_load(row["segments_json"], [])
-    return ensure_segment_ids(row["id"], raw if isinstance(raw, list) else [])
-
-
-def row_original_segments(row: sqlite3.Row) -> tuple[dict[str, dict[str, Any]], str]:
-    """Return the immutable-at-import transcript snapshot, if one is available.
-
-    This deliberately does not fall back to the editable `segments_json` value:
-    doing so would hide a missing original source.  Legacy records migrated to
-    this schema retain a separate snapshot, but its status is labelled so it is
-    not mistaken for the pre-edit transcript.
-    """
-    if "original_segments_json" not in row.keys():
-        return {}, "unavailable"
-    raw = json_load(row["original_segments_json"], [])
-    if not isinstance(raw, list):
-        return {}, "unavailable"
-    values = {
-        str(segment.get("id") or ""): dict(segment)
-        for segment in raw
-        if isinstance(segment, dict) and str(segment.get("id") or "")
-    }
-    status = (
-        clean_single_line(row["original_segments_status"], 80)
-        if "original_segments_status" in row.keys() else ""
-    )
-    return values, status or "unavailable"
-
-
-def normalize_session_profile(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, dict):
-        raw = {}
-    session_type = clean_single_line(raw.get("session_type", "focus_group"), 40)
-    if session_type not in SESSION_TYPES:
-        session_type = "other"
-    session_date = clean_single_line(raw.get("session_date"), 40)
-    session_date_source = clean_single_line(raw.get("session_date_source"), 30)
-    if session_date_source not in {"media_metadata", "manual"}:
-        session_date_source = "manual" if session_date else ""
-    if not session_date:
-        session_date_source = ""
-    return {
-        "session_type": session_type,
-        "session_date": session_date,
-        "session_date_source": session_date_source,
-        "location": clean_single_line(raw.get("location"), 300),
-        # This is intentionally separate from the research objective.  A single
-        # objective can be phrased similarly across studies even when the guide
-        # and the questions are not comparable.
-        "comparison_group": clean_single_line(raw.get("comparison_group"), 300),
-        # A comparison group identifies sessions that can be compared.  This
-        # field identifies the actual group in a particular session and must
-        # not be inferred from the file name or speaker labels.
-        "interview_group_id": clean_single_line(raw.get("interview_group_id"), 120),
-        "objective": clean_multiline(raw.get("objective"), 10000),
-        "moderator_guide": clean_multiline(raw.get("moderator_guide"), 20000),
-        "group_conditions": clean_multiline(raw.get("group_conditions"), 10000),
-        "field_notes": clean_multiline(raw.get("field_notes"), 30000),
-    }
-
-
-def normalized_comparison_group(value: Any) -> str:
-    """Return a stable, human-entered key for compatible interview sessions."""
-    value = unicodedata.normalize("NFKC", clean_single_line(value, 300)).casefold()
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def interview_comparison_identity(profile: dict[str, Any]) -> tuple[str, str, str]:
-    """Get a privacy-preserving compatibility key and its display metadata.
-
-    An explicitly entered comparison group is authoritative.  For existing
-    records that predate that field, an identical moderator guide is a safe
-    fallback; a missing guide is deliberately not treated as compatible.
-    """
-    group = clean_single_line(profile.get("comparison_group"), 300)
-    normalized_group = normalized_comparison_group(group)
-    if normalized_group:
-        return (f"group:{normalized_group}", group, "comparison_group")
-    guide = clean_multiline(profile.get("moderator_guide"), 20000)
-    normalized_guide = re.sub(r"\s+", "", unicodedata.normalize("NFKC", guide)).casefold()
-    if normalized_guide:
-        digest = hashlib.sha256(normalized_guide.encode("utf-8")).hexdigest()[:24]
-        return (f"guide:{digest}", "質問ガイドから自動照合", "moderator_guide")
-    return ("", "未設定", "")
-
-
-def normalize_conversation_speaker_profiles(
-    raw: Any,
-    labels: set[str],
-    speaker_names: dict[str, str],
-) -> dict[str, dict[str, Any]]:
-    source = raw if isinstance(raw, dict) else {}
-    profiles: dict[str, dict[str, Any]] = {}
-    for index, label in enumerate(sorted(labels)):
-        value = source.get(label)
-        value = value if isinstance(value, dict) else {}
-        role = clean_single_line(value.get("session_role", "participant"), 40)
-        if role not in SPEAKER_ROLES:
-            role = "participant"
-        consent_status = clean_single_line(value.get("consent_status", "unknown"), 30)
-        recording_consent = clean_single_line(value.get("recording_consent", "unknown"), 30)
-        attendance_status = clean_single_line(value.get("attendance_status", "attended"), 30)
-        registration_status = clean_single_line(value.get("registration_status"), 40)
-        theme_color = clean_single_line(value.get("theme_color"), 7).upper()
-        if not re.fullmatch(r"#[0-9A-F]{6}", theme_color):
-            theme_color = SPEAKER_THEME_COLORS[index % len(SPEAKER_THEME_COLORS)]
-        global_speaker_id = clean_single_line(value.get("global_speaker_id"), 80)
-        display_name = clean_single_line(
-            value.get("display_name") or speaker_names.get(label), 120
-        )
-        if global_speaker_id:
-            registration_status = "registered"
-        elif registration_status not in SPEAKER_REGISTRATION_STATUSES:
-            registration_status = "temporary_single_group" if display_name else "unidentified"
-        profiles[label] = {
-            "speaker_label": label,
-            "global_speaker_id": global_speaker_id,
-            "registration_status": registration_status,
-            "display_name": display_name,
-            "theme_color": theme_color,
-            "session_role": role,
-            "organization": clean_single_line(value.get("organization"), 200),
-            "department": clean_single_line(value.get("department"), 200),
-            "job_title": clean_single_line(value.get("job_title"), 200),
-            "consent_status": (
-                consent_status if consent_status in CONSENT_STATUSES else "unknown"
-            ),
-            "recording_consent": (
-                recording_consent if recording_consent in CONSENT_STATUSES else "unknown"
-            ),
-            "attendance_status": (
-                attendance_status if attendance_status in ATTENDANCE_STATUSES else "unknown"
-            ),
-            "conditions": clean_multiline(value.get("conditions"), 10000),
-            "notes": clean_multiline(value.get("notes"), 10000),
-        }
-    return profiles
-
-
-def row_session_profile(row: sqlite3.Row) -> dict[str, str]:
-    return normalize_session_profile(json_load(row["session_profile_json"], {}))
-
-
-def row_meeting_minutes(row: sqlite3.Row) -> dict[str, Any]:
-    try:
-        raw = row["meeting_minutes_json"]
-    except (KeyError, IndexError):
-        raw = "{}"
-    return normalize_meeting_minutes(json_load(raw, {}))
-
-
-def row_session_outline(row: sqlite3.Row, session_profile: dict[str, Any]) -> dict[str, Any]:
-    """Join the planned agenda, the saved agenda sections and the saved themes."""
-    try:
-        saved = json_load(row["transformer_analysis_json"], {})
-    except (KeyError, IndexError):
-        saved = {}
-    transformer = saved if isinstance(saved, dict) else {}
-    # The analysis screen owns the exact staleness check; here the saved revisions
-    # answer the question this block asks: was this run made from the current text?
-    saved_revisions = tuple(
-        value if isinstance(value, int) and not isinstance(value, bool) else None
-        for value in (transformer.get("source_revision"), transformer.get("analysis_revision"))
-    )
-    stale = bool(transformer) and saved_revisions != (
-        int(row["revision_count"] or 0), int(row["analysis_revision"] or 0),
-    )
-    return build_session_outline(
-        outline=json_load(row["outline_json"], None), transformer=transformer,
-        session_profile=session_profile, transformer_stale=stale,
-    )
-
-
-def row_speaker_profiles(
-    row: sqlite3.Row,
-    segments: list[dict[str, Any]] | None = None,
-    speaker_names: dict[str, str] | None = None,
-) -> dict[str, dict[str, Any]]:
-    segments = segments if segments is not None else row_segments(row)
-    if speaker_names is None:
-        raw_names = json_load(row["speaker_names_json"], {})
-        speaker_names = raw_names if isinstance(raw_names, dict) else {}
-    labels = {str(item.get("speaker") or "UNKNOWN") for item in segments}
-    return normalize_conversation_speaker_profiles(
-        json_load(row["speaker_profiles_json"], {}),
-        labels,
-        speaker_names,
-    )
-
-
-def emotion_values(segment: dict[str, Any]) -> list[str]:
-    emotions = segment.get("emotions")
-    if not isinstance(emotions, dict):
-        return []
-    values: list[str] = []
-    for data in emotions.values():
-        if not isinstance(data, dict):
-            continue
-        raw_value = data.get("label_ja") or data.get("label")
-        if not raw_value:
-            continue
-        value = str(data.get("label_ja") or emotion_label_ja(str(raw_value))).strip()
-        if value and value not in values:
-            values.append(value)
-    return values
 
 
 def library_group_name(group_id: str) -> str:
@@ -2763,89 +2196,6 @@ def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
     return group_analysis_for_row(updated)
 
 
-WORD_CLOUD_SLOTS = (
-    (320, 184, 250, 0, "middle"),
-    (165, 118, 190, -8, "middle"),
-    (478, 116, 190, 7, "middle"),
-    (156, 232, 195, 6, "middle"),
-    (480, 236, 190, -7, "middle"),
-    (318, 96, 170, 0, "middle"),
-    (319, 268, 180, 0, "middle"),
-    (80, 170, 125, -12, "middle"),
-    (560, 171, 125, 11, "middle"),
-    (78, 283, 125, 0, "middle"),
-    (557, 286, 125, 0, "middle"),
-    (87, 86, 125, 0, "middle"),
-    (551, 82, 125, 0, "middle"),
-    (225, 304, 145, -5, "middle"),
-    (413, 306, 145, 5, "middle"),
-    (226, 58, 140, 0, "middle"),
-    (411, 57, 140, 0, "middle"),
-    (320, 330, 170, 0, "middle"),
-)
-
-
-def word_cloud_svg(source_name: str, segments: list[dict[str, Any]]) -> str:
-    """Render a dependency-free word cloud as an SVG image."""
-    terms = text_mining_terms(segments)
-    max_count = max((count for _, count in terms), default=1)
-    min_count = min((count for _, count in terms), default=1)
-    palette = ("#d7f34a", "#ff9b42", "#79b791", "#efd6ac", "#b8d8d8", "#d3c4e3", "#f2b5d4", "#a7c7e7")
-    words: list[str] = []
-    for index, ((term, count), slot) in enumerate(zip(terms, WORD_CLOUD_SLOTS)):
-        x, y, max_width, rotation, anchor = slot
-        ratio = (count - min_count) / max(1, max_count - min_count)
-        rank_bonus = max(0, 8 - index) * 0.7
-        font_size = round(17 + ratio * 27 + rank_bonus, 1)
-        label = html.escape(term[:24])
-        estimated_width = len(term) * font_size * (0.95 if not term.isascii() else 0.58)
-        length_attributes = (
-            f' textLength="{max_width}" lengthAdjust="spacingAndGlyphs"'
-            if estimated_width > max_width
-            else ""
-        )
-        color = palette[index % len(palette)]
-        words.append(
-            f'<g transform="rotate({rotation} {x} {y})">'
-            f'<text x="{x}" y="{y}" text-anchor="{anchor}" dominant-baseline="middle" '
-            f'font-size="{font_size}" fill="{color}" class="word"{length_attributes}>'
-            f'<title>{label}: {count}回</title>{label}</text></g>'
-        )
-    if not words:
-        words.append(
-            '<text x="320" y="178" class="empty" text-anchor="middle">テキストデータなし</text>'
-            '<text x="320" y="211" class="hint" text-anchor="middle">'
-            '文字起こしを保存するとワードクラウドを表示します</text>'
-        )
-    title = html.escape(Path(source_name).stem[:42] or "文字起こし")
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-<rect width="640" height="360" rx="24" fill="#18211d"/>
-<circle cx="604" cy="34" r="86" fill="#d7f34a" opacity=".09"/>
-<circle cx="38" cy="344" r="105" fill="#ff9b42" opacity=".08"/>
-<text x="24" y="25" class="eyebrow">WORD CLOUD</text>
-<text x="616" y="25" class="source" text-anchor="end">{title}</text>
-{''.join(words)}
-<text x="616" y="345" class="footer" text-anchor="end">{len(segments)} SEGMENTS</text>
-<style>
-text {{ font-family: "Yu Gothic UI", "Meiryo", sans-serif; }}
-.word {{ font-weight:800; paint-order:stroke; stroke:#18211d; stroke-width:2px; stroke-opacity:.22; }}
-.eyebrow {{ fill:#d7f34a; font-size:10px; font-weight:800; letter-spacing:2px; }}
-.source {{ fill:#91a098; font-size:10px; }}
-.empty {{ fill:#d7f34a; font-size:23px; font-weight:800; }}
-.hint {{ fill:#91a098; font-size:12px; }}
-.footer {{ fill:#91a098; font-size:9px; font-weight:800; letter-spacing:1px; }}
-</style>
-</svg>"""
-
-
-def write_word_cloud(
-    target: Path,
-    source_name: str,
-    segments: list[dict[str, Any]],
-) -> Path:
-    return atomic_write_text(target, word_cloud_svg(source_name, segments), encoding="utf-8")
-
-
 def generate_word_cloud_thumbnail(
     item_id: str,
     source_name: str,
@@ -3162,7 +2512,6 @@ def load_token_config(path: Path = TOKEN_FILE) -> TokenConfig:
         typesafe_api_key=clean_secret(raw.get("typesafe_api_key")),
         typesafe_model=clean_single_line(raw.get("typesafe_model"), 200) or JEV_DEFAULT_MODEL,
     )
-
 
 
 def lmstudio_headers(api_key: str) -> dict[str, str]:
@@ -3595,8 +2944,6 @@ run_audio_preprocess = _audio_processor.preprocess
 run_audio_interval_preprocess = _audio_processor.preprocess_interval
 
 
-
-
 TRANSCRIPT_FINISHING_MODES = transcript_formatting.TRANSCRIPT_FINISHING_MODES
 TRANSCRIPT_FORMATTING_VERSION = transcript_formatting.TRANSCRIPT_FORMATTING_VERSION
 normalize_transcript_punctuation = transcript_formatting.normalize_transcript_punctuation
@@ -3858,13 +3205,6 @@ def lmstudio_reasoning_settings(base_url: str, api_key: str, model: str) -> dict
     except (OSError, ValueError, AttributeError, TypeError):
         pass
     return {}
-
-
-@app.get('/api/ai/lmstudio-reasoning')
-def lmstudio_reasoning_route():
-    config = load_token_config()
-    return jsonify({'model': config.lmstudio_model, 'reasoning': lmstudio_reasoning_settings(
-        config.lmstudio_base_url, config.lmstudio_api_key, config.lmstudio_model)})
 
 
 # AI transport composition boundary.
@@ -5424,52 +4764,6 @@ def _update_library_from_payload_locked(
     return result
 
 
-def parse_bool(name: str, default: bool = False, *, form: Any = None) -> bool:
-    form = request.form if form is None else form
-    values = form.getlist(name)
-    if not values:
-        return default
-    return any(value.lower() in {"1", "true", "yes", "on"} for value in values)
-
-
-def parse_optional_int(name: str, *, form: Any = None) -> int | None:
-    form = request.form if form is None else form
-    raw = form.get(name, "").strip()
-    if not raw or raw == "0":
-        return None
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} は整数で指定してください。") from exc
-    if not 1 <= value <= 20:
-        raise ValueError(f"{name} は 1～20 で指定してください。")
-    return value
-
-
-def parse_optional_float(
-    name: str, default: float, min_value: float, max_value: float, *, form: Any = None
-) -> float:
-    form = request.form if form is None else form
-    raw = form.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} は数値で指定してください。") from exc
-    if not math.isfinite(value) or not min_value <= value <= max_value:
-        raise ValueError(f"{name} は {min_value:g}～{max_value:g} で指定してください。")
-    return value
-
-
-def parse_audio_preprocess(*, form: Any = None) -> str:
-    form = request.form if form is None else form
-    preset = form.get("audio_preprocess", "standard").strip() or "standard"
-    if preset not in AUDIO_PREPROCESS_PRESETS:
-        raise ValueError("音声前処理の指定が不正です。")
-    return preset
-
-
 def recover_delete_quarantines() -> list[str]:
     return edit_transactions.recover_delete_quarantines(
         connect=database_connection,
@@ -5541,17 +4835,6 @@ register_system_routes(
     update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
     system_activity_snapshot=lambda: system_activity_snapshot(),
 )
-
-
-@app.get("/api/speakers/export.csv")
-def export_speaker_registry():
-    content = speaker_registry_csv_bytes(list_speaker_registry())
-    return send_file(
-        io.BytesIO(content),
-        mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name="gurumoji_speaker_registry.csv",
-    )
 
 
 @app.post("/api/select-input")
@@ -5721,70 +5004,6 @@ def list_library():
             "groups": groups,
         },
     })
-
-
-def normalized_library_group_name(value: Any) -> str:
-    if not isinstance(value, str):
-        raise ValueError("グループ名を入力してください。")
-    name = clean_single_line(value, 80)
-    if not name:
-        raise ValueError("グループ名を入力してください。")
-    return name
-
-
-def library_groups() -> LibraryGroups:
-    return LibraryGroups(
-        connection=database_connection,
-        lock=library_write_lock,
-        now=utc_now_iso,
-        normalize_name=normalized_library_group_name,
-    )
-
-
-@app.post("/api/library/groups")
-def create_library_group():
-    payload = request.get_json(silent=True)
-    try:
-        group = library_groups().create(payload.get("name") if isinstance(payload, dict) else None)
-    except ValueError as exc:
-        status = 409 if str(exc) == "同じ名前のグループがすでにあります。" else 400
-        return jsonify({"error": str(exc)}), status
-    return jsonify(group), 201
-
-
-@app.put("/api/library/groups/<group_id>")
-def update_library_group(group_id: str):
-    payload = request.get_json(silent=True)
-    try:
-        group = library_groups().rename(group_id, payload.get("name") if isinstance(payload, dict) else None)
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        status = 409 if str(exc) == "同じ名前のグループがすでにあります。" else 400
-        return jsonify({"error": str(exc)}), status
-    return jsonify(group)
-
-
-@app.delete("/api/library/groups/<group_id>")
-def delete_library_group(group_id: str):
-    try:
-        return jsonify(library_groups().delete(group_id))
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-
-
-@app.put("/api/library/<item_id>/group")
-def assign_library_group(item_id: str):
-    payload = request.get_json(silent=True)
-    try:
-        group = library_groups().assign(
-            item_id, payload.get("group_id") if isinstance(payload, dict) else None,
-        )
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(group)
 
 
 comparison_rate = interview_comparison.comparison_rate
@@ -6632,56 +5851,6 @@ register_speaker_routes(
 register_job_routes(app, job_handler)
 
 
-@app.get("/api/analysis/experts")
-def get_analysis_experts():
-    return jsonify(method_experts.catalog_summary())
-
-
-@app.get("/api/analysis/experts/<expert_id>")
-def get_analysis_expert(expert_id: str):
-    try:
-        return jsonify(method_experts.expert_detail(expert_id))
-    except (method_experts.ExpertDefinitionError, KeyError) as exc:
-        return jsonify({"error": str(exc)}), 404
-
-
-@app.get("/api/library/<item_id>/analysis/methods")
-def get_analysis_method_overview(item_id: str):
-    """Per-method state for the method view: what each analysis produced and what its expert says."""
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        analysis = group_analysis_for_row(row, include_research_rows=True)
-        datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
-        outline = json_load(row["outline_json"], None)
-        finished = any(run["kind"] == "ai_finishing" and run["status"] == "completed"
-                       for run in analysis_archive_store().list(item_id))
-        methods = [method for method in method_results(analysis, datasets, outline=outline)
-                   if method["method_id"] not in SEPARATE_RUN_METHODS]
-        # Context search runs on demand and AI finishing belongs to the transcript screen,
-        # so both are listed with their own state instead of a result table.
-        methods += [
-            {"method_id": "kwic", "title": "文脈検索", "status": "not_run", "datasets": ["kwic"],
-             "previews": [], "analysis_unit": "出現箇所",
-             "limitations": ["語を検索したときだけ結果が出ます。検索結果はCSVで保存できます。"]},
-            {"method_id": "ai_finishing", "title": "AI仕上げ・変更記録",
-             "datasets": ["ai_changes", "ai_jev_comparison"],
-             "status": "completed" if finished else "not_run", "previews": [], "analysis_unit": "発話",
-             "limitations": ["実行と変更記録の確認は文字起こし画面です。保存記録に仕上げ前後の発話が残ります。"]},
-        ]
-        overview = method_experts.method_overview(methods, analysis)
-        overview["groups"] = [
-            {"id": key, "title": title, "description": description,
-             "method_ids": [value for value in ids if value not in SEPARATE_RUN_METHODS]}
-            for key, title, description, ids in METHOD_GROUPS
-            if any(value not in SEPARATE_RUN_METHODS for value in ids)
-        ]
-        return jsonify(overview)
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "手法別の分析状態を取得できませんでした。"}), 500
-
-
 def public_insight_request(row) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -6785,40 +5954,6 @@ def run_analysis_insight_job(request_id: str, analysis: dict, provider: str, api
     finally:
         with insight_jobs_lock:
             insight_cancel_events.pop(request_id, None)
-
-
-@app.get("/api/library/<item_id>/analysis/kwic")
-def get_analysis_kwic(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        offset = int(request.args.get("offset", "0"))
-        limit = int(request.args.get("limit", "50"))
-        if offset < 0 or not 1 <= limit <= 200:
-            raise ValueError("検索結果の表示範囲が正しくありません。")
-        analysis = group_analysis_for_row(row)
-        research = build_research_analysis(analysis)
-        export = request.args.get("format") == "csv"
-        result = search_kwic(analysis, research["linguistics"]["morphemes"],
-                             request.args.get("q", ""), mode=request.args.get("mode", "literal"),
-                             speaker=request.args.get("speaker", ""),
-                             offset=0 if export else offset, limit=None if export else limit)
-        if export:
-            stream = io.StringIO(newline="")
-            writer = csv.DictWriter(stream, fieldnames=KWIC_FIELDS, extrasaction="ignore")
-            writer.writeheader()
-            for hit in result["hits"]:
-                writer.writerow({key: analysis_csv_safe(value) for key, value in hit.items()})
-            return send_file(io.BytesIO(stream.getvalue().encode("utf-8-sig")),
-                             mimetype="text/csv; charset=utf-8", as_attachment=True,
-                             download_name=f"{safe_output_stem(str(row['source_name']))[:64]}_文脈検索.csv")
-        result["fingerprint"] = analysis["insights"]["fingerprint"]
-        return jsonify(result)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "文脈検索に失敗しました。"}), 500
 
 
 def start_analysis_insights_command(
@@ -7202,47 +6337,6 @@ def cancel_transformer_analysis_command(
         return {"ok": True}
 
 
-@app.get("/api/library/<item_id>/analysis/semantic-search")
-def get_transformer_semantic_search(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        limit = int(request.args.get("limit", "20"))
-        if not 1 <= limit <= 100:
-            raise ValueError("表示件数は1〜100で指定してください。")
-        analysis = group_analysis_for_row(row)
-        state = analysis.get("transformer", {})
-        public_saved = state.get("result")
-        if not public_saved:
-            return jsonify({"error": "先にTransformerテーマ分析を実行してください。"}), 409
-        if state.get("stale"):
-            return jsonify({"error": "元データが更新されています。Transformer分析を再実行してください。"}), 409
-        saved = json_load(row["transformer_analysis_json"], {})
-        if not isinstance(saved, dict) or not saved.get("vectors"):
-            return jsonify({"error": "保存済み意味ベクトルがありません。Transformer分析を再実行してください。"}), 409
-        query = request.args.get("q", "")
-        hits = transformer_semantic_search(saved, query, limit=limit)
-        return jsonify({"query": query, "hits": hits, "model": saved.get("engine", {})})
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"error": "意味検索を実行できませんでした: "
-                        + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]}), 500
-
-
-@app.get("/api/library/<item_id>/analysis")
-def get_library_analysis(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        execute = request.args.get("execute", "0").strip() in {"1", "true"}
-        return jsonify(group_analysis_for_row(row, execute=execute))
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "分析データを生成できません。元データを確認してください。"}), 500
-
-
 def run_segment_classifications_command(
     item_id: str, payload: dict[str, Any], *, app_url: str
 ) -> dict[str, Any]:
@@ -7368,144 +6462,6 @@ def run_segment_classifications_command(
         ) from exc
 
 
-@app.put("/api/library/<item_id>/analysis")
-def update_library_analysis(item_id: str):
-    if request.content_length and request.content_length > 16 * 1024 * 1024:
-        return jsonify({"error": "分析設定が大きすぎます。"}), 413
-    try:
-        return jsonify(save_group_analysis(item_id, request.get_json(silent=True)))
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except AnalysisConflictError as exc:
-        return jsonify({"error": str(exc), "conflict": True}), 409
-    except sqlite3.Error:
-        return jsonify({"error": "分析設定を保存できません。"}), 500
-
-
-@app.get("/api/library/<item_id>/preparation/export.json")
-def export_transcript_preparation(item_id: str):
-    with database_connection() as connection:
-        connection.execute("BEGIN")
-        row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
-        if row is None:
-            return jsonify({"error": "データが見つかりません。"}), 404
-        value = preparation.view(connection, row, row_segments(row))
-        value["original_segments"] = json_load(row["original_segments_json"], [])
-        value["original_status"] = row["original_segments_status"]
-        value["versions"] = [
-            {**dict(v), "source": json.loads(v["source_json"])} for v in connection.execute(
-                "SELECT version, source_hash, source_json, origin, created_at FROM transcript_versions WHERE item_id=? ORDER BY version", (item_id,))
-        ]
-        for version in value["versions"]:
-            version.pop("source_json")
-        value["review_history"] = [
-            {"revision": v["revision"], "created_at": v["created_at"], "state": json.loads(v["state_json"])}
-            for v in connection.execute("SELECT * FROM transcript_preparation_events WHERE item_id=? ORDER BY revision", (item_id,))
-        ]
-        value["manifest"] = {"schema_version": 1, "encoding": "UTF-8", "row_count": len(value["rows"]),
-            "rows_sha256": preparation.digest(value["rows"]), "columns": preparation.FIELDS,
-            "missing_value": "JSON null / CSV empty", "order_basis": "saved transcript array; verification is separate",
-            "ids": "application-managed IDs; split/merge lineage is researcher-confirmed",
-            "csv_note": "CSV applies spreadsheet formula escaping; JSON preserves exact text.",
-            "privacy": "Local export may contain personal data. Review before sharing. Media not included."}
-    return send_file(io.BytesIO(preparation.encode(value).encode("utf-8")),
-                     mimetype="application/json", as_attachment=True, download_name=f"{item_id}_preparation.json")
-
-
-@app.get("/api/library/<item_id>/analysis/export.json")
-def export_library_analysis_json(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        analysis = group_analysis_for_row(row, include_research_rows=True)
-        content = json.dumps(
-            analysis,
-            ensure_ascii=False,
-            indent=2,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "分析データを出力できません。元データを確認してください。"}), 500
-    return send_file(
-        io.BytesIO(content),
-        mimetype="application/json; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_analysis.json",
-    )
-
-
-@app.get("/api/library/<item_id>/analysis/export.md")
-def export_library_analysis_report(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        analysis = group_analysis_for_row(row, include_research_rows=True)
-        content = focus_group_analysis_report_markdown(analysis).encode("utf-8")
-    except (ValueError, TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "分析レポートを出力できません。元データを確認してください。"}), 500
-    return send_file(
-        io.BytesIO(content),
-        mimetype="text/markdown; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:64]}_分析レポート.md",
-    )
-
-
-@app.get("/api/library/<item_id>/analysis/export.xlsx")
-def export_library_analysis_xlsx(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    try:
-        analysis = group_analysis_for_row(row, include_research_rows=True)
-        datasets = {
-            dataset: analysis_csv_rows(analysis, dataset)
-            for dataset in ANALYSIS_CSV_FIELDS
-        }
-        content = build_analysis_workbook(analysis, datasets)
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "Excel分析データを出力できません。元データを確認してください。"}), 500
-    return send_file(
-        io.BytesIO(content),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=(
-            f"{safe_output_stem(str(row['source_name']))[:64]}_研究分析.xlsx"
-        ),
-    )
-
-
-@app.get("/api/library/<item_id>/analysis/export.csv")
-def export_library_analysis_csv(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "処理済みデータが見つかりません。"}), 404
-    dataset = request.args.get("dataset", "speakers").strip().lower()
-    try:
-        analysis = group_analysis_for_row(row, include_research_rows=True)
-        content = analysis_csv_content(analysis, dataset)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (TypeError, OverflowError, sqlite3.Error):
-        return jsonify({"error": "分析データを出力できません。元データを確認してください。"}), 500
-    return send_file(
-        io.BytesIO(content),
-        mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name=(
-            f"{safe_output_stem(str(row['source_name']))[:64]}_analysis_{dataset}.csv"
-        ),
-    )
-
-
 def meeting_minutes_export_row(item_id: str) -> tuple[sqlite3.Row, dict[str, Any]]:
     return obsidian_workflows().meeting_minutes_export_row(item_id)
 
@@ -7524,135 +6480,6 @@ register_obsidian_routes(
     publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
     log_warning=app.logger.warning,
 )
-
-
-@app.get("/api/library/<item_id>/meeting.json")
-def export_meeting_json(item_id: str):
-    try:
-        row, minutes = meeting_minutes_export_row(item_id)
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    content = json.dumps(
-        meeting_external_payload(str(row["source_name"]), minutes, item_id),
-        ensure_ascii=False,
-        indent=2,
-    ).encode("utf-8")
-    return send_file(
-        io.BytesIO(content), mimetype="application/json; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_meeting.json",
-    )
-
-
-@app.get("/api/library/<item_id>/meeting-tasks.csv")
-def export_meeting_tasks_csv(item_id: str):
-    try:
-        row, minutes = meeting_minutes_export_row(item_id)
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    content = ("\ufeff" + meeting_tasks_csv_text(minutes)).encode("utf-8")
-    return send_file(
-        io.BytesIO(content), mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_tasks.csv",
-    )
-
-
-@app.get("/api/library/<item_id>/meeting-minutes.md")
-def export_meeting_minutes_markdown(item_id: str):
-    try:
-        row, minutes = meeting_minutes_export_row(item_id)
-    except LookupError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    content = format_meeting_minutes_markdown(str(row["source_name"]), minutes).encode("utf-8")
-    return send_file(
-        io.BytesIO(content), mimetype="text/markdown; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_meeting_minutes.md",
-    )
-
-
-@app.get("/api/library/<item_id>/speakers.csv")
-def export_conversation_speakers(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
-    segments = row_segments(row)
-    raw_names = json_load(row["speaker_names_json"], {})
-    speaker_names = raw_names if isinstance(raw_names, dict) else {}
-    profiles = row_speaker_profiles(row, segments, speaker_names)
-    session = row_session_profile(row)
-    registry = {item["id"]: item for item in list_speaker_registry()}
-    metrics: dict[str, dict[str, float | int]] = {}
-    for segment in segments:
-        label = str(segment.get("speaker") or "UNKNOWN")
-        start, end = segment_bounds(segment)
-        data = metrics.setdefault(label, {"count": 0, "seconds": 0.0, "characters": 0})
-        data["count"] = int(data["count"]) + 1
-        data["seconds"] = float(data["seconds"]) + max(0.0, end - start)
-        data["characters"] = int(data["characters"]) + len(str(segment.get("text") or ""))
-    custom_headers = sorted({
-        key
-        for profile in profiles.values()
-        for key in (
-            registry.get(profile.get("global_speaker_id"), {}).get("attributes", {}) or {}
-        )
-    })
-    fixed_headers = [
-        "会話ID", "データ名", "会話種別", "実施日", "場所", "目的",
-        "話者ラベル", "表示名", "グローバル話者ID", "参加者コード",
-        "話者登録状態", "テーマカラー", "会話役割", "組織", "部署", "役職", "参加状態",
-        "会話固有条件", "メモ", "発話数", "発話秒数", "文字数",
-    ]
-    stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=fixed_headers + custom_headers)
-    writer.writerow({header: analysis_csv_safe(header) for header in fixed_headers + custom_headers})
-    for label, profile in profiles.items():
-        global_record = registry.get(profile.get("global_speaker_id"), {})
-        metric = metrics.get(label, {"count": 0, "seconds": 0.0, "characters": 0})
-        export_row = {
-            "会話ID": row["id"],
-            "データ名": row["source_name"],
-            "会話種別": session["session_type"],
-            "実施日": session["session_date"],
-            "場所": session["location"],
-            "目的": session["objective"],
-            "話者ラベル": label,
-            "表示名": profile["display_name"] or speaker_names.get(label, ""),
-            "グローバル話者ID": profile["global_speaker_id"],
-            "参加者コード": global_record.get("participant_code", ""),
-            "話者登録状態": {
-                "registered": "登録済み",
-                "temporary_single_group": "一時話者（この会話のみ）",
-                "unidentified": "未特定",
-            }.get(profile.get("registration_status"), "未特定"),
-            "テーマカラー": profile["theme_color"],
-            "会話役割": profile["session_role"],
-            "組織": profile["organization"],
-            "部署": profile["department"],
-            "役職": profile["job_title"],
-            "参加状態": profile["attendance_status"],
-            "会話固有条件": profile["conditions"],
-            "メモ": profile["notes"],
-            "発話数": metric["count"],
-            "発話秒数": round(float(metric["seconds"]), 3),
-            "文字数": metric["characters"],
-            **(global_record.get("attributes", {}) or {}),
-        }
-        writer.writerow({key: analysis_csv_safe(value) for key, value in export_row.items()})
-    content = ("\ufeff" + stream.getvalue()).encode("utf-8")
-    return send_file(
-        io.BytesIO(content),
-        mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_speakers.csv",
-    )
 
 
 @app.get("/api/library/<item_id>/thumbnail")
@@ -7900,71 +6727,6 @@ def download_library_file(item_id: str, filename: str):
     if matching is None or not matching.is_file():
         return jsonify({"error": "出力ファイルが見つかりません。"}), 404
     return send_file(matching, as_attachment=True, download_name=matching.name)
-
-
-@app.get("/api/training")
-def training_status():
-    try:
-        with database_connection() as connection:
-            events = training_events_from_connection(connection)
-    except (OSError, sqlite3.Error):
-        app.logger.exception("Could not read canonical training events")
-        return jsonify({"error": "学習履歴を読み取れません。"}), 500
-    event_count = len(events)
-    ready_count = sum(int(bool(event.get("ready_for_kushinada"))) for event in events)
-    downloads_allowed = not REMOTE_ACCESS_ENABLED
-    return jsonify({
-        "event_count": event_count,
-        "ready_count": ready_count,
-        "jsonl_url": (
-            "/api/training/corrections.jsonl"
-            if downloads_allowed and event_count > 0
-            else None
-        ),
-        "manifest_url": (
-            "/api/training/manifest.csv"
-            if downloads_allowed and event_count > 0
-            else None
-        ),
-    })
-
-
-@app.get("/api/training/corrections.jsonl")
-def download_training_jsonl():
-    if REMOTE_ACCESS_ENABLED:
-        return jsonify({"error": "Raw training data downloads are disabled for remote access."}), 403
-    try:
-        events = refresh_training_exports()
-    except (OSError, sqlite3.Error) as exc:
-        return jsonify({"error": f"学習データを生成できません: {exc}"}), 500
-    if not events:
-        return jsonify({"error": "学習データはまだありません。"}), 404
-    jsonl_content, _manifest_content = training_export_contents(events)
-    return send_file(
-        io.BytesIO(jsonl_content.encode("utf-8")),
-        mimetype="application/x-ndjson; charset=utf-8",
-        as_attachment=True,
-        download_name="kushinada_corrections.jsonl",
-    )
-
-
-@app.get("/api/training/manifest.csv")
-def download_training_manifest():
-    if REMOTE_ACCESS_ENABLED:
-        return jsonify({"error": "Raw training data downloads are disabled for remote access."}), 403
-    try:
-        events = refresh_training_exports()
-    except (OSError, sqlite3.Error) as exc:
-        return jsonify({"error": f"学習データを生成できません: {exc}"}), 500
-    if not events:
-        return jsonify({"error": "学習データはまだありません。"}), 404
-    _jsonl_content, manifest_content = training_export_contents(events)
-    return send_file(
-        io.BytesIO(("\ufeff" + manifest_content).encode("utf-8")),
-        mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name="kushinada_manifest.csv",
-    )
 
 
 def start_transcription_job_command(
@@ -8286,6 +7048,55 @@ def admission_job_public(job_id: str) -> dict[str, Any]:
         "output_warning": "",
         "revision_count": 0,
     }
+
+
+register_library_group_routes(
+    app,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    library_write_lock=library_write_lock,
+)
+
+
+register_training_routes(
+    app,
+    remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    refresh_training_exports=refresh_training_exports,
+    training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
+)
+
+
+register_export_routes(
+    app,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    list_speaker_registry=list_speaker_registry,
+    meeting_minutes_export_row=meeting_minutes_export_row,
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+    row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
+)
+
+
+register_analysis_view_routes(
+    app,
+    AnalysisConflictError=AnalysisConflictError,
+    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+    build_research_analysis=lambda *args, **kwargs: build_research_analysis(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    public_diagnostic_text=public_diagnostic_text,
+    save_group_analysis=save_group_analysis,
+    transformer_semantic_search=lambda *args, **kwargs: transformer_semantic_search(*args, **kwargs),
+)
+
+
+register_ai_routes(
+    app,
+    lmstudio_reasoning_settings=lambda *args, **kwargs: lmstudio_reasoning_settings(*args, **kwargs),
+    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+)
 
 
 def main() -> int:

@@ -3,6 +3,7 @@
 import ast
 import importlib
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -78,6 +79,37 @@ class RoutingArchitectureTests(unittest.TestCase):
         self.assertEqual(
             endpoints["import_speaker_registry"], "/api/speakers/import"
         )
+
+    def test_adapters_receive_names_that_tests_patch_on_app(self):
+        """A patch on ``app.X`` only reaches code that looks X up through app.
+
+        Routing and handler modules therefore take such names as injected
+        dependencies (the composition passes late-bound lambdas) instead of
+        importing them. Otherwise a test that patches ``app.X`` would keep
+        passing while exercising the real implementation.
+        """
+        tests_root = Path(__file__).resolve().parent
+        pattern = re.compile(
+            r"patch(?:\.object)?\(\s*app\s*,\s*['\"](\w+)"
+            r"|patch\(['\"]app\.(\w+)['\"]"
+        )
+        patched = set()
+        for path in tests_root.glob("test_*.py"):
+            for match in pattern.finditer(path.read_text(encoding="utf-8")):
+                patched.add(match.group(1) or match.group(2))
+        source_root = tests_root.parent / "src" / "gurumoji"
+        violations = []
+        for folder in (source_root / "handlers", source_root / "web"):
+            for path in folder.glob("*.py"):
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                imported = {
+                    alias.asname or alias.name
+                    for node in tree.body if isinstance(node, ast.ImportFrom)
+                    for alias in node.names
+                }
+                for name in sorted(imported & patched):
+                    violations.append(f"{path.name}: {name}")
+        self.assertEqual(violations, [])
 
     def test_route_map_matches_the_committed_snapshot(self):
         """URL, method and endpoint stay identical while routes move modules.
