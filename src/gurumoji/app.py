@@ -451,6 +451,17 @@ from .services.media_files import (
 )
 from .services.media_files import make_media_files
 from .web.library_routes import register_library_routes
+from .web.security import (
+    HIDDEN_LOCAL_PATH_MESSAGE,
+    LOOPBACK_HOSTS,
+    UNSAFE_HTTP_METHODS,
+    bind_host_is_loopback,
+    public_diagnostic_text,
+    remote_addr_is_loopback,
+    request_hostname,
+    sanitize_remote_json_payload,
+)
+from .web.security import make_request_guards, register_request_security
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -519,8 +530,6 @@ ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
 REMOTE_ACCESS_TOKEN = os.environ.get("MOJIOKOSI_ACCESS_TOKEN", "").strip()
-LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
-UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "committing"})
 MODEL_NAMES = {"tiny", "base", "small", "medium", "large-v3"}
 LANGUAGES = {None, "ja", "en", "zh", "ko"}
@@ -554,271 +563,66 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["MAX_CONTENT_LENGTH"] = MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
 
 
-def request_hostname() -> str:
-    try:
-        return (urllib.parse.urlsplit(f"//{request.host}").hostname or "").casefold()
-    except ValueError:
-        return ""
-
-
-def trusted_request_hosts() -> set[str]:
-    hosts = set(LOOPBACK_HOSTS)
-    if not REMOTE_ACCESS_ENABLED:
-        return hosts
-    configured = os.environ.get("MOJIOKOSI_TRUSTED_HOSTS", "")
-    hosts.update(value.strip().casefold() for value in configured.split(",") if value.strip())
-    bind_host = os.environ.get("MOJIOKOSI_HOST", "127.0.0.1").strip().casefold()
-    if bind_host and bind_host not in {"0.0.0.0", "::", "[::]", "*"}:
-        hosts.add(bind_host.strip("[]"))
-    return hosts
-
-
-def remote_addr_is_loopback() -> bool:
-    raw = str(request.remote_addr or "").strip()
-    try:
-        return ipaddress.ip_address(raw).is_loopback
-    except ValueError:
-        return raw.casefold() == "localhost"
-
-
-def bind_host_is_loopback(host: str) -> bool:
-    normalized = host.strip().strip("[]").casefold()
-    if normalized == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(normalized).is_loopback
-    except ValueError:
-        return False
-
-
-def local_path_access_allowed() -> bool:
-    if not has_request_context():
-        return True
-    if REMOTE_ACCESS_ENABLED:
-        # Authentication is enforced by before_request.  Remote filesystem
-        # access remains unavailable unless the separate high-risk opt-in is set.
-        return REMOTE_LOCAL_PATHS_ENABLED
-    return remote_addr_is_loopback()
-
-
-WINDOWS_ABSOLUTE_PATH_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]|\\\\(?:[?.]\\)?[^\\/\r\n]+[\\/])"
+(
+    trusted_request_hosts,
+    local_path_access_allowed,
+    remote_auth_valid,
+    request_origin_allowed,
+) = make_request_guards(
+    remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
+    remote_access_token=lambda: REMOTE_ACCESS_TOKEN,
+    remote_local_paths_enabled=lambda: REMOTE_LOCAL_PATHS_ENABLED,
 )
-POSIX_ABSOLUTE_PATH_RE = re.compile(
-    r"(?:^|(?<=[\s'\`(<\[{=:]))/(?!/)[^\s'\`<>()\[\]{}\r\n]+"
-)
-FILE_URI_RE = re.compile(r"(?i)\bfile://")
-HIDDEN_LOCAL_PATH_MESSAGE = "[local path hidden]"
-REMOTE_DIAGNOSTIC_KEYS = frozenset({
-    "error", "message", "logs", "reason", "warning", "warnings",
-    "restore_errors", "cleanup_errors", "recovery_paths",
-    "output_warning", "learning_warning", "output_dir", "default_output_dir",
-})
 
 
-def public_diagnostic_text(value: str, *, reveal_local_paths: bool) -> str:
-    """Hide a whole diagnostic item if it contains an absolute local path."""
-    text = str(value or "")
-    if reveal_local_paths or not text:
-        return text
-    if (
-        WINDOWS_ABSOLUTE_PATH_RE.search(text)
-        or POSIX_ABSOLUTE_PATH_RE.search(text)
-        or FILE_URI_RE.search(text)
-    ):
-        return HIDDEN_LOCAL_PATH_MESSAGE
-    return text
-
-
-def sanitize_remote_diagnostic_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return public_diagnostic_text(value, reveal_local_paths=False)
-    if isinstance(value, list):
-        return [sanitize_remote_diagnostic_value(item) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: sanitize_remote_diagnostic_value(item)
-            for key, item in value.items()
-        }
-    return value
-
-
-def sanitize_remote_json_payload(value: Any) -> Any:
-    if isinstance(value, list):
-        return [sanitize_remote_json_payload(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    sanitized: dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)
-        diagnostic = (
-            key_text in REMOTE_DIAGNOSTIC_KEYS
-            or key_text.endswith("_warning")
-            or key_text.endswith("_errors")
-        )
-        sanitized[key] = (
-            sanitize_remote_diagnostic_value(item)
-            if diagnostic
-            else sanitize_remote_json_payload(item)
-        )
-    return sanitized
-
-
-def remote_auth_valid() -> bool:
-    if not REMOTE_ACCESS_ENABLED or len(REMOTE_ACCESS_TOKEN) < 20:
-        return not REMOTE_ACCESS_ENABLED
-    supplied = ""
-    header = request.headers.get("Authorization", "")
-    if header.casefold().startswith("bearer "):
-        supplied = header[7:].strip()
-    elif request.authorization and request.authorization.type.casefold() == "basic":
-        supplied = request.authorization.password or ""
-    return bool(supplied) and secrets.compare_digest(supplied, REMOTE_ACCESS_TOKEN)
-
-
-def request_origin_allowed(value: str) -> bool:
-    try:
-        parsed = urllib.parse.urlsplit(value)
-    except ValueError:
-        return False
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return False
-    configured = {
-        item.strip().rstrip("/").casefold()
-        for item in os.environ.get("MOJIOKOSI_ALLOWED_ORIGINS", "").split(",")
-        if item.strip()
-    }
-    normalized = f"{parsed.scheme}://{parsed.netloc}".rstrip("/").casefold()
-    if normalized in configured:
-        return True
-    try:
-        expected = urllib.parse.urlsplit(request.host_url)
-    except ValueError:
-        return False
-    try:
-        return (
-            parsed.scheme == expected.scheme
-            and parsed.hostname.casefold() == (expected.hostname or "").casefold()
-            and parsed.port == expected.port
-        )
-    except ValueError:
-        return False
-
-
-@app.before_request
-def enforce_request_security():
-    hostname = request_hostname()
-    colab_loopback_proxy = is_colab_runtime() and remote_addr_is_loopback()
-    if not hostname or (
-        hostname not in trusted_request_hosts() and not colab_loopback_proxy
-    ):
-        return jsonify({"error": "Untrusted Host header."}), 400
-
-    if REMOTE_ACCESS_ENABLED and not remote_auth_valid():
-        response = jsonify({"error": "Authentication is required."})
-        response.status_code = 401 if len(REMOTE_ACCESS_TOKEN) >= 20 else 503
-        if response.status_code == 401:
-            response.headers["WWW-Authenticate"] = 'Basic realm="Gurumoji", charset="UTF-8"'
-        return response
-
-    fetch_site = request.headers.get("Sec-Fetch-Site", "").casefold()
-    if request.path.startswith("/api/") and fetch_site in {"cross-site", "same-site"}:
-        return jsonify({"error": "Cross-origin request rejected."}), 403
-
-    if request.method in UNSAFE_HTTP_METHODS:
-        origin = request.headers.get("Origin", "")
-        referer = request.headers.get("Referer", "")
-        # Fetch Metadata is authoritative for browser requests and remains correct
-        # when Colab/tunnel reverse proxies rewrite Host before Flask sees it.
-        if fetch_site != "same-origin" and origin and not request_origin_allowed(origin):
-            return jsonify({"error": "Invalid request origin."}), 403
-        if fetch_site != "same-origin" and not origin and referer and not request_origin_allowed(referer):
-            return jsonify({"error": "Invalid request referrer."}), 403
-        browser_markers = bool(origin or referer or fetch_site)
-        if request.headers.get("X-Gurumoji-Request") != "1" and (
-            REMOTE_ACCESS_ENABLED or browser_markers or not remote_addr_is_loopback()
-        ):
-            return jsonify({"error": "Missing CSRF request header."}), 403
-
-    if request.endpoint == "import_speaker_registry":
-        request.max_content_length = MAX_CSV_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
-    elif request.endpoint == "create_job":
-        request.max_content_length = MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
-    elif request.is_json:
-        request.max_content_length = MAX_JSON_REQUEST_BYTES
-
-    length = request.content_length
-    if length is not None:
-        if request.endpoint == "import_speaker_registry" and length > (
-            MAX_CSV_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
-        ):
-            raise RequestEntityTooLarge()
-        if request.endpoint == "create_job" and length > (
-            MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
-        ):
-            raise RequestEntityTooLarge()
-        if request.is_json and length > MAX_JSON_REQUEST_BYTES:
-            raise RequestEntityTooLarge()
-
-    if request.endpoint == "create_job" and request.method == "POST":
-        global _job_admission_id
-        submission_id = request.headers.get("X-Gurumoji-Submission-Id", "").strip()
-        if submission_id and not re.fullmatch(r"[0-9a-f]{32}", submission_id):
-            return jsonify({"error": "Invalid transcription submission ID."}), 400
-        with jobs_lock:
-            prune_jobs_locked()
-            existing = jobs.get(submission_id) if submission_id else None
-            if existing is not None:
-                status_code = 202 if existing.status in ACTIVE_JOB_STATUSES else 200
-                return jsonify(existing.public()), status_code
-            if _job_admission_id is not None:
-                if submission_id and _job_admission_id == submission_id:
-                    return jsonify(admission_job_public(submission_id)), 202
-                return jsonify({"error": "Another transcription job is already active."}), 409
-            if any(job.status in ACTIVE_JOB_STATUSES for job in jobs.values()):
-                return jsonify({"error": "Another transcription job is already active."}), 409
-            _job_admission_id = submission_id or uuid.uuid4().hex
-            g.job_admission_id = _job_admission_id
+def admit_transcription_job():
+    """Reserve the single transcription slot before a create_job upload is read."""
+    global _job_admission_id
+    submission_id = request.headers.get("X-Gurumoji-Submission-Id", "").strip()
+    if submission_id and not re.fullmatch(r"[0-9a-f]{32}", submission_id):
+        return jsonify({"error": "Invalid transcription submission ID."}), 400
+    with jobs_lock:
+        prune_jobs_locked()
+        existing = jobs.get(submission_id) if submission_id else None
+        if existing is not None:
+            status_code = 202 if existing.status in ACTIVE_JOB_STATUSES else 200
+            return jsonify(existing.public()), status_code
+        if _job_admission_id is not None:
+            if submission_id and _job_admission_id == submission_id:
+                return jsonify(admission_job_public(submission_id)), 202
+            return jsonify({"error": "Another transcription job is already active."}), 409
+        if any(job.status in ACTIVE_JOB_STATUSES for job in jobs.values()):
+            return jsonify({"error": "Another transcription job is already active."}), 409
+        _job_admission_id = submission_id or uuid.uuid4().hex
+        g.job_admission_id = _job_admission_id
     return None
 
 
-@app.errorhandler(RequestEntityTooLarge)
-def request_too_large(_error):
-    return jsonify({"error": "Request body exceeds the configured size limit."}), 413
-
-
-@app.after_request
-def disable_development_cache(response):
+def release_job_admission() -> None:
     global _job_admission_id
     admission_id = getattr(g, "job_admission_id", None)
     if admission_id:
         with jobs_lock:
             if _job_admission_id == admission_id:
                 _job_admission_id = None
-    if request.path == "/" or request.path.startswith(("/static/", "/api/")):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    if REMOTE_ACCESS_ENABLED and not REMOTE_LOCAL_PATHS_ENABLED and response.is_json:
-        payload = response.get_json(silent=True)
-        if payload is not None:
-            sanitized = sanitize_remote_json_payload(payload)
-            if sanitized != payload:
-                response.set_data(json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")))
-                response.headers["Content-Type"] = "application/json"
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-    frame_ancestors = "'none'"
-    if is_colab_runtime():
-        frame_ancestors = "https://colab.research.google.com https://*.research.google.com"
-    else:
-        response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
-        f"object-src 'none'; base-uri 'self'; frame-ancestors {frame_ancestors}",
-    )
-    return response
+
+
+register_request_security(
+    app,
+    remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
+    remote_access_token=lambda: REMOTE_ACCESS_TOKEN,
+    remote_local_paths_enabled=lambda: REMOTE_LOCAL_PATHS_ENABLED,
+    max_media_upload_bytes=lambda: MAX_MEDIA_UPLOAD_BYTES,
+    max_csv_upload_bytes=lambda: MAX_CSV_UPLOAD_BYTES,
+    max_json_request_bytes=lambda: MAX_JSON_REQUEST_BYTES,
+    multipart_overhead_bytes=MULTIPART_OVERHEAD_BYTES,
+    is_colab_runtime=is_colab_runtime,
+    trusted_request_hosts=trusted_request_hosts,
+    remote_auth_valid=lambda: remote_auth_valid(),
+    request_origin_allowed=request_origin_allowed,
+    admit_transcription_job=admit_transcription_job,
+    release_job_admission=release_job_admission,
+)
 
 
 @dataclass(frozen=True)
