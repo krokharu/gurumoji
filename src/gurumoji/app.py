@@ -440,6 +440,17 @@ from .services.analysis_pipeline_adapters import (
     run_analysis_pipeline_method,
 )
 from .services.analysis_pipeline_adapters import make_analysis_pipeline_adapters
+from .services.library_schema import make_library_schema
+from .services.library_store import make_library_store
+from .services.output_import import make_output_import
+from .services.media_files import (
+    is_unc_path,
+    is_video_path,
+    media_kind,
+    safe_media_filename,
+)
+from .services.media_files import make_media_files
+from .web.library_routes import register_library_routes
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -1115,18 +1126,6 @@ def release_instance_lock() -> None:
         _instance_lock_streams = []
 
 
-def media_kind(path: Path | None) -> str | None:
-    if path is None:
-        return None
-    mime = mimetypes.guess_type(path.name)[0] or ""
-    return "video" if mime.startswith("video/") or path.suffix.lower() in {".mp4", ".m4v", ".mov", ".mkv"} else "audio"
-
-
-def is_unc_path(value: str | Path) -> bool:
-    raw = str(value).strip()
-    return raw.startswith("\\") or raw.startswith("//")
-
-
 def read_upload_limited(upload: Any, maximum: int) -> bytes:
     chunks: list[bytes] = []
     total = 0
@@ -1209,377 +1208,14 @@ def database_connection():
         connection.close()
 
 
-def ensure_output_import_provenance_schema(
-    connection: sqlite3.Connection,
-) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS output_import_provenance (
-            item_id TEXT NOT NULL,
-            canonical_path TEXT NOT NULL,
-            content_sha256 TEXT NOT NULL DEFAULT '',
-            PRIMARY KEY (item_id, canonical_path)
-        )
-        """
-    )
-    table_info = connection.execute(
-        "PRAGMA table_info(output_import_provenance)"
-    ).fetchall()
-    primary_key = [
-        str(row["name"])
-        for row in sorted(table_info, key=lambda row: int(row["pk"] or 0))
-        if int(row["pk"] or 0) > 0
-    ]
-    if primary_key != ["item_id", "canonical_path"]:
-        columns = {str(row["name"]) for row in table_info}
-        fingerprint_expression = (
-            "COALESCE(content_sha256, '')"
-            if "content_sha256" in columns
-            else "''"
-        )
-        connection.execute("DROP TABLE IF EXISTS output_import_provenance_v2")
-        connection.execute(
-            """
-            CREATE TABLE output_import_provenance_v2 (
-                item_id TEXT NOT NULL,
-                canonical_path TEXT NOT NULL,
-                content_sha256 TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY (item_id, canonical_path)
-            )
-            """
-        )
-        connection.execute(
-            "INSERT OR REPLACE INTO output_import_provenance_v2 "
-            "(item_id, canonical_path, content_sha256) "
-            f"SELECT item_id, canonical_path, {fingerprint_expression} "
-            "FROM output_import_provenance"
-        )
-        connection.execute("DROP TABLE output_import_provenance")
-        connection.execute(
-            "ALTER TABLE output_import_provenance_v2 "
-            "RENAME TO output_import_provenance"
-        )
-    else:
-        columns = {str(row["name"]) for row in table_info}
-        if "content_sha256" not in columns:
-            connection.execute(
-                "ALTER TABLE output_import_provenance "
-                "ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''"
-            )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS output_import_provenance_path_idx "
-        "ON output_import_provenance(canonical_path)"
-    )
-
-
-def initialize_library(*, repair_provenance: bool = True) -> None:
-    DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    MEDIA_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    THUMBNAIL_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    TRAINING_AUDIO_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    with database_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS library_items (
-                id TEXT PRIMARY KEY,
-                source_name TEXT NOT NULL,
-                group_id TEXT NOT NULL DEFAULT '',
-                output_dir TEXT NOT NULL,
-                media_path TEXT,
-                language TEXT,
-                segments_json TEXT NOT NULL,
-                original_segments_json TEXT NOT NULL DEFAULT '',
-                original_segments_status TEXT NOT NULL DEFAULT '',
-                speaker_names_json TEXT NOT NULL,
-                outline_json TEXT,
-                meeting_minutes_json TEXT NOT NULL DEFAULT '{}',
-                emotion_analysis_json TEXT,
-                formatting_result_json TEXT NOT NULL DEFAULT '{}',
-                ai_usage_json TEXT NOT NULL DEFAULT '{}',
-                files_json TEXT NOT NULL,
-                write_srt INTEGER NOT NULL DEFAULT 1,
-                write_json INTEGER NOT NULL DEFAULT 1,
-                burn_subtitled_video INTEGER NOT NULL DEFAULT 0,
-                analysis_config_json TEXT NOT NULL DEFAULT '{}',
-                analysis_annotations_json TEXT NOT NULL DEFAULT '{}',
-                segment_classification_json TEXT NOT NULL DEFAULT '{}',
-                analysis_revision INTEGER NOT NULL DEFAULT 0,
-                analysis_updated_at TEXT,
-                revision_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        library_columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(library_items)").fetchall()
-        }
-        if "session_profile_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN session_profile_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "group_id" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"
-            )
-        if "original_segments_json" not in library_columns:
-            # A transcript that existed before this schema revision cannot be
-            # reconstructed.  Keep the then-current text in a separate column
-            # and disclose that provenance instead of calling it a pristine
-            # ASR/field transcript.
-            connection.execute(
-                "ALTER TABLE library_items "
-                "ADD COLUMN original_segments_json TEXT NOT NULL DEFAULT ''"
-            )
-            connection.execute(
-                "ALTER TABLE library_items "
-                "ADD COLUMN original_segments_status TEXT NOT NULL DEFAULT ''"
-            )
-            connection.execute(
-                "UPDATE library_items SET original_segments_json = segments_json, "
-                "original_segments_status = 'migrated_current_snapshot' "
-                "WHERE original_segments_json = ''"
-            )
-        elif "original_segments_status" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items "
-                "ADD COLUMN original_segments_status TEXT NOT NULL DEFAULT ''"
-            )
-            connection.execute(
-                "UPDATE library_items SET original_segments_status = "
-                "CASE WHEN original_segments_json <> '' THEN 'migrated_current_snapshot' ELSE '' END"
-            )
-        if "speaker_profiles_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN speaker_profiles_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "meeting_minutes_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN meeting_minutes_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "ai_usage_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN ai_usage_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "formatting_result_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN formatting_result_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "burn_subtitled_video" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN burn_subtitled_video INTEGER NOT NULL DEFAULT 0"
-            )
-        if "analysis_config_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN analysis_config_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "analysis_annotations_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN analysis_annotations_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "analysis_revision" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN analysis_revision INTEGER NOT NULL DEFAULT 0"
-            )
-        if "analysis_updated_at" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN analysis_updated_at TEXT"
-            )
-        if "analysis_insights_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN analysis_insights_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "transformer_analysis_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN transformer_analysis_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        if "segment_classification_json" not in library_columns:
-            connection.execute(
-                "ALTER TABLE library_items ADD COLUMN segment_classification_json TEXT NOT NULL DEFAULT '{}'"
-            )
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_insight_requests (
-                request_id TEXT PRIMARY KEY, item_id TEXT NOT NULL,
-                source_revision INTEGER NOT NULL, analysis_revision INTEGER NOT NULL,
-                fingerprint TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
-                status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
-                message TEXT NOT NULL DEFAULT '', usage_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-            )
-        """)
-        connection.execute("CREATE INDEX IF NOT EXISTS insight_requests_item ON analysis_insight_requests(item_id, created_at)")
-        connection.execute("""
-            UPDATE analysis_insight_requests SET status = 'interrupted',
-                message = 'アプリが再起動されました。必要な場合は再生成してください。'
-            WHERE status IN ('queued', 'running', 'cancelling')
-        """)
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS transformer_analysis_requests (
-                request_id TEXT PRIMARY KEY, item_id TEXT NOT NULL,
-                source_revision INTEGER NOT NULL, analysis_revision INTEGER NOT NULL,
-                fingerprint TEXT NOT NULL, model TEXT NOT NULL,
-                max_topics INTEGER NOT NULL, min_topic_size INTEGER NOT NULL,
-                topic_count INTEGER NOT NULL DEFAULT 0,
-                mode TEXT NOT NULL DEFAULT 'auto',
-                min_similarity REAL NOT NULL DEFAULT 0,
-                status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0,
-                message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-            )
-        """)
-        transformer_request_columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(transformer_analysis_requests)").fetchall()
-        }
-        if "topic_count" not in transformer_request_columns:
-            connection.execute(
-                "ALTER TABLE transformer_analysis_requests "
-                "ADD COLUMN topic_count INTEGER NOT NULL DEFAULT 0"
-            )
-        if "mode" not in transformer_request_columns:
-            connection.execute(
-                "ALTER TABLE transformer_analysis_requests "
-                "ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto'"
-            )
-        if "min_similarity" not in transformer_request_columns:
-            connection.execute(
-                "ALTER TABLE transformer_analysis_requests "
-                "ADD COLUMN min_similarity REAL NOT NULL DEFAULT 0"
-            )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS transformer_requests_item "
-            "ON transformer_analysis_requests(item_id, created_at)"
-        )
-        connection.execute("""
-            UPDATE transformer_analysis_requests SET status = 'interrupted',
-                message = 'アプリが再起動されました。必要な場合は再実行してください。'
-            WHERE status IN ('queued', 'running', 'cancelling')
-        """)
-        connection.execute("UPDATE library_items SET write_json = 1 WHERE write_json <> 1")
-        legacy_session_rows = connection.execute(
-            "SELECT id, session_profile_json FROM library_items "
-            "WHERE session_profile_json LIKE '%confidentiality_notes%'"
-        ).fetchall()
-        for legacy_row in legacy_session_rows:
-            raw_profile = json_load(legacy_row["session_profile_json"], {})
-            if not isinstance(raw_profile, dict) or "confidentiality_notes" not in raw_profile:
-                continue
-            sanitized_profile = dict(raw_profile)
-            sanitized_profile.pop("confidentiality_notes", None)
-            connection.execute(
-                "UPDATE library_items SET session_profile_json = ? WHERE id = ?",
-                (json.dumps(sanitized_profile, ensure_ascii=False), legacy_row["id"]),
-            )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS speaker_registry (
-                id TEXT PRIMARY KEY,
-                participant_code TEXT NOT NULL DEFAULT '',
-                display_name TEXT NOT NULL DEFAULT '',
-                pseudonym TEXT NOT NULL DEFAULT '',
-                default_role TEXT NOT NULL DEFAULT 'participant',
-                organization TEXT NOT NULL DEFAULT '',
-                department TEXT NOT NULL DEFAULT '',
-                job_title TEXT NOT NULL DEFAULT '',
-                consent_status TEXT NOT NULL DEFAULT 'unknown',
-                recording_consent TEXT NOT NULL DEFAULT 'unknown',
-                confidentiality_status TEXT NOT NULL DEFAULT 'unknown',
-                tags_json TEXT NOT NULL DEFAULT '[]',
-                attributes_json TEXT NOT NULL DEFAULT '{}',
-                notes TEXT NOT NULL DEFAULT '',
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute("CREATE INDEX IF NOT EXISTS library_updated_idx ON library_items(updated_at DESC)")
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS library_groups (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS library_group_name_idx ON library_groups(name COLLATE NOCASE)"
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS library_items_group_idx ON library_items(group_id)"
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS speaker_registry_code_idx "
-            "ON speaker_registry(participant_code)"
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS speaker_registry_updated_idx "
-            "ON speaker_registry(updated_at DESC)"
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS application_metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            "INSERT OR IGNORE INTO application_metadata (key, value) VALUES (?, ?)",
-            ("speaker_registry_revision", "0"),
-        )
-        connection.execute(
-            "INSERT OR IGNORE INTO application_metadata (key, value) VALUES (?, ?)",
-            ("training_events_migrated", "0"),
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS training_events (
-                event_id TEXT PRIMARY KEY,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS training_events_created_idx "
-            "ON training_events(created_at, event_id)"
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS output_import_tombstones (
-                canonical_path TEXT PRIMARY KEY,
-                content_sha256 TEXT NOT NULL DEFAULT '',
-                deleted_at TEXT NOT NULL
-            )
-            """
-        )
-        tombstone_columns = {
-            str(row["name"])
-            for row in connection.execute(
-                "PRAGMA table_info(output_import_tombstones)"
-            ).fetchall()
-        }
-        if "content_sha256" not in tombstone_columns:
-            connection.execute(
-                "ALTER TABLE output_import_tombstones "
-                "ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''"
-            )
-        ensure_output_import_provenance_schema(connection)
-        initialize_store(connection)
-        initialize_pipeline_store(connection)
-        preparation.initialize(connection)
-        if repair_provenance:
-            repair_output_import_provenance(connection)
-        for row in connection.execute("SELECT id, source_name FROM library_items").fetchall():
-            source_path = Path(str(row["source_name"]))
-            if source_path.is_absolute() and source_path.name:
-                connection.execute(
-                    "UPDATE library_items SET source_name = ? WHERE id = ?",
-                    (source_path.name, row["id"]),
-                )
+ensure_output_import_provenance_schema, initialize_library = make_library_schema(
+    data_directory=lambda: DATA_DIRECTORY,
+    media_directory=lambda: MEDIA_DIRECTORY,
+    thumbnail_directory=lambda: THUMBNAIL_DIRECTORY,
+    training_audio_directory=lambda: TRAINING_AUDIO_DIRECTORY,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    repair_output_import_provenance=lambda *args, **kwargs: repair_output_import_provenance(*args, **kwargs),
+)
 
 
 def speaker_registry_snapshot(
@@ -1641,348 +1277,42 @@ def import_speaker_registry_csv(
     )
 
 
-def library_row(item_id: str) -> sqlite3.Row | None:
-    with database_connection() as connection:
-        return connection.execute("SELECT * FROM library_items WHERE id = ?", (item_id,)).fetchone()
+(
+    library_row,
+    library_group_name,
+    library_public,
+    upsert_library_item,
+) = make_library_store(
+    media_directory=lambda: MEDIA_DIRECTORY,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
+    media_kind=lambda *args, **kwargs: media_kind(*args, **kwargs),
+    normalize_ai_usage=lambda *args, **kwargs: normalize_ai_usage(*args, **kwargs),
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+    row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
+)
 
 
-def library_group_name(group_id: str) -> str:
-    if not group_id:
-        return ""
-    with database_connection() as connection:
-        row = connection.execute(
-            "SELECT name FROM library_groups WHERE id = ?", (group_id,)
-        ).fetchone()
-    return str(row["name"]) if row is not None else ""
-
-
-def library_public(
-    row: sqlite3.Row, *, full: bool = True, match_count: int | None = None,
-    group_name: str | None = None,
-) -> dict[str, Any]:
-    segments = row_segments(row)
-    speaker_names = json_load(row["speaker_names_json"], {})
-    if not isinstance(speaker_names, dict):
-        speaker_names = {}
-    speakers = sorted({
-        str(speaker_names.get(str(item.get("speaker") or "")) or default_speaker_name(item.get("speaker")))
-        for item in segments
-        if item.get("speaker")
-    })
-    emotions = sorted({value for item in segments for value in emotion_values(item)})
-    media_path = Path(row["media_path"]) if row["media_path"] else None
-    file_paths = [Path(value) for value in json_load(row["files_json"], []) if isinstance(value, str)]
-    output_root = Path(row["output_dir"])
-    session_profile = row_session_profile(row)
-    comparison_key, comparison_label, comparison_source = interview_comparison_identity(
-        session_profile
-    )
-    group_id = str(row["group_id"] or "") if "group_id" in row.keys() else ""
-    resolved_group_name = library_group_name(group_id) if group_name is None else group_name
-    media_available = bool(
-        media_path
-        and path_is_within(media_path, MEDIA_DIRECTORY / str(row["id"]))
-        and media_path.is_file()
-    )
-    result: dict[str, Any] = {
-        "id": row["id"],
-        "source_name": row["source_name"],
-        "group_id": group_id,
-        "group_name": resolved_group_name,
-        "output_dir": row["output_dir"] if local_path_access_allowed() else "",
-        "language": row["language"],
-        "segment_count": len(segments),
-        "duration": max((float(item.get("end", 0) or 0) for item in segments), default=0),
-        "speakers": speakers,
-        "emotions": emotions,
-        "preview": " ".join(str(item.get("text", "")).strip() for item in segments[:3]).strip()[:240],
-        "thumbnail_url": (
-            f"/api/library/{row['id']}/thumbnail?v="
-            f"{urllib.parse.quote(str(row['updated_at']))}"
-        ),
-        "media_url": f"/api/library/{row['id']}/media" if media_available else None,
-        "media_kind": media_kind(media_path) if media_available else None,
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-        "revision_count": int(row["revision_count"] or 0),
-        "analysis_revision": int(row["analysis_revision"] or 0),
-        "analysis_updated_at": row["analysis_updated_at"],
-        "match_count": match_count,
-        "speaker_data_url": f"/api/library/{row['id']}/speakers.csv",
-        "analysis_url": f"/api/library/{row['id']}/analysis",
-        "analysis_export_url": f"/api/library/{row['id']}/analysis/export.json",
-        # The key is only a matching token.  A guide-derived key never exposes
-        # the guide text to the list API.
-        "comparison_key": comparison_key,
-        "comparison_label": comparison_label,
-        "comparison_source": comparison_source,
-        "files": [
-            {"name": path.name, "url": f"/api/library/{row['id']}/files/{urllib.parse.quote(path.name)}"}
-            for path in file_paths if path_is_within(path, output_root) and path.is_file()
-        ],
-    }
-    if full:
-        result.update({
-            "status": "completed",
-            "segments": segments,
-            "speaker_names": speaker_names,
-            "session_profile": session_profile,
-            "speaker_profiles": row_speaker_profiles(row, segments, speaker_names),
-            "outline": json_load(row["outline_json"], None),
-            "session_outline": row_session_outline(row, session_profile),
-            "meeting_minutes": row_meeting_minutes(row),
-            "emotion_analysis": json_load(row["emotion_analysis_json"], None),
-            "formatting_result": json_load(row["formatting_result_json"], {}),
-            "ai_usage": normalize_ai_usage(json_load(row["ai_usage_json"], {})),
-            "write_srt": bool(row["write_srt"]),
-            "write_json": True,
-            "burn_subtitled_video": bool(row["burn_subtitled_video"]),
-        })
-    return result
-
-
-def upsert_library_item(
-    *, item_id: str, source_name: str, output_dir: Path, media_path: Path | None,
-    language: str | None, segments: list[dict[str, Any]], speaker_names: dict[str, str],
-    outline: dict[str, Any] | None, emotion_analysis: dict[str, Any] | None,
-    files: list[Path], write_srt: bool, write_json: bool, increment_revision: bool = False,
-    created_at: str | None = None, session_profile: dict[str, Any] | None = None,
-    speaker_profiles: dict[str, Any] | None = None, burn_subtitled_video: bool = False,
-    expected_revision: int | None = None,
-    connection: sqlite3.Connection | None = None,
-    ai_usage: dict[str, Any] | None = None,
-    meeting_minutes: dict[str, Any] | None = None,
-    original_segments: list[dict[str, Any]] | None = None,
-    formatting_result: dict[str, Any] | None = None,
-) -> sqlite3.Row:
-    validate_json_value(segments)
-    validate_json_value(original_segments)
-    validate_json_value(speaker_names)
-    validate_json_value(outline)
-    validate_json_value(emotion_analysis)
-    validate_json_value(session_profile)
-    validate_json_value(speaker_profiles)
-    validate_json_value(meeting_minutes)
-    validate_json_value(formatting_result)
-    ai_usage = normalize_ai_usage(ai_usage)
-    validate_json_value(ai_usage)
-    now = utc_now_iso()
-    segments = ensure_segment_ids(item_id, segments)
-    import_segments = ensure_segment_ids(item_id, original_segments) if original_segments is not None else segments
-    session_profile = normalize_session_profile(session_profile)
-    meeting_minutes = normalize_meeting_minutes(meeting_minutes)
-    labels = {str(item.get("speaker") or "UNKNOWN") for item in segments}
-    speaker_profiles = normalize_conversation_speaker_profiles(
-        speaker_profiles,
-        labels,
-        speaker_names,
-    )
-    def persist(active_connection: sqlite3.Connection) -> sqlite3.Row:
-        if not active_connection.in_transaction:
-            active_connection.execute("BEGIN IMMEDIATE")
-        previous = active_connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
-        if expected_revision is not None:
-            if not active_connection.in_transaction:
-                active_connection.execute("BEGIN IMMEDIATE")
-            current = active_connection.execute(
-                "SELECT revision_count FROM library_items WHERE id = ?", (item_id,)
-            ).fetchone()
-            if current is None:
-                raise LookupError("The transcript no longer exists.")
-            current_revision = int(current["revision_count"] or 0)
-            if current_revision != expected_revision:
-                raise TranscriptConflictError(current_revision)
-        if previous is not None:
-            preparation.capture(active_connection, previous, "legacy_current_baseline")
-        persisted_formatting_result = formatting_result
-        if persisted_formatting_result is None and previous is not None:
-            persisted_formatting_result = json_load(previous["formatting_result_json"], {})
-        active_connection.execute(
-            """
-            INSERT INTO library_items (
-                id, source_name, output_dir, media_path, language, segments_json,
-                original_segments_json, original_segments_status,
-                speaker_names_json, outline_json, meeting_minutes_json, emotion_analysis_json,
-                formatting_result_json, ai_usage_json, files_json,
-                write_srt, write_json, burn_subtitled_video, revision_count, created_at, updated_at,
-                session_profile_json, speaker_profiles_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                source_name=excluded.source_name, output_dir=excluded.output_dir,
-                media_path=excluded.media_path, language=excluded.language,
-                segments_json=excluded.segments_json, speaker_names_json=excluded.speaker_names_json,
-                outline_json=excluded.outline_json, meeting_minutes_json=excluded.meeting_minutes_json,
-                emotion_analysis_json=excluded.emotion_analysis_json,
-                formatting_result_json=excluded.formatting_result_json,
-                ai_usage_json=excluded.ai_usage_json,
-                files_json=excluded.files_json, write_srt=excluded.write_srt,
-                write_json=excluded.write_json,
-                burn_subtitled_video=excluded.burn_subtitled_video,
-                session_profile_json=excluded.session_profile_json,
-                speaker_profiles_json=excluded.speaker_profiles_json,
-                revision_count=library_items.revision_count + ?, updated_at=excluded.updated_at
-            """,
-            (
-                item_id, source_name, str(output_dir), str(media_path) if media_path else None,
-                language, json.dumps(segments, ensure_ascii=False),
-                json.dumps(import_segments, ensure_ascii=False), "initial_import",
-                json.dumps(speaker_names, ensure_ascii=False),
-                json.dumps(outline, ensure_ascii=False) if outline else None,
-                json.dumps(meeting_minutes, ensure_ascii=False),
-                json.dumps(emotion_analysis, ensure_ascii=False) if emotion_analysis else None,
-                json.dumps(persisted_formatting_result or {}, ensure_ascii=False),
-                json.dumps(ai_usage, ensure_ascii=False),
-                json.dumps([str(path) for path in files], ensure_ascii=False),
-                int(write_srt), 1, int(burn_subtitled_video),
-                int(increment_revision), created_at or now, now,
-                json.dumps(session_profile, ensure_ascii=False),
-                json.dumps(speaker_profiles, ensure_ascii=False),
-                int(increment_revision),
-            ),
-        )
-        row = active_connection.execute(
-            "SELECT * FROM library_items WHERE id = ?", (item_id,)
-        ).fetchone()
-        if row is None:
-            raise RuntimeError("The library record could not be read back before commit.")
-        preparation.capture(active_connection, row, "saved" if previous is not None else "initial_import")
-        return row
-
-    if connection is not None:
-        return persist(connection)
-    with database_connection() as owned_connection:
-        return persist(owned_connection)
-
-
-def safe_media_filename(original_name: str, fallback_stem: str = 'media') -> str:
-    '''Keep an allowed media suffix when Werkzeug strips a non-ASCII stem.'''
-    suffix = Path(original_name).suffix.lower()
-    safe_stem = secure_filename(Path(original_name).stem).strip(' .')
-    if not safe_stem:
-        safe_stem = fallback_stem
-    return f'{safe_stem}{suffix}'
-
-
-def stage_media_archive(
-    item_id: str,
-    source_path: Path,
-    check_cancelled: Callable[[], None] | None = None,
-) -> tuple[Path, Path]:
-    target_dir = MEDIA_DIRECTORY / item_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = safe_media_filename(source_path.name)
-    target = target_dir / safe_name
-    staged = temporary_output_path(target)
-    try:
-        atomic_copy_file(source_path, staged, check_cancelled)
-    except Exception:
-        staged.unlink(missing_ok=True)
-        raise
-    return target, staged
-
-
-def commit_staged_media(target: Path, staged: Path) -> Path:
-    if staged.parent.resolve() != target.parent.resolve() or not staged.is_file():
-        raise OSError("The staged media file is missing or outside its destination directory.")
-    sync_file_data(staged)
-    durable_move(staged, target)
-    return target
-
-
-def archive_media(
-    item_id: str,
-    source_path: Path,
-    check_cancelled: Callable[[], None] | None = None,
-) -> Path:
-    target, staged = stage_media_archive(item_id, source_path, check_cancelled)
-    try:
-        return commit_staged_media(target, staged)
-    finally:
-        staged.unlink(missing_ok=True)
-
-
-def remove_owned_directory(path: Path, *, ignore_errors: bool = False) -> None:
-    try:
-        if path.is_symlink():
-            path.unlink(missing_ok=True)
-        elif path.exists():
-            shutil.rmtree(path)
-    except OSError:
-        if not ignore_errors:
-            raise
-
-
-def cleanup_uncommitted_job_artifacts(job: JobRecord, options: JobOptions) -> list[str]:
-    """Remove only resources reserved for this job when no library row was committed."""
-    warnings: list[str] = []
-    try:
-        if library_row(job.id) is not None:
-            return warnings
-    except (OSError, sqlite3.Error) as exc:
-        return [f"Could not verify library persistence; temporary artifacts were retained: {exc}"]
-
-    if options.owns_output_dir:
-        expected_suffix = f"_{job.id[:8]}"
-        if options.output_dir.name.endswith(expected_suffix):
-            try:
-                remove_owned_directory(options.output_dir)
-            except OSError as exc:
-                warnings.append(f"Could not remove the incomplete output directory: {exc}")
-        else:
-            warnings.append("The incomplete output directory failed its ownership check and was retained.")
-
-    media_dir = MEDIA_DIRECTORY / job.id
-    if re.fullmatch(r"[0-9a-f]{32}", job.id):
-        try:
-            media_root = MEDIA_DIRECTORY.resolve()
-            if media_dir.parent.resolve() == media_root:
-                remove_owned_directory(media_dir)
-        except OSError as exc:
-            warnings.append(f"Could not remove the incomplete media archive: {exc}")
-    return warnings
-
-
-def resolve_local_media_path(raw_path: str) -> Path:
-    raw_path = raw_path.strip().strip('"')
-    if not raw_path:
-        raise ValueError("処理する音声・動画ファイルを選択してください。")
-    expanded = os.path.expandvars(raw_path)
-    if is_unc_path(raw_path) or is_unc_path(expanded):
-        raise ValueError("UNC/network media paths are disabled by default. Upload the file instead.")
-    try:
-        path = Path(expanded).expanduser().resolve(strict=True)
-    except OSError as exc:
-        raise ValueError(f"指定したパスを開けません: {exc}") from exc
-    if not path.is_file():
-        raise ValueError("指定したパスはファイルではありません。")
-    if path.stat().st_size == 0:
-        raise ValueError("指定したファイルが空です。")
-    if path.stat().st_size > MAX_MEDIA_UPLOAD_BYTES:
-        raise ValueError("The media file exceeds the configured size limit.")
-    if path.suffix.lower() not in ALLOWED_EXTENSIONS:
-        raise ValueError("対応形式は MP4/MOV/MKV/WAV/MP3/M4A/FLAC です。")
-    return path
-
-
-def prepare_output_root(raw_path: str) -> Path:
-    expanded = os.path.expandvars(raw_path.strip().strip('"'))
-    if expanded and (is_unc_path(raw_path) or is_unc_path(expanded)):
-        raise ValueError("UNC/network output paths are disabled by default.")
-    output_root = Path(expanded).expanduser() if expanded else DEFAULT_OUTPUT_DIRECTORY
-    if is_unc_path(output_root):
-        raise ValueError("UNC/network output paths are disabled by default.")
-    output_root.mkdir(parents=True, exist_ok=True)
-    if not output_root.is_dir():
-        raise ValueError("The output destination must be a directory.")
-    probe = output_root / f".gurumoji-write-test-{uuid.uuid4().hex}"
-    try:
-        with probe.open("xb") as stream:
-            stream.write(b"ok")
-    except OSError as exc:
-        raise ValueError(f"The output directory is not writable: {exc}") from exc
-    finally:
-        probe.unlink(missing_ok=True)
-    return output_root.resolve()
+(
+    stage_media_archive,
+    commit_staged_media,
+    archive_media,
+    remove_owned_directory,
+    cleanup_uncommitted_job_artifacts,
+    resolve_local_media_path,
+    prepare_output_root,
+    thumbnail_cache_path,
+    generate_word_cloud_thumbnail,
+    generate_video_thumbnail,
+) = make_media_files(
+    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+    max_media_upload_bytes=MAX_MEDIA_UPLOAD_BYTES,
+    media_directory=lambda: MEDIA_DIRECTORY,
+    thumbnail_directory=lambda: THUMBNAIL_DIRECTORY,
+    durable_move=lambda *args, **kwargs: durable_move(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+)
 
 
 # Edit transaction composition boundary: the module owns the crash-safe swap,
@@ -2018,15 +1348,6 @@ def promote_staged_files(staging_dir: Path, output_dir: Path, staged_files: list
     return edit_transactions.promote_staged_files(
         staging_dir, output_dir, staged_files, connect=database_connection
     )
-
-def is_video_path(path: Path) -> bool:
-    return path.suffix.lower() in VIDEO_EXTENSIONS
-
-
-def thumbnail_cache_path(source_path: Path) -> Path:
-    stat = source_path.stat()
-    seed = f"{source_path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
-    return THUMBNAIL_DIRECTORY / f"{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex}.jpg"
 
 
 # Group analysis composition boundary: the module computes, this layer supplies
@@ -2193,289 +1514,20 @@ def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
     return group_analysis_for_row(updated)
 
 
-def generate_word_cloud_thumbnail(
-    item_id: str,
-    source_name: str,
-    segments: list[dict[str, Any]],
-) -> Path:
-    return write_word_cloud(
-        THUMBNAIL_DIRECTORY / f"word_cloud_{item_id}.svg",
-        source_name,
-        segments,
-    )
-
-
-def generate_video_thumbnail(source_path: Path) -> Path:
-    if not is_video_path(source_path):
-        raise ValueError("サムネイルは動画ファイルだけ作成できます。")
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError("ffmpeg が見つかりません。README の手順でインストールしてください。")
-    THUMBNAIL_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    target = thumbnail_cache_path(source_path)
-    if target.is_file() and target.stat().st_size > 0:
-        return target
-    last_error = ""
-    for seek_at in ("00:00:01.000", "00:00:00.000"):
-        temporary = temporary_output_path(target)
-        try:
-            completed = subprocess.run(
-                [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-                    "-ss", seek_at, "-i", str(source_path), "-frames:v", "1",
-                    "-vf", "scale=640:-2:force_original_aspect_ratio=decrease",
-                    "-q:v", "3", str(temporary),
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-                check=False,
-            )
-            if completed.returncode == 0 and temporary.is_file() and temporary.stat().st_size > 0:
-                sync_file_data(temporary)
-                durable_move(temporary, target)
-                return target
-            last_error = completed.stderr.strip()
-        except subprocess.TimeoutExpired:
-            last_error = "サムネイル作成がタイムアウトしました。"
-        finally:
-            temporary.unlink(missing_ok=True)
-    raise RuntimeError(last_error or "動画からサムネイルを作成できませんでした。")
-
-
-def canonical_output_import_path(path: Path) -> str:
-    return os.path.normcase(str(path.resolve()))
-
-
-def record_output_import_provenance(
-    connection: sqlite3.Connection,
-    item_id: str,
-    paths: list[Path],
-) -> None:
-    for path in paths:
-        if not path.name.endswith("_話者分離.json"):
-            continue
-        fingerprint = ""
-        if path.is_file():
-            try:
-                fingerprint = file_sha256(path)
-            except OSError:
-                pass
-        connection.execute(
-            """
-            INSERT INTO output_import_provenance (
-                item_id, canonical_path, content_sha256
-            ) VALUES (?, ?, ?)
-            ON CONFLICT(item_id, canonical_path) DO UPDATE SET
-                content_sha256 = CASE
-                    WHEN excluded.content_sha256 <> ''
-                    THEN excluded.content_sha256
-                    ELSE output_import_provenance.content_sha256
-                END
-            """,
-            (item_id, canonical_output_import_path(path), fingerprint),
-        )
-
-
-OUTPUT_ARTIFACT_SUFFIXES = (
-    "_話者分離.json",
-    "_話者分離.txt",
-    "_話者分離.srt",
-    "_ワードクラウド.svg",
-    "_アウトライン.txt",
-    "_感情分析.json",
-    "_感情分析.csv",
-    "_話者カラー字幕.ass",
-    "_字幕付き.mp4",
+(
+    canonical_output_import_path,
+    record_output_import_provenance,
+    existing_output_artifacts,
+    machine_json_owner_for_row,
+    repair_output_import_provenance,
+    import_existing_outputs,
+) = make_output_import(
+    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    publish_input_vault=lambda *args, **kwargs: publish_input_vault(*args, **kwargs),
+    upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
 )
-
-
-def existing_output_artifacts(directory: Path, stem: str) -> list[Path]:
-    return [
-        path
-        for suffix in OUTPUT_ARTIFACT_SUFFIXES
-        if (path := directory / f"{stem}{suffix}").is_file()
-    ]
-
-
-def machine_json_owner_for_row(row: sqlite3.Row, files: list[Path]) -> Path | None:
-    candidates = [path for path in files if path.name.endswith("_話者分離.json")]
-    if not candidates:
-        return None
-    row_id = str(row["id"])
-    id_matches = []
-    for candidate in candidates:
-        resolved = str(candidate.resolve())
-        legacy_id = uuid.uuid5(uuid.NAMESPACE_URL, resolved).hex
-        canonical_id = uuid.uuid5(
-            uuid.NAMESPACE_URL, canonical_output_import_path(candidate)
-        ).hex
-        if row_id in {legacy_id, canonical_id}:
-            id_matches.append(candidate)
-    if len(id_matches) == 1:
-        return id_matches[0]
-    expected = Path(str(row["output_dir"])) / (
-        f"{safe_output_stem(str(row['source_name']))}_話者分離.json"
-    )
-    expected_canonical = canonical_output_import_path(expected)
-    expected_matches = [
-        candidate
-        for candidate in candidates
-        if canonical_output_import_path(candidate) == expected_canonical
-    ]
-    if len(expected_matches) == 1:
-        return expected_matches[0]
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def repair_output_import_provenance(connection: sqlite3.Connection) -> None:
-    rows = connection.execute(
-        "SELECT id, source_name, output_dir, files_json FROM library_items"
-    ).fetchall()
-    for row in rows:
-        raw_files = json_load(row["files_json"], [])
-        if not isinstance(raw_files, list):
-            continue
-        files = [Path(str(value)) for value in raw_files]
-        owner = machine_json_owner_for_row(row, files)
-        if owner is None:
-            continue
-        fingerprint = ""
-        if owner.is_file():
-            try:
-                fingerprint = file_sha256(owner)
-            except OSError:
-                pass
-        connection.execute(
-            "INSERT OR IGNORE INTO output_import_provenance "
-            "(item_id, canonical_path, content_sha256) VALUES (?, ?, ?)",
-            (str(row["id"]), canonical_output_import_path(owner), fingerprint),
-        )
-        owner_canonical = canonical_output_import_path(owner)
-        filtered = [
-            value
-            for value in raw_files
-            if not Path(str(value)).name.endswith("_話者分離.json")
-            or canonical_output_import_path(Path(str(value))) == owner_canonical
-        ]
-        if filtered != raw_files:
-            connection.execute(
-                "UPDATE library_items SET files_json = ? WHERE id = ?",
-                (json.dumps(filtered, ensure_ascii=False), str(row["id"])),
-            )
-
-
-def import_existing_outputs() -> None:
-    if not DEFAULT_OUTPUT_DIRECTORY.is_dir():
-        return
-    with database_connection() as connection:
-        rows = connection.execute("SELECT id, files_json FROM library_items").fetchall()
-        known = {str(row["id"]) for row in rows}
-        referenced_json_owners: dict[str, set[str]] = {}
-        for row in rows:
-            files = json_load(row["files_json"], [])
-            if not isinstance(files, list):
-                continue
-            for value in files:
-                path = Path(str(value))
-                if path.name.endswith("_話者分離.json"):
-                    referenced_json_owners.setdefault(
-                        canonical_output_import_path(path), set()
-                    ).add(str(row["id"]))
-        for provenance in connection.execute(
-            "SELECT provenance.item_id, provenance.canonical_path "
-            "FROM output_import_provenance AS provenance "
-            "INNER JOIN library_items AS item ON item.id = provenance.item_id"
-        ).fetchall():
-            referenced_json_owners.setdefault(
-                str(provenance["canonical_path"]), set()
-            ).add(str(provenance["item_id"]))
-        tombstones = {
-            str(row["canonical_path"]): str(row["content_sha256"] or "")
-            for row in connection.execute(
-                "SELECT canonical_path, content_sha256 FROM output_import_tombstones"
-            ).fetchall()
-        }
-    for json_path in DEFAULT_OUTPUT_DIRECTORY.rglob("*_話者分離.json"):
-        if any(
-            part.startswith(('.edit-staging-', '.edit-preparing-', '.edit-cleanup-'))
-            for part in json_path.parts
-        ):
-            continue
-        canonical_path = canonical_output_import_path(json_path)
-        item_id = uuid.uuid5(uuid.NAMESPACE_URL, canonical_path).hex
-        if item_id in known:
-            try:
-                known_fingerprint = file_sha256(json_path)
-            except OSError:
-                known_fingerprint = ""
-            with database_connection() as connection:
-                connection.execute(
-                    "INSERT OR IGNORE INTO output_import_provenance "
-                    "(item_id, canonical_path, content_sha256) VALUES (?, ?, ?)",
-                    (item_id, canonical_path, known_fingerprint),
-                )
-            continue
-        referenced_owners = referenced_json_owners.get(canonical_path, set())
-        if referenced_owners:
-            if len(referenced_owners) == 1:
-                owner_id = next(iter(referenced_owners))
-                try:
-                    fingerprint = file_sha256(json_path)
-                except OSError:
-                    fingerprint = ""
-                with database_connection() as connection:
-                    connection.execute(
-                        "INSERT OR IGNORE INTO output_import_provenance "
-                        "(item_id, canonical_path, content_sha256) VALUES (?, ?, ?)",
-                        (owner_id, canonical_path, fingerprint),
-                    )
-            continue
-        try:
-            current_fingerprint = file_sha256(json_path)
-            tombstone_fingerprint = tombstones.get(canonical_path)
-            if tombstone_fingerprint is not None and (
-                not tombstone_fingerprint
-                or secrets.compare_digest(tombstone_fingerprint, current_fingerprint)
-            ):
-                continue
-            payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
-            segments = payload.get("segments")
-            if not isinstance(segments, list):
-                continue
-            source_name = Path(str(payload.get("source") or json_path.name.replace("_話者分離.json", ""))).name
-            stem = json_path.name[:-len("_話者分離.json")]
-            files = existing_output_artifacts(json_path.parent, stem)
-            created = datetime.fromtimestamp(json_path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
-            with database_connection() as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                upsert_library_item(
-                    item_id=item_id, source_name=source_name, output_dir=json_path.parent,
-                    media_path=None, language=payload.get("language"), segments=segments,
-                    speaker_names=payload.get("speaker_names") if isinstance(payload.get("speaker_names"), dict) else {},
-                    outline=payload.get("outline") if isinstance(payload.get("outline"), dict) else None,
-                    emotion_analysis=payload.get("emotion_analysis") if isinstance(payload.get("emotion_analysis"), dict) else None,
-                    formatting_result=(
-                        payload.get("formatting_result")
-                        if isinstance(payload.get("formatting_result"), dict) else None
-                    ),
-                    files=files, write_srt=any(path.suffix.lower() == ".srt" for path in files),
-                    write_json=True, created_at=created, connection=connection,
-                )
-                connection.execute(
-                    "INSERT OR REPLACE INTO output_import_provenance "
-                    "(item_id, canonical_path, content_sha256) VALUES (?, ?, ?)",
-                    (item_id, canonical_path, current_fingerprint),
-                )
-                connection.execute(
-                    "DELETE FROM output_import_tombstones WHERE canonical_path = ?",
-                    (canonical_path,),
-                )
-            known.add(item_id)
-            publish_input_vault(library_row(item_id), source_kind="imported")
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
 
 
 def configure_huggingface_hub_compatibility() -> None:
@@ -3740,175 +2792,6 @@ register_system_routes(
 )
 
 
-@app.post("/api/select-input")
-def select_input_file():
-    if not local_path_access_allowed():
-        return jsonify({"error": "Local filesystem selection is disabled for remote access."}), 403
-    if not runtime_info()["native_file_dialog"]:
-        return jsonify({
-            "error": "この実行環境ではOSのファイル選択画面を利用できません。",
-            "hint": "ブラウザーのファイルアップロードを使用してください。",
-            "browser_upload_only": True,
-        }), 409
-    if not file_dialog_lock.acquire(blocking=False):
-        return jsonify({"error": "ファイル選択画面をすでに開いています。"}), 409
-    try:
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-        except Exception as exc:
-            return jsonify({
-                "error": "Windows のファイル選択画面を開けませんでした。",
-                "hint": "ファイルのフルパスを入力欄へ直接貼り付けてください。",
-                "details": str(exc),
-            }), 500
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        root.update()
-        try:
-            selected = filedialog.askopenfilename(
-                parent=root,
-                title="処理する音声・動画ファイルを選択",
-                filetypes=[
-                    ("音声・動画", "*.mp4 *.m4v *.mov *.mkv *.wav *.mp3 *.m4a *.flac"),
-                    ("動画", "*.mp4 *.m4v *.mov *.mkv"),
-                    ("音声", "*.wav *.mp3 *.m4a *.flac"),
-                    ("すべてのファイル", "*.*"),
-                ],
-            )
-        finally:
-            root.destroy()
-
-        if not selected:
-            return jsonify({"ok": True, "cancelled": True})
-        path = resolve_local_media_path(selected)
-        return jsonify({
-            "ok": True,
-            "cancelled": False,
-            "path": str(path),
-            "name": path.name,
-            "size": path.stat().st_size,
-            "media_kind": media_kind(path),
-        })
-    except (ValueError, OSError) as exc:
-        return jsonify({"error": str(exc)}), 400
-    finally:
-        file_dialog_lock.release()
-
-
-@app.post("/api/source-thumbnail")
-def source_thumbnail():
-    if not local_path_access_allowed():
-        return jsonify({"error": "Local filesystem thumbnails are disabled for remote access."}), 403
-    try:
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or not isinstance(payload.get("path"), str):
-            raise ValueError("A media path is required.")
-        source_path = resolve_local_media_path(payload["path"])
-        thumbnail_path = generate_video_thumbnail(source_path)
-        return send_file(thumbnail_path, mimetype="image/jpeg", conditional=True)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
-        return jsonify({"error": f"サムネイルを作成できません: {exc}"}), 500
-
-
-@app.get("/api/library")
-def list_library():
-    keyword = request.args.get("keyword", "").strip().casefold()
-    speaker_filter = request.args.get("speaker", "").strip().casefold()
-    emotion_filter = request.args.get("emotion", "").strip().casefold()
-    group_filter = request.args.get("group", "").strip()
-    sort_key = request.args.get("sort", "updated_desc").strip()
-    with database_connection() as connection:
-        rows = connection.execute("SELECT * FROM library_items ORDER BY updated_at DESC").fetchall()
-        group_rows = connection.execute(
-            """
-            SELECT g.id, g.name, g.created_at, g.updated_at,
-                   COUNT(items.id) AS item_count
-            FROM library_groups AS g
-            LEFT JOIN library_items AS items ON items.group_id = g.id
-            GROUP BY g.id, g.name, g.created_at, g.updated_at
-            ORDER BY g.name COLLATE NOCASE, g.created_at
-            """
-        ).fetchall()
-
-    groups = [
-        {
-            "id": str(row["id"]),
-            "name": str(row["name"]),
-            "item_count": int(row["item_count"] or 0),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        for row in group_rows
-    ]
-    group_names = {group["id"]: group["name"] for group in groups}
-
-    all_speakers: set[str] = set()
-    all_emotions: set[str] = set()
-    candidates: list[tuple[sqlite3.Row, int, list[str], list[str], str]] = []
-    for row in rows:
-        segments = row_segments(row)
-        names = json_load(row["speaker_names_json"], {})
-        if not isinstance(names, dict):
-            names = {}
-        speakers = sorted({
-            str(names.get(str(item.get("speaker") or "")) or default_speaker_name(item.get("speaker")))
-            for item in segments if item.get("speaker")
-        })
-        emotions = sorted({value for item in segments for value in emotion_values(item)})
-        all_speakers.update(speakers)
-        all_emotions.update(emotions)
-        searchable_segments = [str(item.get("text") or "") for item in segments]
-        match_count = sum(1 for text_value in searchable_segments if keyword and keyword in text_value.casefold())
-        source_match = bool(keyword and keyword in str(row["source_name"]).casefold())
-        if keyword and not match_count and not source_match:
-            continue
-        if speaker_filter and not any(speaker_filter == value.casefold() for value in speakers):
-            continue
-        if emotion_filter and not any(emotion_filter == value.casefold() for value in emotions):
-            continue
-        row_group_id = str(row["group_id"] or "")
-        if group_filter == "__ungrouped__" and row_group_id:
-            continue
-        if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
-            continue
-        candidates.append((row, match_count, speakers, emotions, group_names.get(row_group_id, "")))
-
-    if sort_key == "created_desc":
-        candidates.sort(key=lambda item: item[0]["created_at"], reverse=True)
-    elif sort_key == "speaker":
-        candidates.sort(key=lambda item: ((item[2][0] if item[2] else "￿"), item[0]["updated_at"]))
-    elif sort_key == "emotion":
-        candidates.sort(key=lambda item: ((item[3][0] if item[3] else "￿"), item[0]["updated_at"]))
-    elif sort_key == "keyword":
-        candidates.sort(key=lambda item: (item[1], item[0]["updated_at"]), reverse=True)
-    elif sort_key == "name":
-        candidates.sort(key=lambda item: str(item[0]["source_name"]).casefold())
-    elif sort_key == "group":
-        candidates.sort(key=lambda item: (
-            not bool(item[4]), item[4].casefold(), str(item[0]["source_name"]).casefold()
-        ))
-    else:
-        candidates.sort(key=lambda item: item[0]["updated_at"], reverse=True)
-    return jsonify({
-        "items": [
-            library_public(row, full=False, match_count=count, group_name=group_name)
-            for row, count, _, _, group_name in candidates
-        ],
-        "total": len(candidates),
-        "groups": groups,
-        "facets": {
-            "speakers": sorted(all_speakers),
-            "emotions": sorted(all_emotions),
-            "groups": groups,
-        },
-    })
-
-
 comparison_rate = interview_comparison.comparison_rate
 
 
@@ -3949,64 +2832,6 @@ def interview_comparison_request(payload: Any) -> tuple[list[sqlite3.Row], bool]
     if any(item_id not in by_id for item_id in item_ids):
         raise ComparisonRequestError("比較対象のデータが見つかりません。", 404)
     return [by_id[item_id] for item_id in item_ids], allow_different
-
-
-@app.post("/api/library/interview-comparison")
-def compare_group_interviews():
-    if request.content_length and request.content_length > 64 * 1024:
-        return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
-    try:
-        with library_write_lock:
-            rows, allow_different = interview_comparison_request(request.get_json(silent=True))
-            result = build_interview_comparison(rows, allow_different_content=allow_different)
-            result["input_fingerprints"] = {str(row["id"]): archive_source_stamp(row) for row in rows}
-    except ComparisonRequestError as exc:
-        return jsonify({"error": str(exc)}), exc.status
-    except (TypeError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 409
-    except (OverflowError, sqlite3.Error):
-        return jsonify({"error": "インタビュー比較を生成できません。"}), 500
-    return jsonify(result)
-
-
-@app.get("/api/library/interview-comparison/runs")
-def list_interview_comparison_runs():
-    store = analysis_archive_store()
-    local = local_path_access_allowed()
-    return jsonify({"runs": [{**store.public(run, local=local), "member_ids": store.members(run["id"])}
-                             for run in store.list_comparisons()]})
-
-
-@app.post("/api/library")
-def create_library_item():
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"error": "追加内容が JSON ではありません。"}), 400
-    source_name = str(payload.get("source_name") or "新規文字起こし").strip()
-    if any(ord(character) < 32 or ord(character) == 127 for character in source_name):
-        return jsonify({"error": "Source names cannot contain control characters."}), 400
-    if not source_name or len(source_name) > 255:
-        return jsonify({"error": "データ名は 1～255 文字で指定してください。"}), 400
-    item_id = uuid.uuid4().hex
-    try:
-        row = upsert_library_item(
-            item_id=item_id,
-            source_name=source_name,
-            output_dir=manual_output_directory(source_name, item_id),
-            media_path=None, language=None, segments=[], speaker_names={}, outline=None,
-            emotion_analysis=None, files=[], write_srt=True, write_json=True,
-        )
-        return jsonify(library_public(row)), 201
-    except (OSError, sqlite3.Error) as exc:
-        return jsonify({"error": f"データを追加できません: {exc}"}), 500
-
-
-@app.get("/api/library/<item_id>")
-def get_library_item(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
-    return jsonify(library_public(row))
 
 
 identify_library_speakers = make_library_speaker_identification(
@@ -4366,33 +3191,6 @@ register_obsidian_routes(
 )
 
 
-@app.get("/api/library/<item_id>/thumbnail")
-def library_thumbnail(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
-    try:
-        thumbnail_path = generate_word_cloud_thumbnail(
-            item_id,
-            str(row["source_name"]),
-            row_segments(row),
-        )
-        return send_file(
-            thumbnail_path,
-            mimetype="image/svg+xml",
-            conditional=True,
-            max_age=86400,
-        )
-    except OSError as exc:
-        return jsonify({"error": f"ワードクラウドを作成できません: {exc}"}), 500
-
-
-@app.delete("/api/library/<item_id>")
-def delete_library_item(item_id: str):
-    with library_write_lock:
-        return _delete_library_item_locked(item_id)
-
-
 def _delete_library_item_locked(item_id: str):
     row = library_row(item_id)
     if row is None:
@@ -4581,36 +3379,6 @@ def _delete_library_item_locked(item_id: str):
         )
         result["cleanup_errors"] = cleanup_errors
     return jsonify(result)
-
-@app.get("/api/library/<item_id>/media")
-def stream_library_media(item_id: str):
-    row = library_row(item_id)
-    if row is None or not row["media_path"]:
-        return jsonify({"error": "元の音声・動画が保存されていません。"}), 404
-    media_path = Path(row["media_path"])
-    expected_media_dir = MEDIA_DIRECTORY / item_id
-    if not path_is_within(media_path, expected_media_dir) or not media_path.is_file():
-        return jsonify({"error": "元の音声・動画が見つかりません。"}), 404
-    return send_file(media_path, conditional=True, mimetype=mimetypes.guess_type(media_path.name)[0])
-
-
-@app.get("/api/library/<item_id>/files/<path:filename>")
-def download_library_file(item_id: str, filename: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "データが見つかりません。"}), 404
-    paths = [Path(value) for value in json_load(row["files_json"], []) if isinstance(value, str)]
-    output_root = Path(row["output_dir"])
-    matching = next(
-        (
-            path for path in paths
-            if path.name == filename and path_is_within(path, output_root)
-        ),
-        None,
-    )
-    if matching is None or not matching.is_file():
-        return jsonify({"error": "出力ファイルが見つかりません。"}), 404
-    return send_file(matching, as_attachment=True, download_name=matching.name)
 
 
 def start_transcription_job_command(
@@ -4980,6 +3748,30 @@ register_ai_routes(
     app,
     lmstudio_reasoning_settings=lambda *args, **kwargs: lmstudio_reasoning_settings(*args, **kwargs),
     load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+)
+
+
+register_library_routes(
+    app,
+    media_directory=lambda: MEDIA_DIRECTORY,
+    _delete_library_item_locked=_delete_library_item_locked,
+    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+    archive_source_stamp=archive_source_stamp,
+    build_interview_comparison=build_interview_comparison,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    file_dialog_lock=file_dialog_lock,
+    generate_video_thumbnail=lambda *args, **kwargs: generate_video_thumbnail(*args, **kwargs),
+    generate_word_cloud_thumbnail=generate_word_cloud_thumbnail,
+    interview_comparison_request=interview_comparison_request,
+    library_public=library_public,
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    library_write_lock=library_write_lock,
+    local_path_access_allowed=local_path_access_allowed,
+    manual_output_directory=manual_output_directory,
+    resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+    runtime_info=runtime_info,
+    upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
 )
 
 
