@@ -642,7 +642,12 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             stack.enter_context(patch.object(app.shutil, "which", return_value="ffmpeg"))
             stack.enter_context(patch.object(app, "configure_huggingface_hub_compatibility"))
             stack.enter_context(patch.object(app, "configure_speechbrain_lazy_import_compatibility"))
-            outline = stack.enter_context(patch.object(app, "create_outline_with_ai", return_value={
+            stack.enter_context(patch.object(
+                app,
+                "run_diarization_audio_preprocess",
+                side_effect=lambda _source, destination, _check: destination,
+            ))
+            outline =stack.enter_context(patch.object(app, "create_outline_with_ai", return_value={
                 "sections": [{"title": "検討", "bullets": ["元の文字起こし"]}],
             }))
             write_outputs = stack.enter_context(patch.object(app, "write_outputs", return_value=[]))
@@ -1025,7 +1030,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             self.assertEqual(job.status, "cancelled")
             calls["upsert"].assert_not_called()
 
-    def test_preprocessing_is_limited_to_asr_while_speaker_and_emotion_use_original_audio(self):
+    def test_diarization_uses_quiet_boosted_original_and_emotion_uses_original(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-job-original-audio-") as temporary:
             root = Path(temporary)
             source = root / "input.wav"
@@ -1038,6 +1043,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                 ai_provider="none",
             )
             diarized_audio = []
+            diarization_sources = []
             emotion_sources = []
 
             class RecordingDiarizationPipeline:
@@ -1048,21 +1054,43 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                     diarized_audio.append(audio)
                     return []
 
+            def diarization_preprocess(source_path, destination, _check):
+                diarization_sources.append(source_path)
+                destination.write_bytes(b"boosted")
+                return destination
+
             def emotion(audio_path, segments, *_args):
                 emotion_sources.append(audio_path)
                 return segments, app.build_emotion_analysis_summary(segments, ["kushinada"])
 
+            diarization_wav = root / ".pipeline_internal" / "diarization.wav"
             with self.fake_pipeline(), \
                     patch.object(app, "run_audio_preprocess",
                                  side_effect=lambda _source, destination, _preset, _check: destination), \
+                    patch.object(app, "run_diarization_audio_preprocess",
+                                 side_effect=diarization_preprocess), \
                     patch.object(app, "run_aist_emotion_analysis", side_effect=emotion):
                 sys.modules["whisperx"].load_audio = lambda path: [path]
                 sys.modules["whisperx.diarize"].DiarizationPipeline = RecordingDiarizationPipeline
                 app.run_transcription_job(job, options)
 
             self.assertEqual(job.status, "completed")
-            self.assertEqual(diarized_audio, [[str(source)]])
+            self.assertEqual(diarization_sources, [source])
+            self.assertEqual(diarized_audio, [[str(diarization_wav)]])
+            self.assertFalse(diarization_wav.exists())
             self.assertEqual(emotion_sources, [source])
+
+    def test_unprocessed_transcription_diarizes_the_original_without_boost(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-job-no-preprocess-") as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            options = self.options(root, audio_preprocess="none")
+            with self.fake_pipeline(), \
+                    patch.object(app, "run_diarization_audio_preprocess") as diarization_preprocess:
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            diarization_preprocess.assert_not_called()
 
     def test_openai_whisper_status_does_not_claim_ignored_vad_settings(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-job-vad-") as temporary:

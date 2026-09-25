@@ -67,6 +67,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
     run_aist_emotion_analysis = dependencies["run_aist_emotion_analysis"]
     run_audio_interval_preprocess = dependencies["run_audio_interval_preprocess"]
     run_audio_preprocess = dependencies["run_audio_preprocess"]
+    run_diarization_audio_preprocess = dependencies["run_diarization_audio_preprocess"]
     safe_output_stem = dependencies["safe_output_stem"]
     safe_token_count = dependencies["safe_token_count"]
     session_profile_from_media = dependencies["session_profile_from_media"]
@@ -480,14 +481,21 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
 
         set_stage("diarization", "話者の分離", 10)
         if processing_input_path != options.input_path:
-            # speechnorm/loudnorm flatten the level differences between speakers,
-            # afftdn reshapes their spectra, and the expansion lifts pause noise
-            # into the segmentation model. Preprocessing preserves timing, so
-            # the original recording can be diarized against the same clock.
-            status("話者分離には前処理前の元音声を使用します。")
+            # The transcription presets denoise, band-limit and normalize, which
+            # reshapes the voice characteristics speaker embeddings compare.
+            # Diarize the original recording instead, with only too-quiet speech
+            # lifted so soft speakers still reach the segmentation model.
+            # Both filters preserve timing, so every stage shares one clock.
+            status("話者分離用に、元音声の小さすぎる声だけを持ち上げています…")
+            diarization_path = run_diarization_audio_preprocess(
+                options.input_path,
+                internal_work_dir / "diarization.wav",
+                check_cancelled,
+            )
             audio = None
             gc.collect()
-            audio = whisperx.load_audio(str(options.input_path))
+            audio = whisperx.load_audio(str(diarization_path))
+            diarization_path.unlink(missing_ok=True)
             check_cancelled()
         status(f"話者を分離しています（{diarization_device.upper()}）…")
         try:

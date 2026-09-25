@@ -33,9 +33,17 @@ class FindLongAsrGapsTests(unittest.TestCase):
         ]
 
         self.assertEqual(
-            find_long_asr_gaps(segments, 16.0),
-            [(9.0, 12.0), (14.0, 16.0)],
+            find_long_asr_gaps(segments, 17.0),
+            [(9.0, 12.0), (14.0, 17.0)],
         )
+
+    def test_gaps_shorter_than_three_seconds_are_not_rechecked(self):
+        segments = [
+            {"start": 2.9, "end": 5.0, "text": "a"},
+            {"start": 7.9, "end": 9.0, "text": "b"},
+        ]
+
+        self.assertEqual(find_long_asr_gaps(segments, 11.9), [])
 
     def test_gap_threshold_is_inclusive(self):
         segments = [{"start": 3.0, "end": 7.0, "text": "speech"}]
