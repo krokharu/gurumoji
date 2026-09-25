@@ -84,7 +84,7 @@ tags:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DATA-01 | 中 | 元メディアの削除が恒久削除になっている | `_delete_library_item_locked`：隔離フォルダーへ移したあと `shutil.rmtree` | 誤って削除すると元音声を復旧できない（出力は残る） | 既存の隔離の仕組みを使い、保持期間つきのゴミ箱にする。完全に削除する操作は別にする（[[40-Design/storage-policy]] の「別操作とする」方針） | 一部対応（2026-09-25。元メディアを `<data>/trash/<日時>-<会話ID>/` へ移し、`trash.json` に削除日時と期限を記録する。保持期間は `MOJIOKOSI_TRASH_RETENTION_DAYS`（既定30日、0で即時消去）で、過ぎた分は起動時に消す。削除中の強制終了からの回復もゴミ箱へ移す。サムネイルは再生成物なので即時消去。画面からの復元・完全削除の操作は未実装） | P1：優先 |
 | DATA-02 | 中 | Vaultの数と構成がドキュメントごとに食い違っている | `docs/OBSIDIAN_VAULTS.md` と `README.md` は「2つのVault」、[[30-Data/four-vaults-v1]] は Input／Visualization／Orchestrator に ResearchVault と Software を加えた構成 | 利用者やAIが保存先を誤解する | [[40-Design/convergence-plan]] のドキュメント統一で直す | 未対応 | P1：優先 |
-| DATA-03 | 低 | 同じ会話の情報が多くの場所に分散している | SQLite、`runtime/output`、`analysis_store`、ResearchVault、InputVault、`obsidian_workbench` | バックアップの漏れや、復元時の不整合 | 正本の分類は [[40-Design/storage-policy]] にある。バックアップと復元の単位を `60-Operations` の手順として作る | 未対応 | P1：優先 |
+| DATA-03 | 低 | 同じ会話の情報が多くの場所に分散している | SQLite、`runtime/output`、`analysis_store`、ResearchVault、InputVault、`obsidian_workbench` | バックアップの漏れや、復元時の不整合 | 正本の分類は [[40-Design/storage-policy]] にある。バックアップと復元の単位を `60-Operations` の手順として作る | 対応済み（2026-09-25。`services/data_backup.py`。画面の「バックアップを作成」（書き込みロックを取って同時点で写す）と `scripts/backup_data.py create/verify/restore`。対象はDB（backup API）・analysis_store・全Vault・obsidian_layout・作業台・単語登録。メディアと学習用音声は任意。出力・サムネイル・ゴミ箱・tokens.json は除外。復元はhash検証後、空のフォルダーにだけ行う） | P1：優先 |
 
 ## CFG：設定
 

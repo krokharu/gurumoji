@@ -422,6 +422,7 @@ FlaskのHTTPサーバーを `0.0.0.0` などへbindし、`http://PCのIPアド�
 | `MAX_JSON_MB` | `MOJIOKOSI_MAX_JSON_MB` | 32 MB | JSON形式のAPIリクエスト |
 | `MAX_RETAINED_JOBS` | `MOJIOKOSI_MAX_RETAINED_JOBS` | 50件 | メモリー内に保持するジョブ状態 |
 | `JOB_TTL_SECONDS` | `MOJIOKOSI_JOB_TTL_SECONDS` | 86400秒（24時間） | 完了・失敗・キャンセル済みジョブ状態の保持時間 |
+| `BACKUP_DIR` | `MOJIOKOSI_BACKUP_DIR` | `runtime/backups` | 「バックアップを作成」と `scripts/backup_data.py` の保存先 |
 | `TRASH_RETENTION_DAYS` | `MOJIOKOSI_TRASH_RETENTION_DAYS` | 30日 | 削除した会話の元音声・動画を `runtime/data/trash` に保管する日数。過ぎた分は起動時に完全削除します。0で削除時にすぐ消去 |
 
 ジョブ保持上限とTTLは、進捗表示や再接続に使うメモリー内の状態を整理する設定です。処理済みライブラリや `runtime/output` の成果物を自動削除する設定ではありません。送信直後に接続が切れたりページを再読み込みした場合は、ブラウザーが同じ送信IDで受付中・実行中・保存済み結果を照会し、未受付を確認した再送でも同じIDを再利用して二重実行を防ぎます。

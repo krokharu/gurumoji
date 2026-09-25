@@ -28,7 +28,7 @@ Obsidianの保管庫管理で「保管庫としてフォルダーを開く」を
 
 全件データは `runtime/data/analysis_store`、実行・同期状態はSQLite、読むための見解・引用は研究Vaultに保存します。[実装済みの保存仕様と使い方](program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは後続の実装対象です。
 
-分析用Vaultはローカルの `runtime/data/` 配下にあるためGit管理対象外です。復元用にはアプリを停止してDB・`analysis_store`・`obsidian_workbench`・研究Vault・必要なメディアを一緒にバックアップしてください。プログラム用Vaultの資料はGit管理でき、個人の `.obsidian` 設定は除外されます。
+分析用Vaultはローカルの `runtime/data/` 配下にあるためGit管理対象外です。復元用には、画面の「バックアップを作成」または `python scripts/backup_data.py create` で、DB・`analysis_store`・`obsidian_workbench`・全Vault・台帳を同じ時点でバックアップしてください（メディアは任意）。手順は `docs/PROJECT_LAYOUT.md` にあります。プログラム用Vaultの資料はGit管理でき、個人の `.obsidian` 設定は除外されます。
 
 ## プログラム資料Vaultの更新
 

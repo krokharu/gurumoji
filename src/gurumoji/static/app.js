@@ -2421,6 +2421,28 @@ function applyObsidianWatcherStatus(watcher) {
   });
 }
 
+// DATA-03: one consistent copy of what cannot be recreated.
+listen(document.querySelector('#create-backup-button'), 'click', async () => {
+  const button = document.querySelector('#create-backup-button');
+  const message = document.querySelector('#backup-message');
+  const includeMedia = document.querySelector('#backup-include-media');
+  button.disabled = true;
+  setAlert(message, 'バックアップを作成しています。完了まで保存操作は待機します…');
+  try {
+    const response = await apiFetch('/api/system/backup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({include_media: Boolean(includeMedia && includeMedia.checked)})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || 'バックアップを作成できませんでした。');
+    setAlert(message, `作成しました: ${data.path}（${data.file_count}ファイル）。含めていないもの: ${(data.excluded || []).join('、')}`);
+  } catch (error) {
+    setAlert(message, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function applyLmStudioDefaults(config) {
   // A ready, explicitly selected local model is an opt-in.  Make the
   // transcription form ready to use it without requiring three more clicks.

@@ -83,6 +83,7 @@ from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
 from .services.media_trash import purge_expired_trash, trash_media
+from .services import data_backup
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -331,6 +332,9 @@ JOB_TTL_SECONDS = positive_env_int(
 ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
     "MOJIOKOSI_ORPHAN_GRACE_SECONDS", 15 * 60, minimum=60, maximum=7 * 86400
 )
+BACKUP_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_BACKUP_DIR", str(RUNTIME_DIRECTORY / "backups"))
+).expanduser()
 # Days a deleted conversation's original media stays in <data>/trash; 0 erases at once.
 TRASH_RETENTION_DAYS = positive_env_int(
     "MOJIOKOSI_TRASH_RETENTION_DAYS", 30, minimum=0, maximum=3650
@@ -1244,6 +1248,18 @@ def recover_delete_quarantines() -> list[str]:
     )
 
 
+def create_data_backup(include_media: bool = False) -> dict[str, Any]:
+    """Back up the data directory while every Vault and library writer is paused (DATA-03)."""
+    from .analysis_store import STORE_LOCK
+    from .obsidian_layout import LAYOUT_LOCK
+    from .vault_registry import VAULT_LOCK
+    # Same order as the writers take them: library -> store -> layout -> generated Vaults.
+    with library_write_lock, STORE_LOCK, LAYOUT_LOCK, VAULT_LOCK:
+        return data_backup.create_backup(
+            DATABASE_FILE.parent, BACKUP_DIRECTORY, include_media=include_media, app_version=APP_VERSION,
+        )
+
+
 def purge_media_trash() -> list[str]:
     return purge_expired_trash(trash_directory(), TRASH_RETENTION_DAYS)
 
@@ -1753,6 +1769,7 @@ def create_app() -> Flask:
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
         obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        create_backup=lambda include_media: create_data_backup(include_media),
     )
 
     register_analysis_routes(

@@ -560,6 +560,13 @@
   "api_system_activity"
  ],
  [
+  "/api/system/backup",
+  [
+   "POST"
+  ],
+  "api_create_backup"
+ ],
+ [
   "/api/training",
   [
    "GET"
