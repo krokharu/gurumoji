@@ -92,21 +92,22 @@ tags:
 
 | ID | 重要度 | 問題 | 根拠 | 影響 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| CFG-01 | 中 | 設定の置き場所が分散している | [[10-Architecture/system-map]] の「設定の所在」 | 同じ設定に正本が複数できる | 設定の種類ごとに正本を1つに決める（下表） | 未対応 | 保留：設定ごとの責務を維持 |
+| CFG-01 | 中 | 設定の置き場所が分散している | [[10-Architecture/system-map]] の「設定の所在」 | 同じ設定に正本が複数できる | 設定の種類ごとに正本を1つに決める（下表） | 対応済み（2026-09-25。CFG-02〜04とARCH-03で、下表の設定ごとに正本を1つにした。表を実際の正本に更新） | 保留：設定ごとの責務を維持 |
 | CFG-02 | 中 | 秘密情報と利用者設定が同じファイルにあり、UIが秘密ファイルを書き換える | `config/tokens.json` に、APIキーと `openai_model` などの使用モデルが同居している。`update_token_model` がこのファイルを書き換える | 秘密ファイルの破損リスク。共有してよい設定と秘密が分けられない | 使用モデルは秘密ではない設定ファイルへ段階的に移す（読み込みは新旧両対応、書き込みは新しい方だけ） | 対応済み（2026-09-25。使用モデルは秘密ではない `config/ai_models.json` に保存し、アプリとセットアップ画面は `tokens.json` のモデルを書き換えない。読み込みは `ai_models.json` を優先し、ないモデルは `tokens.json` から読む（新旧両対応）。空にしたモデルは古い値に戻らない。`ai_models.json` はGitの除外対象。バックアップの対象外（設定は選び直せる）） | 保留：移行・復元仕様が必要 |
 | CFG-03 | 低 | 既定値が複数の場所に書かれている | 「Obsidianで仕上げ」の既定が、`JobOptions`・`parse_bool("finish_in_obsidian", default=True)`・`index.html` の `checked` の3か所。会話モードは `app.js` にだけある | 既定を変えるときに漏れる | サーバー側の既定を `GET /api/config` で返し、UIはそれを使う | 対応済み（2026-09-25。新規ジョブの既定（録音の種類・「Obsidianで仕上げ」・録音の種類ごとの推奨値）を `services/transcription/options.py` の1か所にまとめた。フォームはそこから描画し、`GET /api/config` の `job_defaults` でも返す。開始処理の省略時の値も同じ定数を使う） | 保留：既定値を変更する際に統合 |
 | CFG-04 | 低 | AIエフォートが2か所にある | `localStorage`、`state.json` | 画面とObsidianで値が食い違う | 正本を会話ごとの `state.json`（仕上げ）とアプリ設定のどちらかに決める | 対応済み（2026-09-25。会話ごとの `state.json` を、その会話のObsidian仕上げの正本にした。画面の設定（`localStorage`）は新しく開くときの既定値だけ。アプリで「Obsidianで仕上げ」を開くと画面の設定をその会話に保存し、状態ノートとアプリのメッセージに使う値を表示する） | 保留：既定値と実行別指定を区別してから |
 
-設定ごとの正本（案）：
+設定ごとの正本（2026-09-25に確定。案から変えた行は理由を併記）：
 
 | 設定 | 正本 |
 | --- | --- |
-| APIキー・トークン | `tokens.json` だけ |
-| 使用モデル・既定の処理条件 | アプリ設定ファイル（秘密を含まない） |
-| 保存先・ポート・公開設定 | 環境変数（起動時に確定し、画面では表示だけ） |
-| Vaultのルート | `vaults.json`（ResearchVaultも登録し、コード内の算出をやめる） |
+| APIキー・トークン | `config/tokens.json` だけ。アプリは書き込まない（CFG-02） |
+| 使用モデル | `config/ai_models.json`（秘密を含まない。なければ `tokens.json` の値を読む。CFG-02） |
+| 新規ジョブの既定の処理条件 | `services/transcription/options.py` の定数。フォームと `GET /api/config` はここから作る（CFG-03）。案の「アプリ設定ファイル」は、利用者が既定値を変える画面がないため作らない |
+| 保存先・ポート・公開設定 | 環境変数（起動時に確定し、画面では表示だけ）。アプリURLは `env_settings.local_app_url`（ARCH-03） |
+| Vaultのルート | ResearchVaultは `vault_files.research_vault_root`、生成Vaultは `vaults.json`、Softwareは `vault_registry.SOFTWARE_ROOT`（ARCH-03）。案の「ResearchVaultも `vaults.json` に登録」は選別で不採用 |
 | 会話ごとの分析条件 | SQLite |
-| 仕上げの実行時オプション | 操作ノート → `state.json` |
+| 仕上げの実行時オプション | 操作ノート → `state.json`。AIの詳しさは会話の `state.json` が正本で、画面の設定は既定値（CFG-04） |
 
 ## DOC：ドキュメント
 
