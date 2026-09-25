@@ -426,6 +426,20 @@ from .services.speaker_identification import (
     speaker_registry_identity_key,
 )
 from .handlers.speaker_identification import make_library_speaker_identification
+from .services.analysis_jobs import (
+    InsightCancelled,
+    TransformerAnalysisCancelled,
+)
+from .services.analysis_jobs import make_insight_jobs
+from .services.analysis_jobs import make_insight_commands
+from .services.analysis_jobs import make_transformer_jobs
+from .services.analysis_jobs import make_transformer_commands
+from .services.analysis_archive import make_analysis_archive
+from .handlers.segment_classification import make_segment_classification_command
+from .services.analysis_pipeline_adapters import (
+    run_analysis_pipeline_method,
+)
+from .services.analysis_pipeline_adapters import make_analysis_pipeline_adapters
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -4111,270 +4125,23 @@ def analysis_archive_store() -> AnalysisStore:
     return AnalysisStore(DATABASE_FILE, database_connection)
 
 
-def archive_source_stamp(row) -> str:
-    with database_connection() as connection:
-        registry = connection.execute("SELECT value FROM application_metadata WHERE key='speaker_registry_revision'").fetchone()
-        prep_revision, _ = preparation.load_state(connection, row["id"])
-    keys = ("id", "source_name", "segments_json", "speaker_names_json", "speaker_profiles_json",
-            "session_profile_json", "outline_json", "emotion_analysis_json", "revision_count",
-            "analysis_revision", "analysis_config_json", "analysis_annotations_json")
-    return archive_digest({"source": {key: row[key] for key in keys},
-                           "preparation_revision": prep_revision,
-                           "registry_revision": registry[0] if registry else "0"})
-
-
-def archive_snapshot(row, analysis: dict) -> dict:
-    return {"title": str(row["source_name"]), "conversation_id": str(row["id"]),
-            "source_revision": int(row["revision_count"]), "analysis_revision": int(row["analysis_revision"]),
-            "segments": analysis["segments"], "config": analysis.get("config", {}),
-            "annotations": analysis.get("annotations", {}),
-            "preparation": analysis.get("manual", {}).get("preparation", {}),
-            "speakers": analysis.get("automatic", {}).get("speaker_metrics", []),
-            "original_source": {"segments": row_segments(row),
-                                "speaker_names": json_load(row["speaker_names_json"], {}),
-                                "speaker_profiles": json_load(row["speaker_profiles_json"], {}),
-                                "session_profile": row_session_profile(row)}}
-
-
-def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = "text_analysis",
-                           kwic: dict | None = None, app_url: str = "http://127.0.0.1:7860",
-                           check_cancelled: Callable[[], None] = lambda: None,
-                           store: AnalysisStore | None = None) -> dict:
-    datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
-    if kwic is not None:
-        datasets = {"kwic": (KWIC_FIELDS, kwic["hits"])}
-    outline = json_load(row["outline_json"], None)
-    ai = analysis.get("insights", {}).get("ai") or {}
-    methods = method_results(analysis, datasets, outline=outline, kwic=kwic)
-    if kwic is not None: methods = [m for m in methods if m["method_id"] == "kwic"]
-    expert_hashes = method_experts.attach_method_reviews(methods, analysis)
-    expert_hashes.update(method_experts.knowledge_hashes(analysis.get("experts")))
-    parameters: dict[str, Any] = ({key: kwic[key] for key in ("query", "mode", "speaker")}
-                                  if kwic is not None else analysis["config"])
-    algorithms = {"automatic": analysis.get("algorithm_version"),
-                  "insights": INSIGHT_VERSION, "finishing": FINISHING_VERSION,
-                  "research": analysis.get("research", {}).get("algorithm_version"),
-                  "engine": analysis.get("research", {}).get("linguistics", {}).get("engine", {}),
-                  "experts": dict(sorted(expert_hashes.items()))}
-    if kind == "transformer_topics":
-        transformer_result = analysis.get("transformer", {}).get("result") or {}
-        parameters = {"analysis": analysis["config"],
-                      "transformer": transformer_result.get("parameters", {})}
-        algorithms["transformer"] = transformer_result.get("algorithm_version", "")
-    result = {"schema_version": 1, "parameters": parameters,
-              "algorithms": algorithms,
-              "ai_request_id": ai.get("request_id", ""), "methods": methods,
-              "analysis": analysis if kwic is None else {"kwic": kwic}}
-    return (store or analysis_archive_store()).save(item_id=str(row["id"]), kind=kind,
-        snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
-        request_id=request_id, input_fingerprint=archive_source_stamp(row),
-        source_revision=int(row["revision_count"]), analysis_revision=int(row["analysis_revision"]),
-        app_url=app_url, provider=ai.get("provider", "") if kind == "ai_insights" else "",
-        model=ai.get("model", "") if kind == "ai_insights" else "", check_cancelled=check_cancelled)
-
-
-def archive_segment_classification(
-    row: sqlite3.Row, analysis: dict[str, Any], classification: dict[str, Any],
-    request_id: str, *, app_url: str = "http://127.0.0.1:7860",
-) -> dict[str, Any]:
-    """Persist one immutable proposal run without changing manual annotations."""
-    analysis_with_result = dict(analysis)
-    analysis_with_result["segment_classification"] = {
-        "result": classification,
-        "stale": False,
-        "summary": segment_classification_summary(classification),
-        "dialogue_acts": DIALOGUE_ACTS,
-    }
-    datasets = {
-        name: analysis_csv_rows(analysis_with_result, name)
-        for name in ("segment_classifications", "segment_classification_crosstabs")
-    }
-    classification_state = analysis_with_result["segment_classification"]
-    methods = method_results(
-        analysis_with_result, datasets, classification=classification_state
-    )
-    methods = [value for value in methods if value["method_id"] == "segment_classification"]
-    llm_source = (classification.get("sources") or {}).get("llm") or {}
-    usage = llm_source.get("usage") or {}
-    result = {
-        "schema_version": 1,
-        "parameters": {
-            "use_jev": bool(llm_source.get("available")),
-            "topic_candidate_count": len(segment_classification_topic_candidates(
-                analysis.get("config", {}).get("codebook", [])
-            )),
-            "classification_fingerprint": str(classification.get("fingerprint") or ""),
-        },
-        "algorithms": {
-            "segment_classification": SEGMENT_CLASSIFICATION_VERSION,
-            "template": SEGMENT_CLASSIFICATION_VERSION,
-            "transformer": ((classification.get("sources") or {}).get("transformer") or {}).get("algorithm_version", ""),
-        },
-        "methods": methods,
-        "classification": classification,
-        "usage": usage,
-    }
-    return analysis_archive_store().save(
-        item_id=str(row["id"]), kind="segment_classification",
-        snapshot=archive_snapshot(row, analysis_with_result), result=result,
-        datasets=datasets, request_id=request_id,
-        input_fingerprint=archive_source_stamp(row),
-        source_revision=int(row["revision_count"]),
-        analysis_revision=int(row["analysis_revision"]), app_url=app_url,
-        provider="typesafe" if llm_source.get("available") else "",
-        model=str(usage.get("model") or ""),
-    )
-
-
-def archive_ai_finishing(row, original_segments: list[dict], stages: dict, provider: str,
-                         model: str, usage: dict, context_outline: dict | None = None,
-                         jev_usage: dict | None = None,
-                         request_id: str | None = None) -> dict:
-    segments = row_segments(row)
-    names = json_load(row["speaker_names_json"], {})
-    display = [{**s, "speaker_name": names.get(s.get("speaker"), s.get("speaker", "UNKNOWN"))} for s in segments]
-    jev_rows = jev_comparison_rows(segments)
-    agreement_counts = Counter(str(row.get("agreement") or "") for row in jev_rows)
-    jev_details = ({
-        "review_version": JEV_REVIEW_VERSION,
-        "model": str(jev_rows[0].get("jev_model") or JEV_DEFAULT_MODEL),
-        "usage": jev_usage or {},
-        "decision_labels": ["correction_needed", "no_correction_needed"],
-        "reviewed_segment_count": len(jev_rows),
-        "agreement_counts": dict(agreement_counts),
-    } if jev_rows else {})
-    details = {"prompt_version": FINISHING_VERSION, "provider": provider, "model": model,
-               "usage": usage, "stages": stages, "original_segments": original_segments,
-               "changes": finishing_changes(original_segments, segments),
-               "context_outline": context_outline, "jev_comparison": jev_details}
-    datasets = {"ai_changes": (["segment_id", "start", "end", "before_text", "after_text",
-                                 "before_speaker", "after_speaker", "noise_candidate", "review_reason"], details["changes"])}
-    if jev_rows:
-        datasets["ai_jev_comparison"] = ([
-            "segment_id", "start", "end", "speaker", "original_text", "current_text",
-            "current_ai_flagged", "jev_flagged", "agreement", "jev_decision",
-            "correction_needed_probability", "jev_confidence", "jev_model",
-        ], jev_rows)
-    cautions = ["AI仕上げは自動処理です。修正前の原文と比較して確認してください。"]
-    if jev_rows:
-        cautions.append(
-            "Jevは音声ではなく文字起こしと会話文脈だけで修正要否を二択判定します。候補は原音で確認してください。"
-        )
-    analysis = {"segments": display, "config": row_analysis_config(row),
-                "annotations": row_analysis_annotations(row, segments, row_analysis_config(row)),
-                "cautions": cautions}
-    outline = json_load(row["outline_json"], None)
-    methods = [m for m in method_results(analysis, datasets, outline=outline, finishing=details)
-               if m["method_id"] in {"ai_finishing", "outline"}]
-    algorithms = {"finishing": FINISHING_VERSION}
-    if jev_rows:
-        algorithms["jev_review"] = JEV_REVIEW_VERSION
-    result = {"schema_version": 1, "methods": methods, "parameters": {"stages": stages},
-              "algorithms": algorithms, "finishing": details, "outline": outline}
-    port = os.environ.get("MOJIOKOSI_PORT", "7860")
-    if not port.isdigit() or not 1 <= int(port) <= 65535: port = "7860"
-    return analysis_archive_store().save(item_id=str(row["id"]), kind="ai_finishing",
-        snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
-        request_id=request_id or "finishing-" + str(row["id"]), input_fingerprint=archive_source_stamp(row),
-        source_revision=int(row["revision_count"]), analysis_revision=int(row["analysis_revision"]),
-        provider=provider, model=model, app_url=f"http://127.0.0.1:{port}")
-
-
-def archive_app_url() -> str:
-    port = os.environ.get("MOJIOKOSI_PORT", "7860")
-    return f"http://127.0.0.1:{port if port.isdigit() and 1 <= int(port) <= 65535 else '7860'}"
-
-
-def archive_meeting_minutes(row) -> dict | None:
-    """Save meeting minutes as their own run, never inside the conversation's text analysis."""
-    minutes = row_meeting_minutes(row)
-    if row_session_profile(row).get("session_type") != "meeting" or not (
-            minutes["tasks"] or minutes["decisions"] or minutes["summary"]
-            or minutes["analysis"]["speaker_activity"]):
-        return None
-    segments = row_segments(row)
-    names = json_load(row["speaker_names_json"], {})
-    config = row_analysis_config(row)
-    analysis = {"segments": [{**s, "speaker_name": names.get(s.get("speaker"), s.get("speaker", "UNKNOWN"))}
-                             for s in segments],
-                "config": config, "annotations": row_analysis_annotations(row, segments, config)}
-    datasets = {
-        "meeting_tasks": (["task_id", "title", "owner", "priority", "due_date", "due_text", "status", "confidence",
-                           "evidence_segment_id", "evidence_start", "evidence_end", "source_text"], minutes["tasks"]),
-        "meeting_decisions": (["decision_id", "text", "speaker", "evidence_segment_id", "evidence_start",
-                               "evidence_end"], minutes["decisions"]),
-        "meeting_speaker_activity": (["speaker", "turns", "seconds"], minutes["analysis"]["speaker_activity"]),
-    }
-    methods = [m for m in method_results(analysis, datasets, meeting=minutes) if m["method_id"] == "meeting_minutes"]
-    result = {"schema_version": 1, "methods": methods,
-              "parameters": {"method": minutes.get("method", ""), "version": minutes.get("version", "")},
-              "algorithms": {"meeting_minutes": MEETING_MINUTES_VERSION}, "meeting_minutes": minutes}
-    stamp = archive_source_stamp(row)
-    return analysis_archive_store().save(item_id=str(row["id"]), kind="meeting_minutes",
-        snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
-        request_id="meeting-" + archive_digest({"source": stamp, "minutes": minutes})[:40],
-        input_fingerprint=stamp, source_revision=int(row["revision_count"]),
-        analysis_revision=int(row["analysis_revision"]), app_url=archive_app_url())
-
-
-def interview_comparison_datasets(comparison: dict[str, Any]) -> dict[str, tuple[list[str], list[dict]]]:
-    """Long-format tables: one row per interview, so every value keeps its conversation ID."""
-    def spread(rows: list[dict], label: str, summary: str) -> list[dict]:
-        return [{label: row.get(label), summary: row.get(summary), **value}
-                for row in rows for value in row.get("interviews", [])]
-    return {
-        "comparison_interviews": (["item_id", "source_name", "comparison_label", "comparison_source", "session_type",
-                                   "session_date", "objective", "included_segment_count", "speaker_count",
-                                   "participant_count", "session_duration", "total_speaking_seconds", "term_count",
-                                   "excluded_segment_count"], comparison.get("interviews", [])),
-        "comparison_common_terms": (["term", "minimum_count", "item_id", "count", "rate_per_1000_terms"],
-                                    spread(comparison.get("common_terms", []), "term", "minimum_count")),
-        "comparison_characteristic_terms": (["item_id", "source_name", "term", "count", "rate_per_1000_terms",
-                                             "other_count", "other_rate_per_1000_terms", "difference_per_1000_terms"],
-                                            comparison.get("characteristic_terms", [])),
-        "comparison_codes": (["code", "max_count", "item_id", "count", "rate_per_100_segments"],
-                             spread(comparison.get("code_comparison", []), "code", "max_count")),
-        "comparison_emotions": (["emotion", "max_count", "item_id", "count", "rate_per_100_segments"],
-                                spread(comparison.get("emotion_comparison", []), "emotion", "max_count")),
-    }
-
-
-def archive_interview_comparison(rows: list, comparison: dict[str, Any], request_id: str, *,
-                                 app_url: str, store: AnalysisStore | None = None) -> dict:
-    """Save a group-interview comparison as one multi-conversation run, apart from each interview's runs."""
-    item_ids = [str(row["id"]) for row in rows]
-    group_id = "comparison-" + hashlib.sha256("\n".join(sorted(item_ids)).encode("utf-8")).hexdigest()[:24]
-    members = [{"conversation_id": str(row["id"]), "title": str(row["source_name"]),
-                "source_revision": int(row["revision_count"] or 0),
-                "analysis_revision": int(row["analysis_revision"] or 0),
-                "input_fingerprint": archive_source_stamp(row)} for row in rows]
-    datasets = interview_comparison_datasets(comparison)
-    methods = [m for m in method_results({"segments": [], "config": {}}, datasets, comparison=comparison)
-               if m["method_id"] == "interview_comparison"]
-    expert_hashes = method_experts.attach_method_reviews(
-        methods, {"segments": [], "config": {}}, context={"session_count": len(comparison.get("interviews", []))})
-    allow_different = bool(comparison.get("allow_different_content"))
-    snapshot = {"title": "グループインタビュー比較：" + " / ".join(member["title"] for member in members),
-                "conversation_id": group_id, "kind": "interview_comparison", "members": members,
-                "allow_different_content": allow_different,
-                "comparison_key": comparison.get("comparison_key", ""), "segments": []}
-    result = {"schema_version": 1, "methods": methods,
-              "parameters": {"item_ids": item_ids, "allow_different_content": allow_different},
-              "algorithms": {"interview_comparison": comparison.get("schema_version", 1), "experts": expert_hashes},
-              "comparison": comparison}
-    return (store or analysis_archive_store()).save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,
-        result=result, datasets=datasets, request_id=request_id,
-        input_fingerprint=archive_digest([member["input_fingerprint"] for member in members]),
-        source_revision=0, analysis_revision=0, app_url=app_url, member_ids=item_ids)
-
-
-def refresh_archive_index(item_id: str) -> None:
-    # Vault failure must not undo a successful transcript/configuration edit.
-    try:
-        analysis_archive_store().publish_index(item_id)
-    except (OSError, ValueError, LookupError, sqlite3.Error):
-        with database_connection() as connection:
-            connection.execute("UPDATE analysis_runs SET vault_status='conflict',error='原文は保存済みですが、Vaultの更新確認が必要です。' WHERE item_id=? AND status='completed'", (item_id,))
+(
+    archive_source_stamp,
+    archive_snapshot,
+    archive_group_analysis,
+    archive_segment_classification,
+    archive_ai_finishing,
+    archive_app_url,
+    archive_meeting_minutes,
+    interview_comparison_datasets,
+    archive_interview_comparison,
+    refresh_archive_index,
+) = make_analysis_archive(
+    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+)
 
 
 def analysis_queries() -> AnalysisQueries:
@@ -4391,100 +4158,15 @@ def analysis_queries() -> AnalysisQueries:
     )
 
 
-PIPELINE_METHOD_DATASETS = {
-    "participation": ("speakers", "groups", "summary", "observations"),
-    "conversation_dynamics": ("transitions", "gaps", "overlaps", "timeline"),
-}
-
-
-def build_analysis_pipeline_snapshot(row: sqlite3.Row) -> dict[str, Any]:
-    """Capture one immutable input and its existing-analysis adapter view."""
-    analysis = group_analysis_for_row(row, include_research_rows=True)
-    return {
-        "schema_version": 1,
-        "input_hash": archive_source_stamp(row),
-        "source_revision": int(row["revision_count"] or 0),
-        "analysis_revision": int(row["analysis_revision"] or 0),
-        "analysis": analysis,
-        "archive_snapshot": archive_snapshot(row, analysis),
-    }
-
-
-def advise_analysis_plan(snapshot: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Run the selected O01 adviser on a small, nonverbatim context packet."""
-    context = analysis_plan_advisor.planning_context(
-        snapshot["analysis"], payload.get("objective", "")
-    )
-    if context["included_segment_count"] < 1:
-        raise AnalysisContractError("分析できる発話がありません。", code="no_valid_input")
-    engine = payload.get("engine", "transformer")
-    policy = payload.get("provider_policy", "local_only")
-    if not isinstance(policy, str) or policy not in {"local_only", "cloud_allowed"}:
-        raise AnalysisContractError("送信方針が正しくありません。", code="provider_unavailable")
-    if engine == "transformer":
-        if policy != "local_only":
-            raise AnalysisContractError("Transformer計画候補はlocal_onlyで生成してください。", code="provider_unavailable")
-        candidate, model_info = analysis_plan_advisor.transformer_candidate(
-            context, encode_transformer_texts
-        )
-        provider, model = "local_transformer", model_info["name"]
-    elif engine == "llm":
-        provider = payload.get("provider", "lmstudio")
-        if not isinstance(provider, str) or provider not in {"lmstudio", "openai", "google"}:
-            raise AnalysisContractError("計画担当のLLMを選択してください。", code="provider_unavailable")
-        if provider == "lmstudio" and policy != "local_only":
-            raise AnalysisContractError("ローカルLLMはlocal_onlyで生成してください。", code="provider_unavailable")
-        if provider != "lmstudio" and policy != "cloud_allowed":
-            raise AnalysisContractError("クラウドLLMにはcloud_allowedが必要です。", code="provider_unavailable")
-        config = load_token_config()
-        api_key, configured_model = configured_ai_credentials(config, provider)
-        model = payload.get("model") or configured_model
-        if not isinstance(model, str) or not model.strip() or len(model) > 200 or "\n" in model or "\r" in model:
-            raise AnalysisContractError("計画担当のモデルを指定してください。", code="provider_unavailable")
-        model = model.strip()
-        if provider != "lmstudio" and not api_key:
-            raise AnalysisContractError("選択したLLMのAPIキーが未設定です。", code="provider_unavailable")
-        base_url = config.lmstudio_base_url if provider == "lmstudio" else ""
-        candidate = analysis_plan_advisor.llm_candidate(
-            context,
-            lambda system, prompt, schema: call_ai_json(
-                provider, api_key, model, system, prompt, "analysis_plan_o01", schema,
-                base_url=base_url,
-            ),
-        )
-    else:
-        raise AnalysisContractError("計画担当のエンジンが正しくありません。", code="method_unavailable")
-    return {
-        "version": analysis_plan_advisor.ADVISOR_VERSION,
-        "source_revision": snapshot["source_revision"],
-        "analysis_revision": snapshot["analysis_revision"],
-        "input_hash": snapshot["input_hash"],
-        "objective": context["objective"],
-        "engine": engine, "provider": provider, "model": model,
-        **candidate,
-    }
-
-
-def run_analysis_pipeline_method(step_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Adapt one existing method to the fixed pipeline snapshot."""
-    if step_id not in PIPELINE_METHOD_DATASETS:
-        raise ValueError("未対応の分析stepです。")
-    analysis = snapshot["analysis"]
-    datasets = {
-        name: analysis_csv_rows(analysis, name)
-        for name in PIPELINE_METHOD_DATASETS[step_id]
-    }
-    methods = method_results(analysis, datasets)
-    method = next((value for value in methods if value["method_id"] == step_id), None)
-    if method is None:
-        raise ValueError(f"{step_id}の既存分析結果を構築できません。")
-    return {
-        "method": method,
-        "datasets": {
-            name: {"fields": fields, "rows": rows}
-            for name, (fields, rows) in datasets.items()
-        },
-    }
+build_analysis_pipeline_snapshot, advise_analysis_plan = make_analysis_pipeline_adapters(
+    archive_snapshot=lambda *args, **kwargs: archive_snapshot(*args, **kwargs),
+    archive_source_stamp=lambda *args, **kwargs: archive_source_stamp(*args, **kwargs),
+    call_ai_json=lambda *args, **kwargs: call_ai_json(*args, **kwargs),
+    configured_ai_credentials=lambda *args, **kwargs: configured_ai_credentials(*args, **kwargs),
+    encode_transformer_texts=lambda *args, **kwargs: encode_transformer_texts(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+)
 
 
 def analysis_pipeline_service() -> AnalysisPipelineService:
@@ -4593,615 +4275,75 @@ register_speaker_routes(
 register_job_routes(app, job_handler)
 
 
-def public_insight_request(row) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    return {**{key: row[key] for key in (
-        "request_id", "item_id", "provider", "model", "status", "progress", "message",
-        "created_at", "updated_at", "source_revision", "analysis_revision",
-    )}, "usage": json_load(row["usage_json"], {})}
+public_insight_request, update_insight_request, run_analysis_insight_job = make_insight_jobs(
+    AnalysisConflictError=AnalysisConflictError,
+    archive_group_analysis=lambda *args, **kwargs: archive_group_analysis(*args, **kwargs),
+    call_ai_json=lambda *args, **kwargs: call_ai_json(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    insight_cancel_events=insight_cancel_events,
+    insight_jobs_lock=insight_jobs_lock,
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    library_write_lock=library_write_lock,
+    merge_ai_usage=lambda *args, **kwargs: merge_ai_usage(*args, **kwargs),
+    public_diagnostic_text=lambda *args, **kwargs: public_diagnostic_text(*args, **kwargs),
+)
 
 
-def update_insight_request(request_id: str, status: str, progress: int, message: str,
-                           usage: dict[str, Any]) -> None:
-    with database_connection() as connection:
-        connection.execute("""
-            UPDATE analysis_insight_requests SET status=?, progress=?, message=?, usage_json=?, updated_at=?
-            WHERE request_id=?
-        """, (status, progress, message, json.dumps(usage, ensure_ascii=False), utc_now_iso(), request_id))
+start_analysis_insights_command, cancel_analysis_insights_command = make_insight_commands(
+    configured_ai_credentials=lambda *args, **kwargs: configured_ai_credentials(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    insight_cancel_events=insight_cancel_events,
+    insight_jobs_lock=insight_jobs_lock,
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+    public_insight_request=lambda *args, **kwargs: public_insight_request(*args, **kwargs),
+    run_analysis_insight_job=lambda *args, **kwargs: run_analysis_insight_job(*args, **kwargs),
+    update_insight_request=lambda *args, **kwargs: update_insight_request(*args, **kwargs),
+)
 
 
-class InsightCancelled(RuntimeError):
-    pass
+public_transformer_request, update_transformer_request, run_transformer_analysis_job = make_transformer_jobs(
+    AnalysisConflictError=AnalysisConflictError,
+    analyze_transformer_topics=lambda *args, **kwargs: analyze_transformer_topics(*args, **kwargs),
+    archive_group_analysis=lambda *args, **kwargs: archive_group_analysis(*args, **kwargs),
+    build_research_analysis=lambda *args, **kwargs: build_research_analysis(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    library_write_lock=library_write_lock,
+    public_diagnostic_text=lambda *args, **kwargs: public_diagnostic_text(*args, **kwargs),
+    transformer_cancel_events=transformer_cancel_events,
+    transformer_jobs_lock=transformer_jobs_lock,
+)
 
 
-def run_analysis_insight_job(request_id: str, analysis: dict, provider: str, api_key: str,
-                             model: str, cancel_event: threading.Event, base_url: str = "",
-                             app_url: str = "http://127.0.0.1:7860",
-                             ai_efforts: dict | None = None) -> None:
-    usage: dict[str, Any] = {}
-    progress_value = 0
-    message = "発話の確認を準備しています。"
-
-    def cancelled():
-        if cancel_event.is_set():
-            raise InsightCancelled("AI見解の生成を中止しました。")
-
-    def progress(value, text):
-        nonlocal progress_value, message
-        with insight_jobs_lock:
-            cancelled()
-            progress_value, message = value, text
-            update_insight_request(request_id, "running", value, text, usage)
-
-    def record_usage(sample):
-        nonlocal usage
-        usage = merge_ai_usage(usage, sample)
-        progress(progress_value, message)
-
-    def call(system, prompt, schema):
-        return call_ai_json(provider, api_key, model, system, prompt, "conversation_insights",
-                            schema, cancelled, record_usage, base_url, ai_efforts=ai_efforts)
-
-    try:
-        expert = method_experts.ai_context(analysis.get("experts"))
-        findings = create_ai_insights(analysis, call, progress, cancelled, expert=expert)
-        with insight_jobs_lock, library_write_lock:
-            cancelled()
-            latest = library_row(analysis["item"]["id"])
-            if latest is None:
-                raise AnalysisConflictError("対象の会話が削除されたため見解を保存しませんでした。")
-            current = group_analysis_for_row(latest)
-            fingerprint = input_fingerprint(analysis)
-            if current["insights"]["fingerprint"] != fingerprint:
-                raise AnalysisConflictError("生成中に元データまたは分析条件が更新されました。再生成してください。")
-            saved = {"findings": findings, "provider": provider, "model": model,
-                     "generated_at": utc_now_iso(), "fingerprint": fingerprint,
-                     "algorithm_version": INSIGHT_VERSION, "request_id": request_id,
-                     "source_revision": analysis["item"]["revision_count"],
-                     "analysis_revision": analysis["item"]["analysis_revision"], "usage": usage,
-                     **({"expert": {key: expert[key] for key in
-                                    ("expert_id", "definition_version", "knowledge_hash", "fingerprint")}}
-                        if expert else {}),
-                     "evidence": {s["id"]: {k: s.get(k) for k in
-                                  ("id", "speaker", "speaker_name", "start", "end", "text")}
-                                  for s in included_segments(analysis)
-                                  if any(s["id"] in f["segment_ids"] for f in findings)}}
-            full_analysis = group_analysis_for_row(latest, include_research_rows=True)
-            full_analysis["insights"].update({"ai": saved, "stale": False})
-            archived = archive_group_analysis(latest, full_analysis, "insights-" + request_id,
-                                               kind="ai_insights", app_url=app_url, check_cancelled=cancelled)
-            saved["archive_id"] = archived["id"]
-            saved["vault_status"] = archived["vault_status"]
-            with database_connection() as connection:
-                cursor = connection.execute("""
-                    UPDATE library_items SET analysis_insights_json=?
-                    WHERE id=? AND revision_count=? AND analysis_revision=?
-                """, (json.dumps(saved, ensure_ascii=False), latest["id"],
-                      analysis["item"]["revision_count"], analysis["item"]["analysis_revision"]))
-                if cursor.rowcount != 1:
-                    raise AnalysisConflictError("保存直前にデータが更新されました。再生成してください。")
-                connection.execute("""
-                    UPDATE analysis_insight_requests SET status='completed', progress=100,
-                        message='AI見解を保存しました。', usage_json=?, updated_at=? WHERE request_id=?
-                """, (json.dumps(usage, ensure_ascii=False), utc_now_iso(), request_id))
-    except InsightCancelled as exc:
-        update_insight_request(request_id, "cancelled", progress_value, str(exc), usage)
-    except AnalysisConflictError as exc:
-        update_insight_request(request_id, "stale", progress_value, str(exc), usage)
-    except Exception as exc:
-        update_insight_request(request_id, "failed", progress_value,
-                               "AI見解を生成できませんでした: "
-                               + public_diagnostic_text(str(exc), reveal_local_paths=False)[:700], usage)
-    finally:
-        with insight_jobs_lock:
-            insight_cancel_events.pop(request_id, None)
+start_transformer_analysis_command, cancel_transformer_analysis_command = make_transformer_commands(
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    public_transformer_request=lambda *args, **kwargs: public_transformer_request(*args, **kwargs),
+    run_transformer_analysis_job=lambda *args, **kwargs: run_transformer_analysis_job(*args, **kwargs),
+    transformer_cancel_events=transformer_cancel_events,
+    transformer_jobs_lock=transformer_jobs_lock,
+    update_transformer_request=lambda *args, **kwargs: update_transformer_request(*args, **kwargs),
+)
 
 
-def start_analysis_insights_command(
-    item_id: str, payload: dict[str, Any], *, app_url: str
-) -> tuple[dict[str, Any], int]:
-    provider, request_id = payload.get("provider"), payload.get("request_id")
-    with insight_jobs_lock:
-        row = library_row(item_id)
-        if row is None:
-            raise AnalysisCommandRequestError(
-                "処理済みデータが見つかりません。", 404
-            )
-        with database_connection() as connection:
-            previous = connection.execute("SELECT * FROM analysis_insight_requests WHERE request_id=?",
-                                          (request_id,)).fetchone()
-            if previous:
-                if any(previous[k] != v for k, v in {
-                    "item_id": item_id, "provider": provider,
-                    "source_revision": payload["source_revision"],
-                    "analysis_revision": payload["analysis_revision"],
-                }.items()):
-                    raise AnalysisCommandRequestError(
-                        "リクエストIDが別の指定に使われています。", 409
-                    )
-                return {"run": public_insight_request(previous)}, 200
-            active = connection.execute("""
-                SELECT * FROM analysis_insight_requests WHERE item_id=?
-                    AND status IN ('queued','running','cancelling') LIMIT 1
-            """, (item_id,)).fetchone()
-            if active:
-                raise AnalysisCommandRequestError(
-                    "この会話のAI見解は生成中です。",
-                    409,
-                    details={"run": public_insight_request(active)},
-                )
-        if payload["source_revision"] != int(row["revision_count"]) or payload["analysis_revision"] != int(row["analysis_revision"]):
-            raise AnalysisCommandRequestError(
-                "データが更新されています。分析を再読み込みしてください。",
-                409,
-                details={"conflict": True},
-            )
-        analysis = group_analysis_for_row(row)
-        blocked = method_experts.ai_block_reason(analysis.get("experts"))
-        if blocked:
-            raise AnalysisCommandRequestError(
-                blocked, 409, details={"expert_blocked": True}
-            )
-        if not included_segments(analysis):
-            raise AnalysisCommandRequestError(
-                "見解の生成に利用できる発話がありません。", 400
-            )
-        try:
-            ai_efforts = normalize_efforts(payload.get("ai_efforts"))
-            config = load_token_config()
-            api_key, model = configured_ai_credentials(config, provider)
-            base_url = config.lmstudio_base_url if provider == "lmstudio" else ""
-            if provider != "lmstudio" and not api_key:
-                raise ValueError("tokens.jsonに選択したプロバイダーのAPIキーを設定してください。")
-            if not model:
-                raise ValueError(local_llm_model_required_message())
-        except (ValueError, RuntimeError) as exc:
-            raise AnalysisCommandRequestError(str(exc), 400) from exc
-        now = utc_now_iso()
-        with database_connection() as connection:
-            connection.execute("""
-                INSERT INTO analysis_insight_requests
-                (request_id,item_id,source_revision,analysis_revision,fingerprint,provider,model,status,message,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,'queued','生成を準備しています。',?,?)
-            """, (request_id, item_id, payload["source_revision"], payload["analysis_revision"],
-                  analysis["insights"]["fingerprint"], provider, model, now, now))
-            run = connection.execute("SELECT * FROM analysis_insight_requests WHERE request_id=?", (request_id,)).fetchone()
-        event = threading.Event()
-        insight_cancel_events[request_id] = event
-        try:
-            threading.Thread(target=run_analysis_insight_job,
-                             args=(request_id, analysis, provider, api_key, model, event, base_url,
-                                   app_url, ai_efforts),
-                             name=f"insights-{item_id}", daemon=True).start()
-        except RuntimeError:
-            insight_cancel_events.pop(request_id, None)
-            update_insight_request(request_id, "failed", 0, "生成処理を開始できませんでした。", {})
-            raise AnalysisCommandRequestError(
-                "生成処理を開始できませんでした。", 503
-            )
-        return {"run": public_insight_request(run)}, 202
-
-
-def cancel_analysis_insights_command(
-    item_id: str, request_id: str
-) -> dict[str, Any]:
-    with insight_jobs_lock, database_connection() as connection:
-        row = connection.execute("SELECT * FROM analysis_insight_requests WHERE item_id=? AND request_id=?",
-                                 (item_id, request_id)).fetchone()
-        if row is None:
-            raise AnalysisCommandRequestError("生成処理が見つかりません。", 404)
-        if row["status"] in {"queued", "running", "cancelling"}:
-            event = insight_cancel_events.get(row["request_id"])
-            if event:
-                event.set()
-            connection.execute("UPDATE analysis_insight_requests SET status='cancelling', message='中止しています。' WHERE request_id=?",
-                               (row["request_id"],))
-        return {"ok": True}
-
-
-def public_transformer_request(row) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    keys = row.keys()
-    return {
-        **{key: row[key] for key in (
-            "request_id", "item_id", "model", "max_topics", "min_topic_size", "topic_count",
-            "status", "progress", "message", "created_at", "updated_at",
-            "source_revision", "analysis_revision",
-        )},
-        "mode": str(row["mode"]) if "mode" in keys else "auto",
-        "min_similarity": float(row["min_similarity"]) if "min_similarity" in keys else 0.0,
-    }
-
-
-def update_transformer_request(request_id: str, status: str, progress: int, message: str) -> None:
-    with database_connection() as connection:
-        connection.execute("""
-            UPDATE transformer_analysis_requests
-            SET status=?, progress=?, message=?, updated_at=? WHERE request_id=?
-        """, (status, progress, message, utc_now_iso(), request_id))
-
-
-class TransformerAnalysisCancelled(RuntimeError):
-    pass
-
-
-def run_transformer_analysis_job(
-    request_id: str, analysis: dict, model: str, max_topics: int,
-    min_topic_size: int, topic_count: int, cancel_event: threading.Event,
-    app_url: str = "http://127.0.0.1:7860", mode: str = "auto",
-    manual_topics: list[dict] | None = None,
-    min_similarity: float = DEFAULT_MANUAL_MIN_SIMILARITY,
-    saved_result: dict | None = None,
-) -> None:
-    progress_value = 0
-
-    def cancelled() -> None:
-        if cancel_event.is_set():
-            raise TransformerAnalysisCancelled("Transformer分析を中止しました。")
-
-    def progress(value: int, message: str) -> None:
-        nonlocal progress_value
-        with transformer_jobs_lock:
-            cancelled()
-            progress_value = max(0, min(99, int(value)))
-            update_transformer_request(request_id, "running", progress_value, message)
-
-    try:
-        progress(2, "日本語の解析結果を準備しています。")
-        research = build_research_analysis(analysis)
-        reuse = (saved_transformer_embeddings(saved_result, analysis, model=model)
-                 if mode in {"candidate", "manual"} else None)
-        embeddings, embedding_segment_ids, engine = reuse if reuse else (None, None, None)
-        saved_quality = (saved_result or {}).get("quality")
-        previous_candidates = (saved_quality.get("cluster_candidates")
-                               if isinstance(saved_quality, dict) else None)
-        if reuse:
-            progress(60, "保存済みの意味ベクトルを再利用します。")
-        elif mode != "auto":
-            progress(5, "保存済みの意味ベクトルがないため、発話を意味ベクトル化します。")
-        result = analyze_transformer_topics(
-            analysis, research["linguistics"]["morphemes"], model_name=model,
-            max_topics=max_topics, min_topic_size=min_topic_size,
-            topic_count=topic_count or None, mode=mode,
-            manual_topics=manual_topics or [], manual_min_similarity=min_similarity,
-            embeddings=embeddings, embedding_segment_ids=embedding_segment_ids, engine=engine,
-            previous_candidates=previous_candidates,
-            progress=progress, check_cancelled=cancelled,
-        )
-        result.update({
-            "generated_at": utc_now_iso(), "request_id": request_id,
-            "source_revision": analysis["item"]["revision_count"],
-            "analysis_revision": analysis["item"]["analysis_revision"],
-        })
-        with transformer_jobs_lock, library_write_lock:
-            cancelled()
-            latest = library_row(analysis["item"]["id"])
-            if latest is None:
-                raise AnalysisConflictError("対象の会話が削除されたため結果を保存しませんでした。")
-            current = group_analysis_for_row(latest)
-            expected = transformer_input_fingerprint(analysis, model=model)
-            actual = transformer_input_fingerprint(current, model=model)
-            if expected != actual:
-                raise AnalysisConflictError("分析中に元データが更新されました。再実行してください。")
-            full_analysis = group_analysis_for_row(latest, include_research_rows=True)
-            full_analysis["transformer"] = {"result": result, "stale": False}
-            progress(95, "分析結果を保存しています。")
-            archived = archive_group_analysis(
-                latest, full_analysis, "transformer-" + request_id,
-                kind="transformer_topics", app_url=app_url, check_cancelled=cancelled,
-            )
-            result["archive_id"] = archived["id"]
-            result["vault_status"] = archived["vault_status"]
-            with database_connection() as connection:
-                cursor = connection.execute("""
-                    UPDATE library_items SET transformer_analysis_json=?
-                    WHERE id=? AND revision_count=? AND analysis_revision=?
-                """, (json.dumps(result, ensure_ascii=False), latest["id"],
-                      analysis["item"]["revision_count"], analysis["item"]["analysis_revision"]))
-                if cursor.rowcount != 1:
-                    raise AnalysisConflictError("保存直前にデータが更新されました。再実行してください。")
-                connection.execute("""
-                    UPDATE transformer_analysis_requests SET status='completed', progress=100,
-                        message='Transformerテーマ分析を保存しました。', updated_at=? WHERE request_id=?
-                """, (utc_now_iso(), request_id))
-    except TransformerAnalysisCancelled as exc:
-        update_transformer_request(request_id, "cancelled", progress_value, str(exc))
-    except AnalysisConflictError as exc:
-        update_transformer_request(request_id, "stale", progress_value, str(exc))
-    except Exception as exc:
-        update_transformer_request(
-            request_id, "failed", progress_value,
-            "Transformer分析を実行できませんでした: "
-            + public_diagnostic_text(str(exc), reveal_local_paths=False)[:700],
-        )
-    finally:
-        with transformer_jobs_lock:
-            transformer_cancel_events.pop(request_id, None)
-
-
-def start_transformer_analysis_command(
-    item_id: str, payload: dict[str, Any], *, app_url: str
-) -> tuple[dict[str, Any], int]:
-    request_id = payload.get("request_id")
-    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        raise AnalysisCommandRequestError("リクエストIDが正しくありません。", 400)
-    if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
-        raise AnalysisCommandRequestError(
-            "元データと分析のrevisionを指定してください。", 400
-        )
-    try:
-        max_topics = int(payload.get("max_topics", 8))
-        min_topic_size = int(payload.get("min_topic_size", 2))
-        topic_count = int(payload.get("topic_count", 0))
-        if (not 2 <= max_topics <= 12 or not 2 <= min_topic_size <= 20
-                or topic_count not in {0, *range(2, 13)}):
-            raise ValueError
-    except (TypeError, ValueError):
-        raise AnalysisCommandRequestError(
-            "テーマ上限・固定数は2〜12、最小発話数は2〜20で指定してください。",
-            400,
-        )
-    mode = str(payload.get("mode") or "auto")
-    if mode not in TOPIC_MODES:
-        raise AnalysisCommandRequestError(
-            "テーマの決め方は自動・候補・手動のいずれかで指定してください。",
-            400,
-        )
-    try:
-        min_similarity = float(payload.get("min_similarity", DEFAULT_MANUAL_MIN_SIMILARITY))
-        if not 0.0 <= min_similarity <= 0.95:
-            raise ValueError
-    except (TypeError, ValueError):
-        raise AnalysisCommandRequestError(
-            "割り当てのしきい値は0〜0.95で指定してください。", 400
-        )
-    if mode == "candidate" and topic_count < 2:
-        raise AnalysisCommandRequestError(
-            "候補から選ぶときは、テーマ数を指定してください。", 400
-        )
-    if mode == "auto":
-        topic_count = 0
-    model = str(os.environ.get("MOJIOKOSI_TRANSFORMER_MODEL", DEFAULT_TRANSFORMER_MODEL)).strip()
-    if not model or len(model) > 200:
-        raise AnalysisCommandRequestError(
-            "Transformerモデルの設定が正しくありません。", 400
-        )
-    with transformer_jobs_lock:
-        row = library_row(item_id)
-        if row is None:
-            raise AnalysisCommandRequestError(
-                "処理済みデータが見つかりません。", 404
-            )
-        with database_connection() as connection:
-            previous = connection.execute(
-                "SELECT * FROM transformer_analysis_requests WHERE request_id=?", (request_id,)
-            ).fetchone()
-            if previous:
-                expected = {
-                    "item_id": item_id, "model": model,
-                    "source_revision": payload["source_revision"],
-                    "analysis_revision": payload["analysis_revision"],
-                    "max_topics": max_topics, "min_topic_size": min_topic_size,
-                    "topic_count": topic_count, "mode": mode,
-                }
-                if any(previous[key] != value for key, value in expected.items()):
-                    raise AnalysisCommandRequestError(
-                        "リクエストIDが別の指定に使われています。", 409
-                    )
-                return {"run": public_transformer_request(previous)}, 200
-            active = connection.execute("""
-                SELECT * FROM transformer_analysis_requests WHERE item_id=?
-                    AND status IN ('queued','running','cancelling') LIMIT 1
-            """, (item_id,)).fetchone()
-            if active:
-                raise AnalysisCommandRequestError(
-                    "この会話のTransformer分析は実行中です。",
-                    409,
-                    details={"run": public_transformer_request(active)},
-                )
-        if (payload["source_revision"] != int(row["revision_count"])
-                or payload["analysis_revision"] != int(row["analysis_revision"])):
-            raise AnalysisCommandRequestError(
-                "データが更新されています。分析を再読み込みしてください。",
-                409,
-                details={"conflict": True},
-            )
-        analysis = group_analysis_for_row(row)
-        if not included_segments(analysis):
-            raise AnalysisCommandRequestError(
-                "Transformer分析に利用できる発話がありません。", 400
-            )
-        manual_topics = list(analysis.get("config", {}).get("transformer_topics") or [])
-        if mode == "manual" and not 2 <= len(manual_topics) <= MAX_MANUAL_TOPICS:
-            raise AnalysisCommandRequestError(
-                f"手動で割り当てるには、テーマを2〜{MAX_MANUAL_TOPICS}件定義して保存してください。",
-                400,
-            )
-        saved_result = json_load(row["transformer_analysis_json"], {}) \
-            if "transformer_analysis_json" in row.keys() else {}
-        fingerprint = transformer_input_fingerprint(analysis, model=model)
-        now = utc_now_iso()
-        with database_connection() as connection:
-            connection.execute("""
-                INSERT INTO transformer_analysis_requests
-                (request_id,item_id,source_revision,analysis_revision,fingerprint,model,
-                 max_topics,min_topic_size,topic_count,mode,min_similarity,
-                 status,message,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued','モデルの準備を開始します。',?,?)
-            """, (request_id, item_id, payload["source_revision"], payload["analysis_revision"],
-                  fingerprint, model, max_topics, min_topic_size, topic_count, mode,
-                  min_similarity, now, now))
-            run = connection.execute(
-                "SELECT * FROM transformer_analysis_requests WHERE request_id=?", (request_id,)
-            ).fetchone()
-        event = threading.Event()
-        transformer_cancel_events[request_id] = event
-        try:
-            threading.Thread(
-                target=run_transformer_analysis_job,
-                args=(request_id, analysis, model, max_topics, min_topic_size,
-                      topic_count, event, app_url),
-                kwargs={"mode": mode, "manual_topics": manual_topics,
-                        "min_similarity": min_similarity,
-                        "saved_result": saved_result if isinstance(saved_result, dict) else {}},
-                name=f"transformer-{item_id}", daemon=True,
-            ).start()
-        except RuntimeError:
-            transformer_cancel_events.pop(request_id, None)
-            update_transformer_request(request_id, "failed", 0, "分析処理を開始できませんでした。")
-            raise AnalysisCommandRequestError(
-                "分析処理を開始できませんでした。", 503
-            )
-        return {"run": public_transformer_request(run)}, 202
-
-
-def cancel_transformer_analysis_command(
-    item_id: str, request_id: str
-) -> dict[str, Any]:
-    with transformer_jobs_lock, database_connection() as connection:
-        row = connection.execute("""
-            SELECT * FROM transformer_analysis_requests WHERE item_id=? AND request_id=?
-        """, (item_id, request_id)).fetchone()
-        if row is None:
-            raise AnalysisCommandRequestError(
-                "Transformer分析処理が見つかりません。", 404
-            )
-        if row["status"] in {"queued", "running", "cancelling"}:
-            event = transformer_cancel_events.get(row["request_id"])
-            if event:
-                event.set()
-            connection.execute("""
-                UPDATE transformer_analysis_requests SET status='cancelling',
-                    message='中止しています。' WHERE request_id=?
-            """, (row["request_id"],))
-        return {"ok": True}
-
-
-def run_segment_classifications_command(
-    item_id: str, payload: dict[str, Any], *, app_url: str
-) -> dict[str, Any]:
-    if any(type(payload.get(key)) is not int for key in ("source_revision", "analysis_revision")):
-        raise AnalysisCommandRequestError(
-            "元データと分析のrevisionを指定してください。", 400
-        )
-    if "use_jev" not in payload or not isinstance(payload.get("use_jev"), bool):
-        raise AnalysisCommandRequestError(
-            "Jevへ発話を送信するか use_jev で明示してください。", 400
-        )
-    request_id = str(payload.get("request_id") or uuid.uuid4().hex)
-    if not re.fullmatch(r"[A-Za-z0-9_-]{16,100}", request_id):
-        raise AnalysisCommandRequestError("リクエストIDが正しくありません。", 400)
-
-    row = library_row(item_id)
-    if row is None:
-        raise AnalysisCommandRequestError("データが見つかりません。", 404)
-    source_revision = int(row["revision_count"] or 0)
-    analysis_revision = int(row["analysis_revision"] or 0)
-    if (payload["source_revision"] != source_revision
-            or payload["analysis_revision"] != analysis_revision):
-        raise AnalysisCommandRequestError(
-            "データが更新されています。分析を再読み込みしてください。",
-            409,
-            details={"conflict": True},
-        )
-
-    try:
-        analysis = group_analysis_for_row(row)
-        segments = analysis["segments"]
-        if not segments:
-            raise AnalysisCommandRequestError("分類できる発話がありません。", 400)
-        transformer_state = analysis.get("transformer", {})
-        transformer_result = (
-            transformer_state.get("result") if not transformer_state.get("stale") else None
-        )
-        llm_proposals: dict[str, dict[str, Any]] = {}
-        llm_usage: dict[str, Any] = {}
-        if payload["use_jev"]:
-            token_config = load_token_config()
-            if not token_config.typesafe_api_key:
-                raise ValueError("tokens.json に typesafe_api_key を設定してください。")
-            llm_proposals, llm_usage = classify_segments_with_jev(
-                segments,
-                segment_classification_topic_candidates(analysis["config"].get("codebook", [])),
-                token_config.typesafe_api_key,
-                token_config.typesafe_model,
-            )
-        result = build_segment_classification_result(
-            segments, analysis["annotations"], analysis["config"].get("codebook", []),
-            transformer_result, llm_proposals,
-            source_revision=source_revision, analysis_revision=analysis_revision,
-            llm_usage=llm_usage,
-        )
-        result["generated_at"] = utc_now_iso()
-        result["request_id"] = request_id
-        with library_write_lock:
-            latest = library_row(item_id)
-            if latest is None:
-                raise AnalysisCommandRequestError("データが削除されています。", 404)
-            if (int(latest["revision_count"] or 0) != source_revision
-                    or int(latest["analysis_revision"] or 0) != analysis_revision):
-                raise AnalysisCommandRequestError(
-                    "実行中にデータが更新されました。もう一度実行してください。",
-                    409,
-                    details={"conflict": True},
-                )
-            with database_connection() as connection:
-                cursor = connection.execute(
-                    """UPDATE library_items SET segment_classification_json=?
-                       WHERE id=? AND revision_count=? AND analysis_revision=?""",
-                    (json.dumps(result, ensure_ascii=False), item_id,
-                     source_revision, analysis_revision),
-                )
-                if cursor.rowcount != 1:
-                    raise AnalysisConflictError(
-                        "保存前にデータが更新されました。もう一度実行してください。"
-                    )
-        latest = library_row(item_id)
-        refreshed = group_analysis_for_row(latest)
-        archive_warning = ""
-        public_run = None
-        try:
-            archived = archive_segment_classification(
-                latest, refreshed, result, "segment-classification-" + request_id,
-                app_url=app_url,
-            )
-            public_run = analysis_archive_store().public(
-                archived, local=local_path_access_allowed()
-            )
-            result["archive_id"] = archived["id"]
-            with database_connection() as connection:
-                connection.execute(
-                    "UPDATE library_items SET segment_classification_json=? WHERE id=?",
-                    (json.dumps(result, ensure_ascii=False), item_id),
-                )
-            refreshed = group_analysis_for_row(library_row(item_id))
-        except (OSError, ValueError, TypeError, sqlite3.Error, StoreConflict) as exc:
-            archive_warning = (
-                "分類結果は保存しましたが、固定分析履歴の作成に失敗しました: "
-                + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500]
-            )
-        return {
-            "segment_classification": refreshed["segment_classification"],
-            "run": public_run, "archive_warning": archive_warning,
-        }
-    except AnalysisCommandRequestError:
-        raise
-    except AnalysisConflictError as exc:
-        raise AnalysisCommandRequestError(
-            str(exc), 409, details={"conflict": True}
-        ) from exc
-    except (ValueError, RuntimeError) as exc:
-        raise AnalysisCommandRequestError(
-            public_diagnostic_text(str(exc), reveal_local_paths=False)[:700], 400
-        ) from exc
-    except (OSError, urllib.error.URLError, sqlite3.Error) as exc:
-        raise AnalysisCommandRequestError(
-            "発話分類を実行できませんでした: "
-            + public_diagnostic_text(str(exc), reveal_local_paths=False)[:500],
-            500,
-        ) from exc
+run_segment_classifications_command = make_segment_classification_command(
+    AnalysisConflictError=AnalysisConflictError,
+    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+    archive_segment_classification=lambda *args, **kwargs: archive_segment_classification(*args, **kwargs),
+    classify_segments_with_jev=lambda *args, **kwargs: classify_segments_with_jev(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    library_write_lock=library_write_lock,
+    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+    local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
+    public_diagnostic_text=lambda *args, **kwargs: public_diagnostic_text(*args, **kwargs),
+)
 
 
 def meeting_minutes_export_row(item_id: str) -> tuple[sqlite3.Row, dict[str, Any]]:
