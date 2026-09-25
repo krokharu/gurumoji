@@ -32,6 +32,17 @@ class AudioProcessor:
             check_cancelled=check_cancelled,
         )
 
+    def preprocess_for_diarization(
+        self, input_path: Path, output_path: Path,
+        check_cancelled: Callable[[], None] | None = None,
+    ) -> Path:
+        return preprocess(
+            input_path, output_path, DIARIZATION_PRESET_KEY,
+            presets={DIARIZATION_PRESET_KEY: DIARIZATION_AUDIO_PRESET},
+            sample_rate=self.sample_rate, run_subprocess=self.run_subprocess,
+            check_cancelled=check_cancelled,
+        )
+
     def preprocess_interval(
         self, input_path: Path, output_path: Path, start: float, end: float,
         preset: str, check_cancelled: Callable[[], None] | None = None,
@@ -115,6 +126,19 @@ def preprocess_interval(
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise RuntimeError("再文字起こし区間の音声ファイルが作成されませんでした。")
     return output_path
+
+
+# Speaker diarization input. Unlike the transcription presets this applies no
+# band limiting, denoising, or loudness normalization, which would reshape the
+# voice characteristics speaker embeddings compare. It only lifts speech that
+# is too quiet: half-waves below -6 dBFS peak are raised by at most 4x (+12 dB)
+# within about a second; louder speech is never attenuated (c=1), and the noise
+# floor below -40 dBFS (t) is not expanded.
+DIARIZATION_PRESET_KEY = "diarization"
+DIARIZATION_AUDIO_PRESET: dict[str, Any] = {
+    "label": "話者分離用（小さすぎる声の持ち上げ）",
+    "filters": ["speechnorm=p=0.5:e=4:c=1:t=0.01:r=0.01:l=1"],
+}
 
 
 AUDIO_PREPROCESS_PRESETS: dict[str, dict[str, Any]] = {

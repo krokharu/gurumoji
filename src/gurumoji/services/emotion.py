@@ -355,12 +355,14 @@ def prepare_aist_s3prl_files(
             "s3prl/result/downstream/*fold1/dev-best.ckpt",
         ],
         status,
+        runtime_directory=runtime_directory,
     )
     upstream_snapshot = snapshot_download_to_local(
         config["upstream_repo"],
         hf_token,
         [f"s3prl/{config['upstream_file']}"],
         status,
+        runtime_directory=runtime_directory,
     )
     copy_tree_files(emotion_snapshot / "s3prl", runtime_dir)
     upstream_source = upstream_snapshot / "s3prl" / config["upstream_file"]
@@ -619,6 +621,16 @@ def run_s3prl_emotion_model(
         "-o",
         override,
     ]
+    expected_prediction = (
+        runtime_dir
+        / "result"
+        / "downstream"
+        / config["checkpoint_dir"]
+        / f"test_{config['fold']}_predict.txt"
+    )
+    # The S3PRL result tree is shared by every run. Remove the previous run's
+    # predictions so a run that writes elsewhere cannot silently reuse them.
+    expected_prediction.unlink(missing_ok=True)
     status(f"AIST感情分析を実行しています: {config['display']} / {config['fold']}")
     check_cancelled()
     started_at = time.time()
@@ -633,13 +645,6 @@ def run_s3prl_emotion_model(
     if completed.returncode != 0:
         details = (completed.stderr or completed.stdout or "").strip()[-1800:]
         raise RuntimeError(f"S3PRLでのAIST感情分析に失敗しました: {details}")
-    expected_prediction = (
-        runtime_dir
-        / "result"
-        / "downstream"
-        / config["checkpoint_dir"]
-        / f"test_{config['fold']}_predict.txt"
-    )
     prediction_path = expected_prediction if expected_prediction.is_file() else None
     if prediction_path is None:
         candidates = [

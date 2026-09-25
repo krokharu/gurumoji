@@ -747,6 +747,7 @@ audio_preprocess_label = _audio_processor.label
 audio_preprocess_filters = _audio_processor.filters
 run_audio_preprocess = _audio_processor.preprocess
 run_audio_interval_preprocess = _audio_processor.preprocess_interval
+run_diarization_audio_preprocess = _audio_processor.preprocess_for_diarization
 
 
 TRANSCRIPT_FINISHING_MODES = transcript_formatting.TRANSCRIPT_FINISHING_MODES
@@ -1083,6 +1084,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         "run_aist_emotion_analysis": run_aist_emotion_analysis,
         "run_audio_interval_preprocess": run_audio_interval_preprocess,
         "run_audio_preprocess": run_audio_preprocess,
+        "run_diarization_audio_preprocess": run_diarization_audio_preprocess,
         "safe_output_stem": safe_output_stem,
         "safe_token_count": safe_token_count,
         "session_profile_from_media": session_profile_from_media,
