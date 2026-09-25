@@ -86,21 +86,27 @@ def sync_rename_metadata(
         sync_directory_metadata(destination.parent, required=required)
 
 
+def validate_windows_extended_tail(extended_tail: str) -> None:
+    if not (
+        re.match(r'^[A-Za-z]:\\', extended_tail)
+        or extended_tail.lower().startswith('unc\\')
+    ):
+        raise OSError('Unsupported Windows extended namespace path.')
+
+
 def windows_extended_path(path: Path) -> str:
     supplied = os.fspath(path)
     if supplied.lower().startswith('\\\\.\\'):
         raise OSError('Windows device namespace paths are not supported.')
+    if supplied.lower().startswith('\\\\?\\'):
+        # Validate before abspath: on POSIX abspath would hide the prefix.
+        validate_windows_extended_tail(supplied[4:])
     raw = os.path.abspath(supplied)
     lowered = raw.lower()
     if lowered.startswith('\\\\.\\'):
         raise OSError('Windows device namespace paths are not supported.')
     if lowered.startswith('\\\\?\\'):
-        extended_tail = raw[4:]
-        if not (
-            re.match(r'^[A-Za-z]:\\', extended_tail)
-            or extended_tail.lower().startswith('unc\\')
-        ):
-            raise OSError('Unsupported Windows extended namespace path.')
+        validate_windows_extended_tail(raw[4:])
         return raw
     if raw.startswith('\\\\'):
         return '\\\\?\\UNC\\' + raw.lstrip('\\')

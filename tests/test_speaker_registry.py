@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from support import use_temporary_library
 from gurumoji.handlers.speaker_registry import (
     SpeakerIdentificationHandler,
     SpeakerRegistryHandler,
@@ -102,13 +103,10 @@ class SpeakerRegistryHandlerTests(unittest.TestCase):
 class SpeakerRegistryApiTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gurumoji-speakers-")
-        self.original_database = app.DATABASE_FILE
-        app.DATABASE_FILE = Path(self.temporary.name) / "library.sqlite3"
-        app.initialize_library()
+        use_temporary_library(self, Path(self.temporary.name))
         self.client = app.app.test_client()
 
     def tearDown(self):
-        app.DATABASE_FILE = self.original_database
         self.temporary.cleanup()
 
     def test_saves_global_speaker_registry(self):

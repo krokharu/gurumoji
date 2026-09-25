@@ -2,6 +2,7 @@
 
 import ast
 import importlib
+import json
 import unittest
 from pathlib import Path
 
@@ -18,8 +19,12 @@ class RoutingArchitectureTests(unittest.TestCase):
     def test_handlers_and_routes_never_import_the_composition_module(self):
         source_root = Path(__file__).resolve().parents[1] / "src" / "gurumoji"
         violations = []
-        for folder in (source_root / "handlers", source_root / "web"):
-            for path in folder.glob("*.py"):
+        # Everything except the composition module itself must stay importable
+        # without it; otherwise extracted modules silently re-couple to app.py.
+        for folder in (source_root,):
+            for path in folder.rglob("*.py"):
+                if path == source_root / "app.py":
+                    continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
@@ -73,6 +78,21 @@ class RoutingArchitectureTests(unittest.TestCase):
         self.assertEqual(
             endpoints["import_speaker_registry"], "/api/speakers/import"
         )
+
+    def test_route_map_matches_the_committed_snapshot(self):
+        """URL, method and endpoint stay identical while routes move modules.
+
+        ``enforce_request_security`` keys upload limits on endpoint names, so
+        an endpoint rename is a behavior change. Regenerate the fixture only
+        for an intentional API change.
+        """
+        fixture = Path(__file__).resolve().parent / "fixtures" / "route_map.json"
+        expected = json.loads(fixture.read_text(encoding="utf-8"))
+        actual = sorted(
+            [rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}), rule.endpoint]
+            for rule in app.app.url_map.iter_rules()
+        )
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
