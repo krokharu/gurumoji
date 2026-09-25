@@ -123,6 +123,38 @@ def graph_options(query: str = GLOBAL_QUERY) -> dict:
             "collapse-display": True, "collapse-forces": True}
 
 
+# path -> (mtime_ns, size, wikilinks of a research memo or None). The watcher
+# syncs themes every 10 s; only notes whose size or time changed are read (OBS-08).
+_MEMO_LINKS: dict[str, tuple[int, int, list[str] | None]] = {}
+_MEMO_LINKS_LIMIT = 20000
+
+
+def memo_links(path: Path) -> list[str] | None:
+    """Wikilinks written in a research memo, outside code; None for other notes."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = str(path)
+    cached = _MEMO_LINKS.get(key)
+    if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+        return cached[2]
+    try:
+        props, body = unpack(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, yaml.YAMLError):
+        warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
+        return None  # not cached: a note being saved is read again next time
+    links = None
+    if props.get("graph_kind") == "memo":
+        body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
+        body = re.sub(r"`[^`\n]*`", "", body)
+        links = WIKILINK.findall(body)
+    if len(_MEMO_LINKS) >= _MEMO_LINKS_LIMIT:
+        _MEMO_LINKS.clear()
+    _MEMO_LINKS[key] = (stat.st_mtime_ns, stat.st_size, links)
+    return links
+
+
 class ObsidianLayout:
     def __init__(self, database_file: Path):
         self.data = Path(database_file).parent
@@ -604,15 +636,9 @@ class ObsidianLayout:
             memberships = {}
             for record in records:
                 for path in safe_path(self.vault, record["folder"]).glob("*.md"):
-                    try:
-                        props, body = unpack(path.read_text(encoding="utf-8-sig"))
-                    except (OSError, ValueError, yaml.YAMLError):
-                        warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
-                        continue
-                    if props.get("graph_kind") != "memo": continue
-                    body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
-                    body = re.sub(r"`[^`\n]*`", "", body)
-                    for target in dict.fromkeys(resolve(value) for value in WIKILINK.findall(body)):
+                    links = memo_links(path)
+                    if links is None: continue
+                    for target in dict.fromkeys(resolve(value) for value in links):
                         if target:
                             memberships.setdefault(target, []).append(record)
             managed = self.load()["managed"]

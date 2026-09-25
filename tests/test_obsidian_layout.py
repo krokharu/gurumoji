@@ -206,6 +206,30 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.layout.sync_themes()
         write.assert_not_called()
 
+    def test_idle_theme_sync_reads_only_changed_interview_notes(self):
+        # OBS-08: unchanged notes are skipped by size and modification time.
+        self.layout.update('a', '会議', {})
+        (self.layout.vault / '20-テーマ/働き方.md').write_text('# 働き方\n', encoding='utf-8')
+        (self.layout.vault / '20-テーマ/評価.md').write_text('# 評価\n', encoding='utf-8')
+        memo = self.layout.vault / self.layout.note_path('a', '会議', '研究メモ')
+        with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/働き方]]\n')
+        self.layout.sync_themes()
+        folder = memo.parent
+        original = Path.read_text
+        reads = []
+        def counting(path, *args, **kwargs):
+            if path.parent == folder: reads.append(path.name)
+            return original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', counting):
+            self.layout.sync_themes()
+            self.assertEqual(reads, [])
+            with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/評価]]\n')
+            self.layout.sync_themes()
+        self.assertEqual(reads, [memo.name])
+        relations = [unpack(p.read_text(encoding='utf-8'))[0]['theme_target']
+                     for p in (self.layout.vault / '40-研究/テーマ関連').glob('*.md')]
+        self.assertEqual(sorted(relations), ['20-テーマ/働き方.md', '20-テーマ/評価.md'])
+
     def test_renamed_interview_folder_is_followed_instead_of_recreated(self):
         self.layout.update('a', '会議', {})
         record = self.layout.register('a', '会議')
