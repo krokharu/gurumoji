@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 import yaml
 
-from .analysis_store import safe_path, write_atomic, markdown
+from .analysis_store import markdown, research_vault_root, safe_path, write_atomic
 
 COMMANDS = {"outline": "アウトラインを作成", "finish": "AI仕上げを実行",
             "apply": "結果をアプリへ反映"}
@@ -250,7 +250,7 @@ class ObsidianWorkbench:
         from .obsidian_layout import ObsidianLayout
         self.layout = ObsidianLayout(database_file)
         self.root = Path(database_file).parent / "obsidian_workbench"
-        self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
 
     def key(self, item_id: str) -> str:
         return sha(item_id.encode())[:32]

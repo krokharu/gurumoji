@@ -41,6 +41,7 @@ def make_data(root: Path) -> Path:
         "thumbnails/word_cloud_a.svg": "<svg/>",
         "trash/20260101T000000Z-x/trash.json": "{}",
         "analysis_store/.result.json.abc.tmp": "partial",
+        "obsidian/ResearchVault/.note.0123456789abcdef.tmp.md": "partial",
         ".gurumoji.instance.lock": "",
     }
     for relative, text in files.items():

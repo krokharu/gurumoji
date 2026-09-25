@@ -77,11 +77,50 @@ class AtomicWriteTests(unittest.TestCase):
         self.assertIn("note.md", logs.output[0])
         self.assertNotIn(str(self.root), logs.output[0])
 
+    def test_long_paths_are_refused_before_writing_with_a_clear_reason(self):
+        # OBS-14: the check runs before any file (or temporary file) is created.
+        with self.assertRaisesRegex(OSError, "ファイル名が長すぎます"):
+            write_atomic(self.root / ("長" * 90 + ".md"), b"x")
+        deep = self.root / ("d" * 120) / ("e" * 120) / "note.md"
+        with patch.object(durable_files, "windows_long_paths_enabled", return_value=False):
+            with self.assertRaisesRegex(OSError, "Windowsの上限259文字"):
+                durable_files.ensure_path_fits(deep, windows=True)
+        with patch.object(durable_files, "windows_long_paths_enabled", return_value=True):
+            durable_files.ensure_path_fits(deep, windows=True)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_temporary_name_stays_close_to_the_target_length(self):
+        target = self.root / ("結果-" + "x" * 70 + ".md")
+        temporary = durable_files.temporary_output_path(target)
+        self.assertLessEqual(len(temporary.name), 24 + 16 + 8 + len(target.suffix))
+        self.assertTrue(temporary.name.endswith(".tmp.md"))
+
     def _temporary(self, data):
         path = self.root / f".tmp-{len(list(self.root.iterdir()))}"
         path.write_bytes(data)
         return path
 
+
+
+class SharedLocationTests(unittest.TestCase):
+    def test_every_research_vault_writer_uses_one_root(self):
+        # ARCH-03: ResearchVault is defined once, in analysis_store.research_vault_root.
+        from gurumoji.analysis_store import research_vault_root
+        from gurumoji.obsidian_finishing import ObsidianWorkbench
+        from gurumoji.obsidian_layout import ObsidianLayout
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "library.sqlite3"
+            expected = research_vault_root(database)
+            self.assertEqual(ObsidianLayout(database).vault, expected)
+            self.assertEqual(ObsidianWorkbench(database).vault, expected)
+
+    def test_app_url_follows_the_configured_port(self):
+        from gurumoji.env_settings import local_app_url
+        with patch.dict("os.environ", {"MOJIOKOSI_PORT": "8123"}):
+            self.assertEqual(local_app_url(), "http://127.0.0.1:8123")
+        for invalid in ("", "0", "70000", "abc"):
+            with patch.dict("os.environ", {"MOJIOKOSI_PORT": invalid}):
+                self.assertEqual(local_app_url(), "http://127.0.0.1:7860")
 
 if __name__ == "__main__":
     unittest.main()

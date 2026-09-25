@@ -96,7 +96,7 @@ obsidian-safety-vault/
    - 期待：保存は止めず（選別で全保存停止案は不採用）、`VaultRegistry.nesting_warnings` と `GET /api/config` の `vault_warnings` が該当するVaultと親フォルダーを返す。親の `.obsidian` は変更しない（`test_four_vaults.py`: `test_vault_opened_inside_a_parent_vault_is_reported_not_blocked`、`test_backend_safety.py`: `test_config_reports_nested_vaults_without_local_paths_for_remote_viewers`）。
 5. **ファイル名（OBS-14）**
    - 入力：`CON`、`a:b*c?`、末尾が `.` や空白、260文字に近いタイトル、同じタイトルが2件。
-   - 期待：保存できる。上書きしない。パスが上限以内になる。
+   - 期待：保存できる。上書きしない。パスが上限以内になる。上限を超える場合は書き込み前に理由と長さを示して停止する（`test_durable_files.py`: `test_long_paths_are_refused_before_writing_with_a_clear_reason`。短い名前での自動作成は未実装）。
 6. **Wikilinkの保持**
    - 準備：fixtureの `wikilinks.md` を、アプリ所有ではない場所に置く。
    - 操作：移行、テーマ同期、ナビゲーション再生成を実行する。

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from .analysis_store import safe_path, write_atomic, markdown
+from .analysis_store import markdown, research_vault_root, safe_path, write_atomic
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 
@@ -126,7 +126,7 @@ def graph_options(query: str = GLOBAL_QUERY) -> dict:
 class ObsidianLayout:
     def __init__(self, database_file: Path):
         self.data = Path(database_file).parent
-        self.vault = self.data / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
         self.registry = self.data / "obsidian_layout" / "interviews.json"
         self.note_log = self.data / "obsidian_layout" / "note_changes.jsonl"
 

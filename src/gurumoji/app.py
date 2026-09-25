@@ -1162,7 +1162,8 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
 
 def vault_registry():
     from .vault_registry import VaultRegistry
-    return VaultRegistry(DATABASE_FILE, PROJECT_DIRECTORY / "docs" / "program-vault")
+    # Software Vault root: vault_registry.SOFTWARE_ROOT, the one definition (ARCH-03).
+    return VaultRegistry(DATABASE_FILE)
 
 
 def vault_nesting_warnings() -> list[dict[str, Any]]:

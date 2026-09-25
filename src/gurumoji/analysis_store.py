@@ -79,6 +79,11 @@ def initialize_store(connection) -> None:
     connection.execute("UPDATE analysis_runs SET status='interrupted',error='保存が中断されました。再保存してください。' WHERE status='writing'")
 
 
+def research_vault_root(database_file: Path) -> Path:
+    """<data>/obsidian/ResearchVault: the one definition used by every writer (ARCH-03)."""
+    return Path(database_file).parent / "obsidian" / "ResearchVault"
+
+
 def safe_path(root: Path, relative: str) -> Path:
     if not relative or "\\" in relative or ":" in relative:
         raise ValueError("保存パスが正しくありません。")
@@ -148,7 +153,7 @@ class AnalysisStore:
         self.vaults = VaultRegistry(database_file)
         self.connect = connect
         self.root = Path(database_file).parent / "analysis_store"
-        self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
         self._last_publication_outcomes: dict[str, dict[str, dict[str, str]]] = {}
         self.note_log = Path(database_file).parent / "obsidian_layout" / "note_changes.jsonl"
         self.run_notes = Path(database_file).parent / "obsidian_layout" / "run_notes"
@@ -321,9 +326,11 @@ class AnalysisStore:
 
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
-             app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
+             app_url: str = "", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
              publish: bool = True) -> dict:
+        from .env_settings import local_app_url
+        app_url = app_url or local_app_url()
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
