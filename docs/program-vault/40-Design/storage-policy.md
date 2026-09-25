@@ -3,7 +3,7 @@ note_id: design-storage-policy
 note_type: storage-policy
 title: 保存先と正本の分類
 status: proposed
-updated: 2026-09-13
+updated: 2026-09-25
 schema_version: 1
 tags:
   - gurumoji/storage
@@ -11,7 +11,16 @@ tags:
 
 # 保存先と正本の分類
 
-2026-09-13更新：組み込み手法の固定保存・AI仕上げの変更記録・Vault生成は実装済みです。現行API・テーブル・登録契約は [[30-Data/analysis-storage-v1]] を参照してください。この文書は差分取り込み・外部手法等の後続計画も含みます。
+この文書は設計時の案である。実装済みの部分の正本は `30-Data` のノートと運用手順で、ここに同じ説明を重ねない（DOC-02）。
+
+## 実装状況（2026-09-25確認）
+
+| 節 | 状況 | 現行の正本・残る提案 |
+| --- | --- | --- |
+| 分類表 | 実装済み（方針） | 各データの保存先は [[30-Data/current-storage]]、分析結果は [[30-Data/analysis-storage-v1]]。秘密は `tokens.json`、使用モデルは `ai_models.json`（CFG-02） |
+| 提案する物理配置 | 一部 | 実装：`analysis_store/inputs`・`runs`、`obsidian/ResearchVault`、`runtime/backups`（DATA-03）。未実装：`incoming/`、`staging/` |
+| 自動保存と容量 | 一部 | 固定保存と再利用は実装済み。会話削除はゴミ箱で保持期間つき（DATA-01）。容量整理の画面は未実装 |
+| 端末間の移送・復元 | 一部 | 整合バックアップ・検証・復元は [[60-Operations/backup-restore]]（DATA-03）。可搬パッケージ（`PortableData/`）は未実装 |
 
 「正本」は、変更時に優先し、復元時の基準にする保存物を指す。同じ内容が複数の形式に現れる場合も、どれが正本でどれが表示・交換用かを記録する。
 

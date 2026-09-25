@@ -113,8 +113,8 @@ tags:
 
 | ID | 重要度 | 問題 | 根拠 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- |
-| DOC-01 | 中 | 同じ説明を別々の場所で管理している | `README.md`（約53KB）、`docs/*.md`（利用者向けの手順）、このVault（仕様） | 役割を決める。READMEは導入の入口、`docs/` は操作手順、Vaultは仕様・設計・問題点。同じ説明は書かずにリンクする | 未対応 | 統合 → DATA-02 |
-| DOC-02 | 低中 | 一部が実装済みなのに `proposed` のままのノートがある | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]（提案API `/api/obsidian/settings` などは未実装） | 実装済みの部分を `30-Data` へ移し、提案部分だけを残す | 未対応 | 統合 → DATA-02 |
+| DOC-01 | 中 | 同じ説明を別々の場所で管理している | `README.md`（約53KB）、`docs/*.md`（利用者向けの手順）、このVault（仕様） | 役割を決める。READMEは導入の入口、`docs/` は操作手順、Vaultは仕様・設計・問題点。同じ説明は書かずにリンクする | 一部対応（2026-09-25。README・`docs/`・Vaultの役割と書かないものを [[40-Design/program-vault-rules]] に確定した。README（約60KB）にある分析機能の詳しい仕様をVaultへ移し、リンクに置き換える整理は未実施） | 統合 → DATA-02 |
+| DOC-02 | 低中 | 一部が実装済みなのに `proposed` のままのノートがある | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]（提案API `/api/obsidian/settings` などは未実装） | 実装済みの部分を `30-Data` へ移し、提案部分だけを残す | 対応済み（2026-09-25。[[40-Design/storage-policy]] と [[40-Design/sync-contract]] の冒頭に節ごとの実装状況表を置き、実装済みの部分は `30-Data`・運用手順の正本へリンクした。本文は提案として残し、現在の説明と将来案を同じ段落に混ぜない） | 統合 → DATA-02 |
 | DOC-03 | 中 | AI向けの開発ルールがリポジトリにない | `AGENTS.md`・`CONTRIBUTING.md` がない | 2026-09-16にルート `AGENTS.md` を追加し、日常作業用の短い優先順位・探索・検証ルールを置いた。詳細は [[40-Design/ai-development-rules]] に分離した | 対応済み（未コミット） | 今回のAI運用ルール監査で対応 |
 
 ## DEV：開発時の残骸
