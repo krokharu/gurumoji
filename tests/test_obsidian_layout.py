@@ -336,6 +336,22 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(migrate(self.database)['mapping'], plan['mapping'])
         self.assertFalse(plan_migration(self.database)['needed'])
 
+    def test_generated_and_researcher_notes_share_one_property_rule(self):
+        # OBS-06: same delimiter, size limit and messages; only newline handling differs.
+        from gurumoji.obsidian_finishing import split_properties
+        for reader in (unpack, split_properties):
+            with self.assertRaisesRegex(ValueError, '区切りが不正'):
+                reader('---\ntitle: x\n本文\n')
+            with self.assertRaisesRegex(ValueError, '大きすぎます'):
+                reader('---\nnote: ' + 'x' * 64001 + '\n---\n本文\n')
+            with self.assertRaisesRegex(ValueError, '読み取れませんでした'):
+                reader('---\ntitle: [\n---\n本文\n')
+            with self.assertRaisesRegex(ValueError, '項目名と値'):
+                reader('---\n- a\n---\n本文\n')
+        self.assertEqual(unpack('\ufeff---\r\ntitle: x\r\n---\r\n本文\r\n'), ({'title': 'x'}, '本文\n'))
+        # A researcher note keeps its own line endings in the body.
+        self.assertEqual(split_properties('---\ntitle: x\n---\n本文\r\n'), ({'title': 'x'}, '本文\r\n'))
+
     def test_legacy_fences_and_quote_literals_are_never_rewritten(self):
         original = '~~~text\n[[old]]\n~~~\n> [[old]]\n\n[[old#^s-61|引用]]\n'
         self.assertEqual(rewrite_links(original, {'old.md': 'new.md'}),

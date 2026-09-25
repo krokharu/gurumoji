@@ -32,7 +32,7 @@ from typing import Callable, Iterable
 
 import yaml
 
-from .analysis_store import safe_path, write_atomic
+from .analysis_store import parse_frontmatter, safe_path, write_atomic
 
 CHANGE_LOG_NAME = "note_changes.jsonl"
 CHANGE_LOG_LIMIT = 5 * 1024 * 1024
@@ -43,7 +43,6 @@ _LOG_LOCK = threading.Lock()
 # write; log it once per process until the path is written again.
 _REPEATING_ACTIONS = ("missing", "skipped", "settings_skipped")
 _REPORTED_MISSING: set[tuple[str, str, str]] = set()
-_FRONTMATTER = re.compile(r"\A---\n(.*?)\n---(?:\n|$)", re.S)
 
 
 @dataclass(frozen=True)
@@ -104,16 +103,10 @@ GENERATED_HISTORY = HistoryLayout(generated_history_directory, "first", "edited"
 def history_copy(content: bytes, *, relative: str, label: str, saved_at: str, note_id: str) -> bytes:
     """Mark a copy as history: its own note_id, graph/history tag, link to the live note."""
     text = content.decode("utf-8", errors="replace").removeprefix("﻿").replace("\r\n", "\n")
-    props: dict = {}
-    body = text
-    match = _FRONTMATTER.match(text)
-    if match:
-        try:
-            loaded = yaml.safe_load(match[1]) or {}
-        except yaml.YAMLError:
-            loaded = None
-        if isinstance(loaded, dict):
-            props, body = loaded, text[match.end():]
+    try:
+        props, body = parse_frontmatter(text)
+    except ValueError:
+        props, body = {}, text  # an unreadable header stays in the copy's body
     tags = props.get("tags") or []
     if isinstance(tags, str):
         tags = tags.split()

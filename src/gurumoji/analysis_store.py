@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+import yaml
+
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
 
 LOGGER = logging.getLogger(__name__)
@@ -137,6 +139,33 @@ def csv_bytes(fields: list[str], rows: list[dict]) -> bytes:
             values[key] = value
         writer.writerow(values)
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+FRONTMATTER_LIMIT = 64000
+_FRONTMATTER_BLOCK = re.compile(r"\A---\n(.*?)\n---(?:\n|$)", re.S)
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Read a note's leading properties with one rule for every reader (OBS-06).
+
+    The delimiter, size limit and error messages are shared; each caller still
+    decides how to normalise the text first, because researcher notes and
+    generated notes are not treated alike.
+    """
+    if not text.startswith("---\n"):
+        return {}, text
+    match = _FRONTMATTER_BLOCK.match(text)
+    if not match:
+        raise ValueError("ノート先頭のプロパティの区切りが不正です。--- の区切りを確認してください。")
+    if len(match[1]) > FRONTMATTER_LIMIT:
+        raise ValueError(f"ノート先頭のプロパティが大きすぎます（上限{FRONTMATTER_LIMIT}文字）。")
+    try:
+        props = yaml.safe_load(match[1]) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError("ノート先頭のプロパティを読み取れませんでした。") from exc
+    if not isinstance(props, dict):
+        raise ValueError("ノートのプロパティは項目名と値で指定してください。")
+    return props, text[match.end():]
 
 
 def frontmatter(note_id: str, title: str, **properties) -> str:

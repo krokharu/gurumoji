@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 import yaml
 
-from .analysis_store import markdown, research_vault_root, safe_path, write_atomic
+from .analysis_store import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 
 COMMANDS = {"outline": "アウトラインを作成", "finish": "AI仕上げを実行",
             "apply": "結果をアプリへ反映"}
@@ -31,19 +31,12 @@ QUOTE_BLOCK = re.compile(
 
 
 def split_properties(note: str) -> tuple[dict, str]:
-    """Accept Obsidian's YAML rewrites; keep all properties out of AI inputs."""
-    if not note.startswith("---\n"):
-        return {}, note
-    match = re.match(r"\A---\n(.*?)\n---(?:\n|$)", note, re.S)
-    if not match or len(match.group(1)) > 64000:
-        raise ValueError("ノート先頭のプロパティが不正です。--- の区切りを確認してください。")
-    try:
-        properties = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError as exc:
-        raise ValueError("Obsidianのプロパティを読み取れませんでした。") from exc
-    if not isinstance(properties, dict):
-        raise ValueError("ノートのプロパティは項目名と値で指定してください。")
-    return properties, note[match.end():]
+    """Accept Obsidian's YAML rewrites; keep all properties out of AI inputs.
+
+    Researcher notes are read as written (no newline normalisation) with the
+    shared delimiter, limit and messages (OBS-06).
+    """
+    return parse_frontmatter(note)
 
 
 def with_properties(body: str, properties: dict) -> str:

@@ -8,12 +8,11 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
-from .analysis_store import markdown, research_vault_root, safe_path, write_atomic
+from .analysis_store import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 
@@ -65,16 +64,8 @@ def find_notes(vault: Path, note_ids: set[str]) -> dict[str, list[str]]:
 
 
 def unpack(text: str) -> tuple[dict, str]:
-    text = text.removeprefix("\ufeff").replace("\r\n", "\n")
-    if not text.startswith("---\n"):
-        return {}, text
-    match = re.match(r"\A---\n(.*?)\n---(?:\n|$)", text, re.S)
-    if not match:
-        raise ValueError("ノートのプロパティ区切りが不正です。")
-    props = yaml.safe_load(match[1]) or {}
-    if not isinstance(props, dict):
-        raise ValueError("ノートのプロパティが不正です。")
-    return props, text[match.end():]
+    """Generated and navigation notes: BOM and CRLF are normalised before reading."""
+    return parse_frontmatter(text.removeprefix("\ufeff").replace("\r\n", "\n"))
 
 
 def pack(props: dict, body: str) -> str:
