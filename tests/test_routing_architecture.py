@@ -4,8 +4,10 @@ import ast
 import importlib
 import json
 import re
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import app
 
@@ -110,6 +112,27 @@ class RoutingArchitectureTests(unittest.TestCase):
                 for name in sorted(imported & patched):
                     violations.append(f"{path.name}: {name}")
         self.assertEqual(violations, [])
+
+    def test_create_app_builds_independent_apps_without_touching_data(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-factory-") as temporary:
+            root = Path(temporary)
+            with (
+                patch.object(app, "DATABASE_FILE", root / "library.sqlite3"),
+                patch.object(app, "DEFAULT_OUTPUT_DIRECTORY", root / "output"),
+            ):
+                second = app.create_app()
+            self.assertEqual(list(root.iterdir()), [])
+        self.assertIsNot(second, app.app)
+
+        def route_map(flask_app):
+            return sorted(
+                (rule.rule, tuple(sorted(rule.methods)), rule.endpoint)
+                for rule in flask_app.url_map.iter_rules()
+            )
+
+        self.assertEqual(route_map(second), route_map(app.app))
+        response = second.test_client().get("/api/config", headers={"Host": "evil.example"})
+        self.assertEqual(response.status_code, 400)
 
     def test_route_map_matches_the_committed_snapshot(self):
         """URL, method and endpoint stay identical while routes move modules.

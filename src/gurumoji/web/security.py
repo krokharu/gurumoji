@@ -3,20 +3,22 @@
 Every request passes the before_request guard: trusted Host header, remote
 authentication when remote access is enabled, cross-site and CSRF checks,
 and per-endpoint body limits. Responses get cache and security headers, and
-remote JSON responses have local filesystem paths removed."""
+remote JSON responses have local filesystem paths removed (see
+gurumoji.diagnostics)."""
 
 from __future__ import annotations
 
 import ipaddress
 import json
 import os
-import re
 import secrets
 import urllib.parse
 from typing import Any, Callable
 
 from flask import Flask, has_request_context, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
+
+from ..diagnostics import sanitize_remote_json_payload
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -45,77 +47,6 @@ def bind_host_is_loopback(host: str) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
-
-
-WINDOWS_ABSOLUTE_PATH_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/]|\\\\(?:[?.]\\)?[^\\/\r\n]+[\\/])"
-)
-
-
-POSIX_ABSOLUTE_PATH_RE = re.compile(
-    r"(?:^|(?<=[\s'\`(<\[{=:]))/(?!/)[^\s'\`<>()\[\]{}\r\n]+"
-)
-
-
-FILE_URI_RE = re.compile(r"(?i)\bfile://")
-
-
-HIDDEN_LOCAL_PATH_MESSAGE = "[local path hidden]"
-
-
-REMOTE_DIAGNOSTIC_KEYS = frozenset({
-    "error", "message", "logs", "reason", "warning", "warnings",
-    "restore_errors", "cleanup_errors", "recovery_paths",
-    "output_warning", "learning_warning", "output_dir", "default_output_dir",
-})
-
-
-def public_diagnostic_text(value: str, *, reveal_local_paths: bool) -> str:
-    """Hide a whole diagnostic item if it contains an absolute local path."""
-    text = str(value or "")
-    if reveal_local_paths or not text:
-        return text
-    if (
-        WINDOWS_ABSOLUTE_PATH_RE.search(text)
-        or POSIX_ABSOLUTE_PATH_RE.search(text)
-        or FILE_URI_RE.search(text)
-    ):
-        return HIDDEN_LOCAL_PATH_MESSAGE
-    return text
-
-
-def sanitize_remote_diagnostic_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return public_diagnostic_text(value, reveal_local_paths=False)
-    if isinstance(value, list):
-        return [sanitize_remote_diagnostic_value(item) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: sanitize_remote_diagnostic_value(item)
-            for key, item in value.items()
-        }
-    return value
-
-
-def sanitize_remote_json_payload(value: Any) -> Any:
-    if isinstance(value, list):
-        return [sanitize_remote_json_payload(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    sanitized: dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)
-        diagnostic = (
-            key_text in REMOTE_DIAGNOSTIC_KEYS
-            or key_text.endswith("_warning")
-            or key_text.endswith("_errors")
-        )
-        sanitized[key] = (
-            sanitize_remote_diagnostic_value(item)
-            if diagnostic
-            else sanitize_remote_json_payload(item)
-        )
-    return sanitized
 
 
 def make_request_guards(

@@ -7,122 +7,66 @@ even while the Python environment is being diagnosed.
 
 from __future__ import annotations
 
-import gc
 import csv
-import ctypes
-import difflib
-import errno
-import hashlib
-import html
-import hmac
-import io
-import inspect
-import ipaddress
 import json
-import math
-import mimetypes
-import ntpath
 import os
 import platform
 import re
-import secrets
 import shutil
 import sqlite3
-import stat
 import subprocess
 import sys
 import threading
 import time
-import traceback
-import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 import warnings
 import webbrowser
-from collections import Counter, defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from flask import Flask, g, has_request_context, jsonify, render_template, request, send_file
+from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import RequestEntityTooLarge
-from werkzeug.utils import secure_filename
-from .research_analysis import (
-    is_research_analysis_cached,
-    RESEARCH_CSV_FIELDS,
-    build_analysis_workbook,
-    build_research_analysis,
-    enrich_research_analysis,
-    research_csv_sources,
-)
-from .analysis_insights import (
-    INSIGHT_VERSION, KWIC_FIELDS, build_session_outline, create_ai_insights,
-    included_segments, input_fingerprint, plan_items, search_kwic,
-)
-from . import analysis_plan_advisor
+
+# app.py is the composition root. Besides what it wires together, it
+# re-exports names that tests, scripts and the Colab notebook reach as
+# app.<name>; pyflakes reports those as unused imports.
+from .research_analysis import build_research_analysis
+from .analysis_insights import search_kwic
 from .transformer_analysis import (
-    DEFAULT_MANUAL_MIN_SIMILARITY,
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
-    MAX_MANUAL_TOPICS,
-    TOPIC_MODES,
-    TRANSFORMER_ANALYSIS_VERSION,
-    TRANSFORMER_CSV_FIELDS,
     analyze_transformer_topics,
     encode_texts as encode_transformer_texts,
-    saved_embeddings as saved_transformer_embeddings,
     semantic_search as transformer_semantic_search,
-    transformer_csv_sources,
-    transformer_input_fingerprint,
 )
 from .ai_finishing import (
-    FINISHING_VERSION, clean_transcript as finish_clean_transcript,
-    create_outline as finish_create_outline, finishing_changes,
+    FINISHING_VERSION,
+    clean_transcript as finish_clean_transcript,
+    create_outline as finish_create_outline,
     repair_recommended_segments as finish_repair_recommended_segments,
 )
 from .jev_review import (
-    JEV_DEFAULT_MODEL, JEV_REVIEW_VERSION,
+    JEV_DEFAULT_MODEL,
+    JEV_REVIEW_VERSION,
     attach_comparison as attach_jev_comparison,
-    comparison_rows as jev_comparison_rows,
     review_transcript as review_transcript_with_jev,
 )
-from .segment_classification import (
-    CLASSIFICATION_FIELDS,
-    CROSSTAB_FIELDS as SEGMENT_CLASSIFICATION_CROSSTAB_FIELDS,
-    DIALOGUE_ACTS,
-    SEGMENT_CLASSIFICATION_VERSION,
-    build_result as build_segment_classification_result,
-    classification_fingerprint,
-    classification_rows,
-    classify_with_jev,
-    crosstab_rows as segment_classification_crosstab_rows,
-    summary as segment_classification_summary,
-    topic_candidates as segment_classification_topic_candidates,
-)
+from .segment_classification import classify_with_jev
 from .obsidian_finishing import ObsidianWorkbench
-from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
-from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
-from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
-from .analysis_core import AnalysisContractError
-from .analysis_pipeline import AnalysisPipelineService, initialize_pipeline_store
-from .handlers.analysis_commands import (
-    AnalysisCommandRequestError,
-    AnalysisCommands,
-    ComparisonRequestError,
-    TranscriptConflictError,
-)
+from .ai_effort import normalize_efforts
+from .analysis_method_registry import method_results
+from .analysis_store import AnalysisStore, StoreConflict
+from .analysis_pipeline import AnalysisPipelineService
+from .handlers.analysis_commands import AnalysisCommands, ComparisonRequestError
 from .handlers.analysis_queries import AnalysisQueries
 from .handlers.application_lifecycle import ApplicationLifecycle
-from .handlers.jobs import JobHandler, JobRequestError
-from .handlers.library_groups import LibraryGroups
+from .handlers.jobs import JobHandler
 from .handlers.speaker_registry import (
     SpeakerIdentificationHandler,
-    SpeakerIdentificationRequestError,
-    SpeakerRegistryConflictError,
     SpeakerRegistryHandler,
 )
 from .web.analysis_routes import register_analysis_routes
@@ -141,33 +85,12 @@ from .services import edit_transactions
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
-    EDIT_TRANSACTION_SCHEMA_VERSION,
-    MAX_EDIT_TRANSACTION_FILES,
-    MAX_EDIT_TRANSACTION_MANIFEST_BYTES,
-    capture_edit_cleanup_inventory,
     cleanup_edit_staging,
-    cleanup_prepared_edit_staging,
-    discard_transaction_target,
-    edit_cleanup_allowed_directories,
-    edit_cleanup_entry_identity,
     edit_journal_mac,
     edit_relative_path_key,
-    edit_staging_identity,
-    edit_transaction_cleanup_inventory,
-    finish_committed_edit_transaction,
-    hold_edit_directory_against_rename,
-    load_edit_preparation_marker,
     load_edit_transaction_manifest,
-    mark_windows_handle_for_deletion,
-    open_windows_edit_entry_for_deletion,
-    preflight_edit_promotion,
-    preflight_rollback_edit_transaction,
     remove_edit_directory_contents,
-    remove_windows_edit_directory_contents,
-    rollback_edit_transaction,
     safe_edit_relative_path,
-    transaction_file_kind,
-    validate_edit_cleanup_inventory,
 )
 from .services import outputs
 from .services import group_analysis
@@ -177,207 +100,75 @@ from .services import interview_comparison
 from .services.transcription import formatting as transcript_formatting
 from .services.transcription import job_runner as transcription_job_runner
 from .services.training_corpus import (
-    TRAINING_MANIFEST_FIELDS,
-    correction_signature,
-    discard_training_clips,
     insert_training_events,
-    kushinada_label,
     training_events_from_connection,
-    training_export_contents,
 )
-from .services.speaker_registry import (
-    ATTENDANCE_STATUSES,
-    CONSENT_STATUSES,
-    SPEAKER_CSV_FIELD_ALIASES,
-    SPEAKER_REGISTRATION_STATUSES,
-    SPEAKER_ROLE_ALIASES,
-    SPEAKER_ROLES,
-    normalize_csv_consent,
-    normalize_csv_role,
-    normalize_speaker_registry_record,
-    normalized_csv_header,
-    speaker_csv_field_for_header,
-    speaker_registry_csv_bytes,
-    speaker_registry_public,
-    speaker_registry_revision,
-    speaker_registry_rows,
-)
+from .services.speaker_registry import speaker_registry_csv_bytes
 from .services.group_analysis import (
     ANALYSIS_CSV_FIELDS,
-    ANALYSIS_ELICITATION_TYPES,
-    ANALYSIS_FACILITATOR_ROLES,
-    ANALYSIS_GROUP_FIELDS,
-    ANALYSIS_INTERACTION_RELATIONS,
-    ANALYSIS_INTERACTION_TAGS,
-    ANALYSIS_INTERPRETATION_STATUSES,
-    ANALYSIS_MAX_TIMELINE_SECONDS,
-    ANALYSIS_MAX_TIME_BINS,
     ANALYSIS_METHODS,
-    ANALYSIS_NON_PARTICIPANT_ROLES,
-    ANALYSIS_UNITS,
-    FOCUS_GROUP_METHOD_REFERENCES,
-    TEXT_MINING_STOP_WORDS,
-    analysis_bool,
-    analysis_csv_content,
     analysis_csv_rows,
     analysis_csv_safe,
-    analysis_emotion_entries,
-    analysis_evenness,
-    analysis_gini,
-    analysis_number,
-    analysis_optional_score,
-    analysis_segment_bounds,
-    build_focus_group_analysis_plan,
-    default_analysis_config,
-    focus_group_analysis_report_markdown,
-    focus_group_data_inventory,
-    normalize_analysis_annotations,
-    normalize_analysis_codebook,
-    normalize_analysis_config,
     normalize_analysis_group_by,
-    normalize_codebook_history,
-    normalize_transformer_topics,
-    row_analysis_annotation_state,
-    row_analysis_annotations,
-    row_analysis_config,
     text_mining_counter,
-    text_mining_terms,
 )
 from .services.outputs import (
-    MEDIA_SESSION_DATE_TAGS,
-    SPEAKER_THEME_COLORS,
-    SUBTITLE_BREAK_AFTER,
-    ass_escape_text,
-    ass_time,
-    job_output_directory,
     rgb_to_ass_color,
     safe_output_stem,
-    speaker_theme_color_map,
     subtitle_text_pages,
     subtitle_text_width,
-    wrap_subtitle_lines,
     write_ass_subtitles,
 )
 from .services.durable_files import (
     atomic_copy_file,
-    atomic_write_bytes,
     atomic_write_text,
     durable_move,
-    durable_write_json,
-    ensure_staging_tree_has_no_reparse_points,
-    file_matches_fingerprint,
-    file_sha256,
     path_entry_exists,
     path_has_reparse_ancestor,
     path_is_link_or_reparse,
     path_is_within,
     sync_directory_metadata,
-    sync_file_data,
     sync_rename_metadata,
-    temporary_output_path,
-    windows_case_insensitive_text,
     windows_extended_path,
-    windows_move_file_write_through,
     posix_move_no_replace,
 )
 from .services import emotion as emotion_analysis
 from .services.meeting_minutes import (
-    MEETING_MINUTES_VERSION,
-    MEETING_TASK_PRIORITIES,
-    MEETING_TASK_PRIORITY_LABELS,
     build_meeting_minutes,
-    format_meeting_minutes_markdown,
-    format_outline_text,
-    meeting_decision_candidate,
-    meeting_due_details,
     meeting_external_payload,
-    meeting_safe_number,
-    meeting_task_candidate,
-    meeting_task_priority,
-    meeting_task_title,
     meeting_tasks_csv_text,
     normalize_meeting_minutes,
 )
 from .services.transcription import audio as transcription_audio
-from .services.emotion import (
-    AIST_EMOTION_LABEL_JA,
-    AIST_EMOTION_MODELS,
-    aist_emotion_model_keys,
-    build_emotion_analysis_summary,
-    emotion_label_ja,
-    emotion_segments_for_output,
-    segment_emotion_display,
-)
+from .services.emotion import aist_emotion_model_keys, build_emotion_analysis_summary
 from .services.transcription.segments import (
-    SHORT_SPEAKER_ISLAND_MAX_SECONDS,
-    SPEAKER_BACKCHANNEL_TEXTS,
-    QUIET_SUPPLEMENT_EDGE_PADDING,
-    QUIET_SUPPLEMENT_LOW_OVERLAP_RATIO,
-    QUIET_SUPPLEMENT_MAX_COMPRESSION_RATIO,
-    QUIET_SUPPLEMENT_MAX_NO_SPEECH_PROB,
-    QUIET_SUPPLEMENT_MIN_AVG_LOGPROB,
-    QUIET_SUPPLEMENT_MIN_DEDUPE_CHARS,
-    QUIET_SUPPLEMENT_MIN_DURATION,
-    QUIET_SUPPLEMENT_PARTIAL_OVERLAP_RATIO,
-    QUIET_SUPPLEMENT_TEXT_WINDOW_SECONDS,
     TRIPLE_PASS_GAP_CONTEXT_SECONDS,
-    TRIPLE_PASS_MIN_GAP_OVERLAP_RATIO,
     TRIPLE_PASS_MIN_GAP_SECONDS,
-    asr_segment_quality_ok,
-    default_speaker_name,
     display_time,
     find_long_asr_gaps,
-    has_near_duplicate_text,
     make_display_segments,
     merge_supplemental_asr_segments,
-    merged_interval_coverage,
     normalize_asr_segments,
-    normalize_text_for_merge,
     offset_asr_segments_to_gap,
-    segment_bounds,
-    segment_speaker,
-    should_add_supplemental_segment,
-    srt_time,
 )
 from .env_settings import env_enabled, positive_env_int
-from .media_formats import ALLOWED_EXTENSIONS, VIDEO_EXTENSIONS
-from .text_utils import (
-    clean_multiline,
-    clean_single_line,
-    json_load,
-    normalize_attributes,
-    normalize_tags,
-    utc_now_iso,
-)
+from .text_utils import clean_single_line, json_load, utc_now_iso
 from . import transcript_preparation as preparation
-from . import method_experts
 from .services.library_rows import (
-    emotion_values,
     ensure_segment_ids,
     interview_comparison_identity,
     normalize_conversation_speaker_profiles,
     normalize_session_profile,
-    normalize_source_name,
     row_meeting_minutes,
     row_original_segments,
     row_segments,
-    row_session_outline,
     row_session_profile,
     row_speaker_profiles,
-    stable_segment_id,
 )
 from .services.transcription.audio import (
     AUDIO_PREPROCESS_PRESETS,
 )
-from .text_utils import (
-    validate_json_value,
-)
-from .handlers.form_fields import (
-    parse_audio_preprocess,
-    parse_bool,
-    parse_optional_float,
-    parse_optional_int,
-)
+from .handlers.form_fields import parse_optional_float
 from .services.word_cloud import (
     write_word_cloud,
 )
@@ -395,10 +186,8 @@ from .services.machine_profile import (
 from .services.ai import settings as ai_settings
 from .services.ai.settings import (
     AI_MODEL_PROVIDERS,
-    AI_PROVIDERS,
     TOKEN_FILE_NAME,
     TokenConfig,
-    ai_provider_label,
     available_ai_models,
     configured_ai_credentials,
     is_colab_runtime,
@@ -407,7 +196,6 @@ from .services.ai.settings import (
     lmstudio_model_id,
     lmstudio_reasoning_settings,
     local_llm_label,
-    local_llm_model_required_message,
     local_llm_short_label,
 )
 from .services.ai.client import (
@@ -423,13 +211,9 @@ from .services.speaker_identification import (
     make_speaker_registration,
     normalize_detected_speaker_name,
     speaker_identity_context_records,
-    speaker_registry_identity_key,
 )
 from .handlers.speaker_identification import make_library_speaker_identification
-from .services.analysis_jobs import (
-    InsightCancelled,
-    TransformerAnalysisCancelled,
-)
+from .services.analysis_jobs import InsightCancelled
 from .services.analysis_jobs import make_insight_jobs
 from .services.analysis_jobs import make_insight_commands
 from .services.analysis_jobs import make_transformer_jobs
@@ -451,17 +235,16 @@ from .services.media_files import (
 )
 from .services.media_files import make_media_files
 from .web.library_routes import register_library_routes
-from .web.security import (
+from .diagnostics import (
     HIDDEN_LOCAL_PATH_MESSAGE,
-    LOOPBACK_HOSTS,
-    UNSAFE_HTTP_METHODS,
-    bind_host_is_loopback,
     public_diagnostic_text,
-    remote_addr_is_loopback,
-    request_hostname,
     sanitize_remote_json_payload,
 )
+from .web.security import bind_host_is_loopback
 from .web.security import make_request_guards, register_request_security
+from .runtime_state import RuntimeState
+from .services.instance_lock import InstanceLock
+from .services.transcription.job_record import JobRecord
 from .services.transcription.diarization import (
     DIARIZATION_MODEL,
     configure_huggingface_hub_compatibility,
@@ -480,11 +263,8 @@ from .services.transcription.vocabulary import (
 from .services.transcription.vocabulary import make_custom_vocabulary_store
 from .services.transcription.options import (
     ACTIVE_JOB_STATUSES,
-    AIST_EMOTION_MODEL_CHOICES,
     CONVERSATION_MODES,
     JobOptions,
-    LANGUAGES,
-    MODEL_NAMES,
 )
 from .handlers.transcription_start import make_transcription_start
 from .services.library_edits import (
@@ -564,12 +344,6 @@ class AnalysisConflictError(RuntimeError):
     pass
 
 
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["JSON_AS_ASCII"] = False
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-app.config["MAX_CONTENT_LENGTH"] = MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
-
-
 (
     trusted_request_hosts,
     local_path_access_allowed,
@@ -614,173 +388,30 @@ def release_job_admission() -> None:
                 _job_admission_id = None
 
 
-register_request_security(
-    app,
-    remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
-    remote_access_token=lambda: REMOTE_ACCESS_TOKEN,
-    remote_local_paths_enabled=lambda: REMOTE_LOCAL_PATHS_ENABLED,
-    max_media_upload_bytes=lambda: MAX_MEDIA_UPLOAD_BYTES,
-    max_csv_upload_bytes=lambda: MAX_CSV_UPLOAD_BYTES,
-    max_json_request_bytes=lambda: MAX_JSON_REQUEST_BYTES,
-    multipart_overhead_bytes=MULTIPART_OVERHEAD_BYTES,
-    is_colab_runtime=is_colab_runtime,
-    trusted_request_hosts=trusted_request_hosts,
-    remote_auth_valid=lambda: remote_auth_valid(),
-    request_origin_allowed=request_origin_allowed,
-    admit_transcription_job=admit_transcription_job,
-    release_job_admission=release_job_admission,
-)
-
-
-@dataclass
-class JobRecord:
-    id: str
-    source_name: str
-    output_dir: Path
-    write_srt: bool
-    write_json: bool
-    conversation_mode: str = "meeting"
-    burn_subtitled_video: bool = False
-    status: str = "queued"
-    progress: int = 0
-    stage: str = "queued"
-    stage_label: str = "開始準備"
-    stage_progress: int = 0
-    message: str = "開始を待っています…"
-    logs: list[str] = field(default_factory=list)
-    segments: list[dict[str, Any]] = field(default_factory=list)
-    speaker_names: dict[str, str] = field(default_factory=dict)
-    session_profile: dict[str, Any] = field(default_factory=dict)
-    speaker_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
-    speaker_registration: dict[str, Any] = field(default_factory=dict)
-    outline: dict[str, Any] | None = None
-    meeting_minutes: dict[str, Any] | None = None
-    emotion_analysis: dict[str, Any] | None = None
-    formatting_result: dict[str, Any] = field(default_factory=dict)
-    ai_usage: dict[str, Any] = field(default_factory=dict)
-    media_path: Path | None = None
-    files: list[Path] = field(default_factory=list)
-    language: str | None = None
-    error: str = ""
-    output_warning: str = ""
-    revision_count: int = 0
-    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    created_at: float = field(default_factory=time.time)
-    finished_at: float | None = None
-
-    def public(self) -> dict[str, Any]:
-        with jobs_lock:
-            reveal_local_paths = local_path_access_allowed()
-            return {
-                "id": self.id,
-                "source_name": self.source_name,
-                "conversation_mode": self.conversation_mode,
-                "output_dir": str(self.output_dir) if reveal_local_paths else "",
-                "status": self.status,
-                "progress": self.progress,
-                "stage": self.stage,
-                "stage_label": self.stage_label,
-                "stage_progress": self.stage_progress,
-                "message": public_diagnostic_text(
-                    self.message, reveal_local_paths=reveal_local_paths
-                ),
-                "logs": [
-                    public_diagnostic_text(item, reveal_local_paths=reveal_local_paths)
-                    for item in self.logs
-                ],
-                "segments": [dict(item) for item in self.segments] if self.status == "completed" else [],
-                "speaker_names": dict(self.speaker_names) if self.status == "completed" else {},
-                "session_profile": (
-                    dict(self.session_profile) if self.status == "completed" else {}
-                ),
-                "speaker_profiles": (
-                    {key: dict(value) for key, value in self.speaker_profiles.items()}
-                    if self.status == "completed" else {}
-                ),
-                "speaker_registration": (
-                    dict(self.speaker_registration) if self.status == "completed" else {}
-                ),
-                "write_srt": self.write_srt,
-                "write_json": True,
-                "burn_subtitled_video": self.burn_subtitled_video,
-                "outline": dict(self.outline) if self.status == "completed" and self.outline else None,
-                "meeting_minutes": (
-                    dict(self.meeting_minutes)
-                    if self.status == "completed" and self.meeting_minutes
-                    else None
-                ),
-                "emotion_analysis": (
-                    dict(self.emotion_analysis)
-                    if self.status == "completed" and self.emotion_analysis
-                    else None
-                ),
-                "formatting_result": (
-                    dict(self.formatting_result) if self.status == "completed" else {}
-                ),
-                "ai_usage": normalize_ai_usage(self.ai_usage),
-                "media_url": f"/api/library/{self.id}/media" if self.status == "completed" and self.media_path else None,
-                "media_kind": media_kind(self.media_path) if self.status == "completed" and self.media_path else None,
-                "files": [
-                    {
-                        "name": path.name,
-                        "url": f"/api/library/{self.id}/files/{urllib.parse.quote(path.name)}",
-                    }
-                    for path in self.files
-                    if path_is_within(path, self.output_dir) and path.is_file()
-                ],
-                "error": public_diagnostic_text(
-                    self.error, reveal_local_paths=reveal_local_paths
-                ),
-                "output_warning": public_diagnostic_text(
-                    self.output_warning, reveal_local_paths=reveal_local_paths
-                ),
-                "revision_count": self.revision_count,
-            }
-
-
-jobs: dict[str, JobRecord] = {}
-jobs_lock = threading.RLock()
-library_write_lock = threading.RLock()
-insight_jobs_lock = threading.RLock()
-insight_cancel_events: dict[str, threading.Event] = {}
-transformer_jobs_lock = threading.RLock()
-transformer_cancel_events: dict[str, threading.Event] = {}
-training_lock = threading.Lock()
-file_dialog_lock = threading.Lock()
-custom_vocabulary_lock = threading.Lock()
+# Process-local runtime state (see runtime_state.py). The module-level names
+# below are the same objects, kept for existing callers and tests.
+runtime = RuntimeState()
+jobs = runtime.jobs
+jobs_lock = runtime.jobs_lock
+library_write_lock = runtime.library_write_lock
+insight_jobs_lock = runtime.insight_jobs_lock
+insight_cancel_events = runtime.insight_cancel_events
+transformer_jobs_lock = runtime.transformer_jobs_lock
+transformer_cancel_events = runtime.transformer_cancel_events
+training_lock = runtime.training_lock
+file_dialog_lock = runtime.file_dialog_lock
+custom_vocabulary_lock = runtime.custom_vocabulary_lock
+JobRecord.state_lock = jobs_lock
+JobRecord.reveal_local_paths = staticmethod(lambda: local_path_access_allowed())
+# The submission currently being admitted by the before_request hook. It is
+# rebound (not mutated), so it stays a module global that tests can reset.
 _job_admission_id: str | None = None
-_instance_lock_streams: list[Any] = []
-_instance_lock_guard = threading.Lock()
 
 
 def prune_jobs_locked(now: float | None = None) -> None:
-    current = time.time() if now is None else now
-    terminal = {"completed", "failed", "cancelled"}
-    for job in jobs.values():
-        if job.status in terminal and job.finished_at is None:
-            job.finished_at = current
-    expired = [
-        job_id
-        for job_id, job in jobs.items()
-        if job.status in terminal
-        and job.finished_at is not None
-        and current - job.finished_at >= JOB_TTL_SECONDS
-    ]
-    for job_id in expired:
-        jobs.pop(job_id, None)
-    excess = len(jobs) - MAX_RETAINED_JOBS
-    if excess <= 0:
-        return
-    removable = sorted(
-        (
-            (job.finished_at or job.created_at, job_id)
-            for job_id, job in jobs.items()
-            if job.status in terminal
-        ),
-        key=lambda value: value[0],
+    runtime.prune_jobs_locked(
+        now, ttl_seconds=JOB_TTL_SECONDS, max_retained=MAX_RETAINED_JOBS
     )
-    for _created_at, job_id in removable[:excess]:
-        jobs.pop(job_id, None)
 
 
 def cleanup_orphaned_uploads() -> None:
@@ -788,12 +419,7 @@ def cleanup_orphaned_uploads() -> None:
         return
     upload_root = UPLOAD_DIRECTORY.resolve()
     cutoff = time.time() - ORPHAN_UPLOAD_GRACE_SECONDS
-    with jobs_lock:
-        active_job_ids = {
-            job_id
-            for job_id, job in jobs.items()
-            if job.status in ACTIVE_JOB_STATUSES
-        }
+    active_job_ids = runtime.active_job_ids(ACTIVE_JOB_STATUSES)
     for candidate in UPLOAD_DIRECTORY.iterdir():
         if not candidate.is_dir() or not re.fullmatch(r"[0-9a-f]{32}", candidate.name):
             continue
@@ -812,34 +438,6 @@ def cleanup_orphaned_uploads() -> None:
             shutil.rmtree(resolved, ignore_errors=True)
 
 
-def lock_instance_stream(stream: Any) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        stream.seek(0, os.SEEK_END)
-        if stream.tell() == 0:
-            stream.write(b"0")
-            stream.flush()
-        stream.seek(0)
-        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-
-def unlock_instance_stream(stream: Any) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        stream.seek(0)
-        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
 def instance_lock_paths() -> list[Path]:
     unique: dict[str, Path] = {}
     for path in (INSTANCE_LOCK_FILE, DATA_INSTANCE_LOCK_FILE):
@@ -848,47 +446,15 @@ def instance_lock_paths() -> list[Path]:
     return [unique[key] for key in sorted(unique)]
 
 
+instance_lock = InstanceLock(lambda: instance_lock_paths())
+
+
 def acquire_instance_lock() -> bool:
-    global _instance_lock_streams
-    with _instance_lock_guard:
-        if _instance_lock_streams:
-            return True
-        acquired: list[Any] = []
-        try:
-            for lock_path in instance_lock_paths():
-                lock_path.parent.mkdir(parents=True, exist_ok=True)
-                stream = lock_path.open("a+b")
-                try:
-                    lock_instance_stream(stream)
-                except Exception:
-                    stream.close()
-                    raise
-                acquired.append(stream)
-        except (ImportError, OSError):
-            for stream in reversed(acquired):
-                try:
-                    unlock_instance_stream(stream)
-                except (ImportError, OSError):
-                    pass
-                stream.close()
-            return False
-        _instance_lock_streams = acquired
-        return True
+    return instance_lock.acquire()
 
 
 def release_instance_lock() -> None:
-    global _instance_lock_streams
-    with _instance_lock_guard:
-        streams = _instance_lock_streams
-        if not streams:
-            return
-        for stream in reversed(streams):
-            try:
-                unlock_instance_stream(stream)
-            except (ImportError, OSError):
-                pass
-            stream.close()
-        _instance_lock_streams = []
+    instance_lock.release()
 
 
 def read_upload_limited(upload: Any, maximum: int) -> bytes:
@@ -1457,28 +1023,8 @@ def create_outline_with_ai(
     )
 
 
-def update_job(
-    job: JobRecord,
-    *,
-    progress: int | None = None,
-    message: str | None = None,
-    stage: str | None = None,
-    stage_label: str | None = None,
-    stage_progress: int | None = None,
-) -> None:
-    with jobs_lock:
-        if progress is not None:
-            job.progress = max(job.progress, min(100, progress))
-        if stage is not None:
-            job.stage = stage
-        if stage_label is not None:
-            job.stage_label = stage_label
-        if stage_progress is not None:
-            job.stage_progress = max(0, min(100, stage_progress))
-        if message is not None:
-            job.message = message
-            job.logs.append(message)
-            job.logs = job.logs[-MAX_LOG_LINES:]
+def update_job(job: JobRecord, **changes: Any) -> None:
+    runtime.update_job(job, max_log_lines=MAX_LOG_LINES, **changes)
 
 
 def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
@@ -1714,29 +1260,6 @@ def reconcile_edit_transactions_before_delete(
 
 def initialize_application() -> None:
     application_lifecycle().initialize()
-
-
-register_system_routes(
-    app,
-    app_name=APP_NAME,
-    product_name=PRODUCT_NAME,
-    app_version=APP_VERSION,
-    app_creator=APP_CREATOR,
-    token_file=lambda: TOKEN_FILE,
-    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
-    runtime_info=runtime_info,
-    local_llm_label=local_llm_label,
-    local_llm_short_label=local_llm_short_label,
-    get_machine_profile=lambda: get_machine_profile(),
-    load_token_config=lambda path: load_token_config(path),
-    lmstudio_connection_status=lmstudio_connection_status,
-    local_path_access_allowed=local_path_access_allowed,
-    load_custom_vocabulary=load_custom_vocabulary,
-    save_custom_vocabulary=save_custom_vocabulary,
-    available_ai_models=lambda provider, config: available_ai_models(provider, config),
-    update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
-    system_activity_snapshot=lambda: system_activity_snapshot(),
-)
 
 
 comparison_rate = interview_comparison.comparison_rate
@@ -2032,21 +1555,6 @@ def job_handler() -> JobHandler:
     )
 
 
-register_analysis_routes(
-    app, analysis_queries, analysis_commands, AI_MODEL_PROVIDERS
-)
-register_speaker_routes(
-    app,
-    speaker_registry_handler,
-    speaker_identification_handler,
-    AI_MODEL_PROVIDERS,
-    import_speaker_registry_csv,
-    read_upload_limited,
-    lambda: MAX_CSV_UPLOAD_BYTES,
-)
-register_job_routes(app, job_handler)
-
-
 public_insight_request, update_insight_request, run_analysis_insight_job = make_insight_jobs(
     AnalysisConflictError=AnalysisConflictError,
     archive_group_analysis=lambda *args, **kwargs: archive_group_analysis(*args, **kwargs),
@@ -2122,22 +1630,6 @@ def meeting_minutes_export_row(item_id: str) -> tuple[sqlite3.Row, dict[str, Any
     return obsidian_workflows().meeting_minutes_export_row(item_id)
 
 
-register_obsidian_routes(
-    app,
-    local_access_allowed=local_path_access_allowed,
-    library_row=library_row,
-    row_segments=row_segments,
-    workbench=obsidian_workbench,
-    normalize_efforts=normalize_efforts,
-    write_lock=library_write_lock,
-    meeting_export_row=meeting_minutes_export_row,
-    meeting_fingerprint=meeting_minutes_fingerprint,
-    archive_meeting_minutes=archive_meeting_minutes,
-    publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
-    log_warning=app.logger.warning,
-)
-
-
 _delete_library_item_locked = make_library_deletion(
     default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
     media_directory=lambda: MEDIA_DIRECTORY,
@@ -2175,77 +1667,159 @@ start_transcription_job_command, admission_job_public = make_transcription_start
 )
 
 
-register_library_group_routes(
-    app,
-    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-    library_write_lock=library_write_lock,
-)
+def create_app() -> Flask:
+    """Build the Flask application: configuration, security hooks and routes.
+
+    Building the app has no side effects on data. The database, startup
+    recovery and the Obsidian watcher are started only by main() through
+    application_lifecycle(), so tests and tools can create an app freely.
+    Every call returns a new, independent Flask instance.
+    """
+    flask_app = Flask(__name__, template_folder="templates", static_folder="static")
+    flask_app.config["JSON_AS_ASCII"] = False
+    flask_app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+    flask_app.config["MAX_CONTENT_LENGTH"] = MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
+
+    register_request_security(
+        flask_app,
+        remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
+        remote_access_token=lambda: REMOTE_ACCESS_TOKEN,
+        remote_local_paths_enabled=lambda: REMOTE_LOCAL_PATHS_ENABLED,
+        max_media_upload_bytes=lambda: MAX_MEDIA_UPLOAD_BYTES,
+        max_csv_upload_bytes=lambda: MAX_CSV_UPLOAD_BYTES,
+        max_json_request_bytes=lambda: MAX_JSON_REQUEST_BYTES,
+        multipart_overhead_bytes=MULTIPART_OVERHEAD_BYTES,
+        is_colab_runtime=is_colab_runtime,
+        trusted_request_hosts=trusted_request_hosts,
+        remote_auth_valid=lambda: remote_auth_valid(),
+        request_origin_allowed=request_origin_allowed,
+        admit_transcription_job=admit_transcription_job,
+        release_job_admission=release_job_admission,
+    )
+
+    register_system_routes(
+        flask_app,
+        app_name=APP_NAME,
+        product_name=PRODUCT_NAME,
+        app_version=APP_VERSION,
+        app_creator=APP_CREATOR,
+        token_file=lambda: TOKEN_FILE,
+        default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+        runtime_info=runtime_info,
+        local_llm_label=local_llm_label,
+        local_llm_short_label=local_llm_short_label,
+        get_machine_profile=lambda: get_machine_profile(),
+        load_token_config=lambda path: load_token_config(path),
+        lmstudio_connection_status=lmstudio_connection_status,
+        local_path_access_allowed=local_path_access_allowed,
+        load_custom_vocabulary=load_custom_vocabulary,
+        save_custom_vocabulary=save_custom_vocabulary,
+        available_ai_models=lambda provider, config: available_ai_models(provider, config),
+        update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
+        system_activity_snapshot=lambda: system_activity_snapshot(),
+    )
+
+    register_analysis_routes(
+        flask_app, analysis_queries, analysis_commands, AI_MODEL_PROVIDERS
+    )
+
+    register_speaker_routes(
+        flask_app,
+        speaker_registry_handler,
+        speaker_identification_handler,
+        AI_MODEL_PROVIDERS,
+        import_speaker_registry_csv,
+        read_upload_limited,
+        lambda: MAX_CSV_UPLOAD_BYTES,
+    )
+
+    register_job_routes(flask_app, job_handler)
+
+    register_obsidian_routes(
+        flask_app,
+        local_access_allowed=local_path_access_allowed,
+        library_row=library_row,
+        row_segments=row_segments,
+        workbench=obsidian_workbench,
+        normalize_efforts=normalize_efforts,
+        write_lock=library_write_lock,
+        meeting_export_row=meeting_minutes_export_row,
+        meeting_fingerprint=meeting_minutes_fingerprint,
+        archive_meeting_minutes=archive_meeting_minutes,
+        publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
+        log_warning=flask_app.logger.warning,
+    )
+
+    register_library_group_routes(
+        flask_app,
+        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+        library_write_lock=library_write_lock,
+    )
+
+    register_training_routes(
+        flask_app,
+        remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
+        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+        refresh_training_exports=refresh_training_exports,
+        training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
+    )
+
+    register_export_routes(
+        flask_app,
+        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+        group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+        library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+        list_speaker_registry=list_speaker_registry,
+        meeting_minutes_export_row=meeting_minutes_export_row,
+        row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+        row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+        row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
+    )
+
+    register_analysis_view_routes(
+        flask_app,
+        AnalysisConflictError=AnalysisConflictError,
+        analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+        build_research_analysis=lambda *args, **kwargs: build_research_analysis(*args, **kwargs),
+        group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+        library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+        public_diagnostic_text=public_diagnostic_text,
+        save_group_analysis=save_group_analysis,
+        transformer_semantic_search=lambda *args, **kwargs: transformer_semantic_search(*args, **kwargs),
+    )
+
+    register_ai_routes(
+        flask_app,
+        lmstudio_reasoning_settings=lambda *args, **kwargs: lmstudio_reasoning_settings(*args, **kwargs),
+        load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+    )
+
+    register_library_routes(
+        flask_app,
+        media_directory=lambda: MEDIA_DIRECTORY,
+        _delete_library_item_locked=_delete_library_item_locked,
+        analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+        archive_source_stamp=archive_source_stamp,
+        build_interview_comparison=build_interview_comparison,
+        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+        file_dialog_lock=file_dialog_lock,
+        generate_video_thumbnail=lambda *args, **kwargs: generate_video_thumbnail(*args, **kwargs),
+        generate_word_cloud_thumbnail=generate_word_cloud_thumbnail,
+        interview_comparison_request=interview_comparison_request,
+        library_public=library_public,
+        library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+        library_write_lock=library_write_lock,
+        local_path_access_allowed=local_path_access_allowed,
+        manual_output_directory=manual_output_directory,
+        resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
+        row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+        runtime_info=runtime_info,
+        upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+    )
+    return flask_app
 
 
-register_training_routes(
-    app,
-    remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
-    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-    refresh_training_exports=refresh_training_exports,
-    training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
-)
-
-
-register_export_routes(
-    app,
-    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
-    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
-    list_speaker_registry=list_speaker_registry,
-    meeting_minutes_export_row=meeting_minutes_export_row,
-    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
-    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
-    row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
-)
-
-
-register_analysis_view_routes(
-    app,
-    AnalysisConflictError=AnalysisConflictError,
-    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
-    build_research_analysis=lambda *args, **kwargs: build_research_analysis(*args, **kwargs),
-    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
-    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
-    public_diagnostic_text=public_diagnostic_text,
-    save_group_analysis=save_group_analysis,
-    transformer_semantic_search=lambda *args, **kwargs: transformer_semantic_search(*args, **kwargs),
-)
-
-
-register_ai_routes(
-    app,
-    lmstudio_reasoning_settings=lambda *args, **kwargs: lmstudio_reasoning_settings(*args, **kwargs),
-    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
-)
-
-
-register_library_routes(
-    app,
-    media_directory=lambda: MEDIA_DIRECTORY,
-    _delete_library_item_locked=_delete_library_item_locked,
-    analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
-    archive_source_stamp=archive_source_stamp,
-    build_interview_comparison=build_interview_comparison,
-    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-    file_dialog_lock=file_dialog_lock,
-    generate_video_thumbnail=lambda *args, **kwargs: generate_video_thumbnail(*args, **kwargs),
-    generate_word_cloud_thumbnail=generate_word_cloud_thumbnail,
-    interview_comparison_request=interview_comparison_request,
-    library_public=library_public,
-    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
-    library_write_lock=library_write_lock,
-    local_path_access_allowed=local_path_access_allowed,
-    manual_output_directory=manual_output_directory,
-    resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
-    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
-    runtime_info=runtime_info,
-    upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
-)
+app = create_app()
 
 
 def main() -> int:
