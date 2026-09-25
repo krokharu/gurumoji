@@ -157,7 +157,7 @@ flowchart LR
 | FFmpeg | 前処理、クリップ、字幕焼き込み、サムネイル | サブプロセス（タイムアウトは環境変数で指定） |
 | Whisper／WhisperX、pyannote | 文字起こし、話者分離 | Python内。Hugging Faceトークンが必要（gatedモデル） |
 | AIST感情モデル | 音声感情分析 | Hugging Faceから初回取得し、ローカルで実行 |
-| OpenAI、Google Gemini、LM Studio | 校正、話者特定、アウトライン、見解 | `call_ai_json` → `ai_http_worker.py`（別プロセス、リダイレクト拒否） |
+| OpenAI、Google Gemini、LM Studio | 校正、話者特定、アウトライン、見解 | `call_ai_json` → `ai_http_worker.py`（別プロセス、リダイレクト拒否）。HTTP 429・5xxは `services/ai/client.py:post_json` が最大2回再試行（`Retry-After` は30秒まで尊重、キャンセル可）。出力上限・安全判定・拒否による未完了応答は `ensure_complete_response` が理由付きのエラーにする |
 | Transformerモデル | テーマ分析、意味検索 | `transformer_analysis.py`（`MOJIOKOSI_TRANSFORMER_MODEL`） |
 | Obsidian | 閲覧、仕上げ・テーマの編集 | ファイルを直接読み書きする。Obsidian本体とは通信せず、`obsidian://open?path=` で開くだけ |
 
