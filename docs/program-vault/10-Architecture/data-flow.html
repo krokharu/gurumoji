@@ -137,7 +137,8 @@ footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);paddin
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/trash</code></td><td>削除した会話の元の音声・動画と <code>trash.json</code>（既定30日保管）</td><td>削除、起動時の期限切れ消去</td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/analysis_store</code></td><td>不変の入力スナップショット、実行結果、表CSV、manifest</td><td><code>AnalysisStore.save</code></td></tr>
           <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/obsidian_workbench</code></td><td>仕上げの <code>state.json</code>、<code>source-*.json</code>、<code>result-*.json</code></td><td><code>ObsidianWorkbench</code></td></tr>
-          <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/ResearchVault</code></td><td>研究者が読むノート、操作ノート、分析ノート、テーマ</td><td>仕上げ・分析の公開・テーマ同期</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/ResearchVault</code></td><td>研究者が読むノート、操作ノート、分析ノート、テーマ。生成ノートの最初の版と研究者の編集版は <code>履歴/ノート変更/</code> に写す</td><td>仕上げ・分析の公開・テーマ同期</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/obsidian_layout/note_changes.jsonl</code></td><td>生成ノートの作成・更新・編集の保存・欠落の記録。<code>90-運用/同期状況</code> に表示</td><td>共通の書き込み判定 <code>vault_note_policy</code></td></tr>
           <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/InputVault</code> ほか2件</td><td>IDでつなぐ台帳型Vault（Input／Visualization／Orchestrator）</td><td><code>publish_input_vault</code>、<code>publish_vaults</code></td></tr>
         </tbody>
       </table>

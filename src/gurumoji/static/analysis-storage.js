@@ -107,13 +107,23 @@ async function saveAnalysisPackage(kwic = null) {
     if (!response.ok) throw new Error(data.error || '分析結果を保存できませんでした。');
     state.pending = null;
     try { sessionStorage.removeItem(storageKey); } catch (_) { /* optional storage */ }
-    state.error = data.run?.vault_status === 'completed' ? '分析結果とVaultを保存しました。'
-      : data.run?.error || '結果ファイルは保存済みです。Vaultの状態を確認してください。';
+    state.error = (data.run?.vault_status === 'completed' ? '分析結果とVaultを保存しました。'
+      : data.run?.error || '結果ファイルは保存済みです。Vaultの状態を確認してください。') + vaultNotesMessage(data.run);
   } catch (error) { state.error = error.message; }
   finally {
     state.busy = false;
     if (itemId === analysisState.itemId) { await loadAnalysisStorage(); refreshAnalysisStorage(); }
   }
+}
+
+// OBS-04: say which researcher-touched notes the shared Vault note policy handled.
+function vaultNotesMessage(run) {
+  const notes = run && run.vault_notes && typeof run.vault_notes === 'object' ? run.vault_notes : {};
+  const count = key => (Array.isArray(notes[key]) ? notes[key].length : 0);
+  const parts = [];
+  if (count('edit_saved')) parts.push(`Obsidianで編集されていたノート${count('edit_saved')}件は、編集した版を履歴に保存してから最新版に更新しました。`);
+  if (count('missing')) parts.push(`削除されていたノート${count('missing')}件は作り直していません。`);
+  return parts.length ? ` ${parts.join(' ')}詳しくはResearchVaultの「90-運用/同期状況」を確認してください。` : '';
 }
 
 async function retrySavedVault(runId) {
@@ -125,7 +135,7 @@ async function retrySavedVault(runId) {
     const response = await apiFetch(`/api/analysis/runs/${encodeURIComponent(runId)}/vault`, {method: 'POST'});
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Vaultを保存できませんでした。');
-    state.error = data.run.error || '保存済みの結果からVaultを保存しました。';
+    state.error = (data.run.error || '保存済みの結果からVaultを保存しました。') + vaultNotesMessage(data.run);
   } catch (error) { state.error = error.message; }
   finally {
     state.busy = false;

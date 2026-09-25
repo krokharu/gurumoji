@@ -293,8 +293,12 @@ class ObsidianWorkbench:
         content = self.layout.decorate(with_properties(body, properties), state["item_id"],
                                        "transcript" if kind == "result" else kind, scope)
         # Researcher-owned notes are immutable from our side after creation.
-        # The generated status note remains the existing mutable status channel.
-        write_atomic(self.note_path(relative), content.encode(), create_only=kind != "status")
+        # The generated status note is the mutable status channel; it follows the
+        # shared Vault note policy (history of edits, recreated when deleted).
+        if kind == "status":
+            self.layout.managed_note(relative, content, navigation=True)
+        else:
+            write_atomic(self.note_path(relative), content.encode(), create_only=True)
 
     def locate_note(self, relative: str, note_id: str | None = None) -> str:
         if self.note_path(relative).exists():

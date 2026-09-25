@@ -71,19 +71,28 @@ class VaultRegistryTests(unittest.TestCase):
         self.assertIn("large-v3", body)
         self.assertIn("Whisper文字起こし", body)
 
-    def test_human_edits_and_deletions_are_preserved_not_overwritten(self):
+    def test_human_edits_are_kept_in_history_and_deletions_are_not_recreated(self):
         self.publish()
         root = self.registry.root("input")
         path = root / self.note
         with path.open("a", encoding="utf-8") as handle:
             handle.write("\n研究者のメモ\n")
-        self.assertEqual(self.publish(revision=1), "conflict")
-        self.assertIn("研究者のメモ", path.read_text(encoding="utf-8"))
-        self.assertEqual(read_notes(root)[self.note][0]["revision"], 0)
-        self.assertIn("手動編集を保持", (root / "00-Index.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.publish(revision=1), "overwritten")
+        self.assertNotIn("研究者のメモ", path.read_text(encoding="utf-8"))
+        self.assertEqual(read_notes(root)[self.note][0]["revision"], 1)
+        history = sorted((root / "99-Archive/history").rglob("*.md"))
+        self.assertEqual(sorted(p.name.split("-", 1)[1] for p in history if p.parent.name.startswith("input-")),
+                         ["edited.md", "first.md"])
+        edited = next(p for p in history if p.name.endswith("-edited.md"))
+        self.assertIn("研究者のメモ", edited.read_text(encoding="utf-8"))
+        self.assertNotIn("99-Archive", (root / "00-Index.md").read_text(encoding="utf-8"))
         path.unlink()
         self.assertEqual(self.publish(revision=2), "missing")
         self.assertFalse(path.exists())
+        self.assertIn("削除を検出", (root / "00-Index.md").read_text(encoding="utf-8"))
+        (root / "00-Index.md").unlink()
+        self.publish(revision=2)
+        self.assertTrue((root / "00-Index.md").exists())
 
     def test_software_and_research_vaults_are_not_generated_roots(self):
         data = self.registry.load()

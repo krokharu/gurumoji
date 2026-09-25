@@ -23,7 +23,7 @@ tags:
 - Obsidian Plugin API（`Vault.process`、`FileManager.processFrontMatter`、`normalizePath`、ゴミ箱への移動）は使えない。代わりに次の処理を自前で実装している。
   - `analysis_store.safe_path`：相対パスだけを許可する。`\`・`:`・`..`・`.` は拒否する。途中のシンボリックリンクとジャンクションも拒否し、ルートの外を指すパスを拒否する。
   - `analysis_store.write_atomic`：同じフォルダーに `.<name>.<uuid>.tmp` を作り、`fsync` してから `os.replace` で置き換える。`create_only=True`の場合は`os.link`で排他的に新規作成し、既存ファイルを置き換えない。いずれも一時ファイルを後片付けする。フォルダーの `fsync` はしない。
-  - hash台帳：アプリが書いた内容のhashを記録し、ファイルが変わっていれば上書きしない（書き込み主体によって挙動が異なる。下記参照）。
+  - hash台帳と共通の書き込み判定：アプリが書いた内容のhashを記録し、`vault_note_policy.write_generated_note` が既存ファイルの扱いを決める（2026-09-25、OBS-04。下記「書き込み主体ごとの競合処理」）。
 - 開く操作は `obsidian://open?path=<絶対パス>` のURIだけで行う（`ObsidianWorkbench.public`、`AnalysisStore.public`）。
 
 ## Vaultの指定方法
@@ -45,15 +45,16 @@ tags:
 
 | パス | 内容 | 書く処理 | 所有 |
 | --- | --- | --- | --- |
-| `00-ホーム.md`、`01-分析結果.md`、`インタビュー一覧.base`、`10-インタビュー/インタビュー一覧.md`、`90-運用/使い方.md`、`40-研究/分析手法/<group>.md` | ナビゲーション | `ObsidianLayout.publish_navigation` → `managed_note` | アプリ（hashで確認） |
-| `10-インタビュー/I###-<名前>/I###-概要.md` | インタビューの入口 | `ObsidianLayout.update` → `managed_note` | アプリ（hashで確認） |
+| `00-ホーム.md`、`01-分析結果.md`、`インタビュー一覧.base`、`10-インタビュー/インタビュー一覧.md`、`90-運用/使い方.md`、`90-運用/同期状況.md`、`40-研究/分析手法/<group>.md` | ナビゲーション | `ObsidianLayout.publish_navigation` → `managed_note` | アプリ（共通判定） |
+| `10-インタビュー/I###-<名前>/I###-概要.md` | インタビューの入口 | `ObsidianLayout.update` → `managed_note` | アプリ（共通判定。削除されても作り直さない） |
+| `…/履歴/ノート変更/<ノート名>-<hash8>/<日時>-{最初の版,研究者の編集}.md`、`90-運用/変更履歴/…` | 生成ノートの履歴の写し。`graph/history`、履歴用の `note_id` | `vault_note_policy` | アプリ（作成のみ） |
 | `…/I###-研究メモ.md` | 研究者のメモ | 無いときだけ作成 | 研究者 |
 | `…/I###-保存原文.md`、`I###-全文.md`、`I###-アウトライン.md`、`I###-操作.md`、`I###-状態.md` | 仕上げの作業台 | `ObsidianWorkbench.prepare` → `save_note` | 全文・アウトライン・操作は研究者（`managed_by: researcher`）、状態・原文はアプリ |
 | `…/履歴/仕上げ/I###-{アウトライン,仕上げ結果,仕上げ後アウトライン}-<run>.md` | AIの生成版。常に新しいパス | `ObsidianWorkbench.execute` | 結果は研究者が編集してよい |
 | `…/I###-会議議事録-r<rev>-<hash>.md`、`…/添付/I###-{タスク,連携}-*.{csv,json}` | 会議議事録と添付 | `ObsidianWorkbench.publish_meeting_minutes` | アプリ（既存なら書かない） |
 | `…/I###-分析まとめ.md`、`…/履歴/分析/<run>/…`、`…/履歴/引用/<snapshot>/part-*.md`、`40-研究/インタビュー比較/comparison-<run>.md`、`90-運用/Gurumoji-SavedAnalyses.md` | 分析結果・引用原文・グラフ用ノード | `AnalysisStore.write_note` | アプリ（SQLite `obsidian_notes` のhashで確認） |
 | `20-テーマ/*.md` | テーマ。研究者が作成する | `sync_themes`は存在確認だけを行い、読み書きしない | 研究者 |
-| `40-研究/テーマ関連/<hash>.md` | テーマとインタビューの関連一覧 | `sync_themes` → `managed_note` | アプリ（hashで確認。編集・削除済みなら保持） |
+| `40-研究/テーマ関連/<hash>.md` | テーマとインタビューの関連一覧 | `sync_themes` → `managed_note` | アプリ（共通判定。削除済みは作り直さない） |
 | `.obsidian/core-plugins.json`、`appearance.json`、`bookmarks.json`、`workspaces.json`、`workspace.json`、`graph.json`、`snippets/gurumoji-reading.css` | 表示設定 | `ObsidianLayout.configure` | 利用者（アプリも書く） |
 
 ### 3つの生成Vault
@@ -121,7 +122,7 @@ tags:
 
 - 人のノートのYAMLコメント・引用形式・アンカー・未知のキー・独自タグ・改行はバイト単位で保持する。
 - 仕上げノートの`graph/*`等は作成時点のまま。最新版の場所は概要と状態ノートを使う。
-- 生成ノートは全体を再生成するが、所有hashが異なる既存内容を上書きしない。一般的なhash確認直後の競合はOBS-04として残る。
+- 生成ノートは全体を再生成する。所有hashと異なる内容（研究者の編集）は履歴に写してから最新版で上書きする（利用者の決定、2026-09-25）。hash確認から書き込みまでの短い間の競合は残る。
 
 ## Wikilink
 
@@ -150,12 +151,24 @@ tags:
 
 | 書き込み主体 | 対象 | 所有・変更の判定 | 外部で編集済みの場合 | 外部で削除・移動済みの場合 |
 | --- | --- | --- | --- | --- |
-| `VaultRegistry._write` | 3 Vaultの全ノート | `vaults.json` の `sha256`・`pending`（書き込み前に予定hashを記録） | `conflict`。上書きせず索引に表示 | `missing`。再作成しない |
-| `AnalysisStore.write_note` | ResearchVaultの分析ノート | SQLite `obsidian_notes.sha256` | `StoreConflict`。`vault_status=conflict` | `StoreConflict`。再作成しない |
-| `ObsidianLayout.managed_note` | ナビ・概要・CSSスニペット | `interviews.json` の `managed` hash | 何も通知せずスキップ（ログなし） | **再作成する** |
-| `ObsidianWorkbench.save_note`、`note` | 仕上げノート、状態ノート | 状態以外は排他的な新規作成。状態は毎回更新。管理状態を失い初期ノートが残る場合は停止 | 状態以外は同名ノートがあれば停止して保持 | 新しい生成パスに作成。移動済み作業ノートは既存の探索規則に従う |
+2026-09-25から、生成ノートの書き込みは `vault_note_policy.write_generated_note` の1つの判定を通る（OBS-04）。台帳は書き込み主体ごとに併存する。
+
+- 新規作成：書いたうえで、その内容を「最初の版」として履歴に写す。
+- アプリが前回書いた内容のまま：最新版で置き換える。この方式の導入前に作られたノートは、初回の置き換えの前に現在の内容を「最初の版」として写す。
+- 研究者が編集していた（台帳にない内容）：編集した版を「研究者の編集」として履歴に写し、最新版で上書きする。
+- 研究者が削除していた：ナビゲーション（ホーム・一覧・使い方・同期状況・分析まとめ・生成Vaultの00-Home／00-Index・状態ノート）だけ作り直す。分析ノート・概要・引用原文・テーマ関連などは作り直さず「欠落」とする。
+- 履歴の写しは、ResearchVaultでは各インタビューの `履歴/ノート変更/`（共通ノートは `90-運用/変更履歴/`）、生成Vaultでは `99-Archive/history/` に置く。`graph/history` タグを付けてグラフから除き、`note_id` は履歴用に付け替え、`aliases` は外す。
+- 変更はすべて `<data>/obsidian_layout/note_changes.jsonl` に記録する（5MBで `.1` へ切り替え）。研究者の編集の保存・欠落・再作成は、ResearchVaultの `90-運用/同期状況.md` と、分析保存の応答 `vault_notes`（画面のメッセージ）に出す。
+
+| 書き込み主体 | 対象 | 所有・変更の判定 | 外部で編集済みの場合 | 外部で削除・移動済みの場合 |
+| --- | --- | --- | --- | --- |
+| `VaultRegistry._write` | 3 Vaultの全ノート | `vaults.json` の `sha256`・`pending`（書き込み前に予定hashを記録）＋共通判定 | 履歴に写して上書き（`overwritten`） | 00-Home／00-Indexは作り直す。他は `missing` |
+| `AnalysisStore.write_note` | ResearchVaultの分析ノート | SQLite `obsidian_notes.sha256`＋共通判定 | 履歴に写して上書き | 分析まとめ・SavedAnalysesは作り直す。他は欠落として報告 |
+| `ObsidianLayout.managed_note` | ナビ・概要・同期状況・状態ノート | `interviews.json` の `managed` hash＋共通判定（`.md` のみ） | 履歴に写して上書き | ナビは作り直す。概要・テーマ関連は作り直さない |
+| `ObsidianLayout.managed_note`（`.base`・CSS） | 設定に近いファイル | `managed` hash | 何も通知せずスキップ | 再作成する |
+| `ObsidianWorkbench.save_note`、`note` | 仕上げノート | 排他的な新規作成。管理状態を失い初期ノートが残る場合は停止 | 同名ノートがあれば停止して保持 | 新しい生成パスに作成。移動済み作業ノートは既存の探索規則に従う |
 | `ObsidianLayout.sync_finishing` | 概要・ナビゲーション | 生成側の所有hashを確認。人の作業ノートは読み書きしない | 人の編集をそのまま保持 | 人のノートは作らない |
-| `ObsidianLayout.sync_themes` | `40-研究/テーマ関連/*.md` | `managed_note`の所有hash。人のテーマノートは存在確認のみ | 生成関連ノートの競合は警告しスキップ | 管理済み関連ノートの欠落は再作成しない |
+| `ObsidianLayout.sync_themes` | `40-研究/テーマ関連/*.md` | `managed_note`の所有hash。人のテーマノートは存在確認のみ | 生成関連ノートの編集は履歴に写して上書き | 管理済み関連ノートの欠落は再作成しない |
 | `ObsidianLayout.configure` | `.obsidian/*.json` | **判定なし**。読んで変更して書く。CSSスニペットだけ `managed_note` | 利用者の設定を変更する。Obsidianが起動中なら互いに上書きしうる（OBS-03） | 作成する |
 | `ObsidianWorkbench.execute`（反映） | DB | revision一致、元ノートのfingerprint一致、反映中の結果ノートの変更なし、`library_write_lock` | 停止してエラーを状態ノートに表示 | `note_id` で1件に特定できなければ停止 |
 | `obsidian_migration.migrate` | ResearchVault全体 | バックアップと移行前後のhash | 中断（`ValueError`） | 移行先に別の内容があれば中断 |
@@ -170,19 +183,19 @@ tags:
   - AIの生成物は常に新しいパスに書くため、監視対象の元ノートを書き換えない。
   - テーマ同期と生成Vaultへの書き出しは、生成結果が同じなら書かない（冪等）。
   - 反映後に更新するのは別のVault（InputVault）とDBで、操作ノートは状態ノート経由の表示だけ。
-- 起動時の `recover`・`migrate` が失敗すると、監視スレッドは停止する。画面への通知はない（OBS-09）。
+- 起動時の `recover`・`migrate` が失敗すると、監視スレッドは停止する。停止と理由は `GET /api/config` と仕上げ状況APIの `watcher` で返し、画面に表示する（OBS-09、2026-09-25）。
 
 ## エラー処理
 
 - Vaultへの書き出しに失敗しても、正本（文字起こし・編集保存・分析の固定保存）は失敗させない。該当する処理は `publish_input_vault`、`retire_input_vault`、`AnalysisStore.publish_vaults`、`refresh_archive_index`。失敗は `logging` のwarningに出すか、`vault_status` に記録する。
 - 仕上げの例外は `state.json` と状態ノートに `error` として表示する。
 - 監視ループの例外はログに出して継続する。
-- `managed_note`一般のスキップ記録はない。テーマ同期では生成関連ノートの競合と研究メモの解析失敗をwarningに出す。Obsidian操作全体の監査ログ（作成・更新・競合・スキップ）はない（OBS-15）。
+- 生成ノートの作成・更新・編集の保存・欠落・再作成は `note_changes.jsonl` に記録する。`.base`・CSSのスキップ、移行、`.obsidian` 設定の変更は記録しない（OBS-15の残り）。
 
 ## バックアップ
 
 - 自動バックアップは移行処理だけ。Vault、`obsidian_workbench`、`analysis_store`、`interviews.json`、SQLite（backup API）を `obsidian_layout/backup-<uuid>` にコピーする。
-- 通常の書き込みでは、上書き前のバックアップを取らない。所有hashが一致するノートだけを上書きする設計に依存している。
+- 通常の書き込みでは、生成ノートの最初の版と、上書きする研究者の編集版を履歴に写す。アプリ同士の更新（固定保存から作り直せる内容）は写さず、変更記録だけ残す。
 - 手動の手順は `docs/PROJECT_LAYOUT.md`（アプリを停止して `runtime/` 全体をコピー）と `docs/OBSIDIAN_VAULTS.md` にある。
 
 ## 削除方法
