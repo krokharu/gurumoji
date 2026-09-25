@@ -487,6 +487,12 @@ from .services.transcription.options import (
     MODEL_NAMES,
 )
 from .handlers.transcription_start import make_transcription_start
+from .services.library_edits import (
+    normalize_edited_segments,
+)
+from .services.library_edits import make_library_update
+from .web.library_deletion import make_library_deletion
+from .services.analysis_annotations import make_analysis_annotation_save
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -1130,23 +1136,13 @@ def group_analysis_for_row(
     )
 
 
-def summarize_codebook_change(before: list[dict[str, str]], after: list[dict[str, str]]) -> str:
-    previous = {str(item.get("id") or ""): item for item in before}
-    current = {str(item.get("id") or ""): item for item in after}
-    added = [item.get("label") or item_id for item_id, item in current.items() if item_id not in previous]
-    removed = [item.get("label") or item_id for item_id, item in previous.items() if item_id not in current]
-    changed = [
-        current[item_id].get("label") or item_id for item_id in current.keys() & previous.keys()
-        if current[item_id] != previous[item_id]
-    ]
-    parts = []
-    if added:
-        parts.append("追加: " + "、".join(str(value) for value in added))
-    if removed:
-        parts.append("削除: " + "、".join(str(value) for value in removed))
-    if changed:
-        parts.append("変更: " + "、".join(str(value) for value in changed))
-    return " / ".join(parts) or "コードブックの順序または定義を変更"
+summarize_codebook_change, _save_group_analysis_locked = make_analysis_annotation_save(
+    AnalysisConflictError=AnalysisConflictError,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+)
 
 
 def save_group_analysis(item_id: str, payload: Any) -> dict[str, Any]:
@@ -1154,123 +1150,6 @@ def save_group_analysis(item_id: str, payload: Any) -> dict[str, Any]:
         result = _save_group_analysis_locked(item_id, payload)
         refresh_archive_index(item_id)
         return result
-
-
-def _save_group_analysis_locked(item_id: str, payload: Any) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise ValueError("分析設定はJSONオブジェクトで送信してください。")
-    row = library_row(item_id)
-    if row is None:
-        raise LookupError("処理済みデータが見つかりません。")
-    missing_revisions = [
-        key for key in ("source_revision", "analysis_revision") if key not in payload
-    ]
-    if missing_revisions:
-        raise ValueError("保存前に分析データを再読み込みしてください。")
-    if "config" in payload and not isinstance(payload["config"], dict):
-        raise ValueError("分析設定の形式が正しくありません。")
-    provided_config = payload.get("config")
-    if (
-        isinstance(provided_config, dict)
-        and "exclude_moderator" in provided_config
-        and not isinstance(provided_config["exclude_moderator"], bool)
-    ):
-        raise ValueError("司会・運営役の除外設定はtrueまたはfalseで指定してください。")
-    if "annotations" in payload and not isinstance(payload["annotations"], dict):
-        raise ValueError("発話注釈の形式が正しくありません。")
-    provided_annotations = payload.get("annotations")
-    if isinstance(provided_annotations, dict):
-        for index, value in enumerate(provided_annotations.values()):
-            if index >= 100000:
-                break
-            if not isinstance(value, dict):
-                continue
-            for key in ("important", "excluded"):
-                if key in value and not isinstance(value[key], bool):
-                    raise ValueError(f"注釈の{key}はtrueまたはfalseで指定してください。")
-    segments = row_segments(row)
-    source_revision = int(row["revision_count"] or 0)
-    analysis_revision = int(row["analysis_revision"] or 0)
-    for key, actual in (
-        ("source_revision", source_revision),
-        ("analysis_revision", analysis_revision),
-    ):
-        if key not in payload:
-            continue
-        try:
-            expected = int(payload[key])
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{key} が正しくありません。") from exc
-        if expected != actual:
-            raise AnalysisConflictError(
-                "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
-            )
-    current_config = row_analysis_config(row)
-    current_annotations, orphaned_annotations = row_analysis_annotation_state(
-        row, segments, current_config
-    )
-    config_source = payload.get("config", current_config)
-    config = normalize_analysis_config(config_source)
-    # The client is allowed to submit an older configuration, but only the
-    # server-held history is authoritative.  Record the reason even when it
-    # was omitted so that a later reviewer can see the gap rather than assume
-    # that no change occurred.
-    config["codebook_history"] = list(current_config.get("codebook_history", []))
-    config["codebook_version"] = int(current_config.get("codebook_version", 0))
-    if config["codebook"] != current_config.get("codebook", []):
-        version = config["codebook_version"] + 1
-        config["codebook_version"] = version
-        config["codebook_history"] = (
-            config["codebook_history"] + [{
-                "version": version,
-                "changed_at": utc_now_iso(),
-                "reason": config["codebook_change_reason"] or "変更理由未記入（要確認）",
-                "summary": summarize_codebook_change(
-                    current_config.get("codebook", []), config["codebook"]
-                ),
-            }]
-        )[-20:]
-        config["codebook_change_reason"] = ""
-    annotations_source = payload.get("annotations", current_annotations)
-    annotations = normalize_analysis_annotations(annotations_source, segments, config)
-    existing_links = {(sid, link.get("target_segment_id"), link.get("relation"))
-        for sid, annotation in {**orphaned_annotations, **current_annotations}.items()
-        for link in annotation.get("interaction_links", [])}
-    current_ids = {s["id"] for s in segments}
-    for sid, annotation in annotations.items():
-        for link in annotation.get("interaction_links", []):
-            if link["target_segment_id"] not in current_ids and (sid, link["target_segment_id"], link["relation"]) not in existing_links:
-                raise ValueError("相互作用リンクの対象発言が存在しません。削除済みの既存リンクのみ履歴として保持できます。")
-    stored_annotations = {**orphaned_annotations, **annotations}
-    now = utc_now_iso()
-    with database_connection() as connection:
-        cursor = connection.execute(
-            """
-            UPDATE library_items SET
-                analysis_config_json = ?, analysis_annotations_json = ?,
-                analysis_revision = analysis_revision + 1, analysis_updated_at = ?
-            WHERE id = ? AND revision_count = ? AND analysis_revision = ?
-            """,
-            (
-                json.dumps(config, ensure_ascii=False),
-                json.dumps(stored_annotations, ensure_ascii=False),
-                now,
-                item_id,
-                source_revision,
-                analysis_revision,
-            ),
-        )
-        if cursor.rowcount != 1:
-            raise AnalysisConflictError(
-                "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
-            )
-        if stored_annotations and not current_annotations and not orphaned_annotations:
-            preparation.capture(connection, row, "analysis_baseline")
-            preparation.bind_analysis(connection, row)
-    updated = library_row(item_id)
-    if updated is None:
-        raise LookupError("処理済みデータが見つかりません。")
-    return group_analysis_for_row(updated)
 
 
 (
@@ -1673,90 +1552,6 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
     transcription_job_runner.run_transcription_job(job, options, dependencies)
 
 
-def normalize_edited_segments(item_id: str, raw_segments: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_segments, list):
-        raise ValueError("発話データは配列で指定してください。")
-    if len(raw_segments) > 100000:
-        raise ValueError("発話数が多すぎます。")
-    validate_json_value(raw_segments)
-    normalized: list[dict[str, Any]] = []
-    used_ids: set[str] = set()
-    label_aliases = {"怒り": "ang", "喜び": "hap", "悲しみ": "sad", "平常": "neu"}
-    valid_emotions = {"", "ang", "hap", "sad", "neu"}
-    for index, raw in enumerate(raw_segments):
-        if not isinstance(raw, dict):
-            raise ValueError(f"発話 {index + 1} の形式が不正です。")
-        try:
-            start_raw = raw.get("start", 0)
-            if start_raw is None or start_raw == "":
-                start_raw = 0
-            if isinstance(start_raw, bool):
-                raise ValueError
-            start_number = float(start_raw)
-            end_raw = raw.get("end", start_number)
-            if end_raw is None or end_raw == "":
-                end_raw = start_number
-            if isinstance(end_raw, bool):
-                raise ValueError
-            end_number = float(end_raw)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"発話 {index + 1} の時刻が不正です。") from exc
-        if not math.isfinite(start_number) or not math.isfinite(end_number):
-            raise ValueError(f"発話 {index + 1} の時刻にNaN/Infinityは使用できません。")
-        start = round(max(0.0, start_number), 3)
-        end = round(end_number, 3)
-        if end < start:
-            raise ValueError(f"発話 {index + 1} の終了時刻は開始時刻以降にしてください。")
-        if end > ANALYSIS_MAX_TIMELINE_SECONDS or end - start > 86400:
-            raise ValueError(f"発話 {index + 1} の長さが不正です。")
-        text_value = raw.get("text", "")
-        if not isinstance(text_value, str) or len(text_value) > 50000:
-            raise ValueError(f"発話 {index + 1} の本文が不正です。")
-        speaker_value = raw.get("speaker") or "UNKNOWN"
-        if not isinstance(speaker_value, str) or len(speaker_value) > 80:
-            raise ValueError(f"発話 {index + 1} の話者ラベルが不正です。")
-        speaker = speaker_value.strip().replace("\r", " ").replace("\n", " ")
-        if "id" in raw and not isinstance(raw["id"], str):
-            raise ValueError(f"発話 {index + 1} のIDが不正です。")
-        segment = dict(raw)
-        segment.update({"start": start, "end": end, "speaker": speaker or "UNKNOWN", "text": text_value.strip()})
-        segment["text"] = text_value
-        if raw.get("time_unknown") or any(raw.get(key) in (None, "") for key in ("start", "end")):
-            segment["time_unknown"] = True
-        segment_id = stable_segment_id(item_id, index, segment)
-        if segment_id in used_ids:
-            segment_id = uuid.uuid4().hex
-        segment["id"] = segment_id
-        used_ids.add(segment_id)
-
-        if "kushinada_label" in raw:
-            raw_label = raw.get("kushinada_label") or ""
-            if not isinstance(raw_label, str):
-                raise ValueError(f"発話 {index + 1} の感情ラベルが不正です。")
-            requested_label = raw_label.strip().lower()
-            requested_label = label_aliases.get(requested_label, requested_label)
-            if requested_label not in valid_emotions:
-                raise ValueError(f"発話 {index + 1} の感情ラベルが不正です。")
-            emotions = dict(segment.get("emotions")) if isinstance(segment.get("emotions"), dict) else {}
-            if requested_label:
-                previous = emotions.get("kushinada") if isinstance(emotions.get("kushinada"), dict) else {}
-                emotions["kushinada"] = {
-                    **previous,
-                    "model_name": "くしなだ",
-                    "model_repo": AIST_EMOTION_MODELS["kushinada"]["emotion_repo"],
-                    "label": requested_label,
-                    "label_ja": emotion_label_ja(requested_label),
-                    "manually_corrected": True,
-                }
-            else:
-                emotions.pop("kushinada", None)
-            segment["emotions"] = emotions
-        normalized.append(segment)
-    return sorted(normalized, key=lambda item: (float(item.get("start", 0)), float(item.get("end", 0)))) if all(
-        preparation.valid_time(item) for item in normalized
-    ) else normalized
-
-
 # Kushinada training corpus composition boundary.
 def _training_store() -> training_corpus.TrainingStore:
     # Built per call: the corpus paths are module-level configuration that
@@ -1842,376 +1637,33 @@ def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[st
     return whisper_settings(options, language, diarization_model=DIARIZATION_MODEL)
 
 
-def _update_library_from_payload_locked(
-    item_id: str,
-    payload: Any,
-    *,
-    ai_usage_override: dict[str, Any] | None = None,
-    record_training: bool = True,
-    outline_override: dict[str, Any] | None = None,
-    check_cancelled: Callable[[], None] | None = None,
-) -> dict[str, Any]:
-    row = library_row(item_id)
-    if row is None:
-        raise LookupError("データが見つかりません。")
-    if not isinstance(payload, dict):
-        raise ValueError("編集内容が JSON ではありません。")
-    validate_json_value(payload)
-    expected_revision = payload.get("revision_count")
-    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
-        raise ValueError("revision_count is required and must be an integer.")
-    current_revision = int(row["revision_count"] or 0)
-    if expected_revision != current_revision:
-        raise TranscriptConflictError(current_revision)
-    recovery_errors, _ = reconcile_edit_transactions_before_mutation(item_id, row)
-    if recovery_errors:
-        raise OSError(
-            'A pending edit transaction could not be recovered safely. Restart the application.'
-        )
-    row = library_row(item_id)
-    if row is None:
-        raise LookupError('データが見つかりません。')
-    current_revision = int(row['revision_count'] or 0)
-    if expected_revision != current_revision:
-        raise TranscriptConflictError(current_revision)
-    old_segments = row_segments(row)
-    old_names = json_load(row["speaker_names_json"], {})
-    if not isinstance(old_names, dict):
-        old_names = {}
-    new_segments = normalize_edited_segments(item_id, payload.get("segments"))
-    raw_names = payload.get("speaker_names", {})
-    if not isinstance(raw_names, dict):
-        raise ValueError("話者名の形式が不正です。")
-    labels = {str(item.get("speaker") or "UNKNOWN") for item in new_segments}
-    new_names: dict[str, str] = {}
-    for label, value in raw_names.items():
-        if not isinstance(label, str) or not isinstance(value, str) or len(label) > 80:
-            raise ValueError("Invalid speaker name mapping.")
-        clean_name = value.strip().replace("\r", " ").replace("\n", " ")
-        if label in labels and clean_name:
-            if len(clean_name) > 80:
-                raise ValueError("話者名は 80 文字以内にしてください。")
-            new_names[label] = clean_name
-    source_value = payload.get("source_name") or row["source_name"]
-    if not isinstance(source_value, str):
-        raise ValueError("Invalid source name.")
-    source_name = normalize_source_name(source_value)
-    if not source_name or len(source_name) > 255:
-        raise ValueError("データ名は 1～255 文字で指定してください。")
-    session_profile = (
-        normalize_session_profile(payload.get("session_profile"))
-        if "session_profile" in payload
-        else row_session_profile(row)
-    )
-    speaker_profiles = normalize_conversation_speaker_profiles(
-        payload.get("speaker_profiles")
-        if "speaker_profiles" in payload
-        else json_load(row["speaker_profiles_json"], {}),
-        labels,
-        new_names,
-    )
-    for label, profile in speaker_profiles.items():
-        if profile["display_name"]:
-            new_names[label] = profile["display_name"]
-
-    outline = outline_override if outline_override is not None else json_load(row["outline_json"], None)
-    meeting_minutes = (
-        build_meeting_minutes(new_segments, new_names, session_profile, outline)
-        if session_profile.get("session_type") == "meeting"
-        else {}
-    )
-    emotion_analysis = json_load(row["emotion_analysis_json"], None)
-    model_keys = sorted({
-        str(model_key)
-        for segment in new_segments
-        for model_key in ((segment.get("emotions") or {}).keys() if isinstance(segment.get("emotions"), dict) else [])
-    })
-    if model_keys:
-        emotion_analysis = build_emotion_analysis_summary(new_segments, model_keys, status="completed")
-    output_dir = Path(row["output_dir"])
-    try:
-        uses_shared_default = output_dir.resolve() == DEFAULT_OUTPUT_DIRECTORY.resolve()
-    except OSError:
-        uses_shared_default = output_dir == DEFAULT_OUTPUT_DIRECTORY
-    if uses_shared_default:
-        output_dir = manual_output_directory(source_name, item_id)
-    raw_previous_files = json_load(row["files_json"], [])
-    previous_output_dir = Path(str(row['output_dir']))
-    previous_files = (
-        [Path(str(value)) for value in raw_previous_files]
-        if isinstance(raw_previous_files, list)
-        else []
-    )
-    staging_dir = output_dir / f".edit-staging-{uuid.uuid4().hex}"
-    transaction_id = staging_dir.name.removeprefix('.edit-staging-')
-    preparing_dir = output_dir / f'.edit-preparing-{transaction_id}-{uuid.uuid4().hex}'
-    preparing_dir.mkdir(parents=True, exist_ok=False)
-    preparing_identity = edit_staging_identity(preparing_dir)
-    staging_identity: tuple[int, int] | None = None
-    preparation_inventory = capture_edit_cleanup_inventory(preparing_dir, {})
-
-    def cleanup_if_owned(candidate: Path) -> list[str]:
-        if not path_entry_exists(candidate):
-            return []
-        try:
-            if edit_staging_identity(candidate) != preparing_identity:
-                return []
-        except OSError:
-            return []
-        return cleanup_edit_staging(
-            candidate,
-            expected_identity=preparing_identity,
-            inventory=preparation_inventory,
-        )
-
-    try:
-        write_edit_preparation_marker(
-            preparing_dir,
-            output_dir,
-            item_id=item_id,
-            expected_revision=current_revision,
-            previous_output_dir=previous_output_dir,
-        )
-        with database_connection() as connection:
-            preparation_storage_id = edit_storage_id(connection)
-            preparation_secret = edit_journal_secret(connection)
-        preparation_payload = load_edit_preparation_marker(
-            preparing_dir,
-            expected_storage_id=preparation_storage_id,
-            expected_secret=preparation_secret,
-        )
-        preparation_inventory = preparation_payload['_cleanup_inventory']
-        durable_move(preparing_dir, staging_dir, replace_existing=False)
-        if edit_staging_identity(staging_dir) != preparing_identity:
-            raise OSError('The published edit staging identity changed unexpectedly.')
-        staging_identity = preparing_identity
-        formatting_result = json_load(row["formatting_result_json"], {})
-        if isinstance(formatting_result, dict) and formatting_result:
-            formatting_result = dict(formatting_result)
-            formatting_result["manual_edit_status"] = "edited_after_formatting"
-        else:
-            formatting_result = {}
-        staged_files = write_outputs(
-            source_name, staging_dir, new_segments, row["language"], new_names,
-            bool(row["write_srt"]), True, outline, emotion_analysis, speaker_profiles,
-            meeting_minutes, check_cancelled,
-            formatting_result=formatting_result,
-        )
-        write_edit_preparation_marker(
-            staging_dir,
-            output_dir,
-            item_id=item_id,
-            expected_revision=current_revision,
-            previous_output_dir=previous_output_dir,
-            staged_files=staged_files,
-        )
-        core_prepared_payload = load_edit_preparation_marker(
-            staging_dir,
-            expected_storage_id=preparation_storage_id,
-            expected_secret=preparation_secret,
-        )
-        preparation_inventory = core_prepared_payload['_cleanup_inventory']
-    except BaseException as preparation_exc:
-        cleanup_errors = [
-            *cleanup_if_owned(preparing_dir),
-            *cleanup_if_owned(staging_dir),
-        ]
-        if cleanup_errors:
-            raise OSError(
-                'Edit preparation failed and owned staging cleanup was incomplete: '
-                + '; '.join(cleanup_errors)
-            ) from preparation_exc
-        raise
-    output_warning = ""
-    media_path = Path(row["media_path"]) if row["media_path"] else None
-    if bool(row["burn_subtitled_video"]) and media_path and media_path.is_file() and is_video_path(media_path):
-        optional_assets_before = {
-            candidate.resolve()
-            for candidate in staging_dir.rglob('*')
-            if candidate.is_file()
-        }
-        try:
-            staged_files.extend(write_subtitled_video_assets(
-                media_path,
-                source_name,
-                staging_dir,
-                new_segments,
-                new_names,
-                speaker_profiles,
-            ))
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-            unexpected_optional = [
-                candidate
-                for candidate in staging_dir.rglob('*')
-                if candidate.is_file()
-                and candidate.resolve() not in optional_assets_before
-            ]
-            if unexpected_optional:
-                cleanup_errors = cleanup_edit_staging(
-                    staging_dir,
-                    expected_identity=staging_identity,
-                    inventory=preparation_inventory,
-                )
-                raise OSError(
-                    'Optional video generation left unauthenticated files; edit staging '
-                    'was retained for safe recovery: '
-                    + '; '.join(cleanup_errors)
-                ) from exc
-            output_warning = f"字幕動画の再作成に失敗しました: {exc}"
-    try:
-        write_edit_preparation_marker(
-            staging_dir,
-            output_dir,
-            item_id=item_id,
-            expected_revision=current_revision,
-            previous_output_dir=previous_output_dir,
-            staged_files=staged_files,
-        )
-        prepared_payload = load_edit_preparation_marker(
-            staging_dir,
-            expected_storage_id=preparation_storage_id,
-            expected_secret=preparation_secret,
-        )
-        preparation_inventory = prepared_payload['_cleanup_inventory']
-    except BaseException as inventory_exc:
-        cleanup_errors = cleanup_edit_staging(
-            staging_dir,
-            expected_identity=staging_identity,
-            inventory=preparation_inventory,
-        )
-        if cleanup_errors:
-            raise OSError(
-                'Edit output inventory could not be authenticated; staging was retained: '
-                + '; '.join(cleanup_errors)
-            ) from inventory_exc
-        raise
-    if record_training:
-        try:
-            training_events, created_training_clips = prepare_training_corrections(
-                row, old_segments, new_segments, old_names, new_names
-            )
-        except BaseException as training_exc:
-            cleanup_errors = cleanup_edit_staging(
-                staging_dir,
-                expected_identity=staging_identity,
-                inventory=preparation_inventory,
-            )
-            if cleanup_errors:
-                raise OSError(
-                    'Training preparation failed and edit staging was retained: '
-                    + '; '.join(cleanup_errors)
-                ) from training_exc
-            raise
-    else:
-        training_events, created_training_clips = [], []
-    learning_warning = ""
-    learning_events = len(training_events)
-    try:
-        write_edit_transaction_manifest(
-            staging_dir,
-            output_dir,
-            staged_files,
-            item_id=item_id,
-            expected_revision=current_revision,
-            previous_output_dir=previous_output_dir,
-        )
-    except BaseException as manifest_exc:
-        discard_training_clips(created_training_clips)
-        cleanup_errors = cleanup_edit_staging(
-            staging_dir,
-            expected_identity=staging_identity,
-            inventory=preparation_inventory,
-        )
-        if cleanup_errors:
-            raise OSError(
-                'Edit manifest creation failed and staging cleanup was incomplete: '
-                + '; '.join(cleanup_errors)
-            ) from manifest_exc
-        raise
-    try:
-        with training_lock:
-            all_training_events: list[dict[str, Any]] = []
-            if check_cancelled is not None:
-                check_cancelled()
-            with promote_staged_files(staging_dir, output_dir, staged_files) as files:
-                with database_connection() as connection:
-                    connection.execute("BEGIN IMMEDIATE")
-                    if check_cancelled is not None:
-                        check_cancelled()
-                    record_output_import_provenance(
-                        connection, item_id, previous_files
-                    )
-                    record_output_import_provenance(
-                        connection, item_id, files
-                    )
-                    updated = upsert_library_item(
-                        item_id=item_id, source_name=source_name, output_dir=output_dir,
-                        media_path=media_path,
-                        language=row["language"], segments=new_segments,
-                        speaker_names=new_names,
-                        outline=outline, emotion_analysis=emotion_analysis, files=files,
-                        write_srt=bool(row["write_srt"]), write_json=True,
-                        increment_revision=True, created_at=row["created_at"],
-                        session_profile=session_profile, speaker_profiles=speaker_profiles,
-                        burn_subtitled_video=bool(row["burn_subtitled_video"]),
-                        expected_revision=current_revision,
-                        connection=connection,
-                        ai_usage=(
-                            ai_usage_override
-                            if ai_usage_override is not None
-                            else json_load(row["ai_usage_json"], {})
-                        ),
-                        meeting_minutes=meeting_minutes,
-                        formatting_result=formatting_result,
-                    )
-                    insert_training_events(connection, training_events)
-                    if training_events:
-                        all_training_events = training_events_from_connection(connection)
-            if training_events:
-                try:
-                    write_training_exports(all_training_events)
-                except (OSError, csv.Error) as exc:
-                    learning_warning = (
-                        "学習履歴はデータベースへ保存しましたが、派生ファイルを更新できませんでした: "
-                        f"{exc}"
-                    )
-    except BaseException:
-        discard_uncommitted_clips = False
-        try:
-            with database_connection() as connection:
-                revision_row = connection.execute(
-                    'SELECT revision_count FROM library_items WHERE id = ?',
-                    (item_id,),
-                ).fetchone()
-            discard_uncommitted_clips = (
-                revision_row is not None
-                and int(revision_row['revision_count'] or 0) == current_revision
-            )
-        except (OSError, sqlite3.Error):
-            # Preserve ambiguous clips. Startup repair removes them if no
-            # committed training event references them.
-            pass
-        if discard_uncommitted_clips:
-            discard_training_clips(created_training_clips)
-        raise
-    with jobs_lock:
-        job = jobs.get(item_id)
-        if job is not None:
-            job.source_name = source_name
-            job.segments = row_segments(updated)
-            job.speaker_names = new_names
-            job.session_profile = session_profile
-            job.speaker_profiles = speaker_profiles
-            job.emotion_analysis = emotion_analysis
-            job.files = files
-            job.outline = outline
-            job.revision_count = int(updated["revision_count"] or 0)
-            job.ai_usage = json_load(updated["ai_usage_json"], {})
-    result = library_public(updated)
-    result["learning_events"] = learning_events
-    result["learning_warning"] = learning_warning
-    result["output_warning"] = output_warning
-    return result
+_update_library_from_payload_locked = make_library_update(
+    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    durable_move=lambda *args, **kwargs: durable_move(*args, **kwargs),
+    edit_journal_secret=lambda *args, **kwargs: edit_journal_secret(*args, **kwargs),
+    edit_storage_id=lambda *args, **kwargs: edit_storage_id(*args, **kwargs),
+    insert_training_events=lambda *args, **kwargs: insert_training_events(*args, **kwargs),
+    jobs=jobs,
+    jobs_lock=jobs_lock,
+    library_public=lambda *args, **kwargs: library_public(*args, **kwargs),
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    manual_output_directory=lambda *args, **kwargs: manual_output_directory(*args, **kwargs),
+    prepare_training_corrections=lambda *args, **kwargs: prepare_training_corrections(*args, **kwargs),
+    promote_staged_files=lambda *args, **kwargs: promote_staged_files(*args, **kwargs),
+    reconcile_edit_transactions_before_mutation=lambda *args, **kwargs: reconcile_edit_transactions_before_mutation(*args, **kwargs),
+    record_output_import_provenance=lambda *args, **kwargs: record_output_import_provenance(*args, **kwargs),
+    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+    training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
+    training_lock=training_lock,
+    upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+    write_edit_preparation_marker=lambda *args, **kwargs: write_edit_preparation_marker(*args, **kwargs),
+    write_edit_transaction_manifest=lambda *args, **kwargs: write_edit_transaction_manifest(*args, **kwargs),
+    write_outputs=lambda *args, **kwargs: write_outputs(*args, **kwargs),
+    write_subtitled_video_assets=lambda *args, **kwargs: write_subtitled_video_assets(*args, **kwargs),
+    write_training_exports=lambda *args, **kwargs: write_training_exports(*args, **kwargs),
+)
 
 
 def recover_delete_quarantines() -> list[str]:
@@ -2686,194 +2138,20 @@ register_obsidian_routes(
 )
 
 
-def _delete_library_item_locked(item_id: str):
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({"error": "Data not found."}), 404
-    with jobs_lock:
-        job = jobs.get(item_id)
-        if job and job.status in ACTIVE_JOB_STATUSES:
-            return jsonify({"error": "An active job cannot be deleted."}), 409
-
-    edit_recovery_errors, edit_recovery_paths = (
-        reconcile_edit_transactions_before_delete(item_id, row)
-    )
-    if edit_recovery_errors:
-        visible_paths = (
-            [str(path) for path in edit_recovery_paths]
-            if local_path_access_allowed()
-            else [path.name for path in edit_recovery_paths]
-        )
-        return jsonify({
-            'error': (
-                '保留中の編集トランザクションを安全に完了できないため、'
-                '削除を中止しました。アプリを再起動して復旧してください。'
-            ),
-            'recovery_paths': visible_paths,
-        }), 409
-    row = library_row(item_id)
-    if row is None:
-        return jsonify({'error': 'Data not found.'}), 404
-
-    nonce = uuid.uuid4().hex
-    candidates: list[Path] = []
-    media_dir = (MEDIA_DIRECTORY / item_id).resolve()
-    media_root = MEDIA_DIRECTORY.resolve()
-    if media_dir.parent == media_root and media_dir.is_dir():
-        candidates.append(media_dir)
-    for thumbnail_name in (f"text_mining_{item_id}.svg", f"word_cloud_{item_id}.svg"):
-        thumbnail = THUMBNAIL_DIRECTORY / thumbnail_name
-        if thumbnail.is_file() or thumbnail.is_symlink():
-            candidates.append(thumbnail)
-
-    moved: list[tuple[Path, Path]] = []
-    quarantine_roots: set[Path] = set()
-
-    def restore_assets() -> list[str]:
-        errors: list[str] = []
-        for quarantined, original in reversed(moved):
-            try:
-                if quarantined.exists() or quarantined.is_symlink():
-                    original.parent.mkdir(parents=True, exist_ok=True)
-                    durable_move(quarantined, original, replace_existing=False)
-            except OSError as exc:
-                errors.append(str(exc))
-        return errors
-
-    def cleanup_empty_quarantine_roots() -> None:
-        for quarantine_root in quarantine_roots:
-            try:
-                quarantine_root.rmdir()
-            except OSError:
-                # A non-empty directory contains an asset that could not be
-                # restored.  Retain it for manual recovery.
-                pass
-
-    def retained_quarantine_paths() -> list[str]:
-        retained = sorted(path for path in quarantine_roots if path.exists())
-        if local_path_access_allowed():
-            return [str(path) for path in retained]
-        return [path.name for path in retained]
-
-    try:
-        for original in candidates:
-            quarantine_root = original.parent / f".delete-staging-{nonce}"
-            quarantine_root.mkdir(parents=True, exist_ok=True)
-            quarantine_roots.add(quarantine_root)
-            quarantined = quarantine_root / original.name
-            durable_move(original, quarantined, replace_existing=False)
-            moved.append((quarantined, original))
-    except OSError as exc:
-        restore_errors = restore_assets()
-        cleanup_empty_quarantine_roots()
-        retained = retained_quarantine_paths()
-        return jsonify({
-            "error": f"削除準備に失敗しました: {exc}",
-            "restore_errors": restore_errors,
-            "recovery_paths": retained,
-        }), 409
-
-    try:
-        with database_connection() as connection:
-            files = json_load(row["files_json"], [])
-            output_json_paths: set[Path] = set()
-            expected_current_json = Path(str(row["output_dir"])) / (
-                f"{safe_output_stem(str(row['source_name']))}_話者分離.json"
-            )
-            expected_current_canonical = canonical_output_import_path(
-                expected_current_json
-            )
-            if isinstance(files, list):
-                output_json_paths.update(
-                    Path(str(value))
-                    for value in files
-                    if (
-                        Path(str(value)).name.endswith("_話者分離.json")
-                        and canonical_output_import_path(Path(str(value)))
-                        == expected_current_canonical
-                    )
-                )
-            provenance_rows = connection.execute(
-                "SELECT canonical_path, content_sha256 "
-                "FROM output_import_provenance WHERE item_id = ?",
-                (item_id,),
-            ).fetchall()
-            provenance_fingerprints = {
-                str(provenance["canonical_path"]): str(
-                    provenance["content_sha256"] or ""
-                )
-                for provenance in provenance_rows
-            }
-            output_json_paths.update(
-                Path(canonical_path)
-                for canonical_path in provenance_fingerprints
-            )
-            tombstone_records: list[tuple[str, str]] = []
-            for output_path in output_json_paths:
-                canonical_path = canonical_output_import_path(output_path)
-                is_provenance = canonical_path in provenance_fingerprints
-                if (
-                    not is_provenance
-                    and not path_is_within(output_path, DEFAULT_OUTPUT_DIRECTORY)
-                ):
-                    continue
-                provenance_fingerprint = provenance_fingerprints.get(
-                    canonical_path, ""
-                )
-                if output_path.is_file():
-                    try:
-                        fingerprint = file_sha256(output_path)
-                    except OSError:
-                        fingerprint = provenance_fingerprint if is_provenance else ""
-                else:
-                    fingerprint = provenance_fingerprint if is_provenance else ""
-                tombstone_records.append((canonical_path, fingerprint))
-            for canonical_path, fingerprint in tombstone_records:
-                connection.execute(
-                    "INSERT OR REPLACE INTO output_import_tombstones "
-                    "(canonical_path, content_sha256, deleted_at) VALUES (?, ?, ?)",
-                    (canonical_path, fingerprint, utc_now_iso()),
-                )
-            connection.execute(
-                "DELETE FROM output_import_provenance WHERE item_id = ?",
-                (item_id,),
-            )
-            for table in ("transcript_versions", "transcript_preparations", "transcript_preparation_events"):
-                connection.execute(f"DELETE FROM {table} WHERE item_id=?", (item_id,))
-            connection.execute("DELETE FROM library_items WHERE id = ?", (item_id,))
-    except sqlite3.Error as exc:
-        restore_errors = restore_assets()
-        cleanup_empty_quarantine_roots()
-        retained = retained_quarantine_paths()
-        suffix = f"; restore errors: {'; '.join(restore_errors)}" if restore_errors else ""
-        return jsonify({
-            "error": f"ライブラリレコードを削除できませんでした: {exc}{suffix}",
-            "restore_errors": restore_errors,
-            "recovery_paths": retained,
-        }), 500
-
-    with jobs_lock:
-        jobs.pop(item_id, None)
-    retire_input_vault(item_id)
-    cleanup_errors: list[str] = []
-    for quarantine_root in quarantine_roots:
-        try:
-            shutil.rmtree(quarantine_root)
-        except OSError as exc:
-            cleanup_errors.append(str(exc))
-    retained = retained_quarantine_paths()
-    result: dict[str, Any] = {
-        "ok": True,
-        "message": "ライブラリ項目と管理対象メディアを削除しました。出力と学習履歴は保持しています。",
-        "recovery_paths": retained,
-    }
-    if cleanup_errors or retained:
-        result["cleanup_warning"] = (
-            "ライブラリ項目は削除しましたが、一部の隔離ファイルを消去できませんでした。"
-            "表示された場所を管理者が確認してください。"
-        )
-        result["cleanup_errors"] = cleanup_errors
-    return jsonify(result)
+_delete_library_item_locked = make_library_deletion(
+    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+    media_directory=lambda: MEDIA_DIRECTORY,
+    thumbnail_directory=lambda: THUMBNAIL_DIRECTORY,
+    canonical_output_import_path=lambda *args, **kwargs: canonical_output_import_path(*args, **kwargs),
+    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+    durable_move=lambda *args, **kwargs: durable_move(*args, **kwargs),
+    jobs=jobs,
+    jobs_lock=jobs_lock,
+    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+    local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
+    reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
+    retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
+)
 
 
 start_transcription_job_command, admission_job_public = make_transcription_start(
