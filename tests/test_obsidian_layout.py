@@ -269,6 +269,9 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.assertEqual(row, (target, hashlib.sha256((self.layout.vault / target).read_bytes()).hexdigest()))
             self.assertEqual(conn.execute('SELECT note_path FROM analysis_runs').fetchone()[0], target)
         self.assertEqual(migrate(self.database), report)
+        # OBS-15: each move is in the change log with its old path.
+        moves = [json.loads(line) for line in self.layout.note_log.read_text(encoding='utf-8').splitlines()]
+        self.assertIn((old, target), {(m['source'], m['path']) for m in moves if m['action'] == 'migrated'})
 
     def test_interrupted_migration_resumes_from_same_backup(self):
         self.seed_legacy()

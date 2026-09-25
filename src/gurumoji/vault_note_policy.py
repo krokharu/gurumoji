@@ -36,9 +36,12 @@ from .analysis_store import safe_path, write_atomic
 
 CHANGE_LOG_NAME = "note_changes.jsonl"
 CHANGE_LOG_LIMIT = 5 * 1024 * 1024
-NOTABLE_ACTIONS = ("edit_saved", "missing", "recreated")
+# skipped / settings_skipped: an edited .base/.css or an unreadable .obsidian setting left as it is (OBS-15).
+NOTABLE_ACTIONS = ("edit_saved", "missing", "recreated", "skipped", "settings_skipped")
 _LOG_LOCK = threading.Lock()
-# A deleted note stays missing on every later write; log it once per process.
+# A deleted note stays missing (and a skipped file stays skipped) on every later
+# write; log it once per process until the path is written again.
+_REPEATING_ACTIONS = ("missing", "skipped", "settings_skipped")
 _REPORTED_MISSING: set[tuple[str, str, str]] = set()
 _FRONTMATTER = re.compile(r"\A---\n(.*?)\n---(?:\n|$)", re.S)
 
@@ -54,12 +57,15 @@ class HistoryLayout:
 
 @dataclass
 class NoteWrite:
-    action: str  # created / updated / unchanged / edit_saved / missing / recreated
+    # created / updated / unchanged / edit_saved / missing / recreated, and for
+    # files outside this policy: skipped / settings_written / settings_skipped / migrated
+    action: str
     path: str
     sha256: str
     previous_sha256: str = ""
     history: list[str] = field(default_factory=list)
     vault: str = "research"
+    source: str = ""  # the old path of a migrated note
 
     @property
     def notable(self) -> bool:
@@ -149,21 +155,25 @@ def _has_first(vault: Path, relative: str, layout: HistoryLayout) -> bool:
     return directory.is_dir() and any(directory.glob(f"*-{layout.first_label}*.md"))
 
 
-def append_change(log_file: Path | None, vault_kind: str, result: NoteWrite, now: datetime) -> None:
+def append_change(log_file: Path | None, vault_kind: str, result: NoteWrite, now: datetime | None = None) -> None:
+    now = now or datetime.now(timezone.utc)
     if log_file is None or result.action == "unchanged":
         return
     key = (str(log_file), vault_kind, result.path)
-    if result.action == "missing":
+    if result.action in _REPEATING_ACTIONS:
         if key in _REPORTED_MISSING:
             return
         _REPORTED_MISSING.add(key)
     else:
         _REPORTED_MISSING.discard(key)
-    line = json.dumps({
+    event = {
         "at": now.isoformat(timespec="seconds"), "vault": vault_kind, "path": result.path,
         "action": result.action, "previous_sha256": result.previous_sha256,
         "sha256": result.sha256, "history": result.history,
-    }, ensure_ascii=False) + "\n"
+    }
+    if result.source:
+        event["source"] = result.source
+    line = json.dumps(event, ensure_ascii=False) + "\n"
     with _LOG_LOCK:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         if log_file.exists() and log_file.stat().st_size > CHANGE_LOG_LIMIT:

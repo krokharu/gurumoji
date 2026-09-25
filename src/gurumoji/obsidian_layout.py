@@ -240,19 +240,25 @@ class ObsidianLayout:
                     data["managed"][relative] = result.sha256
                     self.save(data)
                 return True
+        from .vault_note_policy import NoteWrite, append_change
         with LAYOUT_LOCK:
             data = self.load()
             path = safe_path(self.vault, relative)
-            if path.exists():
+            encoded = text.encode()
+            digest = hashlib.sha256(encoded).hexdigest()
+            existed = path.exists()
+            if existed:
                 actual = hashlib.sha256(path.read_bytes()).hexdigest()
                 if actual != data["managed"].get(relative):
                     reason = "未管理の既存ノート" if relative not in data["managed"] else "人が編集したノート"
                     warn_once(("skip", relative), f"{reason}のため生成ノートを更新しませんでした: {relative}")
+                    append_change(self.note_log, "research", NoteWrite("skipped", relative, digest, actual))
                     return False
-            encoded = text.encode()
-            if not path.exists() or path.read_bytes() != encoded:
+            if not existed or path.read_bytes() != encoded:
                 write_atomic(path, encoded)
-            digest = hashlib.sha256(encoded).hexdigest()
+                append_change(self.note_log, "research",
+                              NoteWrite("updated" if existed else "created", relative, digest,
+                                        data["managed"].get(relative) or ""))
             if data["managed"].get(relative) != digest:
                 data["managed"][relative] = digest
                 self.save(data)
@@ -312,7 +318,9 @@ class ObsidianLayout:
         """List what the shared note policy did to researcher-touched notes (OBS-04, OBS-15)."""
         from .vault_note_policy import recent_changes
         labels = {"edit_saved": "研究者の編集を履歴に保存して更新", "missing": "削除を検出（再作成しません）",
-                  "recreated": "削除を検出して再作成（ナビゲーション）"}
+                  "recreated": "削除を検出して再作成（ナビゲーション）",
+                  "skipped": "編集された設定ファイル（.base・CSS）のため更新を見送り",
+                  "settings_skipped": "読み取れないObsidian設定のため変更せず"}
         vault_names = {"research": "ResearchVault", "input": "InputVault",
                        "visualization": "VisualizationVault", "orchestrator": "OrchestratorVault"}
         rows = []
@@ -455,6 +463,7 @@ class ObsidianLayout:
         appearance, graph and workspaces are left as they are. Later syncs only refresh
         the app's own bookmark group, and only while it still exists.
         """
+        from .vault_note_policy import NoteWrite, append_change
         data = self.load()
         applied = data.get("obsidian_settings")
         if applied is None:
@@ -476,12 +485,17 @@ class ObsidianLayout:
             if value is None or not valid(value):
                 # Unreadable or half-written by Obsidian: never replace the user's settings.
                 warn_once(("settings", name), f"Obsidian設定 {name} を読み取れないため、変更しませんでした。")
+                append_change(self.note_log, "research", NoteWrite("settings_skipped", ".obsidian/" + name, ""))
                 return None
             return value
         def write(name, value):
             p = safe_path(self.vault, ".obsidian/" + name)
             b = json.dumps(value, ensure_ascii=False, indent=2).encode()
-            if not p.exists() or p.read_bytes() != b: write_atomic(p, b)
+            if not p.exists() or p.read_bytes() != b:
+                previous = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else ""
+                write_atomic(p, b)
+                append_change(self.note_log, "research", NoteWrite(
+                    "settings_written", ".obsidian/" + name, hashlib.sha256(b).hexdigest(), previous))
         if initialize:
             core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
                 "command-palette": True, "file-recovery": True, "outline": True},

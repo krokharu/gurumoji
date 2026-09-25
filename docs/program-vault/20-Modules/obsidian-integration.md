@@ -188,7 +188,7 @@ tags:
 - Vaultへの書き出しに失敗しても、正本（文字起こし・編集保存・分析の固定保存）は失敗させない。該当する処理は `publish_input_vault`、`retire_input_vault`、`AnalysisStore.publish_vaults`、`refresh_archive_index`。失敗は `logging` のwarningに出すか、`vault_status` に記録する。
 - 仕上げの例外は `state.json` と状態ノートに `error` として表示する。
 - 監視ループの例外はログに出して継続する。
-- 生成ノートの作成・更新・編集の保存・欠落・再作成は `note_changes.jsonl` に記録する。`.base`・CSSのスキップ、移行、`.obsidian` 設定の変更は記録しない（OBS-15の残り）。
+- 生成ノートの作成・更新・編集の保存・欠落・再作成に加え、`.base`・CSSの作成・更新・見送り（`skipped`）、`.obsidian` 設定の書き込み（`settings_written`）と読み取れない設定の見送り（`settings_skipped`）、移行の移動（`migrated`、元のパスは `source`）を `note_changes.jsonl` に記録する（OBS-15）。見送りは同じパスにつき1プロセス1回だけ記録し、同期状況ノートにも出す。
 
 ## バックアップ
 

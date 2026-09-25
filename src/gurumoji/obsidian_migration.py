@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .analysis_store import safe_path, write_atomic
 from .obsidian_layout import ObsidianLayout, HOME, unpack, pack
+from .vault_note_policy import NoteWrite, append_change
 
 
 def rewrite_links(text: str, mapping: dict[str, str]) -> str:
@@ -198,6 +199,8 @@ def migrate(database_file: Path) -> dict:
             raise ValueError('移行先に別の内容があります。既存内容を保持して中断しました。')
         write_atomic(target, content)
         hashes[old] = (hashlib.sha256(original).hexdigest(), hashlib.sha256(content).hexdigest())
+        # A resumed migration logs the same move again; the log is a record, not a ledger (OBS-15).
+        append_change(layout.note_log, 'research', NoteWrite('migrated', new, hashes[old][1], hashes[old][0], source=old))
     if database_file.exists():
         with closing(sqlite3.connect(database_file)) as conn, conn:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
