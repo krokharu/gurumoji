@@ -3,7 +3,7 @@ note_id: analysis-experts-index
 note_type: method-group
 title: 分析手法ごとの専門家定義
 status: current
-updated: 2026-09-16
+updated: 2026-09-25
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -25,6 +25,7 @@ tags:
 4. 同じフォルダーの知識ノートと、実行定義が参照する文献ノートは、知識hashの計算にだけ使う。内容をAIへ送らない。
 5. 手法の結果を保存するときは、結果を出した手法の専門家の確認結果を付ける。保存する手法ノートの「限界と追加確認」にも、担当専門家の判定と文献IDを書く。
 6. 分析画面の「手法別」タブを開いたときは、一覧に出る手法の担当専門家を読み込む。結果がある手法には結果への判定を、結果がない手法には実行前に満たす条件を示す（ADR-116）。
+7. Gitで共有するこのベースとは別に、実行環境ごとの `<data>/local_knowledge/50-Analysis-Methods/…` があれば同じ相対パスで解決を上書きする（ADR-120、[[40-Design/method-rules#ローカル限定の知識（ADR-120）]]）。一覧の `source` でベース／ローカル追加／ローカル上書きを区別する。
 
 ## 専門家の一覧
 

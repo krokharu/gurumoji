@@ -260,6 +260,52 @@ class KnowledgeUpdateTests(unittest.TestCase):
         self.assertEqual((block["status"], block["ai"]["mode"]), ("unavailable", "generic"))
 
 
+class LocalKnowledgeTests(unittest.TestCase):
+    """A local, gitignored tree (ADR-120) can add or shadow notes without touching the Software Vault base."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="gurumoji-local-knowledge-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name) / "base"
+        self.local = Path(self.temp.name) / "local"
+        shutil.copytree(SOFTWARE_ROOT / "50-Analysis-Methods", self.root / "50-Analysis-Methods")
+
+    def test_missing_local_directory_behaves_like_base_only(self):
+        index = experts.ExpertCatalog(self.root, self.local).index()
+        self.assertEqual(len(index), 17)
+        self.assertTrue(all(entry["source"] == "base" for entry in index.values()))
+
+    def test_local_only_expert_folder_is_added_with_its_own_source(self):
+        folder = self.local / "50-Analysis-Methods/10-Experts/my-local-expert"
+        base_folder = self.root / "50-Analysis-Methods/10-Experts/thematic-analysis"
+        folder.mkdir(parents=True)
+        for name in experts.KNOWLEDGE_NOTES:
+            text = (base_folder / name).read_text(encoding="utf-8")
+            text = text.replace("exp-thematic-analysis", "exp-my-local-expert").replace(
+                "thematic-analysis", "my-local-expert")
+            (folder / name).write_text(text, encoding="utf-8")
+        catalog = experts.ExpertCatalog(self.root, self.local)
+        index = catalog.index()
+        self.assertEqual(len(index), 18)
+        self.assertEqual(index["exp-my-local-expert"]["source"], "local")
+        knowledge = catalog.knowledge("exp-my-local-expert", catalog.definition("exp-my-local-expert"))
+        self.assertEqual((knowledge["missing_references"], knowledge["missing_notes"]), ([], []))
+
+    def test_local_note_shadows_the_base_note_and_changes_the_knowledge_hash(self):
+        override = self.local / "50-Analysis-Methods/10-Experts/thematic-analysis"
+        override.mkdir(parents=True)
+        base_note = self.root / "50-Analysis-Methods/10-Experts/thematic-analysis/02-Procedure.md"
+        (override / "02-Procedure.md").write_text(
+            base_note.read_text(encoding="utf-8") + "\n追記：ローカル環境だけの確認観点。\n", encoding="utf-8")
+        base_only = experts.ExpertCatalog(self.root, self.local / "does-not-exist")
+        with_local = experts.ExpertCatalog(self.root, self.local)
+        self.assertEqual(base_only.index()["exp-thematic-analysis"]["source"], "base")
+        self.assertEqual(with_local.index()["exp-thematic-analysis"]["source"], "local_override")
+        base_knowledge = base_only.knowledge("exp-thematic-analysis", base_only.definition("exp-thematic-analysis"))
+        local_knowledge = with_local.knowledge("exp-thematic-analysis", with_local.definition("exp-thematic-analysis"))
+        self.assertNotEqual(base_knowledge["knowledge_hash"], local_knowledge["knowledge_hash"])
+
+
 class ExpertAiDraftTests(unittest.TestCase):
     def setUp(self):
         self.expert = experts.ai_context(experts.review_for_analysis(synthetic("thematic")))
