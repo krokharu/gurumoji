@@ -150,6 +150,20 @@ class AnalysisVaultTests(unittest.TestCase):
         self.assertTrue(all(note[0]["status"] == "stale" for path, note in read_notes(roots["visualization"]).items()
                             if path.startswith(f"10-Visuals/run-{run['id']}/")))
 
+    def test_deleting_conversation_marks_research_vault_and_keeps_notes(self):
+        with patch.object(app, "call_ai_json"):
+            response = self.client.post(self.fixture.url + "/runs", json=self.fixture.payload("archive-request-000001"))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        notes_before = {p for p in self.store.vault.rglob("*.md")}
+        deleted = self.client.delete("/api/library/content")
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        record = self.store.layout.load()["interviews"]["content"]
+        self.assertEqual(record["status"], "アプリから削除済み")
+        self.assertTrue(record["deleted_at"])
+        hub = (self.store.vault / record["hub"]).read_text(encoding="utf-8")
+        self.assertEqual(unpack(hub)[0]["status"], "アプリから削除済み")
+        self.assertTrue(notes_before <= set(self.store.vault.rglob("*.md")))
+
     def test_whisper_hook_records_settings_and_edit_keeps_them(self):
         row = app.library_row("content")
         app.publish_input_vault(row, {"model": "large-v3", "language": "ja", "device": "cpu", "hf_token": "hf_secret"})

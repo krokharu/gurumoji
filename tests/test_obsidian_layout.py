@@ -112,6 +112,33 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(memo.read_bytes(), before)
         self.assertEqual(json.loads(bookmark.read_text(encoding='utf-8'))['items'][-1]['title'], '自分用')
 
+    def test_deleted_conversation_is_marked_and_notes_are_kept(self):
+        record = self.layout.register('gone', '削除する会議.wav')
+        self.layout.update('gone', '削除する会議.wav', {}, '保存済み')
+        memo = self.layout.vault / self.layout.note_path('gone', '', '研究メモ')
+        memo.write_text(memo.read_text(encoding='utf-8') + '\n研究者の記録\n', encoding='utf-8')
+        memo_bytes = memo.read_bytes()
+        self.assertTrue(self.layout.mark_deleted('gone'))
+        self.assertFalse(self.layout.mark_deleted('gone'))
+        self.assertFalse(self.layout.mark_deleted('never-registered'))
+        hub = (self.layout.vault / record['hub']).read_text(encoding='utf-8')
+        self.assertEqual(unpack(hub)[0]['status'], 'アプリから削除済み')
+        self.assertIn('この会話はアプリから削除されています', hub)
+        index = (self.layout.vault / '10-インタビュー/インタビュー一覧.md').read_text(encoding='utf-8')
+        self.assertIn('（アプリから削除済み）', index)
+        analysis_index = (self.layout.vault / '01-分析結果.md').read_text(encoding='utf-8')
+        self.assertNotIn('：未保存', analysis_index)
+        self.assertEqual(memo.read_bytes(), memo_bytes)
+        # Later finishing syncs do not quietly undo the deletion status.
+        self.layout.update('gone', '削除する会議.wav', {}, '完了')
+        self.assertEqual(self.layout.load()['interviews']['gone']['status'], 'アプリから削除済み')
+        # Imported again under the same ID: the previous status comes back.
+        self.assertTrue(self.layout.clear_deleted('gone'))
+        restored = self.layout.load()['interviews']['gone']
+        self.assertEqual(restored['status'], '保存済み')
+        self.assertNotIn('deleted_at', restored)
+        self.assertNotIn('削除されています', (self.layout.vault / record['hub']).read_text(encoding='utf-8'))
+
     def test_method_tables_escape_link_alias_separator(self):
         from gurumoji.obsidian_layout import method_table
         row = method_table([{'path': 'a/method-x.md', 'title': '手法', 'status': 'completed',

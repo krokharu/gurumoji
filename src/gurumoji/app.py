@@ -1168,7 +1168,13 @@ def vault_publications() -> VaultPublicationService:
         row_session_profile=row_session_profile,
         database_error=sqlite3.Error,
         warn=lambda message, exc: app.logger.warning("%s: %s", message, exc),
+        research_layout=research_layout,
     )
+
+
+def research_layout():
+    from .obsidian_layout import ObsidianLayout
+    return ObsidianLayout(DATABASE_FILE)
 
 
 def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_kind: str | None = None) -> None:

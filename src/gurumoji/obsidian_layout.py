@@ -13,9 +13,11 @@ from pathlib import Path
 import yaml
 
 from .analysis_store import safe_path, write_atomic, markdown
+from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 
 LAYOUT_LOCK = threading.RLock()
+DELETED_STATUS = "アプリから削除済み"
 LOGGER = logging.getLogger(__name__)
 HOME = "00-ホーム.md"
 ANALYSIS_INDEX = "01-分析結果.md"
@@ -235,7 +237,7 @@ class ObsidianLayout:
             record = data["interviews"][item_id]
             record["links"].update({k: v for k, v in links.items() if v})
             if analysis_methods is not None: record["analysis_methods"] = analysis_methods
-            if status is not None: record["status"] = status
+            if status is not None and not record.get("deleted_at"): record["status"] = status
             self.save(data)
             memo = self.note_path(item_id, title, "研究メモ")
             if not safe_path(self.vault, memo).exists():
@@ -250,8 +252,11 @@ class ObsidianLayout:
             analysis = record["links"].get("analysis")
             if analysis and safe_path(self.vault, analysis).is_file():
                 body += "> [!summary] 分析結果を読む\n> " + link(analysis, "分析まとめを開く") + "\n> 見解・根拠・分析条件・保存履歴を確認できます。\n\n"
-            else:
+            elif not record.get("deleted_at"):
                 body += "このインタビューの分析結果はまだ保存されていません。アプリの「分析結果をObsidianに保存」で追加できます。\n\n"
+            if record.get("deleted_at"):
+                body += ("> [!warning] この会話はアプリから削除されています\n> 削除日時：" + markdown(record["deleted_at"])
+                         + "\n> このフォルダーの研究ノートは記録として残しています。アプリからは開けません。\n\n")
             body += link(ANALYSIS_INDEX, "全インタビューの分析結果一覧") + "\n\n## 本文・仕上げ\n\n"
             labels = {"work": "会話全文", "outline": "全体アウトライン", "analysis": "分析まとめ",
                       "control": "AI仕上げの操作", "status_note": "仕上げの状態", "original_note": "保存原文",
@@ -268,6 +273,33 @@ class ObsidianLayout:
             self.managed_note(record["hub"], hub)
             self.publish_navigation()
 
+    def mark_deleted(self, item_id: str) -> bool:
+        """Say the conversation left the app; its research notes stay as history (OBS-11)."""
+        with LAYOUT_LOCK:
+            data = self.load()
+            record = data["interviews"].get(item_id)
+            if record is None or record.get("deleted_at"):
+                return False
+            record["status_before_delete"] = record.get("status", "")
+            record["status"] = DELETED_STATUS
+            record["deleted_at"] = utc_now_iso()
+            self.save(data)
+            self.update(item_id, record["title"], {})
+            return True
+
+    def clear_deleted(self, item_id: str) -> bool:
+        """A conversation imported again under the same ID is no longer deleted."""
+        with LAYOUT_LOCK:
+            data = self.load()
+            record = data["interviews"].get(item_id)
+            if record is None or not record.get("deleted_at"):
+                return False
+            record["status"] = record.pop("status_before_delete", "") or "保存済み"
+            del record["deleted_at"]
+            self.save(data)
+            self.update(item_id, record["title"], {})
+            return True
+
     def sync_finishing(self, state: dict) -> None:
         # Existing finishing notes belong to the researcher. Refresh navigation only.
         status = {"ready": "操作待ち", "running": "処理中", "error": "確認が必要", "interrupted": "中断"}.get(state["status"], "完了")
@@ -283,11 +315,14 @@ class ObsidianLayout:
         with LAYOUT_LOCK:
             records = list(self.load()["interviews"].values())
             props = {"note_type": "navigation", "tags": ["graph/support"]}
-            rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) for r in records)
+            def label(r: dict) -> str:
+                return r["code"] + " " + display_title(r["title"]) + ("（" + DELETED_STATUS + "）" if r.get("deleted_at") else "")
+            rows = "\n".join("- " + link(r["hub"], label(r)) for r in records)
             available = [r for r in records if r["links"].get("analysis")
                          and safe_path(self.vault, r["links"]["analysis"]).is_file()]
-            analysis_rows = "\n".join("- " + link(r["links"]["analysis"], r["code"] + " " + display_title(r["title"]) + " の分析結果") for r in available)
-            pending_rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) + "：未保存" for r in records if r not in available)
+            analysis_rows = "\n".join("- " + link(r["links"]["analysis"], label(r) + " の分析結果") for r in available)
+            pending_rows = "\n".join("- " + link(r["hub"], label(r)) + "：未保存" for r in records
+                                     if r not in available and not r.get("deleted_at"))
             group_links = "\n".join("- " + link(method_group_path(key), title) for key, title, _, _ in METHOD_GROUPS)
             for key, title, description, method_ids in METHOD_GROUPS:
                 body = "# " + title + "\n\n" + link(ANALYSIS_INDEX, "分析結果一覧へ戻る") + "\n\n" + description + "\n\n"

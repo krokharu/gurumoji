@@ -114,7 +114,7 @@ flowchart LR
 1. `DELETE /api/library/<id>` → `_delete_library_item_locked` を呼ぶ。
 2. メディアとサムネイルを隔離フォルダーへ移す。
 3. SQLiteの行と準備履歴を削除し、tombstoneを記録する。
-4. `retire_input_vault` を呼ぶ。
+4. `retire_input_vault` を呼ぶ。InputVaultの台帳を `deleted` にし、ResearchVaultでは `ObsidianLayout.mark_deleted` が `interviews.json` と概要ノート・一覧を「アプリから削除済み」にする（OBS-11）。同じIDで再取り込みされると `publish_input_vault` が `clear_deleted` で元の状態に戻す。
 5. 隔離フォルダーを `rmtree` で恒久削除する。
 
 出力ファイル、`analysis_store`、ResearchVault、`obsidian_workbench` は削除せずに残る。

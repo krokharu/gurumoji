@@ -22,6 +22,8 @@ class VaultPublicationService:
     row_session_profile: Callable[[Any], dict[str, str]]
     database_error: type[Exception]
     warn: Callable[[str, Exception], None]
+    # ResearchVault layout; only its deletion status is kept in step with the library.
+    research_layout: Callable[[], Any] | None = None
 
     def publish_input(
         self,
@@ -51,6 +53,7 @@ class VaultPublicationService:
             )
         except (OSError, ValueError, TypeError, LookupError, self.database_error) as exc:
             self.warn("InputVault を更新できませんでした", exc)
+        self._research_status(str(row["id"]), deleted=False)
 
     def retire_input(self, item_id: str) -> None:
         """Record deletion in the InputVault ledger without deleting provenance."""
@@ -58,6 +61,20 @@ class VaultPublicationService:
             self.registry().retire_input(item_id)
         except (OSError, ValueError, TypeError, LookupError) as exc:
             self.warn("InputVault に削除を記録できませんでした", exc)
+        self._research_status(item_id, deleted=True)
+
+    def _research_status(self, item_id: str, *, deleted: bool) -> None:
+        """Mark a deleted conversation in ResearchVault, or clear the mark when it returns."""
+        if self.research_layout is None:
+            return
+        try:
+            layout = self.research_layout()
+            if deleted:
+                layout.mark_deleted(item_id)
+            else:
+                layout.clear_deleted(item_id)
+        except (OSError, ValueError, TypeError, LookupError) as exc:
+            self.warn("ResearchVault に削除状態を記録できませんでした", exc)
 
 
 def whisper_settings(options: Any, language: str | None, *, diarization_model: str) -> dict[str, Any]:
