@@ -29,8 +29,8 @@ tags:
 | 層 | 担当 | 主なファイル（行数） |
 | --- | --- | --- |
 | UI | 画面・状態管理・API呼び出し | `templates/index.html`（約1,000）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
-| API | Flaskのルート約70本、要求の検証・セキュリティ | `app.py`（約15,700行。ルートとサービス処理が同じファイルにある） |
-| Core／Service | ジョブ、文字起こしパイプライン、編集トランザクション、話者台帳、会話集計、議事録、出力、AI呼び出し | `app.py` 内の関数群 |
+| API | Flaskのルート（84件、`tests/fixtures/route_map.json`）、要求の検証・セキュリティ | `web/*_routes.py`、`web/security.py`。`app.py`（約1,900行）は `create_app()` で登録し、依存を組み立てる（2026-09-25、[[70-Changes/app-py-phase5]]） |
+| Core／Service | ジョブ、文字起こしパイプライン、編集トランザクション、話者台帳、会話集計、議事録、出力、AI呼び出し | `handlers/`、`services/`、実行時状態は `runtime_state.py`。`app.py` には依存を渡す関数が残る |
 | 分析サービス | 日本語解析・統計・Excel、見解・KWIC、Transformer、手法登録、逐語録の準備 | `research_analysis.py`、`analysis_insights.py`、`transformer_analysis.py`、`analysis_method_registry.py`、`transcript_preparation.py` |
 | AIサービス | 分割・校正・アウトライン、エフォート、HTTP通信（別プロセス） | `ai_finishing.py`、`ai_effort.py`、`ai_http_worker.py` |
 | Data | 固定成果物と台帳 | `analysis_store.py`（共通関数 `safe_path`・`write_atomic`・`markdown` もここにある） |

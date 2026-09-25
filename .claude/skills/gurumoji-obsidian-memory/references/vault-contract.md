@@ -13,8 +13,8 @@ Publication paths today:
 | Whisper job saved; transcript edited; AI speaker identification; Obsidian finishing applied; output JSON imported | `app.py`: `publish_input_vault` (Whisper settings via `whisper_vault_settings`) | Input `10-Inputs/input-<key>.md` (ledger, Whisper and diarization settings, vocabulary count and hash, quality counts; no text) |
 | Conversation deleted | `app.py`: `retire_input_vault` | Input ledger set to `status: deleted`; runs and notes kept |
 | Any analysis run completed (text analysis, KWIC, AI insights, Transformer, AI finishing) | `AnalysisStore.publish_vaults` | Input `20-Snapshots/`, Orchestrator `10-Methods/` and `20-Runs/`, Visualization `10-Visuals/run-<id>/` |
-| Meeting minutes (own run, kind `meeting_minutes`) | `app.py`: `archive_meeting_minutes` | Same as an analysis run, for one conversation |
-| Group-interview comparison (own run, kind `interview_comparison`) | `app.py`: `archive_interview_comparison`; members in `analysis_run_members` | Comparison snapshot listing members, run note with `conversation_ids`, ResearchVault `40-研究/インタビュー比較/` |
+| Meeting minutes (own run, kind `meeting_minutes`) | `services/analysis_archive.py`: `archive_meeting_minutes` | Same as an analysis run, for one conversation |
+| Group-interview comparison (own run, kind `interview_comparison`) | `services/analysis_archive.py`: `archive_interview_comparison`; members in `analysis_run_members` | Comparison snapshot listing members, run note with `conversation_ids`, ResearchVault `40-研究/インタビュー比較/` |
 | Input, condition, or speaker change marks runs stale | `AnalysisStore.refresh_vaults` (includes comparisons containing the conversation) | Run and visual notes republished with `status: stale` |
 
 Never mix meeting minutes or comparisons into a conversation's text-analysis run; each is a separate run and method.

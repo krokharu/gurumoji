@@ -1473,6 +1473,10 @@ AIを使う機能の移行では「AI管理の導入順序」のAI-0〜AI-2と�
 
 **実装状態（2026-09-20）：完了。** 移行対象の旧ルート実装を削除し、組み立て側から各Handler／Routingへ依存を渡す単一経路にした。`src/app.py`の互換importは`gurumoji.app`と同一モジュールを返し、`create_job`／`import_speaker_registry`のendpoint名は共通security hookとの契約として維持する。一時的な再exportや旧新二重登録はなく、移行済みHTTP操作の一意性と`handlers`／`web`からcomposition moduleへの逆import不在を機械検証する。
 
+### Phase 5：app.py に残った処理の移動（2026-09-25）
+
+**実装状態：完了。** Phase 0〜4 と同じ方針（機能ごとの縦切り、`app.py` への逆import禁止、HTTP・DB・Vault契約の維持）で、残っていた処理を手順0〜11に分けて移した。`app.py` は 8,361 行から 1,895 行になった。移動先・検証・注意点は [[70-Changes/app-py-phase5]]、旧シンボルの移動先は `70-Changes/app-py-phase5.data.json` に記録した。
+
 ## 移行時の必須確認
 
 ### Blueprint、HTTP、配信

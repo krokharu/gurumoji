@@ -25,7 +25,7 @@ Gurumojiは、音声・動画の文字起こし、話者分離、編集、会話
 
 | 担当 | 現在の責務 | 関連資料 |
 | --- | --- | --- |
-| `app.py` | 会話集計、分析条件・注釈の保存、API、任意AI見解のジョブ管理 | [[20-Modules/module-map]] |
+| `app.py` | 設定・依存の組み立て、`create_app()`、起動（`main`）。API・分析設定の保存・AI見解のジョブは `web/`・`services/` へ移動（[[70-Changes/app-py-phase5]]） | [[20-Modules/module-map]] |
 | `research_analysis.py` | 形態素・係り受け・語彙・共起・統計、分析キャッシュ、Excel | [[40-Design/method-rules]] |
 | `analysis_insights.py` | ローカル見解、KWIC、特徴語比較、根拠検証、AI見解の分割・統合 | [[40-Design/method-rules]] |
 | `static/analysis-content.js` | 見解、検索、引用、音声確認、AI生成状態の表示 | [[20-Modules/module-map]] |
