@@ -14,7 +14,7 @@ Gurumojiは、音声・動画の文字起こし、話者分離、編集、会話
 
 ## 入力から保存まで
 
-1. `templates/index.html` と `static/app.js` が、ファイル・処理条件・話者設定を受け付ける。
+1. `templates/views/create.html`（`index.html` から読み込む）と `static/app.js` が、ファイル・処理条件・話者設定を受け付ける。
 2. `app.py` がジョブを管理し、FFmpegによる任意の音声前処理、Whisper／WhisperX、pyannoteを実行する。
 3. 任意で音声感情分析、AI校正、話者特定、アウトライン生成を行う。AI通信は `ai_http_worker.py` に分離される。
 4. 元メディアを `data/media` に保管し、処理結果をSQLiteと `output` のJSON／TXT等へ保存する。

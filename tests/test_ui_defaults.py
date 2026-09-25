@@ -71,6 +71,12 @@ class UiDefaultsTests(unittest.TestCase):
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn(".conversation-mode-options", styles)
         self.assertIn(".conversation-mode-option input:checked", styles)
+        # The home screen takes the selected recording type's colour; group interview keeps the default green.
+        self.assertIn('class="view create-view" data-conversation-mode="meeting"', page)
+        self.assertIn("createView.dataset.conversationMode", script)
+        for mode in ("meeting", "group_interview", "chat"):
+            self.assertIn(f'.create-view[data-conversation-mode="{mode}"]', styles)
+        self.assertIn('--green: #1c6b50', styles.split('.create-view[data-conversation-mode="group_interview"]', 1)[1].split('}', 1)[0])
 
     def test_meeting_mode_has_visual_minutes_and_handoff_actions(self):
         response = app.app.test_client().get("/")

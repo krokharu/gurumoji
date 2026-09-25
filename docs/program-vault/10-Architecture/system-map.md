@@ -28,7 +28,7 @@ tags:
 
 | 層 | 担当 | 主なファイル（行数） |
 | --- | --- | --- |
-| UI | 画面・状態管理・API呼び出し | `templates/index.html`（約1,000）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
+| UI | 画面・状態管理・API呼び出し | `templates/index.html`（外枠・ダイアログ、約270）と `templates/views/`（画面ごとの断片：`create`・`library`・`result`・`analysis`・`speakers`）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
 | API | Flaskのルート（84件、`tests/fixtures/route_map.json`）、要求の検証・セキュリティ | `web/*_routes.py`、`web/security.py`。`app.py`（約1,900行）は `create_app()` で登録し、依存を組み立てる（2026-09-25、[[70-Changes/app-py-phase5]]） |
 | Core／Service | ジョブ、文字起こしパイプライン、編集トランザクション、話者台帳、会話集計、議事録、出力、AI呼び出し | `handlers/`、`services/`、実行時状態は `runtime_state.py`。`app.py` には依存を渡す関数が残る |
 | 分析サービス | 日本語解析・統計・Excel、見解・KWIC、Transformer、手法登録、逐語録の準備 | `research_analysis.py`、`analysis_insights.py`、`transformer_analysis.py`、`analysis_method_registry.py`、`transcript_preparation.py` |
@@ -174,6 +174,6 @@ flowchart LR
 | 分析条件・コードブック | `library_items.analysis_config_json`（会話ごと） | `PUT …/analysis` |
 | Vault保存先 | 生成Vaultは `vaults.json` の `root`。ResearchVaultとSoftwareはコード内で算出 | 設定UIなし |
 
-注：文字起こしの既定値は、`index.html` の初期値、`app.js` の会話モード設定（`conversationModePresets`）、`JobOptions` の既定、`parse_bool` の既定、`recommend_machine_settings` に分散している。
+注：文字起こしの既定値は、`views/create.html` の初期値、`app.js` の会話モード設定（`conversationModePresets`）、`JobOptions` の既定、`parse_bool` の既定、`recommend_machine_settings` に分散している。
 
 関連：[[10-Architecture/overview]]、[[20-Modules/feature-inventory]]、[[20-Modules/obsidian-integration]]、[[30-Data/current-storage]]、[[40-Design/storage-policy]]。

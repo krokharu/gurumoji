@@ -755,6 +755,7 @@ function setSpeakerCountFixed(fixed, {restoreRange = true} = {}) {
 
 function applyConversationMode(mode = selectedConversationMode()) {
   const preset = conversationModePresets[mode] || conversationModePresets.meeting;
+  if (createView) createView.dataset.conversationMode = conversationModePresets[mode] ? mode : 'meeting';
   const keptLabels = [];
   conversationModeFields.forEach(field => {
     const presetValue = field.property === 'checked' ? preset[field.key] : String(preset[field.key]);
