@@ -337,5 +337,87 @@ class AiFinishingTests(unittest.TestCase):
         self.assertEqual(finishing.clean_transcript([], self.echo, lambda *_: None, lambda: None), [])
 
 
+class FullCleanupProcedureTests(unittest.TestCase):
+    """One order and stage record for the in-job and Obsidian routes (ARCH-07)."""
+
+    def setUp(self):
+        from gurumoji.services.ai.transcript_finishing import run_full_cleanup
+        self.run_full_cleanup = run_full_cleanup
+        self.segments = [{'id': 'a', 'text': '元の文'}]
+        self.outline = {'sections': [{'title': '議題', 'bullets': ['要点']}]}
+        self.calls = []
+
+    def create(self, source):
+        self.calls.append('outline')
+        return self.outline
+
+    def clean(self, source, outline):
+        self.calls.append(('clean', outline is self.outline))
+        return [{**segment, 'text': '校正後'} for segment in source]
+
+    def review(self, outline):
+        self.calls.append('jev')
+        return {'a': {'flagged': True}}, {'request_count': 1}
+
+    def attach(self, segments, reviews):
+        return [{**segment, 'jev': reviews[segment['id']]} for segment in segments]
+
+    def procedure(self, **overrides):
+        options = dict(check_cancelled=lambda: None, create_context_outline=self.create,
+                       clean_with_outline=self.clean, review_with_jev=self.review,
+                       attach_jev=self.attach)
+        options.update(overrides)
+        return self.run_full_cleanup(self.segments, **options)
+
+    def test_outline_then_cleanup_then_jev(self):
+        result = self.procedure()
+        self.assertEqual(self.calls, ['outline', ('clean', True), 'jev'])
+        self.assertEqual(result['segments'][0]['text'], '校正後')
+        self.assertTrue(result['segments'][0]['jev']['flagged'])
+        self.assertEqual(result['stages'], {'outline_context': 'completed', 'cleanup': 'completed',
+                                            'jev_comparison': 'completed'})
+        self.assertEqual(result['jev_usage'], {'request_count': 1})
+
+    def test_existing_outline_is_reused_without_a_new_ai_call(self):
+        result = self.procedure(outline=self.outline)
+        self.assertEqual(self.calls, [('clean', True), 'jev'])
+        self.assertIs(result['context_outline'], self.outline)
+
+    def test_without_failure_callback_the_first_failure_stops(self):
+        def broken(source, outline):
+            raise RuntimeError('cleanup failed')
+        with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+            self.procedure(clean_with_outline=broken)
+        self.assertEqual(self.calls, ['outline'])
+
+    def test_empty_outline_is_a_failure_on_both_routes(self):
+        with self.assertRaisesRegex(RuntimeError, 'アウトラインが空'):
+            self.procedure(create_context_outline=lambda source: {'sections': []})
+
+    def test_with_failure_callback_the_original_text_is_kept_and_jev_is_skipped(self):
+        reported = []
+        def broken(source):
+            raise RuntimeError('outline failed')
+        result = self.procedure(create_context_outline=broken,
+                          on_failure=lambda stage, exc: reported.append((stage, str(exc) if exc else None)))
+        self.assertEqual(result['segments'], self.segments)
+        self.assertEqual(result['stages'], {'outline_context': 'failed', 'cleanup': 'failed',
+                                            'jev_comparison': 'skipped'})
+        self.assertEqual([stage for stage, _ in reported], ['outline_context', 'cleanup', 'jev_comparison'])
+        self.assertIsNone(reported[-1][1])
+        self.assertNotIn('jev', self.calls)
+
+    def test_cancellation_always_propagates(self):
+        def cancelled(source, outline):
+            raise InterruptedError('cancelled')
+        with self.assertRaises(InterruptedError):
+            self.procedure(clean_with_outline=cancelled, on_failure=lambda *_: None)
+
+    def test_jev_without_cleanup_is_skipped(self):
+        result = self.procedure(clean_with_outline=None, on_failure=lambda *_: None)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(result['stages'], {'jev_comparison': 'skipped'})
+
+
 if __name__ == '__main__':
     unittest.main()

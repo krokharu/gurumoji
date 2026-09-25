@@ -65,4 +65,4 @@ Include only task-specific excerpts plus stable IDs. The application should repo
 
 Managed regions may contain an ID, generated summary, artifact references, and a clearly delimited status block. User text, tags, aliases, and research interpretation are user-owned. Update a managed region by ID/hash; never replace the whole note because its title happens to match.
 
-For a conflict, preserve user text, write a conflict/stale state, and require a resolution path. Never perform hidden retries that repeat an AI call or replace a manually edited note.
+Generated notes go through `vault_note_policy.write_generated_note`. When a researcher edited a generated note, that version is copied into the Vault history (tagged `graph/history`, with its own `note_id`) before the latest version is written, and the change is logged and listed in `90-運用/同期状況.md` (user decision, 2026-09-25). Researcher-owned notes are never rewritten. Never perform hidden retries that repeat an AI call.

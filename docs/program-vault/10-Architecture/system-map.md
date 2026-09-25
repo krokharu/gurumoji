@@ -6,7 +6,7 @@ summary: Gurumojiの主要モジュール、データフロー、保存先、設
 status: current
 feature: architecture
 verified: 2026-09-14
-updated: 2026-09-15
+updated: 2026-09-25
 tags:
   - gurumoji/program
   - gurumoji/architecture
@@ -72,6 +72,8 @@ flowchart LR
 原因は、下位の共通関数（パス検証・原子的書き込み・Markdownエスケープ）が上位の `analysis_store` に置かれていることにある（[[40-Design/known-issues]] の ARCH-02）。
 
 ## 主要なデータフロー（操作から保存まで）
+
+図で見るときは、同じフォルダーの `data-flow.html` をブラウザーで開く。流れを選ぶと、通るモジュールと書き込み先が強調される。
 
 ### 1. 新規文字起こし
 

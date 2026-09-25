@@ -112,6 +112,33 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(memo.read_bytes(), before)
         self.assertEqual(json.loads(bookmark.read_text(encoding='utf-8'))['items'][-1]['title'], '自分用')
 
+    def test_app_deletion_marks_overview_and_lists_but_keeps_notes(self):
+        segments = [{'id': 's1', 'speaker': 'A', 'start': 0, 'end': 1, 'text': '本文'}]
+        self.workbench.prepare('gone', '会議.wav', segments, revision=0)
+        record = self.layout.register('gone', '会議.wav')
+        self.layout.update('gone', '会議.wav', {})
+        memo = self.layout.vault / self.layout.note_path('gone', '', '研究メモ')
+        memo.unlink()
+        before = {p: p.read_bytes() for p in self.layout.vault.rglob('*-全文.md')}
+        self.assertTrue(self.layout.mark_deleted('gone'))
+        hub = (self.layout.vault / record['hub']).read_text(encoding='utf-8')
+        self.assertEqual(unpack(hub)[0]['status'], 'アプリから削除済み')
+        self.assertIn('アプリから削除されました', hub)
+        index = (self.layout.vault / '10-インタビュー/インタビュー一覧.md').read_text(encoding='utf-8')
+        self.assertIn('（アプリから削除済み）', index)
+        self.assertNotIn('：未保存', (self.layout.vault / '01-分析結果.md').read_text(encoding='utf-8'))
+        # Notes stay as records, and a memo the researcher removed is not recreated.
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        self.assertFalse(memo.exists())
+        # A later workbench status does not hide the deletion.
+        self.layout.update('gone', '会議.wav', {}, status='確認が必要')
+        self.assertEqual(self.layout.load()['interviews']['gone']['status'], 'アプリから削除済み')
+
+    def test_deleting_a_conversation_never_creates_a_vault_overview(self):
+        self.assertFalse(self.layout.mark_deleted('never-published'))
+        self.assertFalse(self.layout.registry.exists())
+        self.assertFalse(self.layout.vault.exists())
+
     def test_method_tables_escape_link_alias_separator(self):
         from gurumoji.obsidian_layout import method_table
         row = method_table([{'path': 'a/method-x.md', 'title': '手法', 'status': 'completed',

@@ -5,7 +5,9 @@ app. Input, Visualization, and Orchestrator are generated under
 ``<data>/obsidian``. Their notes describe authoritative SQLite rows,
 ``analysis_store`` artifacts, and media by ID, revision, and hash. Transcript
 text and full tables are never copied. Publishing never calls AI or reruns an
-analysis, and a note edited in Obsidian is preserved instead of overwritten.
+analysis. Notes follow the shared Vault note policy (vault_note_policy): a note
+edited in Obsidian is kept under ``99-Archive/history`` before the latest version
+is written, and a deleted note is recreated only for Home and Index.
 """
 from __future__ import annotations
 
@@ -143,6 +145,8 @@ class VaultRegistry:
         self.data = Path(database_file).parent
         self.catalog_file = self.data / "obsidian_layout" / "vaults.json"
         self.software_root = Path(software_root) if software_root else SOFTWARE_ROOT
+        self.note_log = self.data / "obsidian_layout" / "note_changes.jsonl"
+        self.note_events: list = []
 
     # Registry and catalog -------------------------------------------------
     def load(self) -> dict:
@@ -184,7 +188,11 @@ class VaultRegistry:
         return entry["status"] if entry else None
 
     def _write(self, data: dict, kind: str, relative: str, note_id: str, properties: dict, body: str) -> str:
-        """Write one managed note. Returns written / unchanged / conflict / missing."""
+        """Write one managed note. Returns written / unchanged / overwritten / missing.
+
+        ``overwritten``: an edit made in Obsidian was kept in the history first.
+        """
+        from .vault_note_policy import GENERATED_HISTORY, write_generated_note
         if kind not in GENERATED:
             raise ValueError("Software Vault はアプリから書き込みません。")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*\.md", relative):
@@ -205,28 +213,39 @@ class VaultRegistry:
                   "title": str(props.get("title", "")), "summary": str(props.get("summary", "")),
                   "status": str(props.get("status", "current")), "revision": props.get("revision"),
                   "source_hash": props.get("source_hash", "")}
-        if target.exists():
-            actual = sha256(target.read_bytes())
-            if not entry or actual not in {entry.get("sha256"), entry.get("pending")}:
-                if entry:
-                    entry.update(record, sync="conflict")
-                return "conflict"
-            if actual == entry.get("sha256") and entry.get("content_hash") == content_hash:
-                entry.update(record, sync="current", pending="")
-                return "unchanged"
-        elif entry and entry.get("sha256") and not entry.get("pending"):
-            entry.update(record, sync="missing")
-            return "missing"
+        # The rendered file carries an 'updated' time, so compare the content hash first.
+        if (entry and target.exists() and entry.get("content_hash") == content_hash
+                and sha256(target.read_bytes()) == entry.get("sha256")):
+            entry.update(record, sync="current", pending="")
+            return "unchanged"
         props["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         encoded = ("---\n" + yaml.safe_dump(props, allow_unicode=True, sort_keys=False).rstrip()
                    + "\n---\n\n" + body.strip() + "\n").encode("utf-8")
-        entry = data["notes"].setdefault(note_id, {})
-        # Record the intended hash first so an interrupted write is recognised, not a conflict.
-        entry.update(record, pending=sha256(encoded), content_hash=content_hash, sync="writing")
-        self.save(data)
-        write_atomic(target, encoded)
-        entry.update(sha256=entry["pending"], pending="", sync="current")
-        return "written"
+        known = {entry.get("sha256"), entry.get("pending")} if entry else set()
+
+        def before_write(new_hash: str) -> None:
+            # Record the intended hash first so an interrupted write is recognised, not an edit.
+            current = data["notes"].setdefault(note_id, {})
+            current.update(record, pending=new_hash, content_hash=content_hash, sync="writing")
+            self.save(data)
+
+        result = write_generated_note(
+            root, relative, encoded, known_hashes=known,
+            ever_written=bool(entry and (entry.get("sha256") or entry.get("pending"))),
+            recreate_missing=relative in {"00-Home.md", "00-Index.md"},
+            history=GENERATED_HISTORY, vault_kind=kind, log_file=self.note_log,
+            before_write=before_write,
+        )
+        if result.notable:
+            self.note_events.append(result)
+        if result.action == "missing":
+            entry.update(record, sync="missing")
+            return "missing"
+        entry = data["notes"][note_id]
+        entry.update(sha256=result.sha256, pending="", sync="current")
+        if result.history:
+            entry["history"] = [*entry.get("history", []), *result.history][-20:]
+        return "overwritten" if result.action == "edit_saved" else "written"
 
     def _finish(self, data: dict, kinds) -> None:
         for kind in kinds:
@@ -261,7 +280,7 @@ class VaultRegistry:
                          and not entry["path"].startswith("99-Archive/"))
         body = f"# {VAULTS[kind][1]} Vault 索引\n\n[[00-Home|ホーム]]\n\n"
         body += "| ノート | 種類 | 状態 | 要約 |\n| --- | --- | --- | --- |\n"
-        sync = {"conflict": "・手動編集を保持", "missing": "・移動または削除を検出", "writing": "・書き込み中断"}
+        sync = {"missing": "・削除を検出（再作成しません）", "writing": "・書き込み中断"}
         for path, note_id, entry in entries:
             body += (f"| [[{path[:-3]}\\|{note_id}]] | {cell(entry.get('note_type'))} | "
                      f"{cell(entry.get('status'))}{sync.get(entry.get('sync'), '')} | {cell(entry.get('summary'), 120)} |\n")
@@ -446,8 +465,10 @@ class VaultRegistry:
             def aggregate(values: list[str]) -> str:
                 if "conflict" in values:
                     return "conflict"
-                if any(value in {"failed", "missing"} for value in values):
+                if "failed" in values:
                     return "failed"
+                # A note the researcher deleted is left out on purpose (vault_note_policy);
+                # the save screen and the sync note report it.
                 return "published"
 
             return {kind: aggregate(values) for kind, values in outcomes.items()}

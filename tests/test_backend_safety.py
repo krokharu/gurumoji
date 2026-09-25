@@ -209,6 +209,31 @@ class RequestSecurityTests(unittest.TestCase):
             app.HIDDEN_LOCAL_PATH_MESSAGE,
         )
 
+    def test_config_reports_a_stopped_obsidian_watcher(self):
+        from gurumoji.services.obsidian_watcher import WatcherStatus
+        status = WatcherStatus()
+        status.set("failed", "OSError: C:/Users/researcher/data is locked")
+        token = "remote-token-for-tests-1234567890"
+        with (
+            patch.object(app, "obsidian_watcher_status", status),
+            patch.object(app, "load_token_config", return_value=app.TokenConfig()),
+        ):
+            local = self.client.get("/api/config").get_json()["obsidian_watcher"]
+            with (
+                patch.object(app, "REMOTE_ACCESS_ENABLED", True),
+                patch.object(app, "REMOTE_ACCESS_TOKEN", token),
+                patch.object(app, "REMOTE_LOCAL_PATHS_ENABLED", False),
+            ):
+                remote = self.client.get(
+                    "/api/config",
+                    headers={"Authorization": f"Bearer {token}", "Host": "localhost"},
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).get_json()["obsidian_watcher"]
+        self.assertEqual(local["state"], "failed")
+        self.assertIn("locked", local["detail"])
+        self.assertEqual(remote["state"], "failed")
+        self.assertNotIn("detail", remote)
+
     def test_sensitive_responses_are_not_cached_and_have_security_headers(self):
         response = self.client.get("/api/config")
         self.assertEqual(response.status_code, 200)
@@ -1621,6 +1646,85 @@ class TranscriptCasTests(unittest.TestCase):
         self.assertEqual(warnings, [])
         self.assertFalse((media_root / self.item_id).exists())
         self.assertEqual(list(media_root.glob(".delete-staging-*")), [])
+        # DATA-01: a crash after the row delete still keeps the recording in the trash.
+        trashed = list((self.root / "trash").glob(f"*-{self.item_id}/{self.item_id}/meeting.wav"))
+        self.assertEqual([path.read_bytes() for path in trashed], [b"media"])
+
+    def test_delete_moves_original_media_to_trash_and_erases_thumbnails(self):
+        media_root = self.root / "media"
+        thumbnail_root = self.root / "thumbnails"
+        media_dir = media_root / self.item_id
+        media_dir.mkdir(parents=True)
+        (media_dir / "meeting.wav").write_bytes(b"media")
+        thumbnail_root.mkdir(parents=True)
+        (thumbnail_root / f"word_cloud_{self.item_id}.svg").write_text("thumbnail", encoding="utf-8")
+
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", media_root),
+            patch.object(app, "THUMBNAIL_DIRECTORY", thumbnail_root),
+            patch.object(app, "TRASH_RETENTION_DAYS", 30),
+        ):
+            response = self.client.delete(f"/api/library/{self.item_id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("30日間ゴミ箱", payload["message"])
+        entry = Path(payload["trash"]["path"])
+        self.assertEqual(entry.parent, self.root / "trash")
+        self.assertEqual((entry / self.item_id / "meeting.wav").read_bytes(), b"media")
+        manifest = json.loads((entry / "trash.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["item_id"], self.item_id)
+        self.assertEqual(manifest["source_name"], "meeting.wav")
+        self.assertEqual(manifest["expires_at"], payload["trash"]["expires_at"])
+        self.assertFalse(media_dir.exists())
+        self.assertEqual(list(thumbnail_root.iterdir()), [])
+        self.assertEqual(list(media_root.glob(".delete-staging-*")), [])
+        self.assertIsNone(app.library_row(self.item_id))
+
+    def test_delete_with_zero_retention_erases_media_at_once(self):
+        media_root = self.root / "media"
+        media_dir = media_root / self.item_id
+        media_dir.mkdir(parents=True)
+        (media_dir / "meeting.wav").write_bytes(b"media")
+
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", media_root),
+            patch.object(app, "THUMBNAIL_DIRECTORY", self.root / "thumbnails"),
+            patch.object(app, "TRASH_RETENTION_DAYS", 0),
+        ):
+            response = self.client.delete(f"/api/library/{self.item_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("trash", response.get_json())
+        self.assertFalse(media_dir.exists())
+        self.assertFalse((self.root / "trash").exists())
+
+    def test_startup_purges_only_expired_trash_entries(self):
+        from gurumoji.services.media_trash import trash_media
+        from datetime import datetime, timedelta, timezone
+        trash_root = self.root / "trash"
+        now = datetime.now(timezone.utc)
+        entries = {}
+        for name, age in (("old", 31), ("recent", 29)):
+            asset = self.root / name
+            asset.mkdir()
+            (asset / "meeting.wav").write_bytes(b"media")
+            entries[name] = trash_media(trash_root, name, "", [asset], retention_days=30,
+                                        move=app.durable_move, now=now - timedelta(days=age))["path"]
+        unknown = trash_root / "20260101T000000Z-hand-placed"
+        unknown.mkdir()
+
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", self.root / "media"),
+            patch.object(app, "TRASH_RETENTION_DAYS", 30),
+        ):
+            warnings = app.purge_media_trash()
+
+        self.assertFalse(entries["old"].exists())
+        self.assertTrue((entries["recent"] / "recent" / "meeting.wav").is_file())
+        self.assertTrue(unknown.is_dir())
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("hand-placed", warnings[0])
 
     def test_existing_output_import_skips_referenced_and_intentionally_deleted_results(self):
         first = self.client.put(f"/api/library/{self.item_id}", json=self.payload())

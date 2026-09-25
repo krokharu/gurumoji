@@ -158,6 +158,9 @@ class AnalysisStore:
         self.root = Path(database_file).parent / "analysis_store"
         self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
         self._last_publication_outcomes: dict[str, dict[str, dict[str, str]]] = {}
+        self.note_log = Path(database_file).parent / "obsidian_layout" / "note_changes.jsonl"
+        self.run_notes = Path(database_file).parent / "obsidian_layout" / "run_notes"
+        self._note_events: list = []
 
     def publish_vaults(self, run_id: str) -> dict[str, str]:
         """Mirror a completed run into the Input, Orchestrator, and Visualization Vaults.
@@ -177,7 +180,9 @@ class AnalysisStore:
                 if name.startswith("tables/") and name.endswith(".csv"):
                     with safe_path(self.root, artifact["path"]).open(encoding="utf-8-sig", newline="") as handle:
                         fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(handle), [])
+            self.vaults.note_events = []
             statuses = self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
+            self._note_events.extend(self.vaults.note_events)
             outcomes = {
                 kind: {"status": status, "error": "" if status == "published" else "公開先を確認してください。"}
                 for kind, status in statuses.items()
@@ -306,6 +311,7 @@ class AnalysisStore:
             artifact["url"] = f"/api/analysis/artifacts/{artifact['id']}"
         result["obsidian_uri"] = ("obsidian://open?" + urlencode({"path": str(self.vault / row["note_path"])})
                                     if local and row["note_path"] and row["vault_status"] == "completed" else "")
+        result["vault_notes"] = self.vault_notes(row["id"])
         return result
 
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
@@ -445,32 +451,57 @@ class AnalysisStore:
                              (record["folder"], len(prefix), len(prefix), prefix))
 
     def write_note(self, relative: str, note_id: str, item_id: str, content: str,
-                   *, graph_kind: str = "analysis", graph_scope: str | None = None) -> None:
+                   *, graph_kind: str = "analysis", graph_scope: str | None = None,
+                   navigation: bool = False) -> None:
+        """Write through the shared Vault note policy (vault_note_policy, OBS-04).
+
+        A researcher's edit is kept in the history before the latest version is
+        written. A deleted note is recreated only when it is ``navigation``.
+        """
+        from .vault_note_policy import write_generated_note
         if item_id:
             content = self.layout.decorate(content, item_id, graph_kind,
                 graph_scope or ("detail" if relative.endswith("-分析まとめ.md") else "history"))
             self.follow_moves(item_id)
-        target = safe_path(self.vault, relative)
-        encoded = content.encode("utf-8")
-        new_hash = hashlib.sha256(encoded).hexdigest()
         with self.connect() as conn:
             previous = conn.execute("SELECT * FROM obsidian_notes WHERE path=?", (relative,)).fetchone()
-        if target.exists():
-            actual = hashlib.sha256(target.read_bytes()).hexdigest()
-            if actual == new_hash:
-                pass
-            elif previous is None or actual != previous["sha256"]:
-                raise StoreConflict("Obsidianで変更されたノートがあります。手書き内容を保持して同期を保留しました。")
-            else:
-                write_atomic(target, encoded)
-        elif previous:
-            raise StoreConflict("移動・削除されたノートがあります。自動では再作成しません。")
-        else:
-            write_atomic(target, encoded)
+        result = write_generated_note(
+            self.vault, relative, content.encode("utf-8"),
+            known_hashes={previous["sha256"]} if previous else set(),
+            ever_written=previous is not None, recreate_missing=navigation,
+            log_file=self.note_log,
+        )
+        if result.notable:
+            self._note_events.append(result)
+        if result.action == "missing":
+            return
         with self.connect() as conn:
             conn.execute("""INSERT INTO obsidian_notes(path,note_id,item_id,sha256,updated_at) VALUES(?,?,?,?,?)
                 ON CONFLICT(path) DO UPDATE SET sha256=excluded.sha256,updated_at=excluded.updated_at""",
-                (relative, note_id, item_id, new_hash, datetime.now(timezone.utc).isoformat()))
+                (relative, note_id, item_id, result.sha256, datetime.now(timezone.utc).isoformat()))
+
+    def _record_note_events(self, run_id: str) -> None:
+        """Keep what the last Vault save did to researcher-touched notes, for the app screen."""
+        target = self.run_notes / f"{run_id}.json"
+        events = self._note_events
+        self._note_events = []
+        if not events:
+            target.unlink(missing_ok=True)
+            return
+        summary = {
+            "edit_saved": [{"vault": e.vault, "path": e.path, "history": e.history}
+                           for e in events if e.action == "edit_saved"],
+            "missing": [{"vault": e.vault, "path": e.path} for e in events if e.action == "missing"],
+            "recreated": [{"vault": e.vault, "path": e.path} for e in events if e.action == "recreated"],
+        }
+        write_atomic(target, json.dumps(summary, ensure_ascii=False).encode("utf-8"))
+
+    def vault_notes(self, run_id: str) -> dict:
+        try:
+            data = json.loads((self.run_notes / f"{run_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def source_notes(self, segments: list[dict], item_id: str, title: str, app_url: str) -> dict[str, str]:
         snapshot_id = digest({"segments": segments, "item_id": item_id, "title": title})
@@ -536,10 +567,12 @@ class AnalysisStore:
             run = self.get(run_id)
             if not run or run["status"] != "completed": raise LookupError("完了した保存結果がありません。")
             # Independent of ResearchVault conflicts: the four Vaults use their own hash catalog.
+            self._note_events = []
             self.publish_vaults(run_id)
             try:
                 if run["kind"] == "interview_comparison":
                     self._publish_comparison(run)
+                    self._record_note_events(run_id)
                     return self.get(run_id)
                 snapshot, result = self._read_package(run_id)
                 item_id = run["item_id"]
@@ -553,7 +586,8 @@ class AnalysisStore:
                 refs = self.source_notes(source, item_id, title, run["app_url"])
                 artifact_rows = self.artifacts(run_id)
                 links = {a["name"]: f"[{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in artifact_rows}
-                local_links = {a["name"]: f"[ローカルファイル]({safe_path(self.root, a['path']).absolute().as_uri()})" for a in artifact_rows}
+                # No file:/// URI: it names the PC user and breaks when the Vault moves (OBS-12).
+                local_links = {a["name"]: f"保存先 `analysis_store/{a['path']}`" for a in artifact_rows}
                 main = frontmatter(f"analysis-{run_id}", title + "：保存済み分析", conversation_id=item_id,
                                    analysis_id=run_id, input_snapshot_id=run["snapshot_id"],
                                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
@@ -636,6 +670,7 @@ class AnalysisStore:
                 with self.connect() as conn:
                     conn.execute("UPDATE analysis_runs SET vault_status='completed',note_path=?,error='' WHERE id=?", (note_path, run_id))
                 self.publish_index(item_id)
+                self._record_note_events(run_id)
             except Exception as exc:
                 message = str(exc) if isinstance(exc, StoreConflict) else "Vaultへの保存を完了できませんでした。結果ファイルは保持しています。"
                 with self.connect() as conn:
@@ -789,11 +824,11 @@ class AnalysisStore:
             status = "更新が必要" if row["stale"] else "保存時点の結果"
             text += f"- [[{row['note_path'][:-3]}|{row['created_at']} / {row['kind']}]]：{status}\n"
         summary = self.layout.note_path(item_id, title, "分析まとめ")
-        self.write_note(summary, note_id, item_id, text)
+        self.write_note(summary, note_id, item_id, text, navigation=True)
         self.layout.update(item_id, title, {"analysis": summary}, analysis_methods=list(by_method.values()))
         # A dedicated generated index never overwrites the user's Home or guides.
         with self.connect() as conn:
             notes = conn.execute("SELECT path,note_id FROM obsidian_notes WHERE note_id LIKE 'conversation-%' ORDER BY path").fetchall()
         index = frontmatter("gurumoji-saved-analyses", "アプリから保存した分析", note_type="analysis-index")
         index += "# アプリから保存した分析\n\n" + "\n".join(f"- [[{n['path'][:-3]}]]" for n in notes) + "\n"
-        self.write_note("90-運用/Gurumoji-SavedAnalyses.md", "gurumoji-saved-analyses", "", index)
+        self.write_note("90-運用/Gurumoji-SavedAnalyses.md", "gurumoji-saved-analyses", "", index, navigation=True)

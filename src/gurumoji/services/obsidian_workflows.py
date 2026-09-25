@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .ai.transcript_finishing import run_full_cleanup
+
 
 @dataclass(frozen=True)
 class ObsidianWorkflowService:
@@ -140,30 +142,50 @@ class ObsidianWorkflowService:
             d.workbench().publish_status(state)
 
         names = d.json_load(row["speaker_names_json"], {})
-        if action == "outline" or not context.get("sections"):
-            context = d.create_outline_with_ai(
-                segments, names, provider, api_key, model, status, check, record_usage,
+
+        def create_context_outline(source: list[dict[str, Any]]) -> dict[str, Any]:
+            return d.create_outline_with_ai(
+                source, names, provider, api_key, model, status, check, record_usage,
                 base_url=base_url, ai_efforts=state.get("ai_efforts"),
             )
+
         if action == "outline":
-            return {"outline": context, "usage": usage}
-        revised = d.clean_segments_with_ai(
-            segments, provider, api_key, model, status, check, record_usage,
-            base_url=base_url, ai_efforts=state.get("ai_efforts"), outline=context,
+            return {"outline": create_context_outline(segments), "usage": usage}
+
+        def clean_with_outline(
+            source: list[dict[str, Any]], outline: dict[str, Any]
+        ) -> list[dict[str, Any]]:
+            return d.clean_segments_with_ai(
+                source, provider, api_key, model, status, check, record_usage,
+                base_url=base_url, ai_efforts=state.get("ai_efforts"), outline=outline,
+            )
+
+        def review_source_with_jev(outline: dict[str, Any]) -> tuple[dict, dict]:
+            return d.review_segments_with_jev(
+                segments, config.typesafe_api_key, config.typesafe_model, status, check,
+                outline=outline,
+            )
+
+        # Same order and stage record as the in-job route (ARCH-07). Any failure
+        # stops here so the researcher can retry from the operation note.
+        full_cleanup = run_full_cleanup(
+            segments,
+            check_cancelled=check,
+            create_context_outline=create_context_outline,
+            clean_with_outline=clean_with_outline,
+            review_with_jev=review_source_with_jev if state.get("jev_compare") else None,
+            attach_jev=d.attach_jev_comparison,
+            outline=context,
         )
+        revised = full_cleanup["segments"]
+        context = full_cleanup["context_outline"]
+        jev_usage: dict[str, Any] = full_cleanup["jev_usage"]
         stages = {
-            "outline_context": "completed", "cleanup": "completed",
+            "outline_context": "not_requested", "cleanup": "not_requested",
             "jev_comparison": "not_requested", "speaker_identity": "not_requested",
             "outline": "not_requested",
+            **full_cleanup["stages"],
         }
-        jev_usage: dict[str, Any] = {}
-        if state.get("jev_compare"):
-            reviews, jev_usage = d.review_segments_with_jev(
-                segments, config.typesafe_api_key, config.typesafe_model, status, check,
-                outline=context,
-            )
-            revised = d.attach_jev_comparison(revised, reviews)
-            stages["jev_comparison"] = "completed"
         if state.get("detect_names"):
             diagnostics: dict[str, Any] = {}
             detected = d.detect_speaker_names_with_ai(

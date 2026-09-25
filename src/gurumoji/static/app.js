@@ -2344,6 +2344,7 @@ async function loadConfig() {
     const data = await readJsonResponse(response);
     tokenConfigSnapshot = data && typeof data === 'object' ? data : {};
     applyMachineProfile(data.machine);
+    applyObsidianWatcherStatus(data.obsidian_watcher);
     const runtime = data.runtime || {};
     browserFilePickerOnly = Boolean(runtime.browser_upload);
     if (browsePathButton) {
@@ -2406,6 +2407,42 @@ async function loadConfig() {
     window.clearTimeout(timeoutId);
   }
 }
+
+function applyObsidianWatcherStatus(watcher) {
+  // OBS-09: a watcher that stopped at startup must not look like an idle one.
+  if (!watcher || typeof watcher !== 'object' || !watcher.state) return;
+  const failed = ['failed', 'polling_failed'].includes(watcher.state);
+  document.querySelectorAll('[data-obsidian-watcher-pill]').forEach(pill => {
+    pill.classList.remove('loading', 'ready', 'missing');
+    pill.classList.add(watcher.state === 'running' ? 'ready' : failed ? 'missing' : 'loading');
+    pill.textContent = watcher.state === 'running' ? 'Obsidian監視 ✓' : 'Obsidian監視';
+  });
+  document.querySelectorAll('[data-obsidian-watcher-detail]').forEach(detail => {
+    detail.textContent = [watcher.message, watcher.detail].filter(Boolean).join(' ');
+  });
+}
+
+// DATA-03: one consistent copy of what cannot be recreated.
+listen(document.querySelector('#create-backup-button'), 'click', async () => {
+  const button = document.querySelector('#create-backup-button');
+  const message = document.querySelector('#backup-message');
+  const includeMedia = document.querySelector('#backup-include-media');
+  button.disabled = true;
+  setAlert(message, 'バックアップを作成しています。完了まで保存操作は待機します…');
+  try {
+    const response = await apiFetch('/api/system/backup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({include_media: Boolean(includeMedia && includeMedia.checked)})
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || 'バックアップを作成できませんでした。');
+    setAlert(message, `作成しました: ${data.path}（${data.file_count}ファイル）。含めていないもの: ${(data.excluded || []).join('、')}`);
+  } catch (error) {
+    setAlert(message, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 function applyLmStudioDefaults(config) {
   // A ready, explicitly selected local model is an opt-in.  Make the
@@ -3846,7 +3883,7 @@ function deleteRecoveryNote(data) {
 }
 
 async function deleteLibraryItem(itemId, name) {
-  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n保存メディアも削除されます。出力ファイルと学習履歴は残ります。`)) return;
+  if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n元の音声・動画はゴミ箱へ移し、保持期間（既定30日）が過ぎたら完全に削除します。出力ファイル・分析結果・Obsidianのノート・学習履歴は残ります。`)) return;
   try {
     if (currentJobId === itemId && mediaPlayer) {
       mediaPlayer.pause();
@@ -3878,9 +3915,12 @@ async function deleteLibraryItem(itemId, name) {
     showView('library');
     await loadLibrary();
     const cleanupWarning = data.cleanup_warning || '';
+    const trashNote = data.trash && data.trash.expires_at
+      ? ` 元の音声・動画は${new Date(data.trash.expires_at).toLocaleDateString('ja-JP')}までゴミ箱に保管します。`
+      : '';
     setAlert(
       document.querySelector('#library-message'),
-      `「${name}」を削除しました。${cleanupWarning}${recoveryNote}`,
+      `「${name}」を削除しました。${trashNote}${cleanupWarning}${recoveryNote}`,
       Boolean(cleanupWarning || recoveryNote)
     );
   } catch (error) {

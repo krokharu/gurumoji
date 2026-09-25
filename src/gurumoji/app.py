@@ -74,7 +74,7 @@ from .web.job_routes import register_job_routes
 from .web.obsidian_routes import register_obsidian_routes
 from .web.speaker_routes import register_speaker_routes
 from .web.system_routes import register_system_routes
-from .services.obsidian_watcher import ObsidianWatcher
+from .services.obsidian_watcher import ObsidianWatcher, WatcherStatus
 from .services.obsidian_workflows import ObsidianWorkflowService
 from .services.transcription_reporting import TranscriptionReporter
 from .services.vault_publication import VaultPublicationService, whisper_settings
@@ -82,6 +82,8 @@ from .services.ai import client as ai_client
 from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
+from .services.media_trash import purge_expired_trash, trash_media
+from .services import data_backup
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -329,6 +331,13 @@ JOB_TTL_SECONDS = positive_env_int(
 )
 ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
     "MOJIOKOSI_ORPHAN_GRACE_SECONDS", 15 * 60, minimum=60, maximum=7 * 86400
+)
+BACKUP_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_BACKUP_DIR", str(RUNTIME_DIRECTORY / "backups"))
+).expanduser()
+# Days a deleted conversation's original media stays in <data>/trash; 0 erases at once.
+TRASH_RETENTION_DAYS = positive_env_int(
+    "MOJIOKOSI_TRASH_RETENTION_DAYS", 30, minimum=0, maximum=3650
 )
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
@@ -1181,6 +1190,14 @@ def retire_input_vault(item_id: str) -> None:
     vault_publications().retire_input(item_id)
 
 
+def retire_research_vault(item_id: str) -> None:
+    """Mark the ResearchVault overview as deleted; its notes stay as records (OBS-11)."""
+    try:
+        obsidian_workbench().layout.mark_deleted(item_id)
+    except (OSError, ValueError, TypeError, LookupError) as exc:
+        app.logger.warning("ResearchVault に削除を記録できませんでした: %s", exc)
+
+
 def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
     return whisper_settings(options, language, diarization_model=DIARIZATION_MODEL)
 
@@ -1214,12 +1231,39 @@ _update_library_from_payload_locked = make_library_update(
 )
 
 
+def trash_directory() -> Path:
+    # Beside media so the move stays a rename on the same volume.
+    return MEDIA_DIRECTORY.parent / "trash"
+
+
+def _discard_deleted_media(path: Path, item_id: str) -> None:
+    trash_media(trash_directory(), item_id, "", [path],
+                retention_days=TRASH_RETENTION_DAYS, move=durable_move)
+
+
 def recover_delete_quarantines() -> list[str]:
     return edit_transactions.recover_delete_quarantines(
         connect=database_connection,
         media_directory=MEDIA_DIRECTORY,
         thumbnail_directory=THUMBNAIL_DIRECTORY,
+        discard_media=_discard_deleted_media if TRASH_RETENTION_DAYS > 0 else None,
     )
+
+
+def create_data_backup(include_media: bool = False) -> dict[str, Any]:
+    """Back up the data directory while every Vault and library writer is paused (DATA-03)."""
+    from .analysis_store import STORE_LOCK
+    from .obsidian_layout import LAYOUT_LOCK
+    from .vault_registry import VAULT_LOCK
+    # Same order as the writers take them: library -> store -> layout -> generated Vaults.
+    with library_write_lock, STORE_LOCK, LAYOUT_LOCK, VAULT_LOCK:
+        return data_backup.create_backup(
+            DATABASE_FILE.parent, BACKUP_DIRECTORY, include_media=include_media, app_version=APP_VERSION,
+        )
+
+
+def purge_media_trash() -> list[str]:
+    return purge_expired_trash(trash_directory(), TRASH_RETENTION_DAYS)
 
 
 def discover_edit_transaction_staging_dirs(
@@ -1373,6 +1417,9 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
     return obsidian_workflows().run_finishing(action, state, segments, context, provider, check)
 
 
+obsidian_watcher_status = WatcherStatus()
+
+
 def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     from .obsidian_migration import migrate
     return ObsidianWatcher(
@@ -1380,6 +1427,7 @@ def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
         engine=run_obsidian_finishing,
         migrate=migrate,
         log_exception=app.logger.exception,
+        status=obsidian_watcher_status,
     ).start()
 
 
@@ -1399,7 +1447,7 @@ def application_lifecycle() -> ApplicationLifecycle:
             initialize_library=lambda: initialize_library(repair_provenance=False),
             recover_edits=lambda: recover_edit_transactions(),
             repair_provenance=repair_provenance,
-            recover_deletes=lambda: recover_delete_quarantines(),
+            recover_deletes=lambda: recover_delete_quarantines() + purge_media_trash(),
             repair_training=lambda: repair_training_artifacts(),
             cleanup_uploads=lambda: cleanup_orphaned_uploads(),
             import_outputs=lambda: import_existing_outputs(),
@@ -1645,6 +1693,9 @@ _delete_library_item_locked = make_library_deletion(
     local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
     reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
     retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
+    trash_directory=lambda: trash_directory(),
+    trash_retention_days=lambda: TRASH_RETENTION_DAYS,
+    retire_research_vault=lambda *args, **kwargs: retire_research_vault(*args, **kwargs),
 )
 
 
@@ -1719,6 +1770,8 @@ def create_app() -> Flask:
         available_ai_models=lambda provider, config: available_ai_models(provider, config),
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
+        obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        create_backup=lambda include_media: create_data_backup(include_media),
     )
 
     register_analysis_routes(
@@ -1750,6 +1803,7 @@ def create_app() -> Flask:
         archive_meeting_minutes=archive_meeting_minutes,
         publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
         log_warning=flask_app.logger.warning,
+        watcher_status=lambda: obsidian_watcher_status.snapshot(),
     )
 
     register_library_group_routes(

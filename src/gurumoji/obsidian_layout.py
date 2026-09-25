@@ -8,6 +8,7 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -20,7 +21,10 @@ LOGGER = logging.getLogger(__name__)
 HOME = "00-ホーム.md"
 ANALYSIS_INDEX = "01-分析結果.md"
 GUIDE = "90-運用/使い方.md"
+SYNC_STATUS = "90-運用/同期状況.md"
 INDEX = "10-インタビュー/インタビュー一覧.md"
+# The overview stays as a record after the conversation is deleted in the app (OBS-11).
+DELETED_STATUS = "アプリから削除済み"
 GLOBAL_QUERY = "tag:#graph/overview -tag:#graph/history -tag:#graph/support"
 WIKILINK = re.compile(r"(?<![!\\])\[\[([^\]#|]+)(?:[^\]]*)\]\]")
 # Process-wide, so the 10-second watcher reports a persistent condition once.
@@ -122,6 +126,7 @@ class ObsidianLayout:
         self.data = Path(database_file).parent
         self.vault = self.data / "obsidian" / "ResearchVault"
         self.registry = self.data / "obsidian_layout" / "interviews.json"
+        self.note_log = self.data / "obsidian_layout" / "note_changes.jsonl"
 
     def load(self) -> dict:
         if self.registry.exists():
@@ -209,8 +214,30 @@ class ObsidianLayout:
         if kind != "interview": props["interview"] = link(record["hub"])
         return pack(props, body)
 
-    def managed_note(self, relative: str, text: str) -> bool:
-        """Update only our own unchanged generated note. Preserve all human edits."""
+    def managed_note(self, relative: str, text: str, *, navigation: bool = True) -> bool:
+        """Write one generated note; False when a deleted content note is left missing.
+
+        Markdown goes through the shared Vault note policy (vault_note_policy):
+        a researcher's edit is kept in the history before the latest version is
+        written, and a deleted note is recreated only for ``navigation``.
+        Settings-like files (.base, .css) keep the older rule: never replace an edit.
+        """
+        if relative.endswith(".md"):
+            from .vault_note_policy import write_generated_note
+            with LAYOUT_LOCK:
+                data = self.load()
+                known = data["managed"].get(relative)
+                result = write_generated_note(
+                    self.vault, relative, text.encode(),
+                    known_hashes={known} if known else set(), ever_written=known is not None,
+                    recreate_missing=navigation, log_file=self.note_log,
+                )
+                if result.action == "missing":
+                    return False
+                if known != result.sha256:
+                    data["managed"][relative] = result.sha256
+                    self.save(data)
+                return True
         with LAYOUT_LOCK:
             data = self.load()
             path = safe_path(self.vault, relative)
@@ -235,16 +262,26 @@ class ObsidianLayout:
             record = data["interviews"][item_id]
             record["links"].update({k: v for k, v in links.items() if v})
             if analysis_methods is not None: record["analysis_methods"] = analysis_methods
-            if status is not None: record["status"] = status
+            # A later workbench status must not hide that the app deleted the conversation.
+            if status is not None and record.get("status") != DELETED_STATUS: record["status"] = status
             self.save(data)
+            deleted = record["status"] == DELETED_STATUS
             memo = self.note_path(item_id, title, "研究メモ")
-            if not safe_path(self.vault, memo).exists():
-                self.managed_note(memo, self.decorate(pack({"note_type": "research-memo"},
-                    "# 研究メモ\n\n自由に記録してください。関連テーマは `[[20-テーマ/テーマ名]]` でリンクできます。\n"),
-                    item_id, "memo", "detail"))
+            if not deleted and not safe_path(self.vault, memo).exists():
+                # The memo belongs to the researcher: create it once, never rewrite it.
+                try:
+                    write_atomic(safe_path(self.vault, memo), self.decorate(pack({"note_type": "research-memo"},
+                        "# 研究メモ\n\n自由に記録してください。関連テーマは `[[20-テーマ/テーマ名]]` でリンクできます。\n"),
+                        item_id, "memo", "detail").encode(), create_only=True)
+                except FileExistsError:
+                    pass
             data = self.load()
             record = data["interviews"][item_id]
             body = f"# {record['code']} {markdown(display_title(title))}\n\n状態：{markdown(record['status'])}\n\n"
+            if deleted:
+                body += ("> [!warning] この会話はアプリから削除されました"
+                         + (f"（{markdown(record['deleted_at'])}）" if record.get("deleted_at") else "") + "\n"
+                         "> ノートは記録として残しています。アプリへのリンクと再保存は使えません。\n\n")
             body += "> [!info]- 元の録音ファイル名\n> " + markdown(title) + "\n\n"
             body += "## 分析結果\n\n"
             analysis = record["links"].get("analysis")
@@ -265,8 +302,51 @@ class ObsidianLayout:
             body += "\n## 関連テーマ\n\n研究メモで共通テーマにリンクすると、テーマを経由して他のインタビューと比較できます。\n"
             hub = self.decorate(pack({"note_id": "interview-" + item_id, "note_type": "interview",
                 "title": title, "conversation_id": item_id, "status": record["status"]}, body), item_id, "interview", "overview")
-            self.managed_note(record["hub"], hub)
+            # The overview is a content note: a deleted one is reported, not recreated.
+            self.managed_note(record["hub"], hub, navigation=False)
             self.publish_navigation()
+
+    def publish_sync_status(self, props: dict) -> None:
+        """List what the shared note policy did to researcher-touched notes (OBS-04, OBS-15)."""
+        from .vault_note_policy import recent_changes
+        labels = {"edit_saved": "研究者の編集を履歴に保存して更新", "missing": "削除を検出（再作成しません）",
+                  "recreated": "削除を検出して再作成（ナビゲーション）"}
+        vault_names = {"research": "ResearchVault", "input": "InputVault",
+                       "visualization": "VisualizationVault", "orchestrator": "OrchestratorVault"}
+        rows = []
+        for event in recent_changes(self.note_log, limit=100):
+            path = str(event.get("path") or "")
+            research = event.get("vault", "research") == "research"
+            note = link(path) if research and path.endswith(".md") else "`" + markdown(path) + "`"
+            # Inside a table the alias separator must be escaped (OBS-19).
+            history = " / ".join((link(h, "履歴").replace("|", "\\|") if research else "`" + markdown(h) + "`")
+                                 for h in event.get("history") or [])
+            rows.append(f"| {markdown(str(event.get('at', ''))[:19])} | {vault_names.get(event.get('vault'), markdown(event.get('vault')))} "
+                        f"| {note} | {labels.get(event.get('action'), markdown(event.get('action')))} | {history or '―'} |")
+        body = ("# 同期状況\n\n" + link(HOME, "ホームへ戻る") + "\n\n"
+                "アプリが作るノートを研究者が編集していた場合は、編集した版を履歴に保存してから最新版に更新します。"
+                "削除されていた場合、分析ノート・概要は作り直さず、ホーム・一覧などのナビゲーションだけ作り直します。"
+                "履歴の写しは全体グラフに表示しません。研究者のノート（全文・操作・研究メモ・仕上げ結果）はアプリが上書きしません。\n\n"
+                "## 最近の記録（新しい順、最大100件）\n\n")
+        if rows:
+            body += "| 日時（UTC） | Vault | ノート | 内容 | 履歴 |\n| --- | --- | --- | --- | --- |\n" + "\n".join(rows) + "\n"
+        else:
+            body += "記録はありません。\n"
+        body += "\nすべての変更の記録は、データフォルダーの `obsidian_layout/note_changes.jsonl` にあります。\n"
+        self.managed_note(SYNC_STATUS, pack(props, body))
+
+    def mark_deleted(self, item_id: str) -> bool:
+        """Record an app-side deletion on an existing overview; never create one."""
+        with LAYOUT_LOCK:
+            data = self.load()
+            record = data["interviews"].get(item_id)
+            if record is None:
+                return False
+            if record.get("status") != DELETED_STATUS:
+                record["deleted_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self.save(data)
+            self.update(item_id, record["title"], {}, status=DELETED_STATUS)
+            return True
 
     def sync_finishing(self, state: dict) -> None:
         # Existing finishing notes belong to the researcher. Refresh navigation only.
@@ -283,11 +363,14 @@ class ObsidianLayout:
         with LAYOUT_LOCK:
             records = list(self.load()["interviews"].values())
             props = {"note_type": "navigation", "tags": ["graph/support"]}
-            rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) for r in records)
+            rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"]))
+                             + ("（" + DELETED_STATUS + "）" if r.get("status") == DELETED_STATUS else "")
+                             for r in records)
             available = [r for r in records if r["links"].get("analysis")
                          and safe_path(self.vault, r["links"]["analysis"]).is_file()]
             analysis_rows = "\n".join("- " + link(r["links"]["analysis"], r["code"] + " " + display_title(r["title"]) + " の分析結果") for r in available)
-            pending_rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) + "：未保存" for r in records if r not in available)
+            pending_rows = "\n".join("- " + link(r["hub"], r["code"] + " " + display_title(r["title"])) + "：未保存" for r in records
+                                     if r not in available and r.get("status") != DELETED_STATUS)
             group_links = "\n".join("- " + link(method_group_path(key), title) for key, title, _, _ in METHOD_GROUPS)
             for key, title, description, method_ids in METHOD_GROUPS:
                 body = "# " + title + "\n\n" + link(ANALYSIS_INDEX, "分析結果一覧へ戻る") + "\n\n" + description + "\n\n"
@@ -313,13 +396,15 @@ class ObsidianLayout:
             self.managed_note(HOME, pack(props, "# インタビュー研究\n\n"
                 "- " + link(INDEX, "インタビューを選ぶ") + "\n"
                 "- [[インタビュー一覧.base|日付・状態で一覧を見る]]\n"
-                "- " + link(GUIDE, "全体グラフ・インタビュー別グラフの使い方") + "\n\n"
+                "- " + link(GUIDE, "全体グラフ・インタビュー別グラフの使い方") + "\n"
+                "- " + link(SYNC_STATUS, "同期状況（履歴に保存した編集・削除を検出したノート）") + "\n\n"
                 "左のブックマーク → **Gurumoji** → **研究全体のグラフ** または **インタビュー別** で表示を切り替えます。\n\n"
                 "## 分析結果\n\n"
                 "> [!summary] 保存済みの分析を読む\n> " + link(ANALYSIS_INDEX, "分析結果一覧を開く") + "\n\n"
                 + group_links + "\n\n"
                 + (analysis_rows or "分析結果を保存すると、ここから開けます。") + "\n\n"
                 "## インタビュー\n\n" + rows + "\n"))
+            self.publish_sync_status(props)
             self.managed_note(GUIDE, pack(props, "# グラフと仕上げの使い方\n\n"
                 "1. この ResearchVault フォルダーを保管庫として開きます。\n"
                 "2. 左のブックマークから Gurumoji → 研究全体のグラフ を開きます。\n"
@@ -512,7 +597,5 @@ class ObsidianLayout:
                 body += "研究メモの明示リンクから作成した一覧です。テーマ本文は変更しません。\n\n"
                 body += "\n".join("- " + link(r["hub"], r["code"] + " " + r["title"])
                                   for r in related.values()) or "現在、このテーマに関連するインタビューはありません。"
-                if self.managed_note(relative, pack(props, body + "\n")):
-                    _WARNED.discard(("relation-edited", relative))
-                else:
-                    warn_once(("relation-edited", relative), "手動編集されたテーマ関連ノートを保持しました。")
+                # Deleted relation notes are skipped above; an edited one is kept in the history.
+                self.managed_note(relative, pack(props, body + "\n"), navigation=False)

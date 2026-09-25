@@ -12,6 +12,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..ai.transcript_finishing import run_full_cleanup
+
 def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any]) -> None:
     TranscriptionReporter = dependencies["TranscriptionReporter"]
     CONVERSATION_MODES = dependencies["CONVERSATION_MODES"]
@@ -608,68 +610,66 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     "おすすめのJev判定・発話単位LLM整形を省略しました。元の文字起こしを保存します: "
                     + details
                 )
-        if options.clean_transcript and not options.finish_in_obsidian:
-            try:
+        if ((options.clean_transcript or options.jev_compare)
+                and not options.finish_in_obsidian):
+            # The same order and stage record as the Obsidian workbench (ARCH-07).
+            def create_context_outline(source: list[dict[str, Any]]) -> dict[str, Any]:
                 status("再校正に先立ち、会話全体のアウトラインを作成しています…")
-                context_outline = create_outline_with_ai(
-                    segments, {}, options.ai_provider, options.ai_api_key, options.ai_model,
+                return create_outline_with_ai(
+                    source, {}, options.ai_provider, options.ai_api_key, options.ai_model,
                     status, check_cancelled, record_ai_usage, **ai_base_kwargs,
                 )
-                if not context_outline.get("sections"):
-                    raise RuntimeError("会話全体のアウトラインが空でした。")
-                finishing_stages["outline_context"] = "completed"
-            except InterruptedError:
-                raise
-            except Exception as exc:
-                context_outline = None
-                finishing_stages["outline_context"] = "failed"
-                record_warning("再校正用の全体アウトラインを作成できませんでした: " + str(exc))
-        if options.clean_transcript and not options.finish_in_obsidian:
-            try:
-                if context_outline is None:
-                    raise RuntimeError("参照する全体アウトラインがないため再校正を実行できません。")
-                segments = clean_segments_with_ai(
-                    segments,
+
+            def clean_with_outline(
+                source: list[dict[str, Any]], outline: dict[str, Any]
+            ) -> list[dict[str, Any]]:
+                return clean_segments_with_ai(
+                    source,
                     options.ai_provider,
                     options.ai_api_key,
                     options.ai_model,
                     status,
                     check_cancelled,
                     record_ai_usage,
-                    outline=context_outline,
+                    outline=outline,
                     **ai_base_kwargs,
                 )
-                finishing_stages["cleanup"] = "completed"
-                check_cancelled()
-            except InterruptedError:
-                raise
-            except Exception as exc:
+
+            def review_original_with_jev(outline: dict[str, Any]) -> tuple[dict, dict]:
+                return review_segments_with_jev(
+                    imported_transcript,
+                    options.jev_api_key,
+                    options.jev_model,
+                    status,
+                    check_cancelled,
+                    outline=outline,
+                )
+
+            def warn_full_cleanup(stage: str, exc: BaseException | None) -> None:
+                if exc is None:
+                    record_warning("現行AIの文字整形が完了しなかったため、Jevとの比較を省略しました。")
+                    return
                 details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                finishing_stages["cleanup"] = "failed"
-                record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
-        if options.jev_compare and not options.finish_in_obsidian:
-            if finishing_stages["cleanup"] != "completed":
-                finishing_stages["jev_comparison"] = "skipped"
-                record_warning("現行AIの文字整形が完了しなかったため、Jevとの比較を省略しました。")
-            else:
-                try:
-                    reviews, jev_usage = review_segments_with_jev(
-                        imported_transcript,
-                        options.jev_api_key,
-                        options.jev_model,
-                        status,
-                        check_cancelled,
-                        outline=context_outline,
-                    )
-                    segments = attach_jev_comparison(segments, reviews)
-                    finishing_stages["jev_comparison"] = "completed"
-                    check_cancelled()
-                except InterruptedError:
-                    raise
-                except Exception as exc:
-                    details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                    finishing_stages["jev_comparison"] = "failed"
+                if stage == "outline_context":
+                    record_warning("再校正用の全体アウトラインを作成できませんでした: " + str(exc))
+                elif stage == "cleanup":
+                    record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
+                else:
                     record_warning("Jevによる修正要否の比較を省略しました: " + details)
+
+            full_cleanup = run_full_cleanup(
+                segments,
+                check_cancelled=check_cancelled,
+                create_context_outline=create_context_outline,
+                clean_with_outline=clean_with_outline if options.clean_transcript else None,
+                review_with_jev=review_original_with_jev if options.jev_compare else None,
+                attach_jev=attach_jev_comparison,
+                on_failure=warn_full_cleanup,
+            )
+            segments = full_cleanup["segments"]
+            finishing_stages.update(full_cleanup["stages"])
+            if full_cleanup["stages"].get("jev_comparison") == "completed":
+                jev_usage = full_cleanup["jev_usage"]
         set_stage("finishing", "文字起こしの仕上げ", 100)
         progress(88)
         emotion_analysis: dict[str, Any] | None = None

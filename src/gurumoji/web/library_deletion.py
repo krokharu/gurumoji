@@ -1,10 +1,13 @@
 """DELETE /api/library/<item_id>: remove one library item and its managed media.
 
 Managed media and thumbnails are first moved into a .delete-staging-* folder
-and removed only after the database rows are deleted; if the database step
-fails they are moved back. A crash in between is resolved at startup by
-recover_delete_quarantines. Output files and training history are kept, and
-tombstones stop the deleted output from being imported again."""
+and resolved only after the database rows are deleted; if the database step
+fails they are moved back. After the delete, the original media goes to the
+retention trash (services/media_trash) and regenerable thumbnails are erased.
+A crash in between is resolved at startup by recover_delete_quarantines.
+Output files and training history are kept, tombstones stop the deleted
+output from being imported again, and the ResearchVault overview is marked
+as deleted rather than removed (OBS-11)."""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from flask import jsonify
 
 from ..text_utils import json_load, utc_now_iso
 from ..services.durable_files import file_sha256, path_is_within
+from ..services.media_trash import trash_media
 from ..services.outputs import safe_output_stem
 from ..services.transcription.options import ACTIVE_JOB_STATUSES
 
@@ -36,6 +40,9 @@ def make_library_deletion(
     local_path_access_allowed: Any,
     reconcile_edit_transactions_before_delete: Any,
     retire_input_vault: Any,
+    trash_directory: Callable[[], Path] | None = None,
+    trash_retention_days: Callable[[], int] = lambda: 0,
+    retire_research_vault: Callable[[str], None] = lambda _item_id: None,
 ) -> Callable[..., Any]:
     def _delete_library_item_locked(item_id: str):
         row = library_row(item_id)
@@ -206,18 +213,54 @@ def make_library_deletion(
         with jobs_lock:
             jobs.pop(item_id, None)
         retire_input_vault(item_id)
+        retire_research_vault(item_id)
         cleanup_errors: list[str] = []
+        retention_days = trash_retention_days()
+        media_assets = [
+            quarantined for quarantined, original in moved
+            if original.parent == media_root
+        ]
+        kept_roots: set[Path] = set()
+        trashed: dict[str, Any] | None = None
+        if media_assets and retention_days > 0 and trash_directory is not None:
+            # DATA-01: deleting the conversation keeps the recording for the
+            # retention period instead of erasing it at once.
+            try:
+                trashed = trash_media(
+                    trash_directory(), item_id, str(row["source_name"] or ""), media_assets,
+                    retention_days=retention_days, move=durable_move,
+                )
+            except OSError as exc:
+                cleanup_errors.append(str(exc))
+                kept_roots = {
+                    quarantined.parent for quarantined in media_assets
+                    if quarantined.exists() or quarantined.is_symlink()
+                }
         for quarantine_root in quarantine_roots:
+            if quarantine_root in kept_roots:
+                continue
             try:
                 shutil.rmtree(quarantine_root)
             except OSError as exc:
                 cleanup_errors.append(str(exc))
         retained = retained_quarantine_paths()
+        if trashed:
+            message = (
+                f"ライブラリ項目を削除しました。元の音声・動画は{retention_days}日間ゴミ箱に保管し、"
+                "その後の起動時に完全に削除します。出力と学習履歴は保持しています。"
+            )
+        else:
+            message = "ライブラリ項目と管理対象メディアを削除しました。出力と学習履歴は保持しています。"
         result: dict[str, Any] = {
             "ok": True,
-            "message": "ライブラリ項目と管理対象メディアを削除しました。出力と学習履歴は保持しています。",
+            "message": message,
             "recovery_paths": retained,
         }
+        if trashed:
+            result["trash"] = {
+                "expires_at": trashed["expires_at"],
+                "path": str(trashed["path"]) if local_path_access_allowed() else trashed["path"].name,
+            }
         if cleanup_errors or retained:
             result["cleanup_warning"] = (
                 "ライブラリ項目は削除しましたが、一部の隔離ファイルを消去できませんでした。"
