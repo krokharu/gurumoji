@@ -306,7 +306,20 @@ class AnalysisStore:
             artifact["url"] = f"/api/analysis/artifacts/{artifact['id']}"
         result["obsidian_uri"] = ("obsidian://open?" + urlencode({"path": str(self.vault / row["note_path"])})
                                     if local and row["note_path"] and row["vault_status"] == "completed" else "")
+        # vault_status covers ResearchVault only; the generated Vaults are reported separately (OBS-18).
+        result["vault_outputs"] = self._vault_outputs(row)
+        result["vault_outputs_complete"] = all(
+            value["status"] == "published" for value in result["vault_outputs"].values())
         return result
+
+    def _vault_outputs(self, row: dict) -> dict[str, dict[str, str]]:
+        if row["status"] != "completed":
+            return {}
+        try:
+            return self.publication_outcomes(row["id"])
+        except (OSError, ValueError, LookupError) as exc:
+            return {kind: {"status": "unknown", "error": str(exc)}
+                    for kind in ("input", "orchestrator", "visualization")}
 
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,

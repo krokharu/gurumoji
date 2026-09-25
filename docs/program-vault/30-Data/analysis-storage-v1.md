@@ -112,6 +112,8 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 | 成果物取得 | `GET /api/analysis/artifacts/<artifact-id>`。hashを検証して返す |
 | 固定runのZIP取得 | `GET /api/analysis/runs/<run-id>/export.zip`。manifest、parameters、result、表CSVを同じ固定成果物から束ねる |
 
+保存結果（`run`）の `vault_status` はResearchVaultへの書き出しだけを表す。Input／Orchestrator／Visualizationへの書き出しは `vault_outputs`（Vaultごとの `status`：`published`／`failed`／`conflict`／`unknown` と `error`）と `vault_outputs_complete` で返す。正本（固定成果物とResearchVault）の保存が成功していれば、生成Vaultが失敗しても保存は成功扱いのまま（ADR-009）。「保存履歴」は未完了のVaultと理由を示し、上の再試行で書き直せる（OBS-18）。
+
 新しい組み込み手法は [[40-Design/method-rules|登録規約]] を満たし、`analysis_method_registry.METHODS` にID・表示名・CSVデータセットを追加する。計算は既存の分析層へ、詳細と状態・単位・解析器の対応付けは `method_results` へ加える。CSVの列定義、根拠IDの検証、空・除外・更新時の検証を追加し、計算が変わった版を更新する。ファイルから任意コードを実行する登録方式にはしない。登録手法の一覧・件数は現行の`METHODS`を正本とする。
 
 複数会話のインタビュー比較と固定保存は実装済み。ResearchVaultでは`40-研究/インタビュー比較/comparison-<run-id>.md`に保存する。比較画面から保存履歴、成果物、Obsidianノートを開き、固定済み成果物からVault保存を再試行できる（UX-33）。研究メモ・解釈・コード案の差分取り込み、外部R／Python等の結果登録、図の自動添付、保存先変更UI、バックアップ専用UIも後続工程。
