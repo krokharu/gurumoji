@@ -53,10 +53,10 @@ class AnalysisStorageTests(unittest.TestCase):
         # Graph result nodes deliberately retain compact finding previews.
         self.assertIn('graph_kind: analysis_result', notes)
         self.assertIn('先頭10行まで', notes)
-        # OBS-12: notes carry a portable location, never the PC's absolute path.
+        # Reproduction files link through the app only; no machine-specific file:/// path (OBS-12).
+        self.assertIn('/api/analysis/artifacts/', notes)
         self.assertNotIn('file://', notes)
-        self.assertNotIn(str(self.store.root.resolve()), notes)
-        self.assertIn('保存先 `analysis_store/runs/' + run['id'] + '/result.json`', notes)
+        self.assertNotIn(str(self.store.root.absolute()), notes)
 
     def test_moved_interview_folder_keeps_catalog_ownership(self):
         run = self.save().get_json()['run']
@@ -267,6 +267,20 @@ class AnalysisStorageTests(unittest.TestCase):
             result = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
         self.assertEqual(result['vault_status'], 'completed')
         self.assertEqual(self.artifact(result, 'result.json'), before)
+
+    def test_generated_vault_failure_is_reported_and_retryable(self):
+        # OBS-18: ResearchVault succeeds but Input/Orchestrator/Visualization fail.
+        with patch('gurumoji.vault_registry.VaultRegistry.publish_analysis', side_effect=OSError('generated vault is locked')):
+            run = self.save().get_json()['run']
+        self.assertEqual((run['status'], run['vault_status']), ('completed', 'completed'))
+        self.assertFalse(run['vault_outputs_complete'])
+        self.assertEqual(set(run['vault_outputs']), {'input', 'orchestrator', 'visualization'})
+        self.assertTrue(any(value['status'] != 'published' for value in run['vault_outputs'].values()))
+        listed = next(r for r in self.client.get(self.url).get_json()['runs'] if r['id'] == run['id'])
+        self.assertFalse(listed['vault_outputs_complete'])
+        retried = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
+        self.assertTrue(retried['vault_outputs_complete'], retried['vault_outputs'])
+        self.assertEqual({value['status'] for value in retried['vault_outputs'].values()}, {'published'})
 
     def test_mid_write_failure_retries_deterministically_and_detects_tamper(self):
         write = analysis_store.write_atomic

@@ -46,7 +46,7 @@
 - 本文・話者・時刻・くしなだ感情ラベルの修正差分を、音声クリップ付き学習データとして蓄積
 - API キーは画面へ入力せず、`config/tokens.json` からだけ読込
 
-分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[2つのVaultの開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
+分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。このほかアプリが台帳を書き出す Input・Visualization・Orchestrator の3つのVaultがあります。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[Vaultの構成と開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
 
 Obsidian がインストール済みの場合は、`run.bat` と同じフォルダーに **「可視化用Obsidianを開く」** ショートカットが自動作成されます。クリックすると `runtime/data/obsidian/VisualizationVault` を開きます。
 
@@ -346,7 +346,7 @@ JSON は画面設定にかかわらず必ず生成され、話者ラベル、自
 
 研究分析のExcel、分析全体JSON、個別CSVは「分析・可視化」で選択中の処理済みデータからダウンロード時に生成します。これらは保存済みrevisionを記録しますが、`runtime/output` フォルダーへ自動複製はしません。
 
-選択した元ファイルは変更・削除しません。開始時にアプリ内のジョブ専用フォルダーへスナップショットコピーし、そのコピーを処理するため、実行中に元ファイルが置換されても処理内容は変わりません。前処理用ファイルを含む一時コピーは処理終了後に削除します。確認再生用のコピーは `runtime/data/media`、ライブラリのメタデータは `runtime/data/library.sqlite3` に保存されます（`MOJIOKOSI_DATA_DIR` で変更可）。
+選択した元ファイルは変更・削除しません。開始時にアプリ内のジョブ専用フォルダーへスナップショットコピーし、そのコピーを処理するため、実行中に元ファイルが置換されても処理内容は変わりません。前処理用ファイルを含む一時コピーは処理終了後に削除します。確認再生用のコピーは `runtime/data/media`、ライブラリのメタデータは `runtime/data/library.sqlite3` に保存されます（`MOJIOKOSI_DATA_DIR` で変更可）。処理済みデータを削除すると、会話と確認再生用のコピーは `runtime/data/trash` のゴミ箱に移り、一覧の「ゴミ箱」から復元できます。30日後に自動で完全に削除されます（日数は `MOJIOKOSI_TRASH_RETENTION_DAYS` で変更でき、0で自動削除しません）。
 
 ## くしなだ学習用データ
 
@@ -425,7 +425,7 @@ FlaskのHTTPサーバーを `0.0.0.0` などへbindし、`http://PCのIPアド�
 | `MAX_RETAINED_JOBS` | `MOJIOKOSI_MAX_RETAINED_JOBS` | 50件 | メモリー内に保持するジョブ状態 |
 | `JOB_TTL_SECONDS` | `MOJIOKOSI_JOB_TTL_SECONDS` | 86400秒（24時間） | 完了・失敗・キャンセル済みジョブ状態の保持時間 |
 | `BACKUP_DIR` | `MOJIOKOSI_BACKUP_DIR` | `runtime/backups` | 「バックアップを作成」と `scripts/backup_data.py` の保存先 |
-| `TRASH_RETENTION_DAYS` | `MOJIOKOSI_TRASH_RETENTION_DAYS` | 30日 | 削除した会話の元音声・動画を `runtime/data/trash` に保管する日数。過ぎた分は起動時に完全削除します。0で削除時にすぐ消去 |
+| `TRASH_RETENTION_DAYS` | `MOJIOKOSI_TRASH_RETENTION_DAYS` | 30日 | 削除した会話（DBの行・元音声・動画・サムネイル）を `runtime/data/trash` に保管する日数。その間は処理済みデータ一覧の「ゴミ箱」から復元・完全削除でき、過ぎた分は起動時に完全削除します。0で自動削除しない |
 
 ジョブ保持上限とTTLは、進捗表示や再接続に使うメモリー内の状態を整理する設定です。処理済みライブラリや `runtime/output` の成果物を自動削除する設定ではありません。送信直後に接続が切れたりページを再読み込みした場合は、ブラウザーが同じ送信IDで受付中・実行中・保存済み結果を照会し、未受付を確認した再送でも同じIDを再利用して二重実行を防ぎます。
 

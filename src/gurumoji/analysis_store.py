@@ -312,7 +312,20 @@ class AnalysisStore:
         result["obsidian_uri"] = ("obsidian://open?" + urlencode({"path": str(self.vault / row["note_path"])})
                                     if local and row["note_path"] and row["vault_status"] == "completed" else "")
         result["vault_notes"] = self.vault_notes(row["id"])
+        # vault_status covers ResearchVault only; the generated Vaults are reported separately (OBS-18).
+        result["vault_outputs"] = self._vault_outputs(row)
+        result["vault_outputs_complete"] = all(
+            value["status"] == "published" for value in result["vault_outputs"].values())
         return result
+
+    def _vault_outputs(self, row: dict) -> dict[str, dict[str, str]]:
+        if row["status"] != "completed":
+            return {}
+        try:
+            return self.publication_outcomes(row["id"])
+        except (OSError, ValueError, LookupError) as exc:
+            return {kind: {"status": "unknown", "error": str(exc)}
+                    for kind in ("input", "orchestrator", "visualization")}
 
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
@@ -576,8 +589,6 @@ class AnalysisStore:
                     return self.get(run_id)
                 snapshot, result = self._read_package(run_id)
                 item_id = run["item_id"]
-                library_id = snapshot["library_id"]
-                item_key = uuid.uuid5(uuid.NAMESPACE_URL, library_id + item_id).hex
                 title = str(snapshot.get("title") or item_id)
                 run_dir = self.layout.analysis_dir(item_id, title, run_id)
                 originals = {s["id"]: s for s in snapshot.get("original_source", {}).get("segments", [])}
@@ -586,8 +597,6 @@ class AnalysisStore:
                 refs = self.source_notes(source, item_id, title, run["app_url"])
                 artifact_rows = self.artifacts(run_id)
                 links = {a["name"]: f"[{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in artifact_rows}
-                # No file:/// URI: it names the PC user and breaks when the Vault moves (OBS-12).
-                local_links = {a["name"]: f"保存先 `analysis_store/{a['path']}`" for a in artifact_rows}
                 main = frontmatter(f"analysis-{run_id}", title + "：保存済み分析", conversation_id=item_id,
                                    analysis_id=run_id, input_snapshot_id=run["snapshot_id"],
                                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
@@ -653,7 +662,7 @@ class AnalysisStore:
                     text += links["parameters.json"] + " / " + links["result.json"] + "\n\n"
                     for dataset in method.get("datasets", []):
                         name = f"tables/{dataset}.csv"
-                        if name in links: text += f"- {links[name]} / {local_links[name]}\n"
+                        if name in links: text += f"- {links[name]}\n"
                     text += "\n## 限界と追加確認\n\n" + "\n".join("- " + markdown(v) for v in method.get("limitations", [])) + "\n"
                     self.write_note(target + ".md", f"analysis-{run_id}-{method_id}", item_id, text,
                                     graph_kind="analysis_result", graph_scope="detail")
@@ -662,7 +671,7 @@ class AnalysisStore:
                     main += "\n## 可視化用の分析ツリー\n\n"
                     main += "アウトライン、分析種別、結果の順にグラフでたどれます。\n\n"
                     main += "\n".join("- " + value for value in tree_links) + "\n"
-                main += "\n## 再現用ファイル\n\n" + "\n".join("- " + value + " / " + local_links[name] for name, value in links.items()) + "\n"
+                main += "\n## 再現用ファイル\n\n" + "\n".join("- " + value for value in links.values()) + "\n"
                 main += "\n研究者のメモはインタビューの概要から研究メモを開いて記録してください。\n"
                 note_path = f"{run_dir}/analysis-{run_id}.md"
                 self.write_note(note_path, f"analysis-{run_id}", item_id, main,

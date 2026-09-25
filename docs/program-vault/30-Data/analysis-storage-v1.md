@@ -62,7 +62,7 @@ ResearchVaultの会話は`10-インタビュー/I###-<名前>/`にまとめる�
 
 プロパティは単純なYAML値にし、大量のIDや入れ子の結果はJSONに置く。リンクはVault内のノートパスとブロックIDで生成する。[Obsidian公式：プロパティ](https://help.obsidian.md/properties)、[内部リンクとブロック参照](https://help.obsidian.md/links)
 
-各CSV／JSONにはアプリで取得するリンクと、保存PC上で開くローカルファイルのリンクを付ける。音声リンクとアプリからの取得にはサーバーの起動が必要。PCや配置を変えた場合はローカルファイルリンクの再出力が必要になる。「Obsidianで開く」はローカルパスへのアクセスが許可された環境で表示する。[Obsidian公式：URI](https://help.obsidian.md/uri)
+各CSV／JSONにはアプリで取得するリンクだけを付ける。端末固有の `file:///` パスは、PCのユーザー名などがVaultに残り、移動で切れるため書かない（OBS-12）。音声リンクとアプリからの取得にはサーバーの起動が必要。「Obsidianで開く」はローカルパスへのアクセスが許可された環境で表示する。[Obsidian公式：URI](https://help.obsidian.md/uri)
 
 ## AI仕上げと分析の規約
 
@@ -88,7 +88,7 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 
 分析の生成ノートが人に編集されていたら、編集版を各インタビューの `履歴/ノート変更/` に写してから最新版で上書きする。削除されていたら作り直さず、保存結果の `vault_notes` と `90-運用/同期状況.md` で知らせる（2026-09-25、OBS-04）。保存済みのJSON／CSVは変更しない。考察は各インタビューの`I###-研究メモ.md`に書く。旧`60-ResearchNotes`は移行前の配置。ノートの自動マージは行わない。書き込み主体ごとの差異は[[20-Modules/obsidian-integration]]を参照する。
 
-会話をアプリで削除しても、固定結果とVaultの履歴は自動削除しない。削除済み会話のアプリAPI・音声リンクは使用できなくなる。完全に消去する場合はバックアップを含め、保存した実行・入力・ノートを別途整理する。バックアップはアプリ停止後にDB・`analysis_store`・研究Vault・必要なメディアを一組で保存する。
+会話をアプリで削除しても、固定結果とVaultの履歴は自動削除しない。削除済み会話のアプリAPI・音声リンクは使用できなくなる。完全に消去する場合はバックアップを含め、保存した実行・入力・ノートを別途整理する。バックアップと復元は [[60-Operations/backup-restore]] の手順で、DB・メディア・`analysis_store`・各Vault・台帳を一組で扱う。
 
 ## APIと拡張手順
 
@@ -111,6 +111,8 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 | 保存・Vault生成の再試行 | `POST /api/analysis/runs/<run-id>/vault` |
 | 成果物取得 | `GET /api/analysis/artifacts/<artifact-id>`。hashを検証して返す |
 | 固定runのZIP取得 | `GET /api/analysis/runs/<run-id>/export.zip`。manifest、parameters、result、表CSVを同じ固定成果物から束ねる |
+
+保存結果（`run`）の `vault_status` はResearchVaultへの書き出しだけを表す。Input／Orchestrator／Visualizationへの書き出しは `vault_outputs`（Vaultごとの `status`：`published`／`failed`／`conflict`／`unknown` と `error`）と `vault_outputs_complete` で返す。正本（固定成果物とResearchVault）の保存が成功していれば、生成Vaultが失敗しても保存は成功扱いのまま（ADR-009）。「保存履歴」は未完了のVaultと理由を示し、上の再試行で書き直せる（OBS-18）。
 
 新しい組み込み手法は [[40-Design/method-rules|登録規約]] を満たし、`analysis_method_registry.METHODS` にID・表示名・CSVデータセットを追加する。計算は既存の分析層へ、詳細と状態・単位・解析器の対応付けは `method_results` へ加える。CSVの列定義、根拠IDの検証、空・除外・更新時の検証を追加し、計算が変わった版を更新する。ファイルから任意コードを実行する登録方式にはしない。登録手法の一覧・件数は現行の`METHODS`を正本とする。
 

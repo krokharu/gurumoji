@@ -69,15 +69,15 @@ obsidian-safety-vault/
 | 競合：人のノートへの同期書き込み | `test_obsidian_layout.py`のテーマ・仕上げ保護2件 | あり | 人のノートに書かない方式で解決。生成ノート一般のhash照合直後の競合（OBS-04）は未検証 |
 | 競合：状態を失った後に作業台を作り直す | `test_obsidian_finishing.py`: `test_missing_state_never_overwrites_existing_initial_notes`、`test_create_only_write_preserves_a_concurrent_file` | あり | 自動復元ではなく、既存ノートを保持して停止することを検証 |
 | リネーム・移動 | `test_obsidian_finishing.py`: `test_metadata_edits_and_moved_notes_preserve_finishing_and_apply`、`test_ambiguous_moved_note_is_rejected` | あり（仕上げのみ） | 分析ノートを移動した後に再保存しても、再作成・二重作成しないこと。Wikilinkの全形式が移行後も保持されること（`rewrite_links` の単体テストは一部あり） |
-| 削除：復元可能 | `test_vault_coverage.py`: `test_deleted_conversation_keeps_a_marked_ledger` | 一部 | ResearchVaultの状態表示（OBS-11）。メディアをゴミ箱から復元できること（DATA-01。未実装） |
+| 削除：復元可能 | `test_vault_coverage.py`: `test_deleted_conversation_keeps_a_marked_ledger`、`test_obsidian_layout.py`: `test_deleted_conversation_is_marked_and_notes_are_kept`、`test_four_vaults.py`: `test_deleting_conversation_marks_research_vault_and_keeps_notes` | あり | `test_backend_safety.py` のゴミ箱の5件（削除→復元で行が一致、競合の拒否と完全削除、保持期間、起動時の保留項目の完了・破棄）でDATA-01も確認 |
 | 重複：2回処理しても二重に生成しない | `test_analysis_storage.py`のidempotency、`test_four_vaults.py`の再公開、`test_obsidian_finishing.py`のラッチ、`test_obsidian_layout.py`のテーマ同期 | あり | テーマの別ノートも2回目はバイト一致。元テーマは初回から変更しない |
 | 異常終了：書き込み途中 | `test_analysis_storage.py`: `test_mid_write_failure_retries_deterministically_and_detects_tamper`、`test_interrupted_save_recovers_original_package_after_edit_without_reanalysis`、`test_obsidian_layout.py`: `test_interrupted_migration_resumes_from_same_backup` | 一部 | `VaultRegistry` の `pending` hashからの回復。`os.replace` が失敗したときに一時ファイルが残らないこと |
 | 移行：リンクと引用 | `test_obsidian_layout.py`: `test_migration_updates_catalog_links_and_preserves_literal_quotes_and_backup`、`test_legacy_fences_and_quote_literals_are_never_rewritten` | あり | 利用者が作った空フォルダーを削除しないこと（OBS-13）、Dry Run（OBS-16） |
 | Vaultの誤認：入れ子・書き込み禁止のルート | `test_four_vaults.py`: `test_software_and_research_vaults_are_not_generated_roots` | 一部 | 親フォルダーに `.obsidian` がある場合に停止すること（OBS-10） |
-| `.obsidian` を変更しない | `test_obsidian_layout.py`（ワークスペース編集の保持） | 一部 | 既存Vaultの `core-plugins.json`・`appearance.json` を変更しないこと（OBS-03、ADR-103 の採用後） |
+| `.obsidian` を変更しない | `test_obsidian_layout.py`: `test_existing_vault_settings_are_never_rewritten`、`test_new_vault_is_configured_once_and_user_changes_stay`、ワークスペース編集の保持 | あり | Obsidian起動中にアプリのブックマークグループを更新したときの競合（OBS-04） |
 | ファイル名：禁止文字・末尾・同名・長さ | なし | なし | `register`、`graph_node_path` の規則とパス長の上限（OBS-14） |
 | CSRF：ブラウザー由来のPOST | `test_interview_comparison.py`: `test_browser_requests_require_csrf_and_save_the_displayed_input_version`、`test_browser_e2e.py`: `test_comparison_and_unsaved_navigation_regressions` | あり | Origin／Sec-Fetchヘッダーと実ブラウザーで比較・保存を検証。`apiFetch`内部の`window.fetch`は許可する |
-| 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops` | 一部 | `recover`・`migrate` が失敗したときに状態として公開されること（OBS-09）、操作ログに本文が含まれないこと（OBS-15） |
+| 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops`、`test_backend_safety.py`: `test_config_reports_a_stopped_obsidian_watcher`、`test_application_lifecycle.py`: `test_not_started_is_reported_before_the_watcher_runs` | 一部 | スキップのログに本文が含まれないことの自動確認（OBS-15）。実ブラウザーでの表示確認 |
 
 ## 追加するテストケース（期待する結果）
 

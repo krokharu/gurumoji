@@ -112,27 +112,65 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(memo.read_bytes(), before)
         self.assertEqual(json.loads(bookmark.read_text(encoding='utf-8'))['items'][-1]['title'], '自分用')
 
-    def test_app_deletion_marks_overview_and_lists_but_keeps_notes(self):
-        segments = [{'id': 's1', 'speaker': 'A', 'start': 0, 'end': 1, 'text': '本文'}]
-        self.workbench.prepare('gone', '会議.wav', segments, revision=0)
-        record = self.layout.register('gone', '会議.wav')
-        self.layout.update('gone', '会議.wav', {})
+    def test_existing_vault_settings_are_never_rewritten(self):
+        settings = self.layout.vault / '.obsidian'
+        settings.mkdir(parents=True)
+        files = {
+            'core-plugins.json': '{"graph": false, "file-explorer": true}',
+            'appearance.json': '{"enabledCssSnippets": []}',
+            'bookmarks.json': '{"items": [{"type": "file", "path": "mine.md"}]}',
+            'workspaces.json': '{"workspaces": {}, "active": ""}',
+        }
+        for name, text in files.items():
+            (settings / name).write_text(text, encoding='utf-8')
+        for i in range(2):
+            self.layout.update('existing', '既存.wav', {}, '保存済み')
+        for name, text in files.items():
+            self.assertEqual((settings / name).read_text(encoding='utf-8'), text, name)
+        self.assertFalse((settings / 'graph.json').exists())
+        self.assertFalse((settings / 'workspace.json').exists())
+        self.assertEqual(self.layout.load()['obsidian_settings']['mode'], 'existing')
+
+    def test_new_vault_is_configured_once_and_user_changes_stay(self):
+        self.layout.update('new', '新規.wav', {}, '保存済み')
+        settings = self.layout.vault / '.obsidian'
+        self.assertEqual(self.layout.load()['obsidian_settings']['mode'], 'initialized')
+        self.assertTrue(json.loads((settings / 'core-plugins.json').read_text(encoding='utf-8'))['graph'])
+        # The user turns the graph off and removes the Gurumoji bookmarks.
+        (settings / 'core-plugins.json').write_text('{"graph": false}', encoding='utf-8')
+        (settings / 'bookmarks.json').write_text('{"items": []}', encoding='utf-8')
+        (settings / 'graph.json').unlink()
+        self.layout.update('second', '二件目.wav', {}, '保存済み')
+        self.assertEqual((settings / 'core-plugins.json').read_text(encoding='utf-8'), '{"graph": false}')
+        self.assertEqual((settings / 'bookmarks.json').read_text(encoding='utf-8'), '{"items": []}')
+        self.assertFalse((settings / 'graph.json').exists())
+
+    def test_deleted_conversation_is_marked_and_notes_are_kept(self):
+        record = self.layout.register('gone', '削除する会議.wav')
+        self.layout.update('gone', '削除する会議.wav', {}, '保存済み')
         memo = self.layout.vault / self.layout.note_path('gone', '', '研究メモ')
-        memo.unlink()
-        before = {p: p.read_bytes() for p in self.layout.vault.rglob('*-全文.md')}
+        memo.write_text(memo.read_text(encoding='utf-8') + '\n研究者の記録\n', encoding='utf-8')
+        memo_bytes = memo.read_bytes()
         self.assertTrue(self.layout.mark_deleted('gone'))
+        self.assertFalse(self.layout.mark_deleted('gone'))
+        self.assertFalse(self.layout.mark_deleted('never-registered'))
         hub = (self.layout.vault / record['hub']).read_text(encoding='utf-8')
         self.assertEqual(unpack(hub)[0]['status'], 'アプリから削除済み')
-        self.assertIn('アプリから削除されました', hub)
+        self.assertIn('この会話はアプリから削除されています', hub)
         index = (self.layout.vault / '10-インタビュー/インタビュー一覧.md').read_text(encoding='utf-8')
         self.assertIn('（アプリから削除済み）', index)
-        self.assertNotIn('：未保存', (self.layout.vault / '01-分析結果.md').read_text(encoding='utf-8'))
-        # Notes stay as records, and a memo the researcher removed is not recreated.
-        self.assertEqual({p: p.read_bytes() for p in before}, before)
-        self.assertFalse(memo.exists())
-        # A later workbench status does not hide the deletion.
-        self.layout.update('gone', '会議.wav', {}, status='確認が必要')
+        analysis_index = (self.layout.vault / '01-分析結果.md').read_text(encoding='utf-8')
+        self.assertNotIn('：未保存', analysis_index)
+        self.assertEqual(memo.read_bytes(), memo_bytes)
+        # Later finishing syncs do not quietly undo the deletion status.
+        self.layout.update('gone', '削除する会議.wav', {}, '完了')
         self.assertEqual(self.layout.load()['interviews']['gone']['status'], 'アプリから削除済み')
+        # Imported again under the same ID: the previous status comes back.
+        self.assertTrue(self.layout.clear_deleted('gone'))
+        restored = self.layout.load()['interviews']['gone']
+        self.assertEqual(restored['status'], '保存済み')
+        self.assertNotIn('deleted_at', restored)
+        self.assertNotIn('削除されています', (self.layout.vault / record['hub']).read_text(encoding='utf-8'))
 
     def test_deleting_a_conversation_never_creates_a_vault_overview(self):
         self.assertFalse(self.layout.mark_deleted('never-published'))

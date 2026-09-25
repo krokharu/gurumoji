@@ -1728,13 +1728,8 @@ def recover_delete_quarantines(
     connect: Callable[[], Any],
     media_directory: Path,
     thumbnail_directory: Path,
-    discard_media: Callable[[Path, str], None] | None = None,
 ) -> list[str]:
-    """Resolve crash-left delete staging from the canonical library row state.
-
-    Media of an already deleted row goes to ``discard_media`` (the retention
-    trash) when given; otherwise, and for thumbnails, it is erased.
-    """
+    """Resolve crash-left delete staging from the canonical library row state."""
     warnings: list[str] = []
     storage_roots = ((media_directory, "media"), (thumbnail_directory, "thumbnail"))
     with connect() as connection:
@@ -1775,8 +1770,6 @@ def recover_delete_quarantines(
                                 )
                                 continue
                             durable_move(quarantined, target, replace_existing=False)
-                        elif asset_kind == "media" and discard_media is not None:
-                            discard_media(quarantined, item_id)
                         elif quarantined.is_dir() and not quarantined.is_symlink():
                             shutil.rmtree(quarantined)
                         else:

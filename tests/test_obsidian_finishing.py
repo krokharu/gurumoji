@@ -3,9 +3,10 @@ import json
 import re
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import app
 from gurumoji import ai_finishing

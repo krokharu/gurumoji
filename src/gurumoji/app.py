@@ -82,8 +82,8 @@ from .services.ai import client as ai_client
 from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
-from .services.media_trash import purge_expired_trash, trash_media
 from .services import data_backup
+from .services import library_trash
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -335,10 +335,6 @@ ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
 BACKUP_DIRECTORY = Path(
     os.environ.get("MOJIOKOSI_BACKUP_DIR", str(RUNTIME_DIRECTORY / "backups"))
 ).expanduser()
-# Days a deleted conversation's original media stays in <data>/trash; 0 erases at once.
-TRASH_RETENTION_DAYS = positive_env_int(
-    "MOJIOKOSI_TRASH_RETENTION_DAYS", 30, minimum=0, maximum=3650
-)
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
 REMOTE_ACCESS_TOKEN = os.environ.get("MOJIOKOSI_ACCESS_TOKEN", "").strip()
@@ -1179,7 +1175,13 @@ def vault_publications() -> VaultPublicationService:
         row_session_profile=row_session_profile,
         database_error=sqlite3.Error,
         warn=lambda message, exc: app.logger.warning("%s: %s", message, exc),
+        research_layout=research_layout,
     )
+
+
+def research_layout():
+    from .obsidian_layout import ObsidianLayout
+    return ObsidianLayout(DATABASE_FILE)
 
 
 def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_kind: str | None = None) -> None:
@@ -1188,14 +1190,6 @@ def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_ki
 
 def retire_input_vault(item_id: str) -> None:
     vault_publications().retire_input(item_id)
-
-
-def retire_research_vault(item_id: str) -> None:
-    """Mark the ResearchVault overview as deleted; its notes stay as records (OBS-11)."""
-    try:
-        obsidian_workbench().layout.mark_deleted(item_id)
-    except (OSError, ValueError, TypeError, LookupError) as exc:
-        app.logger.warning("ResearchVault に削除を記録できませんでした: %s", exc)
 
 
 def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
@@ -1232,22 +1226,53 @@ _update_library_from_payload_locked = make_library_update(
 
 
 def trash_directory() -> Path:
-    # Beside media so the move stays a rename on the same volume.
-    return MEDIA_DIRECTORY.parent / "trash"
+    # Beside the database, like analysis_store, so a relocated library keeps its trash.
+    return Path(DATABASE_FILE).parent / "trash"
 
 
-def _discard_deleted_media(path: Path, item_id: str) -> None:
-    trash_media(trash_directory(), item_id, "", [path],
-                retention_days=TRASH_RETENTION_DAYS, move=durable_move)
+def trash_retention_days() -> int:
+    return library_trash.retention_days(
+        os.environ.get("MOJIOKOSI_TRASH_RETENTION_DAYS", str(library_trash.DEFAULT_RETENTION_DAYS)))
+
+
+def _trash_move(source: Path, target: Path) -> None:
+    durable_move(source, target, replace_existing=False)
 
 
 def recover_delete_quarantines() -> list[str]:
-    return edit_transactions.recover_delete_quarantines(
+    def row_exists(item_id: str) -> bool:
+        with database_connection() as connection:
+            return connection.execute("SELECT 1 FROM library_items WHERE id=?", (item_id,)).fetchone() is not None
+
+    # Committed deletes reach the trash first; the quarantine recovery then sees nothing left.
+    warnings = library_trash.recover_pending(trash_directory(), row_exists=row_exists, move=_trash_move)
+    warnings += edit_transactions.recover_delete_quarantines(
         connect=database_connection,
         media_directory=MEDIA_DIRECTORY,
         thumbnail_directory=THUMBNAIL_DIRECTORY,
-        discard_media=_discard_deleted_media if TRASH_RETENTION_DAYS > 0 else None,
     )
+    for entry_id in library_trash.purge_expired(trash_directory(), trash_retention_days()):
+        app.logger.info("保持期間を過ぎたゴミ箱の項目を完全に削除しました: %s", entry_id)
+    return warnings
+
+
+def list_library_trash() -> dict[str, Any]:
+    days = trash_retention_days()
+    entries = library_trash.list_entries(trash_directory(), days)
+    return {"entries": entries, "retention_days": days, "total_bytes": sum(e["bytes"] for e in entries)}
+
+
+def restore_library_trash(entry_id: str) -> str:
+    item_id = library_trash.restore(
+        trash_directory(), entry_id, connect=database_connection,
+        targets={"media": MEDIA_DIRECTORY, "thumbnail": THUMBNAIL_DIRECTORY}, move=_trash_move)
+    # Clears the ResearchVault deletion mark and republishes the InputVault ledger.
+    publish_input_vault(library_row(item_id))
+    return item_id
+
+
+def purge_library_trash(entry_id: str) -> None:
+    library_trash.purge(trash_directory(), entry_id)
 
 
 def create_data_backup(include_media: bool = False) -> dict[str, Any]:
@@ -1260,10 +1285,6 @@ def create_data_backup(include_media: bool = False) -> dict[str, Any]:
         return data_backup.create_backup(
             DATABASE_FILE.parent, BACKUP_DIRECTORY, include_media=include_media, app_version=APP_VERSION,
         )
-
-
-def purge_media_trash() -> list[str]:
-    return purge_expired_trash(trash_directory(), TRASH_RETENTION_DAYS)
 
 
 def discover_edit_transaction_staging_dirs(
@@ -1447,7 +1468,7 @@ def application_lifecycle() -> ApplicationLifecycle:
             initialize_library=lambda: initialize_library(repair_provenance=False),
             recover_edits=lambda: recover_edit_transactions(),
             repair_provenance=repair_provenance,
-            recover_deletes=lambda: recover_delete_quarantines() + purge_media_trash(),
+            recover_deletes=lambda: recover_delete_quarantines(),
             repair_training=lambda: repair_training_artifacts(),
             cleanup_uploads=lambda: cleanup_orphaned_uploads(),
             import_outputs=lambda: import_existing_outputs(),
@@ -1694,8 +1715,7 @@ _delete_library_item_locked = make_library_deletion(
     reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
     retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
     trash_directory=lambda: trash_directory(),
-    trash_retention_days=lambda: TRASH_RETENTION_DAYS,
-    retire_research_vault=lambda *args, **kwargs: retire_research_vault(*args, **kwargs),
+    trash_retention_days=lambda: trash_retention_days(),
 )
 
 
@@ -1871,6 +1891,9 @@ def create_app() -> Flask:
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         runtime_info=runtime_info,
         upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+        list_library_trash=lambda: list_library_trash(),
+        restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
+        purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
     )
     return flask_app
 
