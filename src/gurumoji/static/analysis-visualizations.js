@@ -52,6 +52,40 @@ function analysisSvgElement(tagName, attributes = {}, textValue = '') {
   return element;
 }
 
+function buildAnalysisProcessFlow({title, note, nodes}) {
+  const flow = analysisElement('section', 'analysis-process-flow');
+  const heading = analysisElement('div', 'analysis-process-flow-heading');
+  heading.append(analysisElement('strong', '', title), analysisElement('small', '', note));
+  const viewport = analysisElement('div', 'analysis-process-flow-viewport');
+  const track = analysisElement('div', 'analysis-process-flow-track');
+  nodes.forEach((item, index) => {
+    const node = analysisElement('div', `analysis-process-node ${item.state || 'pending'}`);
+    node.dataset.processNode = item.id;
+    node.append(
+      analysisElement('span', 'analysis-process-node-kind', item.kind || `STEP ${index + 1}`),
+      analysisElement('strong', '', item.label),
+      analysisElement('small', '', item.detail || '')
+    );
+    if (Array.isArray(item.terms) && item.terms.length) {
+      const terms = analysisElement('div', 'analysis-process-terms');
+      item.terms.slice(0, 3).forEach(term => terms.append(analysisElement('span', '', term)));
+      node.append(terms);
+    }
+    track.append(node);
+    if (index < nodes.length - 1) {
+      const next = nodes[index + 1];
+      const state = item.state === 'running' || next.state === 'running' ? 'active'
+        : item.state === 'complete' && next.state === 'complete' ? 'complete' : 'pending';
+      const link = analysisElement('span', `analysis-process-link ${state}`);
+      link.setAttribute('aria-hidden', 'true');
+      track.append(link);
+    }
+  });
+  viewport.append(track);
+  flow.append(heading, viewport);
+  return flow;
+}
+
 function buildAnalysisLineSvg(series, bins) {
   const svg = analysisSvgElement('svg', {
     class: 'analysis-timeline-chart', viewBox: '0 0 760 300', role: 'img', tabindex: '0'
@@ -180,6 +214,129 @@ function buildAnalysisTimelineChart(rawBins, speakerMetrics = []) {
   totalButton.addEventListener('click', () => render('total'));
   speakerButton.addEventListener('click', () => render('speakers'));
   render('total');
+  return module;
+}
+
+function analysisExcitementPoints(rawBins) {
+  return (Array.isArray(rawBins) ? rawBins : []).map(bin => {
+    const start = Math.max(0, Number(bin.start) || 0);
+    const end = Math.max(start, Number(bin.end) || start);
+    const duration = Math.max(.001, end - start);
+    const speaking = Math.max(0, Number(bin.speaking_seconds) || 0);
+    const turns = Math.max(0, Number(bin.turn_count) || 0);
+    // A descriptive activity index: speech occupancy and turn starts, each capped.
+    const occupancy = Math.min(1, speaking / duration);
+    const turnRate = Math.min(1, turns / Math.max(1, duration / 12));
+    return {start, end, speaking, turns, score: Math.round(100 * (.65 * occupancy + .35 * turnRate))};
+  }).filter(point => point.end > point.start);
+}
+
+function buildAnalysisExcitementChart(rawBins, sessionOutline = {}) {
+  const points = analysisExcitementPoints(rawBins);
+  const module = analysisElement('div', 'analysis-chart-module');
+  const explanation = analysisElement('p', 'analysis-caption',
+    '縦軸は発話時間の割合（65%）と発話開始回数（35%）から計算した会話活発度です。声の大きさや感情を測った値ではありません。');
+  module.append(explanation);
+  if (!points.length) {
+    module.append(analysisElement('p', 'analysis-no-data', '時刻付きの発話がないため表示できません。'));
+    return module;
+  }
+  const result = sessionOutline?.result || {};
+  const stale = Boolean(result.transformer_stale);
+  const duration = Math.max(...points.map(point => point.end));
+  const rows = (Array.isArray(result.rows) ? result.rows : []).filter(row => {
+    const start = Number(row.start);
+    const end = Number(row.end);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start
+      && start < duration && (!stale || row.title_source === 'outline');
+  });
+  const stage = analysisElement('div', 'analysis-chart-stage');
+  const svg = analysisSvgElement('svg', {
+    class: 'analysis-timeline-chart analysis-excitement-chart', viewBox: '0 0 760 350', role: 'img', tabindex: '0'
+  });
+  svg.append(
+    analysisSvgElement('title', {}, '時間別の盛り上がりと議題・話題'),
+    analysisSvgElement('desc', {}, '横軸は会話の経過時間、縦軸は発話量と発話開始回数から計算した盛り上がりの目安です。下の帯にアウトラインと話題を表示します。')
+  );
+  const plot = {x: 70, y: 22, width: 650, height: 195};
+  const at = time => plot.x + plot.width * Math.min(1, Math.max(0, time / duration));
+  [0, 25, 50, 75, 100].forEach(score => {
+    const y = plot.y + plot.height * (1 - score / 100);
+    svg.append(
+      analysisSvgElement('line', {x1: plot.x, x2: plot.x + plot.width, y1: y, y2: y, class: 'analysis-chart-grid'}),
+      analysisSvgElement('text', {x: plot.x - 9, y: y + 4, 'text-anchor': 'end', class: 'analysis-chart-axis-label'}, String(score))
+    );
+  });
+  const coordinates = points.map(point => ({
+    ...point, x: at((point.start + point.end) / 2),
+    y: plot.y + plot.height * (1 - point.score / 100)
+  }));
+  const line = coordinates.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
+  const area = `M ${plot.x} ${plot.y + plot.height} L ${coordinates.map(point => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')} L ${plot.x + plot.width} ${plot.y + plot.height} Z`;
+  svg.append(
+    analysisSvgElement('path', {d: area, class: 'analysis-excitement-area'}),
+    analysisSvgElement('path', {d: line, class: 'analysis-excitement-line', 'vector-effect': 'non-scaling-stroke'})
+  );
+  coordinates.forEach(point => {
+    const related = rows.find(row => Number(row.start) <= point.start && point.start < Number(row.end));
+    const topic = !stale && related ? (related.topics || []).map(item => item.label).filter(Boolean).join('・') : '';
+    const circle = analysisSvgElement('circle', {cx: point.x, cy: point.y, r: 4, class: 'analysis-excitement-point'});
+    circle.append(analysisSvgElement('title', {},
+      `${formatTime(point.start)}–${formatTime(point.end)} / 盛り上がり ${point.score} / 発話 ${point.speaking.toFixed(1)}秒 / 発話開始 ${point.turns}回`
+      + (related ? ` / アウトライン ${related.title}` : '') + (topic ? ` / 話題 ${topic}` : '')));
+    svg.append(circle);
+  });
+  svg.append(
+    analysisSvgElement('text', {x: 14, y: 122, transform: 'rotate(-90 14 122)', 'text-anchor': 'middle', class: 'analysis-chart-axis-title'}, '盛り上がり（目安）'),
+    analysisSvgElement('text', {x: 35, y: 251, class: 'analysis-chart-axis-title'}, '議題'),
+    analysisSvgElement('text', {x: 35, y: 278, class: 'analysis-chart-axis-title'}, '話題')
+  );
+  rows.forEach(row => {
+    const x = at(Number(row.start));
+    const width = Math.max(2, at(Math.min(duration, Number(row.end))) - x);
+    const labels = [
+      {text: row.title_source === 'outline' ? String(row.title || '') : '', y: 236, kind: 'outline'},
+      {text: !stale ? (row.topics || []).map(item => item.label).filter(Boolean).join('・')
+        || (row.title_source === 'transformer' ? String(row.title || '') : '') : '', y: 263, kind: 'topic'}
+    ];
+    labels.filter(item => item.text).forEach(item => {
+      const group = analysisSvgElement('g');
+      group.append(analysisSvgElement('rect', {
+        x, y: item.y, width, height: 22, rx: 3, class: `analysis-excitement-band ${item.kind}`
+      }));
+      if (width >= 30) group.append(analysisSvgElement('text', {
+        x: x + 4, y: item.y + 15, class: 'analysis-excitement-band-label'
+      }, Array.from(item.text).slice(0, Math.floor((width - 8) / 11)).join('')));
+      group.append(analysisSvgElement('title', {}, `${formatTime(row.start)}–${formatTime(row.end)} / ${item.text}`));
+      svg.append(group);
+    });
+  });
+  [0, duration / 2, duration].forEach((time, index) => svg.append(analysisSvgElement('text', {
+    x: at(time), y: 315, 'text-anchor': index === 0 ? 'start' : index === 2 ? 'end' : 'middle', class: 'analysis-chart-axis-label'
+  }, formatTime(time))));
+  svg.append(analysisSvgElement('text', {
+    x: plot.x + plot.width / 2, y: 338, 'text-anchor': 'middle', class: 'analysis-chart-axis-title'
+  }, '経過時間'));
+  stage.append(svg);
+  module.append(stage);
+  const labels = analysisElement('div', 'analysis-excitement-labels');
+  if (!rows.length) {
+    labels.append(analysisElement('p', 'analysis-no-data', 'アウトライン・話題の時刻付きラベルはまだありません。'));
+  } else {
+    rows.forEach(row => {
+      const entry = analysisElement('div', 'analysis-excitement-label');
+      const topic = !stale ? (row.topics || []).map(item => item.label).filter(Boolean).join('・')
+        || (row.title_source === 'transformer' ? String(row.title || '') : '話題未解析') : '話題を再分析してください';
+      entry.append(
+        analysisElement('time', '', `${formatTime(row.start)}–${formatTime(row.end)}`),
+        analysisElement('span', '', row.title_source === 'outline' ? `議題: ${row.title}` : '議題: アウトライン未設定'),
+        analysisElement('span', '', `話題: ${topic}`)
+      );
+      labels.append(entry);
+    });
+  }
+  module.append(labels);
+  if (stale) module.append(analysisElement('p', 'analysis-chart-note', '本文などが更新されたため、古いTransformer話題は表示していません。テーマ分析を再実行するとラベルを更新できます。'));
   return module;
 }
 

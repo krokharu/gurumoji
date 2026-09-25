@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-from ..analysis_insights import KWIC_FIELDS, input_fingerprint, plan_items
+from ..analysis_insights import KWIC_FIELDS, build_session_outline, input_fingerprint, plan_items
 from ..analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from ..media_formats import ALLOWED_EXTENSIONS, VIDEO_EXTENSIONS
 from ..research_analysis import (
@@ -1620,6 +1620,12 @@ def group_analysis_for_row(
             analysis, model=str(transformer_result.get("engine", {}).get("name") or DEFAULT_TRANSFORMER_MODEL)
         ),
     }
+    analysis["session_outline"] = build_session_outline(
+        outline=json_load(row["outline_json"], None),
+        transformer=transformer_result,
+        session_profile=session_profile,
+        transformer_stale=analysis["transformer"]["stale"],
+    )
     classification_saved = json_load(row["segment_classification_json"], {}) \
         if "segment_classification_json" in row.keys() else {}
     classification_result = (

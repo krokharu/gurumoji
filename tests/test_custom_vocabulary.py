@@ -9,13 +9,13 @@ import app
 class CustomVocabularyTests(unittest.TestCase):
     def test_normalizes_deduplicates_and_builds_a_compact_whisper_prompt(self):
         terms = app.normalize_custom_vocabulary(
-            " グルモジ \nWhisperX\nグルモジ\n\n黒川研究室 "
+            " グルモジ \nWhisperX\nグルモジ\n\n東京大学 "
         )
 
-        self.assertEqual(terms, ("グルモジ", "WhisperX", "黒川研究室"))
+        self.assertEqual(terms, ("グルモジ", "WhisperX", "東京大学"))
         self.assertEqual(
             app.whisper_vocabulary_prompt(terms),
-            "用語・固有名詞: グルモジ、WhisperX、黒川研究室。",
+            "用語・固有名詞: グルモジ、WhisperX、東京大学。",
         )
 
     def test_rejects_an_overlong_registered_term(self):

@@ -469,9 +469,11 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 raise RuntimeError(diarization_access_error_message(DIARIZATION_MODEL)) from exc
             raise
         diarize_kwargs: dict[str, int] = {}
-        if options.min_speakers is not None:
+        if options.num_speakers is not None:
+            diarize_kwargs["num_speakers"] = options.num_speakers
+        elif options.min_speakers is not None:
             diarize_kwargs["min_speakers"] = options.min_speakers
-        if options.max_speakers is not None:
+        if options.num_speakers is None and options.max_speakers is not None:
             diarize_kwargs["max_speakers"] = options.max_speakers
         diarize_segments = diarize_model(audio, **diarize_kwargs)
         check_cancelled()

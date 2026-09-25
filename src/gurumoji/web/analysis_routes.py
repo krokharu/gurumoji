@@ -128,6 +128,22 @@ def register_analysis_routes(
         except sqlite3.Error:
             return jsonify({"error": "計画を確認できませんでした。"}), 500
 
+    @blueprint.post("/api/library/<item_id>/analysis/plans/proposals")
+    def propose_analysis_pipeline(item_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "計画候補はJSONオブジェクトで指定してください。"}), 400
+        try:
+            return jsonify(commands().propose_pipeline(item_id, payload))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except (ValueError, RuntimeError) as exc:
+            return jsonify({"error": str(exc)}), 503
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "計画候補を生成できませんでした。"}), 500
+
     @blueprint.post("/api/library/<item_id>/analysis/pipelines")
     def start_analysis_pipeline(item_id: str):
         payload = request.get_json(silent=True)

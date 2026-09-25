@@ -137,6 +137,29 @@ class SessionOutlineApiTests(unittest.TestCase):
                          ["outline", "transformer"])
         self.assertFalse(outline["result"]["transformer_stale"])
 
+    def test_analysis_payload_exposes_timed_outline_and_current_topics_for_chart(self):
+        from gurumoji.transformer_analysis import DEFAULT_MODEL, transformer_input_fingerprint
+
+        first = self.client.get("/api/library/session/analysis").get_json()
+        analysis = first.get("analysis", first)
+        saved = transformer_result()
+        saved.update({"source_revision": 0, "analysis_revision": 0,
+                      "fingerprint": transformer_input_fingerprint(analysis, model=DEFAULT_MODEL)})
+        with app.database_connection() as connection:
+            connection.execute(
+                "UPDATE library_items SET transformer_analysis_json=? WHERE id='session'",
+                (json.dumps(saved, ensure_ascii=False),),
+            )
+        response = self.client.get("/api/library/session/analysis")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        analysis = payload.get("analysis", payload)
+        self.assertTrue(analysis["automatic"]["time_bins"])
+        rows = analysis["session_outline"]["result"]["rows"]
+        self.assertEqual(rows[0]["title"], "価格の議題")
+        self.assertEqual(rows[0]["topics"][0]["label"], "価格について")
+        self.assertFalse(analysis["session_outline"]["result"]["transformer_stale"])
+
     def test_edited_transcript_marks_the_saved_themes_as_older(self):
         row = app.library_row("session")
         app.upsert_library_item(

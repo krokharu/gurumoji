@@ -1,6 +1,8 @@
 import threading
 import time
 import unittest
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import app
@@ -38,6 +40,129 @@ class AnalysisMilestoneTests(unittest.TestCase):
                 return body
             time.sleep(0.02)
         self.fail(f"pipeline timeout: {body}")
+
+    def test_local_transformer_proposal_is_validated_and_recorded_in_plan(self):
+        class Vector:
+            def __init__(self, value):
+                self.value = value
+
+            def __matmul__(self, other):
+                return self.value * other.value
+
+        def encode(values, *, kind):
+            if kind == "query":
+                return [Vector(1)], {"name": "test-local-transformer"}
+            return [Vector(0.9), Vector(0.2)], {"name": "test-local-transformer"}
+
+        payload = self.payload("proposal-transformer-request-0001")
+        with patch.object(app, "encode_transformer_texts", side_effect=encode):
+            response = self.client.post(self.url + "/plans/proposals", json={
+                **payload, "engine": "transformer", "objective": "参加の偏りを確認したい",
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        proposal = response.get_json()["proposal"]
+        self.assertEqual(proposal["primary_method"], "participation")
+        self.assertEqual(proposal["provider"], "local_transformer")
+        recorded = {key: value for key, value in proposal.items() if key != "advice_token"}
+        preview = self.client.post(self.url + "/plans/preview", json={
+            **payload, "planning_proposal": proposal,
+        })
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        self.assertEqual(preview.get_json()["plan"]["planning_proposal"], recorded)
+        started = self.client.post(self.url + "/pipelines", json={
+            **payload, "planning_proposal": proposal,
+        })
+        self.assertEqual(started.status_code, 202, started.get_json())
+        self.assertEqual(started.get_json()["planning"], {
+            "objective": proposal["objective"], "provider": "local_transformer",
+            "model": "test-local-transformer", "primary_method": "participation",
+        })
+        completed = self.wait(started.get_json()["pipeline_id"], {"completed", "failed", "waiting"})
+        self.assertEqual(completed["status"], "completed", completed)
+        run = completed["result_run"]
+        artifact = next(value for value in run["artifacts"] if value["name"] == "result.json")
+        package = json.loads(self.client.get(artifact["url"]).data)
+        self.assertEqual(package["parameters"]["planning_proposal"], recorded)
+        proposal["input_hash"] = "old-input"
+        tampered = self.client.post(self.url + "/plans/preview", json={
+            **payload, "planning_proposal": proposal,
+        })
+        self.assertEqual(tampered.status_code, 400, tampered.get_json())
+
+    def test_selected_local_llm_proposes_only_supported_plan_fields(self):
+        payload = self.payload("proposal-local-llm-request-0001")
+        with patch.object(app, "load_token_config", return_value=SimpleNamespace(
+            lmstudio_base_url="http://127.0.0.1:1234/v1"
+        )), patch.object(app, "configured_ai_credentials", return_value=("", "test-local-model")), patch.object(
+            app, "call_ai_json", return_value={
+                "primary_method": "conversation_dynamics", "rationale": "話者交替を先に確認する。",
+                "checks": [{"id": "timing_quality", "message": "発話時刻を確認する。"}],
+            }
+        ) as call:
+            response = self.client.post(self.url + "/plans/proposals", json={
+                **payload, "engine": "llm", "provider": "lmstudio",
+                "objective": "発話の時間構造を確認したい",
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        proposal = response.get_json()["proposal"]
+        self.assertEqual(proposal["provider"], "lmstudio")
+        self.assertEqual(proposal["model"], "test-local-model")
+        self.assertEqual(proposal["review_order"][0], "conversation_dynamics")
+        self.assertIn("interpretation_limit", {check["id"] for check in proposal["checks"]})
+        self.assertIn("available_methods", call.call_args.args[4])
+        self.assertNotIn("segments", json.loads(call.call_args.args[4]))
+
+    def test_cloud_llm_requires_explicit_cloud_policy(self):
+        payload = self.payload("proposal-cloud-policy-request-0001")
+        with patch.object(app, "call_ai_json") as call:
+            response = self.client.post(self.url + "/plans/proposals", json={
+                **payload, "engine": "llm", "provider": "openai",
+                "objective": "参加の偏りを確認したい",
+            })
+        self.assertEqual(response.status_code, 409, response.get_json())
+        call.assert_not_called()
+
+    def test_selected_cloud_llm_receives_only_planning_context(self):
+        payload = self.payload("proposal-cloud-allowed-request-0001")
+        with patch.object(app, "load_token_config", return_value=SimpleNamespace()), patch.object(
+            app, "configured_ai_credentials", return_value=("test-key", "test-cloud-model")
+        ), patch.object(app, "call_ai_json", return_value={
+            "primary_method": "participation", "rationale": "参加の偏りを先に確認する。",
+            "checks": [],
+        }) as call:
+            response = self.client.post(self.url + "/plans/proposals", json={
+                **payload, "engine": "llm", "provider": "openai",
+                "provider_policy": "cloud_allowed", "objective": "参加の偏りを確認したい",
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(call.call_args.args[0], "openai")
+        context = json.loads(call.call_args.args[4])
+        self.assertEqual(context["objective"], "参加の偏りを確認したい")
+        self.assertEqual(set(context), {
+            "objective", "included_segment_count", "speaker_count", "invalid_time_segments", "available_methods",
+        })
+        proposal = response.get_json()["proposal"]
+        preview = self.client.post(self.url + "/plans/preview", json={
+            **payload, "provider_policy": "cloud_allowed", "planning_proposal": proposal,
+        })
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+
+    def test_llm_cannot_add_an_unimplemented_method(self):
+        payload = self.payload("proposal-invalid-method-request-0001")
+        with patch.object(app, "load_token_config", return_value=SimpleNamespace(
+            lmstudio_base_url="http://127.0.0.1:1234/v1"
+        )), patch.object(app, "configured_ai_credentials", return_value=("", "test-local-model")), patch.object(
+            app, "call_ai_json", return_value={
+                "primary_method": "inferential_statistics", "rationale": "実装されていない手法を使う。",
+                "checks": [],
+            }
+        ):
+            response = self.client.post(self.url + "/plans/proposals", json={
+                **payload, "engine": "llm", "provider": "lmstudio",
+                "objective": "参加の偏りを確認したい",
+            })
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()["reason_code"], "invalid_proposal")
 
     def test_independent_m2_tasks_overlap_and_m3_never_starts_early(self):
         both_started = threading.Event()

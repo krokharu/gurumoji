@@ -77,6 +77,7 @@ def whisper_settings(options: Any, language: str | None, *, diarization_model: s
         "no_speech_threshold": options.no_speech_threshold,
         "min_speakers": options.min_speakers,
         "max_speakers": options.max_speakers,
+        "num_speakers": getattr(options, "num_speakers", None),
         "emotion_analysis": options.emotion_analysis,
         "emotion_model": options.emotion_model if options.emotion_analysis else "",
         "conversation_mode": options.conversation_mode,

@@ -42,7 +42,7 @@ SOURCE_KINDS = {"whisper": "Whisper文字起こし", "imported": "出力JSONの�
 # Only non-secret transcription settings. Tokens and API keys are never accepted.
 WHISPER_KEYS = ("model", "language", "device", "diarization_device", "audio_preprocess", "triple_pass",
                 "boost_quiet_speech", "vad_onset", "vad_offset", "no_speech_threshold",
-                "min_speakers", "max_speakers", "emotion_analysis", "emotion_model", "conversation_mode",
+                "min_speakers", "max_speakers", "num_speakers", "emotion_analysis", "emotion_model", "conversation_mode",
                 "diarization_model", "custom_vocabulary_terms", "custom_vocabulary_sha256")
 CHARTS = {
     "meeting_speaker_activity": "棒グラフ", "comparison_interviews": "棒グラフ",

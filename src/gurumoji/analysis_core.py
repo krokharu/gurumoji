@@ -99,6 +99,9 @@ CAPABILITIES = {
         "manual": {"status": "available", "external": False},
         "all": {"status": "unavailable", "reason": "初回pipelineは外部LLMを呼びません。"},
     },
+    "planning_roles": {
+        "o01": {"status": "available", "engines": ["transformer", "lmstudio", "openai", "google"]},
+    },
 }
 
 DEFINITION_TYPES = frozenset({"string", "number", "boolean", "category"})
@@ -229,6 +232,43 @@ def eligibility_assessment(definitions: list[dict[str, Any]], *, segment_count: 
     }
 
 
+def validate_planning_proposal(
+    proposal: Any, *, input_hash: str, source_revision: int,
+    analysis_revision: int, provider_policy: str,
+) -> dict[str, Any]:
+    """Accept O01 advice as a bounded annotation, never as executable steps."""
+    from .analysis_plan_advisor import ADVISOR_VERSION, normalize_candidate
+
+    if not isinstance(proposal, dict) or proposal.get("version") != ADVISOR_VERSION:
+        raise AnalysisContractError("計画候補の版が正しくありません。", code="invalid_proposal")
+    if (proposal.get("input_hash") != input_hash
+            or proposal.get("source_revision") != source_revision
+            or proposal.get("analysis_revision") != analysis_revision):
+        raise AnalysisContractError("計画候補の入力版が変わっています。再提案してください。", code="revision_conflict")
+    engine = proposal.get("engine")
+    provider = proposal.get("provider")
+    model = proposal.get("model")
+    if not isinstance(engine, str) or engine not in {"transformer", "llm"} or not isinstance(model, str) or not model.strip() or len(model) > 200:
+        raise AnalysisContractError("計画候補の実行モデルが正しくありません。", code="invalid_proposal")
+    if not isinstance(provider, str):
+        raise AnalysisContractError("計画候補の実行先が正しくありません。", code="invalid_proposal")
+    if engine == "transformer" and provider != "local_transformer":
+        raise AnalysisContractError("Transformer計画候補の実行先が正しくありません。", code="invalid_proposal")
+    if engine == "llm" and provider not in {"lmstudio", "openai", "google"}:
+        raise AnalysisContractError("計画候補のLLMが正しくありません。", code="invalid_proposal")
+    if provider in {"openai", "google"} and provider_policy != "cloud_allowed":
+        raise AnalysisContractError("クラウドLLMにはcloud_allowedが必要です。", code="provider_unavailable")
+    objective = proposal.get("objective")
+    if not isinstance(objective, str) or not 3 <= len(objective.strip()) <= 500:
+        raise AnalysisContractError("計画候補の分析目的が正しくありません。", code="invalid_proposal")
+    return {
+        "version": ADVISOR_VERSION, "input_hash": input_hash,
+        "source_revision": source_revision, "analysis_revision": analysis_revision,
+        "engine": engine, "provider": provider, "model": model.strip(),
+        "objective": objective.strip(), **normalize_candidate(proposal),
+    }
+
+
 def build_plan_envelope(
     *, item_id: str, source_revision: int, analysis_revision: int,
     input_fingerprint: str, payload: dict[str, Any], definitions: list[dict[str, Any]],
@@ -251,11 +291,21 @@ def build_plan_envelope(
     if not isinstance(targets, list) or any(t not in {"input", "orchestrator", "visualization"} for t in targets):
         raise AnalysisContractError("公開先が正しくありません。", field="publication_targets")
     provider_policy = payload.get("provider_policy", "local_only")
-    if provider_policy != "local_only":
+    if not isinstance(provider_policy, str) or provider_policy not in {"local_only", "cloud_allowed"}:
         raise AnalysisContractError(
-            "初回pipelineはlocal_onlyだけを提供します。", code="provider_unavailable",
+            "送信方針が正しくありません。", code="provider_unavailable",
             field="provider_policy",
         )
+    proposal = payload.get("planning_proposal")
+    if proposal is not None:
+        proposal = validate_planning_proposal(
+            proposal, input_hash=input_fingerprint, source_revision=source_revision,
+            analysis_revision=analysis_revision, provider_policy=provider_policy,
+        )
+    if provider_policy == "cloud_allowed" and (
+        proposal is None or proposal["provider"] not in {"openai", "google"}
+    ):
+        raise AnalysisContractError("local_only が既定です。クラウド送信方針には選択したLLMの計画候補が必要です。", code="provider_unavailable")
     normalized_definitions = [validate_definition(value) for value in definitions]
     assessment = eligibility_assessment(normalized_definitions, segment_count=segment_count)
     steps = [
@@ -287,6 +337,8 @@ def build_plan_envelope(
         ],
         "steps": steps, "eligibility": assessment,
     }
+    if proposal is not None:
+        envelope["planning_proposal"] = proposal
     envelope["plan_hash"] = fingerprint(envelope)
     return envelope
 
@@ -320,4 +372,3 @@ def build_execution_binding(envelope: dict[str, Any], definitions: list[dict[str
 
 def capability_catalog() -> dict[str, Any]:
     return {"version": CONTRACT_VERSION, "capabilities": CAPABILITIES}
-

@@ -224,6 +224,11 @@ class AnalysisCommands:
             raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
         return self._pipeline.preview(item_id, payload)
 
+    def propose_pipeline(self, item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.propose(item_id, payload)
+
     def start_pipeline(
         self, item_id: str, payload: dict[str, Any], *, app_url: str
     ) -> tuple[dict[str, Any], int]:

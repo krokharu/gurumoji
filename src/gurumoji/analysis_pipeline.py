@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .analysis_plan_advisor import sign_proposal, verify_proposal
 from .analysis_core import (
     AnalysisContractError,
     build_execution_binding,
@@ -22,6 +23,7 @@ from .analysis_core import (
     capability_catalog,
     fingerprint,
     validate_definition,
+    validate_planning_proposal,
 )
 
 
@@ -178,6 +180,7 @@ class AnalysisPipelineService:
         publication_outcomes: Callable[[str], dict[str, dict[str, str]]],
         public_run: Callable[[dict[str, Any]], dict[str, Any]],
         runtime_key: str,
+        plan_advisor: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         self.connect = connect
         self.find_item = find_item
@@ -189,6 +192,7 @@ class AnalysisPipelineService:
         self.publication_outcomes = publication_outcomes
         self.public_run = public_run
         self.runtime_key = runtime_key
+        self.plan_advisor = plan_advisor
 
     def capabilities(self) -> dict[str, Any]:
         return capability_catalog()
@@ -279,6 +283,8 @@ class AnalysisPipelineService:
             raise AnalysisContractError("definition_idsはIDの配列です。", field="definition_ids")
         definitions = self._definitions(item_id, ids)
         snapshot = self.snapshot_builder(item)
+        if payload.get("planning_proposal") is not None:
+            verify_proposal(payload["planning_proposal"])
         envelope = build_plan_envelope(
             item_id=item_id, source_revision=source_revision, analysis_revision=analysis_revision,
             input_fingerprint=snapshot["input_hash"], payload=payload, definitions=definitions,
@@ -287,6 +293,32 @@ class AnalysisPipelineService:
         binding = build_execution_binding(envelope, definitions)
         return {"plan": envelope, "binding": binding, "definitions": definitions,
                 "capabilities": capability_catalog()["capabilities"]}
+
+    def propose(self, item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.plan_advisor is None:
+            raise AnalysisContractError("計画候補の生成を利用できません。", code="method_unavailable")
+        item = self.find_item(item_id)
+        if item is None:
+            raise LookupError("分析対象が見つかりません。")
+        source_revision = int(item["revision_count"] or 0)
+        analysis_revision = int(item["analysis_revision"] or 0)
+        if (payload.get("source_revision") != source_revision
+                or payload.get("analysis_revision") != analysis_revision):
+            raise AnalysisContractError("入力版が更新されています。", code="revision_conflict")
+        snapshot = self.snapshot_builder(item)
+        proposal = self.plan_advisor(snapshot, payload)
+        latest = self.find_item(item_id)
+        if (latest is None
+                or int(latest["revision_count"] or 0) != source_revision
+                or int(latest["analysis_revision"] or 0) != analysis_revision
+                or self.source_fingerprint(latest) != snapshot["input_hash"]):
+            raise AnalysisContractError("候補生成中に入力が更新されました。", code="revision_conflict")
+        normalized = validate_planning_proposal(
+            proposal, input_hash=snapshot["input_hash"],
+            source_revision=source_revision, analysis_revision=analysis_revision,
+            provider_policy=payload.get("provider_policy", "local_only"),
+        )
+        return {"proposal": sign_proposal(normalized)}
 
     def start(self, item_id: str, payload: dict[str, Any], *, app_url: str) -> tuple[dict[str, Any], int]:
         request_id = payload.get("request_id")
@@ -524,13 +556,17 @@ class AnalysisPipelineService:
                 methods.append(value["method"])
             for name, table in value.get("datasets", {}).items():
                 datasets[name] = (table["fields"], table["rows"])
+        plan = json.loads(pipeline["plan_json"])
+        parameters = {
+            "pipeline_id": pipeline["pipeline_id"], "plan_hash": pipeline["plan_hash"],
+            "binding": json.loads(pipeline["binding_json"]), "definitions": definitions,
+            "research_protocol": plan["research_protocol"],
+        }
+        if "planning_proposal" in plan:
+            parameters["planning_proposal"] = plan["planning_proposal"]
         result = {
             "schema_version": 1,
-            "parameters": {
-                "pipeline_id": pipeline["pipeline_id"], "plan_hash": pipeline["plan_hash"],
-                "binding": json.loads(pipeline["binding_json"]), "definitions": definitions,
-                "research_protocol": json.loads(pipeline["plan_json"])["research_protocol"],
-            },
+            "parameters": parameters,
             "algorithms": {"analysis_pipeline": "analysis-pipeline-1"},
             "methods": methods, "chart_specs": artifacts.get("chart_specs", {}).get("chart_specs", []),
         }
@@ -746,12 +782,17 @@ class AnalysisPipelineService:
             except (LookupError, KeyError, TypeError):
                 result_run = {"id": row["result_run_id"]}
         completed = sum(step["status"] in TERMINAL_SUCCESS for step in steps)
+        proposal = json.loads(row["plan_json"]).get("planning_proposal")
+        planning = ({key: proposal[key] for key in
+                     ("objective", "provider", "model", "primary_method")}
+                    if isinstance(proposal, dict) else None)
         return {
             "contract": "AnalysisResponse", "pipeline_id": pipeline_id,
             "request_id": row["request_id"], "item_id": item_id, "status": row["status"],
             "current_milestone": row["current_milestone"], "wait_reason": row["wait_reason"],
             "error": row["error"], "plan_hash": row["plan_hash"], "input_hash": row["input_hash"],
             "progress": round(100 * completed / len(steps)) if steps else 0,
+            "planning": planning,
             "milestones": milestones,
             "publications": [{key: value[key] for key in ("target_role", "status", "error", "result_run_id", "package_hash")} for value in publications],
             "events": [{"sequence": value["sequence"], "type": value["event_type"],

@@ -168,6 +168,8 @@ ChartSpecは `chart_id, visual_id, dataset_ref, source_hash, grain, filters, enc
 
 表示部品は `MetricCards / DataTable / BarChart / Heatmap / Timeline / RelationGraph / DistributionPlot / EffectPlot / QuotePanel / OutlineTree` に集約。現行のSVG・HTML表・発話への移動を再利用する。全図に代替表、単位、N、欠測、選択条件、根拠操作を付ける。数値表示と原表は同じ丸め規則を共有する。
 
+現行の分析画面では `automatic.time_bins` と `session_outline.result.rows` を組み合わせ、経過時間×会話活発度のSVGにアウトライン・Transformer話題の時間帯を重ねる。会話活発度は各時間帯の発話時間割合65%と発話開始回数35%を合成した0〜100の表示用指標で、声量・感情・話題の重要性は測らない。分析APIの `session_outline` は保存済みアウトラインとテーマから作る表示用の結合結果であり、古いTransformer話題は画面で隠す。これは上記のChartSpec/画像出力とは別の現行UI機能である。
+
 画像は統計値から決定的に描画する。UIコンセプトの画像生成を、研究用グラフの数値描画には使わない。静的出力はMatplotlib Figure/Aggを候補として手法別rendererを持つ。PNG/SVG/PDFに加え、JPEG/TIFFは対応バックエンドを検証して提供する。ブラウザーSVGと静的rendererが共有するのはChartSpec/数値/配置であり、ピクセル単位の完全一致は保証しない。
 
 ### 6.2 成果物カタログ
@@ -423,6 +425,10 @@ src/gurumoji/
 | O07 | 可視化・説明担当 | M3/M7 | 許可された図種・列・説明のChartSpec案。数値は確定dataset参照 |
 
 オーケストレーターは役割であり、常駐する別モデルではない。同じモデルが複数役割を担当してよい。役割数と同数のエージェント/プロセスを常時起動しない。計画担当と実際の文章分析担当のcall ID、プロンプト版、入力、使用量、結果は別管理とする。
+
+現行のO01接続は、基礎分析の実行設定で計画候補を明示生成する範囲に限る。ローカルTransformerは分析目的と実行可能な2手法のカードを意味ベクトルで比較する。指定LLMはLM Studioを既定とし、OpenAI／Googleを選んだ場合だけ分析目的・集計件数・手法カードを送る。候補の手法IDと入力版を分析コアが検証し、基礎分析の実行時には候補を結果のparameterへ固定する。候補は既存の必須step・ゲートを変更しない。O02〜O07、動的な手法追加、モデル呼出しの永続attempt管理は未実装。
+
+処理経路表示は、O01のAPI要求中だけ選択モデルへの線を動かし、完了後は停止する。pipeline状態APIの `planning` は採用済み候補の `objective, provider, model, primary_method` を返し、処理画面ではO01を完了済み、M0〜M7を実際の段階状態に連動して表示する。単独のTransformerテーマ分析は既存の進捗値（準備・意味ベクトル・テーマ形成・根拠整理）に連動する。線はAPI/処理段階の状態を示し、モデル内部のattentionや単語間計算の観測値ではない。
 
 処理内容を固定できる場合はコードの既定計画を使い、手動定義にLLMの提案や相談を強制しない。各役割の知識は既存ExpertCatalogと手法登録票から読む。既存の人手コードや専門家定義をモデルが直接改訂しない。
 

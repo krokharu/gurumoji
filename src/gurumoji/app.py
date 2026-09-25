@@ -64,6 +64,7 @@ from .analysis_insights import (
     INSIGHT_VERSION, KWIC_FIELDS, build_session_outline, create_ai_insights,
     included_segments, input_fingerprint, plan_items, search_kwic,
 )
+from . import analysis_plan_advisor
 from .transformer_analysis import (
     DEFAULT_MANUAL_MIN_SIMILARITY,
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
@@ -72,6 +73,7 @@ from .transformer_analysis import (
     TRANSFORMER_ANALYSIS_VERSION,
     TRANSFORMER_CSV_FIELDS,
     analyze_transformer_topics,
+    encode_texts as encode_transformer_texts,
     saved_embeddings as saved_transformer_embeddings,
     semantic_search as transformer_semantic_search,
     transformer_csv_sources,
@@ -105,6 +107,7 @@ from .obsidian_finishing import ObsidianWorkbench
 from .ai_effort import normalize_efforts, effort_payload, local_effort_payload, SCHEMA_STAGES
 from .analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from .analysis_store import AnalysisStore, StoreConflict, digest as archive_digest, initialize_store
+from .analysis_core import AnalysisContractError
 from .analysis_pipeline import AnalysisPipelineService, initialize_pipeline_store
 from .handlers.analysis_commands import (
     AnalysisCommandRequestError,
@@ -830,6 +833,7 @@ class JobOptions:
     owns_output_dir: bool = False
     finish_in_obsidian: bool = True
     ai_efforts: dict = field(default_factory=normalize_efforts)
+    num_speakers: int | None = None
     conversation_mode: str = "meeting"
     custom_vocabulary: tuple[str, ...] = ()
     recommended_cleanup: bool = False
@@ -6445,6 +6449,61 @@ def build_analysis_pipeline_snapshot(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def advise_analysis_plan(snapshot: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Run the selected O01 adviser on a small, nonverbatim context packet."""
+    context = analysis_plan_advisor.planning_context(
+        snapshot["analysis"], payload.get("objective", "")
+    )
+    if context["included_segment_count"] < 1:
+        raise AnalysisContractError("分析できる発話がありません。", code="no_valid_input")
+    engine = payload.get("engine", "transformer")
+    policy = payload.get("provider_policy", "local_only")
+    if not isinstance(policy, str) or policy not in {"local_only", "cloud_allowed"}:
+        raise AnalysisContractError("送信方針が正しくありません。", code="provider_unavailable")
+    if engine == "transformer":
+        if policy != "local_only":
+            raise AnalysisContractError("Transformer計画候補はlocal_onlyで生成してください。", code="provider_unavailable")
+        candidate, model_info = analysis_plan_advisor.transformer_candidate(
+            context, encode_transformer_texts
+        )
+        provider, model = "local_transformer", model_info["name"]
+    elif engine == "llm":
+        provider = payload.get("provider", "lmstudio")
+        if not isinstance(provider, str) or provider not in {"lmstudio", "openai", "google"}:
+            raise AnalysisContractError("計画担当のLLMを選択してください。", code="provider_unavailable")
+        if provider == "lmstudio" and policy != "local_only":
+            raise AnalysisContractError("ローカルLLMはlocal_onlyで生成してください。", code="provider_unavailable")
+        if provider != "lmstudio" and policy != "cloud_allowed":
+            raise AnalysisContractError("クラウドLLMにはcloud_allowedが必要です。", code="provider_unavailable")
+        config = load_token_config()
+        api_key, configured_model = configured_ai_credentials(config, provider)
+        model = payload.get("model") or configured_model
+        if not isinstance(model, str) or not model.strip() or len(model) > 200 or "\n" in model or "\r" in model:
+            raise AnalysisContractError("計画担当のモデルを指定してください。", code="provider_unavailable")
+        model = model.strip()
+        if provider != "lmstudio" and not api_key:
+            raise AnalysisContractError("選択したLLMのAPIキーが未設定です。", code="provider_unavailable")
+        base_url = config.lmstudio_base_url if provider == "lmstudio" else ""
+        candidate = analysis_plan_advisor.llm_candidate(
+            context,
+            lambda system, prompt, schema: call_ai_json(
+                provider, api_key, model, system, prompt, "analysis_plan_o01", schema,
+                base_url=base_url,
+            ),
+        )
+    else:
+        raise AnalysisContractError("計画担当のエンジンが正しくありません。", code="method_unavailable")
+    return {
+        "version": analysis_plan_advisor.ADVISOR_VERSION,
+        "source_revision": snapshot["source_revision"],
+        "analysis_revision": snapshot["analysis_revision"],
+        "input_hash": snapshot["input_hash"],
+        "objective": context["objective"],
+        "engine": engine, "provider": provider, "model": model,
+        **candidate,
+    }
+
+
 def run_analysis_pipeline_method(step_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
     """Adapt one existing method to the fixed pipeline snapshot."""
     if step_id not in PIPELINE_METHOD_DATASETS:
@@ -6487,6 +6546,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
         publication_outcomes=store.publication_outcomes,
         public_run=public_run,
         runtime_key=str(DATABASE_FILE.resolve()),
+        plan_advisor=advise_analysis_plan,
     )
 
 
@@ -7964,6 +8024,7 @@ def start_transcription_job_command(
             )
         min_speakers = parse_optional_int("min_speakers", form=form)
         max_speakers = parse_optional_int("max_speakers", form=form)
+        num_speakers = parse_optional_int("num_speakers", form=form)
         if min_speakers and max_speakers and min_speakers > max_speakers:
             raise ValueError("最少話者数は最多話者数以下にしてください。")
         triple_pass = parse_bool("triple_pass", form=form)
@@ -8097,6 +8158,7 @@ def start_transcription_job_command(
             audio_preprocess=audio_preprocess,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
+            num_speakers=num_speakers,
             device=device,
             diarization_device=diarization_device,
             triple_pass=triple_pass,

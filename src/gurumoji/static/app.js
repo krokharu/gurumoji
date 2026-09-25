@@ -45,6 +45,11 @@ const languageSelect = document.querySelector('[name="language"]');
 const audioPreprocess = document.querySelector('[name="audio_preprocess"]');
 const minSpeakersInput = document.querySelector('[name="min_speakers"]');
 const maxSpeakersInput = document.querySelector('[name="max_speakers"]');
+const speakerCountFixButton = document.querySelector('#speaker-count-fix');
+const fixedSpeakerCountInput = document.querySelector('#fixed-speaker-count');
+const fixedSpeakerCountField = document.querySelector('#fixed-speaker-count-field');
+const minSpeakersField = document.querySelector('#min-speakers-field');
+const maxSpeakersField = document.querySelector('#max-speakers-field');
 const conversationModeInputs = [...document.querySelectorAll('input[name="conversation_mode"]')];
 const conversationModeHint = document.querySelector('#conversation-mode-hint');
 const conversationModeResetButton = document.querySelector('#conversation-mode-reset');
@@ -701,6 +706,52 @@ const conversationModeFields = [
   {input: vadOffset, key: 'vadOffset', label: 'VAD offset', property: 'value'},
 ].filter(field => field.input);
 const manuallyEditedModeFields = new Set();
+let speakerRangeBeforeFix = null;
+
+function isSpeakerCountFixed() {
+  return speakerCountFixButton?.getAttribute('aria-pressed') === 'true';
+}
+
+function syncFixedSpeakerCount() {
+  if (!isSpeakerCountFixed()) return;
+  minSpeakersInput.value = fixedSpeakerCountInput.value;
+  maxSpeakersInput.value = fixedSpeakerCountInput.value;
+  updateCreateSummary();
+}
+
+function setSpeakerCountFixed(fixed, {restoreRange = true} = {}) {
+  if (fixed) {
+    speakerRangeBeforeFix = {
+      min: minSpeakersInput.value,
+      max: maxSpeakersInput.value,
+      editedMin: manuallyEditedModeFields.has('minSpeakers'),
+      editedMax: manuallyEditedModeFields.has('maxSpeakers')
+    };
+    if (minSpeakersInput.value && minSpeakersInput.value === maxSpeakersInput.value) {
+      fixedSpeakerCountInput.value = minSpeakersInput.value;
+    }
+    manuallyEditedModeFields.add('minSpeakers');
+    manuallyEditedModeFields.add('maxSpeakers');
+  } else if (speakerRangeBeforeFix && restoreRange) {
+    minSpeakersInput.value = speakerRangeBeforeFix.min;
+    maxSpeakersInput.value = speakerRangeBeforeFix.max;
+    if (!speakerRangeBeforeFix.editedMin) manuallyEditedModeFields.delete('minSpeakers');
+    if (!speakerRangeBeforeFix.editedMax) manuallyEditedModeFields.delete('maxSpeakers');
+  }
+  speakerCountFixButton.setAttribute('aria-pressed', String(fixed));
+  speakerCountFixButton.textContent = fixed ? '人数の固定を解除する' : '話者数を固定する';
+  fixedSpeakerCountField.hidden = !fixed;
+  fixedSpeakerCountInput.disabled = !fixed;
+  minSpeakersField.hidden = fixed;
+  maxSpeakersField.hidden = fixed;
+  if (fixed) {
+    syncFixedSpeakerCount();
+    fixedSpeakerCountInput.focus();
+  } else {
+    speakerRangeBeforeFix = null;
+    applyConversationMode();
+  }
+}
 
 function applyConversationMode(mode = selectedConversationMode()) {
   const preset = conversationModePresets[mode] || conversationModePresets.meeting;
@@ -749,6 +800,8 @@ function updateCreateSummary() {
   const vocabularyTerms = vocabularyTermsFromInput();
   const recognitionExtras = [];
   if (vocabularyTerms.length) recognitionExtras.push(`単語登録 ${vocabularyTerms.length}語`);
+  const fixedSpeakerLabel = isSpeakerCountFixed() ? `話者数 ${fixedSpeakerCountInput.value || '未入力'}人に固定` : '';
+  if (fixedSpeakerLabel) recognitionExtras.push(fixedSpeakerLabel);
   const finishExtras = [];
   if (triplePass && triplePass.checked) finishExtras.push('詳細処理');
   const providerLabel = aiProvider && aiProvider.value !== 'none' ? selectedOptionText(aiProvider) : '';
@@ -795,7 +848,7 @@ function updateCreateSummary() {
   };
   setText('[data-choice-transcription-device]', transcriptionHardware);
   setText('[data-choice-recognition-model]', `認識モデル ${model}`);
-  setText('[data-choice-recognition-detail]', `話者分離 ${diarizationHardware} / ${language} / 前処理 ${preprocess}`);
+  setText('[data-choice-recognition-detail]', `話者分離 ${diarizationHardware}${fixedSpeakerLabel ? ` / ${fixedSpeakerLabel}` : ''} / ${language} / 前処理 ${preprocess}`);
   setText('[data-settings-value="vocabulary"]', vocabularyTerms.length ? `${vocabularyTerms.length}語を登録` : '未登録');
   setText('[data-choice-finishing-state]', finishingState);
   setText('[data-choice-finishing-model]', finishingModel);
@@ -807,7 +860,7 @@ function updateCreateSummary() {
   setText('[data-review-source]', sourceLabel);
   setText('[data-review-transcription-compact]', `認識モデル ${model}・${transcriptionHardware} / 話者分離 ${diarizationHardware}`);
   setText('[data-review-transcription]', `認識モデル: ${model} / ${transcriptionHardware}`);
-  setText('[data-review-diarization]', `話者分離: pyannote.audio / ${diarizationHardware}`);
+  setText('[data-review-diarization]', `話者分離: pyannote.audio / ${diarizationHardware}${fixedSpeakerLabel ? ` / ${fixedSpeakerLabel}` : ''}`);
   setText('[data-review-finish]', `AI仕上げ ${finishingLabel}${finishInVault ? ' / Obsidianに保存してあとで整える' : ''}${emotionEnabled ? ` / 感情分析 ${emotionLabel}` : ''}`);
   setText('[data-review-output]', outputParts.join(' / '));
   setText('[data-flow-detail="1"]', hasSource ? sourceLabel : '未選択');
@@ -2463,6 +2516,7 @@ function setRunning(running) {
   [...form.elements].forEach(element => {
     element.disabled = running || element.dataset.alwaysDisabled === 'true';
   });
+  if (fixedSpeakerCountInput) fixedSpeakerCountInput.disabled = running || !isSpeakerCountFixed();
   if (cancelButton) cancelButton.disabled = !running;
   syncQuietFields();
   syncEmotionFields();
@@ -2547,7 +2601,10 @@ conversationModeInputs.forEach(input => listen(input, 'change', () => {
 conversationModeFields.forEach(field => {
   ['input', 'change'].forEach(eventName => listen(field.input, eventName, () => manuallyEditedModeFields.add(field.key)));
 });
+listen(speakerCountFixButton, 'click', () => setSpeakerCountFixed(!isSpeakerCountFixed()));
+listen(fixedSpeakerCountInput, 'input', syncFixedSpeakerCount);
 listen(conversationModeResetButton, 'click', () => {
+  if (isSpeakerCountFixed()) setSpeakerCountFixed(false, {restoreRange: false});
   manuallyEditedModeFields.clear();
   applyConversationMode();
 });
@@ -6315,6 +6372,10 @@ function renderAutomaticAnalysis(compact) {
   if (bins.length) timelinePanel.body.append(buildAnalysisTimelineChart(bins, speakers));
   else timelinePanel.body.append(analysisElement('p', 'analysis-no-data', '時間推移を表示できる発話がありません。'));
   grid.append(timelinePanel.panel);
+
+  const excitementPanel = analysisCardPanel('盛り上がりと議題・話題（時間別）', 'automatic', '', true, 'conversation_dynamics');
+  excitementPanel.body.append(buildAnalysisExcitementChart(bins, data.session_outline));
+  grid.append(excitementPanel.panel);
 
   const speakerPanel = analysisCardPanel('話者ごとの発話量', 'automatic', 'speakers', true, 'participation');
   if (!speakers.length) {

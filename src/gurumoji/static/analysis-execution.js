@@ -24,6 +24,16 @@ const analysisRunButton = document.querySelector('#analysis-run-button');
 const analysisRunSettingsButton = document.querySelector('#analysis-run-settings-button');
 const analysisRunStartButton = document.querySelector('#analysis-run-start');
 const analysisRunDialogMessage = document.querySelector('#analysis-run-dialog-message');
+const analysisAdvisorObjective = document.querySelector('#analysis-advisor-objective');
+const analysisAdvisorEngine = document.querySelector('#analysis-advisor-engine');
+const analysisAdvisorModel = document.querySelector('#analysis-advisor-model');
+const analysisAdvisorModelField = document.querySelector('#analysis-advisor-model-field');
+const analysisAdvisorProposeButton = document.querySelector('#analysis-advisor-propose');
+const analysisAdvisorFlow = document.querySelector('#analysis-advisor-flow');
+const analysisAdvisorResult = document.querySelector('#analysis-advisor-result');
+let analysisPlanningProposal = null;
+let analysisPlanningItemId = '';
+let analysisAdvisorItemId = '';
 const analysisExecutionView = document.querySelector('#analysis-execution-view');
 const analysisExecutionChip = document.querySelector('#analysis-job-chip');
 const analysisExecutionChipLabel = document.querySelector('#analysis-job-chip-label');
@@ -92,9 +102,12 @@ function analysisExecutionUpdatePlanSummary() {
     strong.textContent = 'M0〜M7の固定計画：';
     summary.append(strong, document.createTextNode(
       manual
-        ? '手入力定義を少数試行 → 採用版をM4で固定 → 既存2手法と全件測定 ／ 外部送信なし'
-        : '既存の発話量・会話時間構造をM2で並列実行 ／ 外部送信なし'
+        ? '手入力定義を少数試行 → 採用版をM4で固定 → 既存2手法と全件測定 ／ 基礎分析の実行は外部送信なし'
+        : '既存の発話量・会話時間構造をM2で並列実行 ／ 基礎分析の実行は外部送信なし'
     ));
+    if (analysisPlanningProposal && analysisPlanningItemId === analysisState.itemId) {
+      summary.append(document.createTextNode(` ／ O01の優先確認: ${analysisPlanningProposal.primary_method === 'participation' ? '発話量・参加バランス' : '会話の時間構造'}`));
+    }
   }
   const error = analysisExecutionValidatePlan();
   analysisExecutionSetDialogMessage(error, Boolean(error));
@@ -108,6 +121,16 @@ function openAnalysisExecutionDialog(options = {}) {
     return;
   }
   const requestedMode = options.mode === 'manual' ? 'manual' : 'automatic';
+  if (analysisPlanningItemId && analysisPlanningItemId !== analysisState.itemId) {
+    analysisPlanningProposal = null;
+    analysisPlanningItemId = '';
+    if (analysisAdvisorResult) analysisAdvisorResult.replaceChildren();
+  }
+  if (analysisAdvisorItemId !== analysisState.itemId) {
+    analysisAdvisorItemId = analysisState.itemId;
+    analysisAdvisorClearProposal();
+    if (analysisAdvisorObjective) analysisAdvisorObjective.value = String(analysisState.config?.research_question || '').slice(0, 500);
+  }
   const mode = document.querySelector(`input[name="analysis_run_mode"][value="${requestedMode}"]`);
   if (mode) mode.checked = true;
   const details = document.querySelector('#analysis-run-details');
@@ -115,6 +138,129 @@ function openAnalysisExecutionDialog(options = {}) {
   analysisExecutionUpdatePlanSummary();
   if (!analysisRunDialog.open) analysisRunDialog.showModal();
   window.requestAnimationFrame(() => document.querySelector('input[name="analysis_run_mode"]:checked')?.focus());
+}
+
+function analysisAdvisorClearProposal() {
+  analysisPlanningProposal = null;
+  analysisPlanningItemId = '';
+  if (analysisAdvisorFlow) { analysisAdvisorFlow.hidden = true; analysisAdvisorFlow.replaceChildren(); }
+  if (analysisAdvisorResult) analysisAdvisorResult.replaceChildren();
+  analysisExecutionUpdatePlanSummary();
+}
+
+function analysisProcessProviderLabel(provider) {
+  return {transformer: 'Transformer（このPC）', local_transformer: 'Transformer（このPC）', lmstudio: 'LM Studio（このPC）',
+    openai: 'OpenAI', google: 'Gemini'}[provider] || provider || '選択したモデル';
+}
+
+function analysisProcessMethodLabel(method) {
+  return method === 'participation' ? '発話量・参加バランス'
+    : method === 'conversation_dynamics' ? '会話の時間構造' : '確認待ち';
+}
+
+function analysisProcessObjectiveTerms(objective) {
+  const value = String(objective || '').trim();
+  if (!value) return [];
+  const words = typeof Intl.Segmenter === 'function'
+    ? [...new Intl.Segmenter('ja', {granularity: 'word'}).segment(value)]
+      .filter(part => part.isWordLike).map(part => part.segment)
+    : value.split(/[\s、，。,.]+/);
+  const terms = [...new Set(words.filter(word => word.length >= 2))].slice(0, 3);
+  return terms.length ? terms : [value.slice(0, 20)];
+}
+
+function renderAnalysisAdvisorFlow({state, objective, provider, model = '', proposal = null}) {
+  if (!analysisAdvisorFlow) return;
+  analysisAdvisorFlow.hidden = false;
+  const completed = state === 'complete';
+  const failed = state === 'failed';
+  analysisAdvisorFlow.replaceChildren(buildAnalysisProcessFlow({
+    title: completed ? 'O01 計画候補を検証しました' : failed ? 'O01 計画候補を生成できませんでした' : 'O01 計画候補を生成中',
+    note: '線の動きはAPI要求の状態です。モデル内部の単語間計算は表示しません。',
+    nodes: [
+      {id: 'input', kind: '入力', label: '分析目的・集計条件', detail: String(objective).slice(0, 70),
+        terms: analysisProcessObjectiveTerms(objective), state: 'complete'},
+      {id: 'model', kind: '選択したモデル', label: analysisProcessProviderLabel(provider),
+        detail: model || '設定済みモデルを使用', state: completed ? 'complete' : failed ? 'failed' : 'running'},
+      {id: 'validation', kind: '照合', label: '実行可能な手法を確認',
+        detail: '既存の2手法と確認事項', state: completed ? 'complete' : 'pending'},
+      {id: 'proposal', kind: '候補', label: completed ? analysisProcessMethodLabel(proposal?.primary_method) : '応答待ち',
+        detail: completed ? '優先して確認する手法' : '', state: completed ? 'complete' : 'pending'}
+    ]
+  }));
+}
+
+function analysisAdvisorSyncEngine() {
+  if (analysisAdvisorModelField) analysisAdvisorModelField.hidden = analysisAdvisorEngine?.value === 'transformer';
+  analysisAdvisorClearProposal();
+}
+
+async function analysisAdvisorPropose() {
+  if (!analysisState.itemId || !analysisState.data) {
+    analysisExecutionSetDialogMessage('先に分析対象を読み込んでください。', true);
+    return;
+  }
+  if (hasUnsavedAnalysisChanges()) {
+    analysisExecutionSetDialogMessage('分析設定を保存してから計画候補を生成してください。', true);
+    return;
+  }
+  const objective = analysisAdvisorObjective?.value.trim() || '';
+  if (objective.length < 3 || objective.length > 500) {
+    analysisExecutionSetDialogMessage('分析目的を3〜500文字で入力してください。', true);
+    analysisAdvisorObjective?.focus();
+    return;
+  }
+  const selected = analysisAdvisorEngine?.value || 'transformer';
+  const selectedModel = analysisAdvisorModel?.value.trim() || '';
+  const cloud = selected === 'openai' || selected === 'google';
+  const item = analysisState.data.item;
+  const requestedItemId = analysisState.itemId;
+  analysisAdvisorClearProposal();
+  renderAnalysisAdvisorFlow({state: 'running', objective, provider: selected, model: selectedModel});
+  if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = true;
+  analysisExecutionSetDialogMessage('計画候補を生成しています。');
+  try {
+    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(requestedItemId)}/analysis/plans/proposals`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        source_revision: item.revision_count, analysis_revision: item.analysis_revision,
+        objective, engine: selected === 'transformer' ? 'transformer' : 'llm',
+        provider: selected === 'transformer' ? undefined : selected,
+        model: selected === 'transformer' ? undefined : selectedModel,
+        provider_policy: cloud ? 'cloud_allowed' : 'local_only'
+      })
+    });
+    if (analysisState.itemId !== requestedItemId || analysisAdvisorEngine?.value !== selected
+        || analysisAdvisorObjective?.value.trim() !== objective
+        || (selected !== 'transformer' && (analysisAdvisorModel?.value.trim() || '') !== selectedModel)) return;
+    analysisPlanningProposal = response.proposal;
+    analysisPlanningItemId = requestedItemId;
+    const proposal = analysisPlanningProposal;
+    renderAnalysisAdvisorFlow({state: 'complete', objective, provider: proposal.provider,
+      model: proposal.model, proposal});
+    const label = proposal.primary_method === 'participation' ? '発話量・参加バランス' : '会話の時間構造';
+    if (analysisAdvisorResult) {
+      analysisAdvisorResult.replaceChildren();
+      const lead = document.createElement('p');
+      lead.textContent = `優先して確認: ${label}（${proposal.provider} / ${proposal.model}）`;
+      const reason = document.createElement('p');
+      reason.textContent = proposal.rationale;
+      analysisAdvisorResult.append(lead, reason);
+      for (const check of proposal.checks) {
+        const line = document.createElement('p');
+        line.textContent = `確認: ${check.message}`;
+        analysisAdvisorResult.append(line);
+      }
+    }
+    analysisExecutionUpdatePlanSummary();
+    analysisExecutionSetDialogMessage('計画候補を確認しました。開始すると既存2手法を実行し、候補を実行記録へ残します。');
+  } catch (error) {
+    if (analysisState.itemId !== requestedItemId) return;
+    renderAnalysisAdvisorFlow({state: 'failed', objective, provider: selected, model: selectedModel});
+    analysisExecutionSetDialogMessage(error.message || '計画候補を生成できませんでした。', true);
+  } finally {
+    if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = false;
+  }
 }
 
 function analysisExecutionPersist() {
@@ -169,6 +315,7 @@ function analysisExecutionApplyResponse(response) {
   }));
   analysisExecutionState.settings = {
     ...(analysisExecutionState.settings || {}), progress: response.progress,
+    planning: response.planning || null,
     publications: response.publications || [], allowedActions: response.allowed_actions || [],
     error: response.error || '', waitReason: response.wait_reason || '', resultRun: response.result_run
   };
@@ -201,6 +348,48 @@ function analysisExecutionElapsedText() {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function renderAnalysisExecutionFlow(current) {
+  const host = document.querySelector('#analysis-execution-flow');
+  if (!host) return;
+  const planning = analysisExecutionState.settings?.planning;
+  const running = ['accepted', 'running', 'cancelling'].includes(analysisExecutionState.status);
+  const done = analysisExecutionState.status === 'completed';
+  const index = analysisExecutionState.currentIndex;
+  const signature = JSON.stringify([planning, analysisExecutionState.status, index,
+    current?.id, current?.title]);
+  if (host.dataset.flowSignature === signature) return;
+  host.dataset.flowSignature = signature;
+  host.replaceChildren();
+  if (planning) host.append(buildAnalysisProcessFlow({
+    title: 'O01 モデルによる計画判断',
+    note: '候補生成時に完了。現在の分析段階ではこのモデルを呼び出していません。',
+    nodes: [
+      {id: 'objective', kind: '入力', label: '分析目的', detail: String(planning.objective || '').slice(0, 70),
+        terms: analysisProcessObjectiveTerms(planning.objective), state: 'complete'},
+      {id: 'advisor', kind: '使用したモデル', label: analysisProcessProviderLabel(planning.provider),
+        detail: planning.model || '', state: 'complete'},
+      {id: 'candidate', kind: '確認順', label: analysisProcessMethodLabel(planning.primary_method),
+        detail: '実行計画に記録済み', state: 'complete'}
+    ]
+  }));
+  const phaseState = (first, last) => done || index > last ? 'complete'
+    : running && index >= first && index <= last ? 'running' : 'pending';
+  host.append(buildAnalysisProcessFlow({
+    title: '現在の分析処理',
+    note: `${current?.id || 'M0'} ${current?.title || '入力確認'} ／ サーバーの段階状態と連動`,
+    nodes: [
+      {id: 'source', kind: 'M0–M1', label: '発話・話者・時刻', detail: '入力と範囲を固定',
+        terms: ['発話', '話者', '時刻'], state: phaseState(0, 1)},
+      {id: 'methods', kind: 'M2–M4', label: '既存手法・定義', detail: '発話量と会話の時間構造',
+        terms: ['参加', '交替'], state: phaseState(2, 4)},
+      {id: 'package', kind: 'M5–M7', label: '結果の保存・公開', detail: '根拠と成果物を確定',
+        state: phaseState(5, 7)},
+      {id: 'result', kind: '結果', label: done ? '分析完了' : '結果待ち', detail: '',
+        state: done ? 'complete' : 'pending'}
+    ]
+  }));
+}
+
 function renderAnalysisExecution() {
   if (analysisExecutionView && !analysisExecutionView.hidden) analysisExecutionSetWorkspaceVisibility(true);
   const stagesHost = document.querySelector('#analysis-execution-stages');
@@ -229,6 +418,7 @@ function renderAnalysisExecution() {
   const current = analysisExecutionState.stages[analysisExecutionState.currentIndex]
     || analysisExecutionState.stages.find(value => ['failed', 'waiting', 'cancelled'].includes(value.status))
     || analysisExecutionState.stages.at(-1);
+  renderAnalysisExecutionFlow(current);
   const stateLabel = document.querySelector('#analysis-execution-state-label');
   const title = document.querySelector('#analysis-execution-current-title');
   const message = document.querySelector('#analysis-execution-message');
@@ -252,7 +442,11 @@ function renderAnalysisExecution() {
   const external = document.querySelector('#analysis-execution-external');
   if (elapsed) elapsed.textContent = analysisExecutionElapsedText();
   if (mode) mode.textContent = analysisExecutionState.mode === 'manual' ? '手入力定義' : '自動計画';
-  if (external) external.textContent = 'なし（local_only）';
+  if (external) {
+    const provider = analysisExecutionState.settings?.planning?.provider;
+    external.textContent = ['openai', 'google'].includes(provider)
+      ? `計画時: ${analysisProcessProviderLabel(provider)} ／ 実行中: なし` : 'なし（ローカル）';
+  }
   const log = document.querySelector('#analysis-execution-log');
   if (log) log.textContent = analysisExecutionState.logs.join('\n');
   const orbit = document.querySelector('#analysis-execution-orbit');
@@ -378,7 +572,8 @@ async function startAnalysisExecution(event) {
       request_id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : createSubmissionId(),
       source_revision: item.revision_count, analysis_revision: item.analysis_revision,
       mode: analysisExecutionMode(), definition_ids: definitionIds,
-      provider_policy: 'local_only',
+      provider_policy: analysisPlanningProposal?.provider === 'openai' || analysisPlanningProposal?.provider === 'google' ? 'cloud_allowed' : 'local_only',
+      ...(analysisPlanningProposal && analysisPlanningItemId === analysisState.itemId ? {planning_proposal: analysisPlanningProposal} : {}),
       publication_targets: publish ? ['input', 'orchestrator', 'visualization'] : [],
       research_protocol: {classification: 'exploratory', data_viewed: true}
     };
@@ -444,8 +639,12 @@ async function analysisExecutionReviewPlan() {
 function analysisExecutionBind() {
   listen(analysisRunButton, 'click', () => analysisExecutionState.active ? showAnalysisExecutionView() : openAnalysisExecutionDialog());
   listen(analysisRunSettingsButton, 'click', () => openAnalysisExecutionDialog({mode: 'manual', showDetails: true}));
-  listen(document.querySelector('#analysis-run-close'), 'click', () => analysisRunDialog?.close());
+  listen(document.querySelector('#close-analysis-run-dialog'), 'click', () => analysisRunDialog?.close());
   listen(analysisRunForm, 'submit', startAnalysisExecution);
+  listen(analysisAdvisorProposeButton, 'click', analysisAdvisorPropose);
+  listen(analysisAdvisorEngine, 'change', analysisAdvisorSyncEngine);
+  listen(analysisAdvisorObjective, 'input', analysisAdvisorClearProposal);
+  listen(analysisAdvisorModel, 'input', analysisAdvisorClearProposal);
   document.querySelectorAll('input[name="analysis_run_mode"], #analysis-manual-definition input, #analysis-manual-definition select, #analysis-run-publish')
     .forEach(control => listen(control, 'input', analysisExecutionUpdatePlanSummary));
   listen(document.querySelector('#analysis-execution-background'), 'click', () => hideAnalysisExecutionView());

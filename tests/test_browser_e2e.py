@@ -511,6 +511,105 @@ window.addEventListener('DOMContentLoaded', async () => {
     reset.click();
     expect('UX-14 reset restores preset', maxSpeakers.value === '12' && reset.hidden, maxSpeakers.value);
 
+    const fixSpeakers = byId('speaker-count-fix');
+    const fixedCount = byId('fixed-speaker-count');
+    expect('fixed count input stays disabled until requested', fixedCount.disabled);
+    fixSpeakers.click();
+    fixedCount.value = '4';
+    fixedCount.dispatchEvent(new Event('input', {bubbles: true}));
+    expect('fixed speaker count sets both bounds', minSpeakers.value === '4' && maxSpeakers.value === '4');
+    expect('fixed speaker count is submitted',
+      new FormData(byId('job-form')).get('num_speakers') === '4');
+    document.querySelector('input[name="conversation_mode"][value="chat"]').click();
+    expect('fixed speaker count survives mode change', minSpeakers.value === '4' && maxSpeakers.value === '4');
+    fixSpeakers.click();
+    expect('unfix restores current mode range', minSpeakers.value === '2' && maxSpeakers.value === '6');
+    fixSpeakers.click();
+    expect('fixed speaker count appears in summary',
+      document.querySelector('[data-choice-recognition-detail]').textContent.includes('話者数 4人に固定'));
+    reset.click();
+    expect('preset reset releases fixed speaker count',
+      fixSpeakers.getAttribute('aria-pressed') === 'false' && minSpeakers.value === '2' && maxSpeakers.value === '6');
+
+    const previousAnalysisItem = analysisState.itemId;
+    const previousAnalysisData = analysisState.data;
+    const previousFetchForPlan = window.fetch;
+    analysisState.itemId = 'browser-plan-fixture';
+    analysisState.data = {item: {revision_count: 1, analysis_revision: 1}};
+    window.fetch = (input, options) => String(input).includes('/plans/proposals')
+      ? Promise.resolve(new Response(JSON.stringify({proposal: {
+          version: 'o01-plan-advice-1', input_hash: 'fixture-hash',
+          source_revision: 1, analysis_revision: 1, objective: '参加の偏りを確認したい',
+          engine: 'llm', provider: 'lmstudio', model: 'local-test-model',
+          primary_method: 'participation', review_order: ['participation', 'conversation_dynamics'],
+          rationale: '発話量を優先する。', checks: []
+        }}), {status: 200, headers: {'Content-Type': 'application/json'}}))
+      : previousFetchForPlan(input, options);
+    byId('analysis-advisor-objective').value = '参加の偏りを確認したい';
+    byId('analysis-advisor-engine').value = 'lmstudio';
+    byId('analysis-advisor-engine').dispatchEvent(new Event('change', {bubbles: true}));
+    byId('analysis-advisor-propose').click();
+    expect('O01 shows the selected model while the request is active',
+      Boolean(byId('analysis-advisor-flow').querySelector('[data-process-node="model"].running')));
+    await waitFor(() => byId('analysis-advisor-result').textContent.includes('local-test-model'), 'O01 proposal displayed');
+    expect('O01 local LLM proposal is shown', byId('analysis-advisor-result').textContent.includes('発話量・参加バランス'));
+    expect('O01 stops animating after validation',
+      !byId('analysis-advisor-flow').querySelector('.analysis-process-link.active'));
+    const previousExecutionSettings = analysisExecutionState.settings;
+    const previousExecutionStatus = analysisExecutionState.status;
+    const previousExecutionIndex = analysisExecutionState.currentIndex;
+    analysisExecutionState.settings = {planning: {
+      objective: '参加の偏りを確認したい', provider: 'lmstudio', model: 'local-test-model', primary_method: 'participation'
+    }};
+    analysisExecutionState.status = 'running';
+    analysisExecutionState.currentIndex = 2;
+    renderAnalysisExecutionFlow({id: 'M2', title: '一次分析'});
+    const executionFlows = byId('analysis-execution-flow').querySelectorAll('.analysis-process-flow');
+    expect('processing screen separates completed LLM planning from running analysis',
+      executionFlows.length === 2
+      && !executionFlows[0].querySelector('.analysis-process-node.running')
+      && Boolean(executionFlows[1].querySelector('[data-process-node="methods"].running')));
+    analysisExecutionState.settings = previousExecutionSettings;
+    analysisExecutionState.status = previousExecutionStatus;
+    analysisExecutionState.currentIndex = previousExecutionIndex;
+    window.fetch = previousFetchForPlan;
+    analysisState.itemId = previousAnalysisItem;
+    analysisState.data = previousAnalysisData;
+    analysisAdvisorClearProposal();
+
+    const previousConfigForTransformer = analysisState.config;
+    analysisState.itemId = 'browser-transformer-fixture';
+    analysisState.data = {item: {revision_count: 0, analysis_revision: 0}, transformer: {result: null}};
+    analysisState.config = {};
+    const transformerFlowHost = document.createElement('div');
+    transformerFlowHost.dataset.transformerProcessFlow = 'true';
+    document.body.append(transformerFlowHost);
+    contentAnalysisState().transformerRun = {status: 'running', progress: 35,
+      model: 'intfloat/multilingual-e5-small', message: '意味ベクトル化しています'};
+    refreshTransformerControls();
+    expect('Transformer flow follows real vectorization progress',
+      Boolean(transformerFlowHost.querySelector('[data-process-node="embedding"].running')));
+    contentAnalysisState().transformerRun = {status: 'completed', progress: 100, message: '完了'};
+    refreshTransformerControls();
+    expect('Transformer flow stops after completion',
+      !transformerFlowHost.querySelector('.analysis-process-link.active'));
+    transformerFlowHost.remove();
+    analysisState.itemId = previousAnalysisItem;
+    analysisState.data = previousAnalysisData;
+    analysisState.config = previousConfigForTransformer;
+
+    const excitement = buildAnalysisExcitementChart([
+      {start: 0, end: 60, speaking_seconds: 60, turn_count: 1},
+      {start: 60, end: 120, speaking_seconds: 0, turn_count: 0}
+    ], {result: {rows: [{start: 0, end: 60, title: '価格の議題', title_source: 'outline',
+      topics: [{label: '価格について'}]}], transformer_stale: false}});
+    expect('activity graph shows measured high and low points',
+      analysisExcitementPoints([{start: 0, end: 60, speaking_seconds: 60, turn_count: 1},
+        {start: 60, end: 120, speaking_seconds: 0, turn_count: 0}]).map(point => point.score).join(',') === '72,0');
+    expect('activity graph labels outline and topic',
+      excitement.textContent.includes('価格の議題') && excitement.textContent.includes('価格について'));
+    expect('activity graph explains the proxy', excitement.textContent.includes('感情を測った値ではありません'));
+
     // UX-12: cancelling asks first; declining sends nothing.
     const cancelCalls = [];
     const realFetch = window.fetch;

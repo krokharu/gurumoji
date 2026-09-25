@@ -319,7 +319,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("async function cancelAnalysisExecution(", execution)
         self.assertIn("async function analysisExecutionPrepareDefinition(", execution)
         self.assertIn("/analysis/pipelines", execution)
-        self.assertIn("provider_policy: 'local_only'", execution)
+        self.assertIn("? 'cloud_allowed' : 'local_only'", execution)
 
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn("prefers-reduced-motion", styles)

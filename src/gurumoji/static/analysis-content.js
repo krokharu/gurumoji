@@ -557,6 +557,10 @@ function buildTransformerAnalysisPanel() {
   status.dataset.transformerStatus = 'true';
   status.setAttribute('role', 'status');
   panel.body.append(status);
+  const processFlow = analysisElement('div');
+  processFlow.dataset.transformerProcessFlow = 'true';
+  processFlow.hidden = true;
+  panel.body.append(processFlow);
 
   const output = analysisElement('div', 'transformer-output');
   output.dataset.transformerOutput = 'true';
@@ -830,6 +834,47 @@ function refreshTransformerControls() {
           || (state.transformerRun ? `${state.transformerRun.message} ${state.transformerRun.progress}%`
             : modeHints[mode]);
   });
+  document.querySelectorAll('[data-transformer-process-flow]').forEach(host => {
+    const run = state.transformerRun;
+    host.hidden = !run && !state.transformerStarting;
+    if (host.hidden) { host.replaceChildren(); delete host.dataset.flowSignature; return; }
+    const progress = Math.max(0, Math.min(100, Number(run?.progress) || 0));
+    const completed = run?.status === 'completed';
+    const running = run?.status === 'running';
+    const failed = ['failed', 'stale', 'cancelled'].includes(run?.status);
+    const sourceTerms = (analysisState.data.automatic?.keywords || [])
+      .map(item => String(item.term || '')).filter(Boolean).slice(0, 3);
+    const title = `Transformerテーマ分析 ${completed ? '完了' : failed ? '停止' : `${progress}%`}`;
+    const note = run?.message || 'サーバーの進捗に連動。モデル内部の単語間計算は表示しません。';
+    const phase = progress < 5 ? 'prepare' : progress < 60 ? 'embedding'
+      : progress < 90 ? 'topics' : 'evidence';
+    const signature = JSON.stringify([run?.status, phase, run?.model, sourceTerms]);
+    if (host.dataset.flowSignature === signature) {
+      const heading = host.querySelector('.analysis-process-flow-heading');
+      if (heading) {
+        heading.querySelector('strong').textContent = title;
+        heading.querySelector('small').textContent = note;
+      }
+      return;
+    }
+    host.dataset.flowSignature = signature;
+    const stepState = (first, last) => completed || progress > last ? 'complete'
+      : failed && progress >= first && progress <= last ? 'failed'
+        : running && progress >= first && progress <= last ? 'running' : 'pending';
+    host.replaceChildren(buildAnalysisProcessFlow({
+      title, note,
+      nodes: [
+        {id: 'prepare', kind: '入力', label: '発話と内容語', detail: '分析する発話を準備',
+          terms: sourceTerms.length ? sourceTerms : ['発話', '内容語', '話者'], state: stepState(0, 4)},
+        {id: 'embedding', kind: 'Transformer', label: 'E5意味ベクトル',
+          detail: run?.model || '保存済みベクトルを再利用する場合あり', state: stepState(5, 59)},
+        {id: 'topics', kind: 'テーマ', label: '分類・割り当て', detail: '意味の近さから候補を形成',
+          state: stepState(60, 89)},
+        {id: 'evidence', kind: '結果', label: '根拠発話と保存', detail: '',
+          state: stepState(90, 100)}
+      ]
+    }));
+  });
 }
 
 async function startTransformerAnalysis() {
@@ -1037,7 +1082,7 @@ function refreshInsightControls() {
     const usage = state.run?.usage;
     const tokenText = usage?.request_count ? ` / ${usage.request_count}回・${Number(usage.total_tokens || 0).toLocaleString()}トークン` : '';
     host.textContent = analysisState.dirty ? '未保存の変更があります。設定・コードを保存してから生成してください。'
-      : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解は画面上部の「分析を実行」から明示的に生成します。');
+      : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解は「内容・文脈検索」の「AIで内容・意見を整理」から個別に生成します。');
   });
   document.querySelectorAll('[data-insight-output]').forEach(host => {
     const insights = analysisState.data.insights || {};
