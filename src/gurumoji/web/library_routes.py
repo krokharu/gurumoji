@@ -1,0 +1,324 @@
+"""HTTP adapters for the library: listing, items, media, thumbnails and files."""
+
+from __future__ import annotations
+
+import mimetypes
+import sqlite3
+import subprocess
+import uuid
+from pathlib import Path
+from typing import Any, Callable
+
+from flask import Flask, jsonify, request, send_file
+
+from ..handlers.analysis_commands import ComparisonRequestError
+from ..services.durable_files import path_is_within
+from ..services.library_rows import emotion_values
+from ..services.media_files import media_kind
+from ..services.transcription.segments import default_speaker_name
+from ..text_utils import json_load
+
+
+def register_library_routes(
+    app: Flask,
+    *,
+    media_directory: Callable[[], Any],
+    _delete_library_item_locked: Any,
+    analysis_archive_store: Any,
+    archive_source_stamp: Any,
+    build_interview_comparison: Any,
+    database_connection: Any,
+    file_dialog_lock: Any,
+    generate_video_thumbnail: Any,
+    generate_word_cloud_thumbnail: Any,
+    interview_comparison_request: Any,
+    library_public: Any,
+    library_row: Any,
+    library_write_lock: Any,
+    local_path_access_allowed: Any,
+    manual_output_directory: Any,
+    resolve_local_media_path: Any,
+    row_segments: Any,
+    runtime_info: Any,
+    upsert_library_item: Any,
+) -> None:
+    def select_input_file():
+        if not local_path_access_allowed():
+            return jsonify({"error": "Local filesystem selection is disabled for remote access."}), 403
+        if not runtime_info()["native_file_dialog"]:
+            return jsonify({
+                "error": "この実行環境ではOSのファイル選択画面を利用できません。",
+                "hint": "ブラウザーのファイルアップロードを使用してください。",
+                "browser_upload_only": True,
+            }), 409
+        if not file_dialog_lock.acquire(blocking=False):
+            return jsonify({"error": "ファイル選択画面をすでに開いています。"}), 409
+        try:
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+            except Exception as exc:
+                return jsonify({
+                    "error": "Windows のファイル選択画面を開けませんでした。",
+                    "hint": "ファイルのフルパスを入力欄へ直接貼り付けてください。",
+                    "details": str(exc),
+                }), 500
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            root.update()
+            try:
+                selected = filedialog.askopenfilename(
+                    parent=root,
+                    title="処理する音声・動画ファイルを選択",
+                    filetypes=[
+                        ("音声・動画", "*.mp4 *.m4v *.mov *.mkv *.wav *.mp3 *.m4a *.flac"),
+                        ("動画", "*.mp4 *.m4v *.mov *.mkv"),
+                        ("音声", "*.wav *.mp3 *.m4a *.flac"),
+                        ("すべてのファイル", "*.*"),
+                    ],
+                )
+            finally:
+                root.destroy()
+
+            if not selected:
+                return jsonify({"ok": True, "cancelled": True})
+            path = resolve_local_media_path(selected)
+            return jsonify({
+                "ok": True,
+                "cancelled": False,
+                "path": str(path),
+                "name": path.name,
+                "size": path.stat().st_size,
+                "media_kind": media_kind(path),
+            })
+        except (ValueError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        finally:
+            file_dialog_lock.release()
+
+    def source_thumbnail():
+        if not local_path_access_allowed():
+            return jsonify({"error": "Local filesystem thumbnails are disabled for remote access."}), 403
+        try:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict) or not isinstance(payload.get("path"), str):
+                raise ValueError("A media path is required.")
+            source_path = resolve_local_media_path(payload["path"])
+            thumbnail_path = generate_video_thumbnail(source_path)
+            return send_file(thumbnail_path, mimetype="image/jpeg", conditional=True)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
+            return jsonify({"error": f"サムネイルを作成できません: {exc}"}), 500
+
+    def list_library():
+        keyword = request.args.get("keyword", "").strip().casefold()
+        speaker_filter = request.args.get("speaker", "").strip().casefold()
+        emotion_filter = request.args.get("emotion", "").strip().casefold()
+        group_filter = request.args.get("group", "").strip()
+        sort_key = request.args.get("sort", "updated_desc").strip()
+        with database_connection() as connection:
+            rows = connection.execute("SELECT * FROM library_items ORDER BY updated_at DESC").fetchall()
+            group_rows = connection.execute(
+                """
+                SELECT g.id, g.name, g.created_at, g.updated_at,
+                       COUNT(items.id) AS item_count
+                FROM library_groups AS g
+                LEFT JOIN library_items AS items ON items.group_id = g.id
+                GROUP BY g.id, g.name, g.created_at, g.updated_at
+                ORDER BY g.name COLLATE NOCASE, g.created_at
+                """
+            ).fetchall()
+
+        groups = [
+            {
+                "id": str(row["id"]),
+                "name": str(row["name"]),
+                "item_count": int(row["item_count"] or 0),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in group_rows
+        ]
+        group_names = {group["id"]: group["name"] for group in groups}
+
+        all_speakers: set[str] = set()
+        all_emotions: set[str] = set()
+        candidates: list[tuple[sqlite3.Row, int, list[str], list[str], str]] = []
+        for row in rows:
+            segments = row_segments(row)
+            names = json_load(row["speaker_names_json"], {})
+            if not isinstance(names, dict):
+                names = {}
+            speakers = sorted({
+                str(names.get(str(item.get("speaker") or "")) or default_speaker_name(item.get("speaker")))
+                for item in segments if item.get("speaker")
+            })
+            emotions = sorted({value for item in segments for value in emotion_values(item)})
+            all_speakers.update(speakers)
+            all_emotions.update(emotions)
+            searchable_segments = [str(item.get("text") or "") for item in segments]
+            match_count = sum(1 for text_value in searchable_segments if keyword and keyword in text_value.casefold())
+            source_match = bool(keyword and keyword in str(row["source_name"]).casefold())
+            if keyword and not match_count and not source_match:
+                continue
+            if speaker_filter and not any(speaker_filter == value.casefold() for value in speakers):
+                continue
+            if emotion_filter and not any(emotion_filter == value.casefold() for value in emotions):
+                continue
+            row_group_id = str(row["group_id"] or "")
+            if group_filter == "__ungrouped__" and row_group_id:
+                continue
+            if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
+                continue
+            candidates.append((row, match_count, speakers, emotions, group_names.get(row_group_id, "")))
+
+        if sort_key == "created_desc":
+            candidates.sort(key=lambda item: item[0]["created_at"], reverse=True)
+        elif sort_key == "speaker":
+            candidates.sort(key=lambda item: ((item[2][0] if item[2] else "￿"), item[0]["updated_at"]))
+        elif sort_key == "emotion":
+            candidates.sort(key=lambda item: ((item[3][0] if item[3] else "￿"), item[0]["updated_at"]))
+        elif sort_key == "keyword":
+            candidates.sort(key=lambda item: (item[1], item[0]["updated_at"]), reverse=True)
+        elif sort_key == "name":
+            candidates.sort(key=lambda item: str(item[0]["source_name"]).casefold())
+        elif sort_key == "group":
+            candidates.sort(key=lambda item: (
+                not bool(item[4]), item[4].casefold(), str(item[0]["source_name"]).casefold()
+            ))
+        else:
+            candidates.sort(key=lambda item: item[0]["updated_at"], reverse=True)
+        return jsonify({
+            "items": [
+                library_public(row, full=False, match_count=count, group_name=group_name)
+                for row, count, _, _, group_name in candidates
+            ],
+            "total": len(candidates),
+            "groups": groups,
+            "facets": {
+                "speakers": sorted(all_speakers),
+                "emotions": sorted(all_emotions),
+                "groups": groups,
+            },
+        })
+
+    def compare_group_interviews():
+        if request.content_length and request.content_length > 64 * 1024:
+            return jsonify({"error": "比較対象の指定が大きすぎます。"}), 413
+        try:
+            with library_write_lock:
+                rows, allow_different = interview_comparison_request(request.get_json(silent=True))
+                result = build_interview_comparison(rows, allow_different_content=allow_different)
+                result["input_fingerprints"] = {str(row["id"]): archive_source_stamp(row) for row in rows}
+        except ComparisonRequestError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 409
+        except (OverflowError, sqlite3.Error):
+            return jsonify({"error": "インタビュー比較を生成できません。"}), 500
+        return jsonify(result)
+
+    def list_interview_comparison_runs():
+        store = analysis_archive_store()
+        local = local_path_access_allowed()
+        return jsonify({"runs": [{**store.public(run, local=local), "member_ids": store.members(run["id"])}
+                                 for run in store.list_comparisons()]})
+
+    def create_library_item():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "追加内容が JSON ではありません。"}), 400
+        source_name = str(payload.get("source_name") or "新規文字起こし").strip()
+        if any(ord(character) < 32 or ord(character) == 127 for character in source_name):
+            return jsonify({"error": "Source names cannot contain control characters."}), 400
+        if not source_name or len(source_name) > 255:
+            return jsonify({"error": "データ名は 1～255 文字で指定してください。"}), 400
+        item_id = uuid.uuid4().hex
+        try:
+            row = upsert_library_item(
+                item_id=item_id,
+                source_name=source_name,
+                output_dir=manual_output_directory(source_name, item_id),
+                media_path=None, language=None, segments=[], speaker_names={}, outline=None,
+                emotion_analysis=None, files=[], write_srt=True, write_json=True,
+            )
+            return jsonify(library_public(row)), 201
+        except (OSError, sqlite3.Error) as exc:
+            return jsonify({"error": f"データを追加できません: {exc}"}), 500
+
+    def get_library_item(item_id: str):
+        row = library_row(item_id)
+        if row is None:
+            return jsonify({"error": "データが見つかりません。"}), 404
+        return jsonify(library_public(row))
+
+    def library_thumbnail(item_id: str):
+        row = library_row(item_id)
+        if row is None:
+            return jsonify({"error": "データが見つかりません。"}), 404
+        try:
+            thumbnail_path = generate_word_cloud_thumbnail(
+                item_id,
+                str(row["source_name"]),
+                row_segments(row),
+            )
+            return send_file(
+                thumbnail_path,
+                mimetype="image/svg+xml",
+                conditional=True,
+                max_age=86400,
+            )
+        except OSError as exc:
+            return jsonify({"error": f"ワードクラウドを作成できません: {exc}"}), 500
+
+    def delete_library_item(item_id: str):
+        with library_write_lock:
+            return _delete_library_item_locked(item_id)
+
+    def stream_library_media(item_id: str):
+        row = library_row(item_id)
+        if row is None or not row["media_path"]:
+            return jsonify({"error": "元の音声・動画が保存されていません。"}), 404
+        media_path = Path(row["media_path"])
+        expected_media_dir = media_directory() / item_id
+        if not path_is_within(media_path, expected_media_dir) or not media_path.is_file():
+            return jsonify({"error": "元の音声・動画が見つかりません。"}), 404
+        return send_file(media_path, conditional=True, mimetype=mimetypes.guess_type(media_path.name)[0])
+
+    def download_library_file(item_id: str, filename: str):
+        row = library_row(item_id)
+        if row is None:
+            return jsonify({"error": "データが見つかりません。"}), 404
+        paths = [Path(value) for value in json_load(row["files_json"], []) if isinstance(value, str)]
+        output_root = Path(row["output_dir"])
+        matching = next(
+            (
+                path for path in paths
+                if path.name == filename and path_is_within(path, output_root)
+            ),
+            None,
+        )
+        if matching is None or not matching.is_file():
+            return jsonify({"error": "出力ファイルが見つかりません。"}), 404
+        return send_file(matching, as_attachment=True, download_name=matching.name)
+
+    # Keep established endpoint names: the security hook and the
+    # route-map snapshot depend on them.
+    endpoints = (
+        ('/api/select-input', 'select_input_file', select_input_file, 'POST'),
+        ('/api/source-thumbnail', 'source_thumbnail', source_thumbnail, 'POST'),
+        ('/api/library', 'list_library', list_library, 'GET'),
+        ('/api/library/interview-comparison', 'compare_group_interviews', compare_group_interviews, 'POST'),
+        ('/api/library/interview-comparison/runs', 'list_interview_comparison_runs', list_interview_comparison_runs, 'GET'),
+        ('/api/library', 'create_library_item', create_library_item, 'POST'),
+        ('/api/library/<item_id>', 'get_library_item', get_library_item, 'GET'),
+        ('/api/library/<item_id>/thumbnail', 'library_thumbnail', library_thumbnail, 'GET'),
+        ('/api/library/<item_id>', 'delete_library_item', delete_library_item, 'DELETE'),
+        ('/api/library/<item_id>/media', 'stream_library_media', stream_library_media, 'GET'),
+        ('/api/library/<item_id>/files/<path:filename>', 'download_library_file', download_library_file, 'GET'),
+    )
+    for rule, endpoint, view, method in endpoints:
+        app.add_url_rule(rule, endpoint, view, methods=[method])

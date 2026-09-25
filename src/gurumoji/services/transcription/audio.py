@@ -115,3 +115,39 @@ def preprocess_interval(
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise RuntimeError("再文字起こし区間の音声ファイルが作成されませんでした。")
     return output_path
+
+
+AUDIO_PREPROCESS_PRESETS: dict[str, dict[str, Any]] = {
+    "none": {
+        "label": "加工なし",
+        "filters": [],
+    },
+    "light": {
+        "label": "軽め",
+        "filters": [
+            "highpass=f=70",
+            "lowpass=f=7800",
+            "loudnorm=I=-18:LRA=11:TP=-1.5",
+        ],
+    },
+    "standard": {
+        "label": "おすすめ",
+        "filters": [
+            "highpass=f=70",
+            "lowpass=f=7800",
+            "afftdn=nr=8:nf=-55:tn=1",
+            "speechnorm=e=3:r=0.00001:l=1",
+            "loudnorm=I=-18:LRA=11:TP=-1.5",
+        ],
+    },
+    "strong": {
+        "label": "強め",
+        "filters": [
+            "highpass=f=80",
+            "lowpass=f=7600",
+            "afftdn=nr=14:nf=-50:tn=1",
+            "speechnorm=e=6.25:r=0.00001:l=1",
+            "loudnorm=I=-18:LRA=11:TP=-1.5",
+        ],
+    },
+}

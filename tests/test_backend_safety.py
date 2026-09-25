@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from support import use_temporary_library
 from werkzeug.exceptions import RequestEntityTooLarge
 
 
@@ -276,7 +277,9 @@ class InputAndExportSafetyTests(unittest.TestCase):
             "/api/jobs", method="POST", data={"vad_onset": "nan"}
         ):
             with self.assertRaises(ValueError):
-                app.parse_optional_float("vad_onset", 0.35, 0.05, 0.95)
+                app.parse_optional_float(
+                    "vad_onset", 0.35, 0.05, 0.95, form=app.request.form
+                )
 
     def test_unc_paths_are_rejected_without_accessing_the_share(self):
         self.assertTrue(app.is_unc_path(r"\\server\share\meeting.wav"))
@@ -1287,9 +1290,7 @@ class TranscriptCasTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gurumoji-cas-")
         self.root = Path(self.temporary.name)
-        self.original_database = app.DATABASE_FILE
-        app.DATABASE_FILE = self.root / "library.sqlite3"
-        app.initialize_library()
+        use_temporary_library(self, self.root)
         self.client = app.app.test_client()
         self.item_id = "cas-item"
         app.upsert_library_item(
@@ -1308,7 +1309,6 @@ class TranscriptCasTests(unittest.TestCase):
         )
 
     def tearDown(self):
-        app.DATABASE_FILE = self.original_database
         with app.jobs_lock:
             app.jobs.clear()
         self.temporary.cleanup()

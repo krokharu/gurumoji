@@ -1,13 +1,19 @@
 """Tests to ensure GET /api/library/<id>/analysis does not trigger research analysis unless execute=1."""
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import app
+from support import use_temporary_library
 
 
 class AnalysisTriggerSuppressionTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="gurumoji-trigger-")
+        self.addCleanup(temporary.cleanup)
+        use_temporary_library(self, Path(temporary.name))
         self.client = app.app.test_client()
 
     @patch("app.group_analysis.is_research_analysis_cached", return_value=False)

@@ -13,7 +13,7 @@ tags:
 
 # Obsidian連携の現状構造と安全性
 
-- **確認元：** `src/gurumoji/obsidian_layout.py`、`obsidian_finishing.py`、`obsidian_migration.py`、`vault_registry.py`、`analysis_store.py`、`app.py`（`start_obsidian_watcher`、`run_obsidian_finishing`、`publish_input_vault`、`publish_meeting_minutes_to_obsidian`、`_delete_library_item_locked`）。
+- **確認元：** `src/gurumoji/obsidian_layout.py`、`obsidian_finishing.py`、`obsidian_migration.py`、`vault_registry.py`、`analysis_store.py`、`app.py`（`start_obsidian_watcher`、`run_obsidian_finishing`、`publish_input_vault`、`publish_meeting_minutes_to_obsidian`）、`web/library_deletion.py`（`_delete_library_item_locked`）。
 - **確認条件：** 作業ツリー（2026-09-14）。OBS-01/02/05/07の優先修正を反映済み。[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]。
 - **関連ノート：** 危険箇所の対応状況は [[40-Design/known-issues]] の `OBS-*` で管理する。改善方針は [[40-Design/convergence-plan]] と [[40-Design/decisions]] に書く。利用者向けの操作手順は `docs/OBSIDIAN_FINISHING.md` と `docs/OBSIDIAN_GRAPH.md` にある。
 

@@ -1,0 +1,2137 @@
+{
+ "schema_version": 1,
+ "change_id": "change-app-py-phase5",
+ "title": "app.py split, phase 5 (steps 0-11)",
+ "base_commit": "594b7a0",
+ "branch": "claude/program-evaluation-8l5p0t",
+ "verified": "2026-09-25",
+ "app_py_lines": {
+  "before": 8361,
+  "after": 1895
+ },
+ "tests": {
+  "total": 580,
+  "failed": 0,
+  "skipped": 11,
+  "skipped_reasons": [
+   "Windows PowerShell required (10)",
+   "ffprobe not installed (1)"
+  ],
+  "environment": "Linux, Python 3.11, Chromium and ffmpeg available, heavy ML packages not installed"
+ },
+ "compatibility": {
+  "http": "URL, methods and endpoint names unchanged (tests/fixtures/route_map.json)",
+  "database_and_files": "No schema, stored-format, ID or Vault-layout change",
+  "app_module_names": "Names tests, scripts and the Colab notebook use as app.<name> remain importable from gurumoji.app"
+ },
+ "guards": [
+  {
+   "test": "tests/test_routing_architecture.py::test_route_map_matches_the_committed_snapshot",
+   "protects": "URL/method/endpoint identity"
+  },
+  {
+   "test": "tests/test_routing_architecture.py::test_handlers_and_routes_never_import_the_composition_module",
+   "protects": "No module imports gurumoji.app"
+  },
+  {
+   "test": "tests/test_routing_architecture.py::test_adapters_receive_names_that_tests_patch_on_app",
+   "protects": "Patched app.<name> reaches web/ and handlers/ code"
+  },
+  {
+   "test": "tests/test_routing_architecture.py::test_create_app_builds_independent_apps_without_touching_data",
+   "protects": "create_app() has no data side effects"
+  }
+ ],
+ "modules": {
+  "src/gurumoji/app.py": "Composition root: settings/paths, runtime-state aliases, dependency wiring (late-bound), create_app(), main().",
+  "src/gurumoji/runtime_state.py": "RuntimeState: in-memory jobs, shared locks, analysis cancel events; job pruning and progress updates.",
+  "src/gurumoji/diagnostics.py": "Redaction of local filesystem paths from diagnostics sent to remote clients.",
+  "src/gurumoji/web/security.py": "before/after-request hooks: trusted Host, remote auth, cross-site/CSRF, per-endpoint body limits, security headers.",
+  "src/gurumoji/web/library_routes.py": "Library list/get/create, media, files, thumbnails, input selection, interview comparison.",
+  "src/gurumoji/web/library_deletion.py": "DELETE /api/library/<id> body with quarantine and restore.",
+  "src/gurumoji/web/library_group_routes.py": "Library group routes.",
+  "src/gurumoji/web/export_routes.py": "Analysis, meeting-minutes and speaker exports.",
+  "src/gurumoji/web/analysis_view_routes.py": "Analysis view, annotations, experts, KWIC, semantic search.",
+  "src/gurumoji/web/training_routes.py": "Correction-training dataset downloads.",
+  "src/gurumoji/web/ai_routes.py": "LM Studio reasoning settings route.",
+  "src/gurumoji/handlers/transcription_start.py": "Validate a transcription request, reserve folders, start the worker.",
+  "src/gurumoji/handlers/form_fields.py": "Flask-free form field parsers.",
+  "src/gurumoji/handlers/speaker_identification.py": "Re-run AI speaker identification for a saved conversation.",
+  "src/gurumoji/handlers/segment_classification.py": "Synchronous segment classification command.",
+  "src/gurumoji/services/library_rows.py": "Pure conversions of library_items rows.",
+  "src/gurumoji/services/library_schema.py": "SQLite schema creation and in-place upgrades.",
+  "src/gurumoji/services/library_store.py": "library_row, library_public, upsert_library_item.",
+  "src/gurumoji/services/library_edits.py": "Edited-transcript validation and the locked update with edit manifest.",
+  "src/gurumoji/services/analysis_annotations.py": "Analysis settings/annotation save with codebook versioning.",
+  "src/gurumoji/services/output_import.py": "Import of existing output files with provenance/tombstones.",
+  "src/gurumoji/services/media_files.py": "Media staging, thumbnails, output roots, local media paths.",
+  "src/gurumoji/services/word_cloud.py": "Word-cloud SVG thumbnails.",
+  "src/gurumoji/services/machine_profile.py": "CPU/RAM/GPU detection and activity sampling.",
+  "src/gurumoji/services/instance_lock.py": "Cross-process instance lock.",
+  "src/gurumoji/services/subprocesses.py": "Cancellable subprocess execution.",
+  "src/gurumoji/services/ai/settings.py": "TokenConfig, token file, provider labels, model discovery, LM Studio probes.",
+  "src/gurumoji/services/speaker_identification.py": "AI speaker-name detection, identity repairs, registry linking.",
+  "src/gurumoji/services/analysis_jobs.py": "AI-insight and Transformer runners and start/cancel commands.",
+  "src/gurumoji/services/analysis_archive.py": "archive_* conversions into immutable AnalysisStore runs.",
+  "src/gurumoji/services/analysis_pipeline_adapters.py": "Pipeline snapshot, step adapter, O01 plan adviser.",
+  "src/gurumoji/services/transcription/options.py": "JobOptions and accepted form values.",
+  "src/gurumoji/services/transcription/job_record.py": "JobRecord and its client view.",
+  "src/gurumoji/services/transcription/diarization.py": "pyannote setup and Hugging Face access diagnostics.",
+  "src/gurumoji/services/transcription/vocabulary.py": "Custom vocabulary storage and Whisper prompt."
+ },
+ "symbols": {
+  "AnalysisConflictError": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "class",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "InsightCancelled": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "top level",
+   "kind": "class",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "JobOptions": {
+   "module": "src/gurumoji/services/transcription/options.py",
+   "defined_in": "top level",
+   "kind": "class",
+   "lines_before": 43,
+   "moved_in_phase5": true
+  },
+  "JobRecord": {
+   "module": "src/gurumoji/services/transcription/job_record.py",
+   "defined_in": "top level",
+   "kind": "class",
+   "lines_before": 103,
+   "moved_in_phase5": true
+  },
+  "TokenConfig": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "class",
+   "lines_before": 31,
+   "moved_in_phase5": true
+  },
+  "TransformerAnalysisCancelled": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "top level",
+   "kind": "class",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "_delete_library_item_locked": {
+   "module": "src/gurumoji/web/library_deletion.py",
+   "defined_in": "make_library_deletion()",
+   "kind": "function",
+   "lines_before": 188,
+   "moved_in_phase5": true
+  },
+  "_run_initialized_application": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 33,
+   "moved_in_phase5": false
+  },
+  "_save_group_analysis_locked": {
+   "module": "src/gurumoji/services/analysis_annotations.py",
+   "defined_in": "make_analysis_annotation_save()",
+   "kind": "function",
+   "lines_before": 115,
+   "moved_in_phase5": true
+  },
+  "_save_speaker_registry_records_locked": {
+   "module": "src/gurumoji/services/speaker_registry.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "_spawn_obsidian_watcher": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false
+  },
+  "_stop_subprocess": {
+   "module": "src/gurumoji/services/subprocesses.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": true
+  },
+  "_training_store": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false
+  },
+  "_update_library_from_payload_locked": {
+   "module": "src/gurumoji/services/library_edits.py",
+   "defined_in": "make_library_update()",
+   "kind": "function",
+   "lines_before": 370,
+   "moved_in_phase5": true
+  },
+  "acquire_instance_lock": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 26,
+   "moved_in_phase5": false
+  },
+  "admission_job_public": {
+   "module": "src/gurumoji/handlers/transcription_start.py",
+   "defined_in": "make_transcription_start()",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": true
+  },
+  "advise_analysis_plan": {
+   "module": "src/gurumoji/services/analysis_pipeline_adapters.py",
+   "defined_in": "make_analysis_pipeline_adapters()",
+   "kind": "function",
+   "lines_before": 53,
+   "moved_in_phase5": true
+  },
+  "ai_provider_label": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": true
+  },
+  "analysis_archive_store": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "analysis_commands": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 30,
+   "moved_in_phase5": false
+  },
+  "analysis_pipeline_service": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 22,
+   "moved_in_phase5": false
+  },
+  "analysis_queries": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false
+  },
+  "application_lifecycle": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 26,
+   "moved_in_phase5": false
+  },
+  "apply_speaker_identity_repairs": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 58,
+   "moved_in_phase5": true
+  },
+  "archive_ai_finishing": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 52,
+   "moved_in_phase5": true
+  },
+  "archive_app_url": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": true
+  },
+  "archive_group_analysis": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 35,
+   "moved_in_phase5": true
+  },
+  "archive_interview_comparison": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 27,
+   "moved_in_phase5": true
+  },
+  "archive_media": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "archive_meeting_minutes": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 30,
+   "moved_in_phase5": true
+  },
+  "archive_segment_classification": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 51,
+   "moved_in_phase5": true
+  },
+  "archive_snapshot": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "archive_source_stamp": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "assign_library_group": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "available_ai_models": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 95,
+   "moved_in_phase5": true
+  },
+  "bind_host_is_loopback": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "build_analysis_pipeline_snapshot": {
+   "module": "src/gurumoji/services/analysis_pipeline_adapters.py",
+   "defined_in": "make_analysis_pipeline_adapters()",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "build_interview_comparison": {
+   "module": "src/gurumoji/services/interview_comparison.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "burn_ass_subtitles_into_video": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "call_ai_json": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 23,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "cancel_analysis_insights_command": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_insight_commands()",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "cancel_transformer_analysis_command": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_transformer_commands()",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "canonical_output_import_path": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "chunk_segments": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "classify_segments_with_jev": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false
+  },
+  "clean_recommended_segments_with_ai": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": false
+  },
+  "clean_secret": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "clean_segments_with_ai": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false
+  },
+  "cleanup_orphaned_uploads": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 27,
+   "moved_in_phase5": false
+  },
+  "cleanup_uncommitted_job_artifacts": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": true
+  },
+  "cleanup_unreferenced_training_clips": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "commit_staged_media": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "compare_group_interviews": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "configure_huggingface_hub_compatibility": {
+   "module": "src/gurumoji/services/transcription/diarization.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 18,
+   "moved_in_phase5": true
+  },
+  "configure_speechbrain_lazy_import_compatibility": {
+   "module": "src/gurumoji/services/transcription/diarization.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "configured_ai_credentials": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": true
+  },
+  "copy_file_limited": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 19,
+   "moved_in_phase5": false
+  },
+  "create_diarization_pipeline": {
+   "module": "src/gurumoji/services/transcription/diarization.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "create_library_group": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "create_library_item": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 21,
+   "moved_in_phase5": true
+  },
+  "create_outline_with_ai": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false
+  },
+  "database_connection": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": false
+  },
+  "delete_library_group": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "delete_library_item": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": true
+  },
+  "detect_machine_profile": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 60,
+   "moved_in_phase5": true
+  },
+  "detect_speaker_names_with_ai": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 374,
+   "moved_in_phase5": true
+  },
+  "diarization_access_error_message": {
+   "module": "src/gurumoji/services/transcription/diarization.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "disable_development_cache": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "register_request_security()",
+   "kind": "function",
+   "lines_before": 31,
+   "moved_in_phase5": true
+  },
+  "discover_edit_transaction_staging_dirs": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "display_speaker_for_ai": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": true
+  },
+  "download_library_file": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "download_training_jsonl": {
+   "module": "src/gurumoji/web/training_routes.py",
+   "defined_in": "register_training_routes()",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "download_training_manifest": {
+   "module": "src/gurumoji/web/training_routes.py",
+   "defined_in": "register_training_routes()",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "edit_journal_secret": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "edit_storage_id": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "emotion_csv_text": {
+   "module": "src/gurumoji/services/emotion.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "emotion_values": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "enforce_request_security": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "register_request_security()",
+   "kind": "function",
+   "lines_before": 74,
+   "moved_in_phase5": true
+  },
+  "ensure_output_import_provenance_schema": {
+   "module": "src/gurumoji/services/library_schema.py",
+   "defined_in": "make_library_schema()",
+   "kind": "function",
+   "lines_before": 61,
+   "moved_in_phase5": true
+  },
+  "ensure_segment_ids": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": true
+  },
+  "existing_output_artifacts": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "export_conversation_speakers": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 74,
+   "moved_in_phase5": true
+  },
+  "export_library_analysis_csv": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "export_library_analysis_json": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "export_library_analysis_report": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "export_library_analysis_xlsx": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 25,
+   "moved_in_phase5": true
+  },
+  "export_meeting_json": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": true
+  },
+  "export_meeting_minutes_markdown": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": true
+  },
+  "export_meeting_tasks_csv": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": true
+  },
+  "export_speaker_registry": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "export_transcript_preparation": {
+   "module": "src/gurumoji/web/export_routes.py",
+   "defined_in": "register_export_routes()",
+   "kind": "function",
+   "lines_before": 27,
+   "moved_in_phase5": true
+  },
+  "extract_ai_token_usage": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 66,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "extract_emotion_segment_wavs": {
+   "module": "src/gurumoji/services/emotion.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "extract_google_text": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "extract_lmstudio_text": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "extract_openai_text": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "extract_training_clip": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "generate_video_thumbnail": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 37,
+   "moved_in_phase5": true
+  },
+  "generate_word_cloud_thumbnail": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "get_analysis_expert": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "get_analysis_experts": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "get_analysis_kwic": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 31,
+   "moved_in_phase5": true
+  },
+  "get_analysis_method_overview": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 34,
+   "moved_in_phase5": true
+  },
+  "get_library_analysis": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": true
+  },
+  "get_library_item": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "get_machine_profile": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "get_transformer_semantic_search": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 26,
+   "moved_in_phase5": true
+  },
+  "group_analysis_for_row": {
+   "module": "src/gurumoji/services/group_analysis.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "identify_library_speakers": {
+   "module": "src/gurumoji/handlers/speaker_identification.py",
+   "defined_in": "make_library_speaker_identification()",
+   "kind": "function",
+   "lines_before": 165,
+   "moved_in_phase5": true
+  },
+  "import_existing_outputs": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 110,
+   "moved_in_phase5": true
+  },
+  "import_speaker_registry_csv": {
+   "module": "src/gurumoji/services/speaker_registry.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "initialize_application": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "initialize_library": {
+   "module": "src/gurumoji/services/library_schema.py",
+   "defined_in": "make_library_schema()",
+   "kind": "function",
+   "lines_before": 308,
+   "moved_in_phase5": true
+  },
+  "instance_lock_paths": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": false
+  },
+  "interview_comparison_datasets": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "interview_comparison_identity": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": true
+  },
+  "interview_comparison_request": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 25,
+   "moved_in_phase5": false
+  },
+  "is_colab_runtime": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "is_diarization_access_error": {
+   "module": "src/gurumoji/services/transcription/diarization.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "is_unc_path": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": true
+  },
+  "is_video_path": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "job_handler": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": false
+  },
+  "legacy_training_events": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "library_group_name": {
+   "module": "src/gurumoji/services/library_store.py",
+   "defined_in": "make_library_store()",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "library_groups": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "library_public": {
+   "module": "src/gurumoji/services/library_store.py",
+   "defined_in": "make_library_store()",
+   "kind": "function",
+   "lines_before": 83,
+   "moved_in_phase5": true
+  },
+  "library_row": {
+   "module": "src/gurumoji/services/library_store.py",
+   "defined_in": "make_library_store()",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": true
+  },
+  "library_thumbnail": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 18,
+   "moved_in_phase5": true
+  },
+  "link_detected_speakers_to_registry": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "make_speaker_registration()",
+   "kind": "function",
+   "lines_before": 84,
+   "moved_in_phase5": true
+  },
+  "list_interview_comparison_runs": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "list_library": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 91,
+   "moved_in_phase5": true
+  },
+  "list_speaker_registry": {
+   "module": "src/gurumoji/services/speaker_registry.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "lmstudio_base_url": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "lmstudio_connection_status": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 29,
+   "moved_in_phase5": true
+  },
+  "lmstudio_headers": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "lmstudio_model_id": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "lmstudio_reasoning_route": {
+   "module": "src/gurumoji/web/ai_routes.py",
+   "defined_in": "register_ai_routes()",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": true
+  },
+  "lmstudio_reasoning_settings": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "load_custom_vocabulary": {
+   "module": "src/gurumoji/services/transcription/vocabulary.py",
+   "defined_in": "make_custom_vocabulary_store()",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": true
+  },
+  "load_token_config": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 24,
+   "moved_in_phase5": true
+  },
+  "local_llm_label": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "local_llm_model_required_message": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "local_llm_short_label": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "local_path_access_allowed": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "make_request_guards()",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "lock_instance_stream": {
+   "module": "src/gurumoji/services/instance_lock.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": true
+  },
+  "machine_json_owner_for_row": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": true
+  },
+  "main": {
+   "module": "src/gurumoji/ai_http_worker.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 32,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "manual_output_directory": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "mark_analysis_run_stale": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false
+  },
+  "media_kind": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "media_metadata_session_date": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "meeting_minutes_export_row": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "meeting_minutes_fingerprint": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "merge_ai_usage": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "normalize_ai_usage": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "normalize_conversation_speaker_profiles": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 51,
+   "moved_in_phase5": true
+  },
+  "normalize_custom_vocabulary": {
+   "module": "src/gurumoji/services/transcription/vocabulary.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 36,
+   "moved_in_phase5": true
+  },
+  "normalize_detected_speaker_name": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 23,
+   "moved_in_phase5": true
+  },
+  "normalize_edited_segments": {
+   "module": "src/gurumoji/services/library_edits.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 82,
+   "moved_in_phase5": true
+  },
+  "normalize_outline_sections": {
+   "module": null,
+   "note": "removed (duplicate or unused)",
+   "kind": "function",
+   "lines_before": 42,
+   "moved_in_phase5": false
+  },
+  "normalize_session_profile": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 30,
+   "moved_in_phase5": true
+  },
+  "normalize_source_name": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": true
+  },
+  "normalized_comparison_group": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": true
+  },
+  "normalized_library_group_name": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "nvidia_activity_snapshot": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 56,
+   "moved_in_phase5": true
+  },
+  "obsidian_workbench": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "obsidian_workflows": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": false
+  },
+  "parse_audio_preprocess": {
+   "module": "src/gurumoji/handlers/form_fields.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "parse_bool": {
+   "module": "src/gurumoji/handlers/form_fields.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "parse_optional_float": {
+   "module": "src/gurumoji/handlers/form_fields.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": true
+  },
+  "parse_optional_int": {
+   "module": "src/gurumoji/handlers/form_fields.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": true
+  },
+  "persist_speaker_registry_record": {
+   "module": "src/gurumoji/services/speaker_registry.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "post_json": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "prepare_output_root": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 19,
+   "moved_in_phase5": true
+  },
+  "prepare_training_corrections": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "probe_video_dimensions": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "promote_staged_files": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "prune_jobs_locked": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": false
+  },
+  "public_diagnostic_text": {
+   "module": "src/gurumoji/diagnostics.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": true
+  },
+  "public_insight_request": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_insight_jobs()",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "public_transformer_request": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_transformer_jobs()",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": true
+  },
+  "publish_input_vault": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "publish_meeting_minutes_to_obsidian": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "read_upload_limited": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 12,
+   "moved_in_phase5": false
+  },
+  "recommend_machine_settings": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 49,
+   "moved_in_phase5": true
+  },
+  "reconcile_edit_transaction_with_database": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "reconcile_edit_transactions_before_delete": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "reconcile_edit_transactions_before_mutation": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "record_output_import_provenance": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": true
+  },
+  "record_training_corrections": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "recover_delete_quarantines": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "recover_edit_transactions": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "refresh_archive_index": {
+   "module": "src/gurumoji/services/analysis_archive.py",
+   "defined_in": "make_analysis_archive()",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "refresh_training_exports": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "register_detected_speakers": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "make_speaker_registration()",
+   "kind": "function",
+   "lines_before": 107,
+   "moved_in_phase5": true
+  },
+  "release_instance_lock": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": false
+  },
+  "remote_addr_is_loopback": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "remote_auth_valid": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "make_request_guards()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "remove_owned_directory": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": true
+  },
+  "repair_output_import_provenance": {
+   "module": "src/gurumoji/services/output_import.py",
+   "defined_in": "make_output_import()",
+   "kind": "function",
+   "lines_before": 35,
+   "moved_in_phase5": true
+  },
+  "repair_training_artifacts": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "request_hostname": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": true
+  },
+  "request_origin_allowed": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "make_request_guards()",
+   "kind": "function",
+   "lines_before": 27,
+   "moved_in_phase5": true
+  },
+  "request_too_large": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "register_request_security()",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "resolve_local_media_path": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "retire_input_vault": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "review_segments_with_jev": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false
+  },
+  "row_meeting_minutes": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "row_original_segments": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 23,
+   "moved_in_phase5": true
+  },
+  "row_segments": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": true
+  },
+  "row_session_outline": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "row_session_profile": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": true
+  },
+  "row_speaker_profiles": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 15,
+   "moved_in_phase5": true
+  },
+  "run_aist_emotion_analysis": {
+   "module": "src/gurumoji/services/emotion.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "run_analysis_insight_job": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_insight_jobs()",
+   "kind": "function",
+   "lines_before": 81,
+   "moved_in_phase5": true
+  },
+  "run_analysis_pipeline_method": {
+   "module": "src/gurumoji/services/analysis_pipeline_adapters.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 20,
+   "moved_in_phase5": true
+  },
+  "run_cancellable_subprocess": {
+   "module": "src/gurumoji/services/subprocesses.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 48,
+   "moved_in_phase5": true
+  },
+  "run_obsidian_finishing": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false
+  },
+  "run_segment_classifications_command": {
+   "module": "src/gurumoji/handlers/segment_classification.py",
+   "defined_in": "make_segment_classification_command()",
+   "kind": "function",
+   "lines_before": 123,
+   "moved_in_phase5": true
+  },
+  "run_transcription_job": {
+   "module": "src/gurumoji/services/transcription/job_runner.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 69,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "run_transformer_analysis_job": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_transformer_jobs()",
+   "kind": "function",
+   "lines_before": 92,
+   "moved_in_phase5": true
+  },
+  "runtime_info": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false
+  },
+  "safe_media_filename": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "safe_token_count": {
+   "module": "src/gurumoji/services/ai/client.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "sanitize_remote_diagnostic_value": {
+   "module": "src/gurumoji/diagnostics.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "sanitize_remote_json_payload": {
+   "module": "src/gurumoji/diagnostics.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 19,
+   "moved_in_phase5": true
+  },
+  "save_custom_vocabulary": {
+   "module": "src/gurumoji/services/transcription/vocabulary.py",
+   "defined_in": "make_custom_vocabulary_store()",
+   "kind": "function",
+   "lines_before": 11,
+   "moved_in_phase5": true
+  },
+  "save_group_analysis": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 5,
+   "moved_in_phase5": false
+  },
+  "save_speaker_registry_records": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": false
+  },
+  "save_upload_limited": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 19,
+   "moved_in_phase5": false
+  },
+  "select_input_file": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 55,
+   "moved_in_phase5": true
+  },
+  "session_profile_from_media": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "source_thumbnail": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": true
+  },
+  "speaker_identification_handler": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "speaker_identity_context_records": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 63,
+   "moved_in_phase5": true
+  },
+  "speaker_registry_handler": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": false
+  },
+  "speaker_registry_identity_key": {
+   "module": "src/gurumoji/services/speaker_identification.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 8,
+   "moved_in_phase5": true
+  },
+  "speaker_registry_snapshot": {
+   "module": "src/gurumoji/services/speaker_registry.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "stable_segment_id": {
+   "module": "src/gurumoji/services/library_rows.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "stage_media_archive": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 16,
+   "moved_in_phase5": true
+  },
+  "start_analysis_insights_command": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_insight_commands()",
+   "kind": "function",
+   "lines_before": 83,
+   "moved_in_phase5": true
+  },
+  "start_obsidian_watcher": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "start_transcription_job_command": {
+   "module": "src/gurumoji/handlers/transcription_start.py",
+   "defined_in": "make_transcription_start()",
+   "kind": "function",
+   "lines_before": 289,
+   "moved_in_phase5": true
+  },
+  "start_transformer_analysis_command": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_transformer_commands()",
+   "kind": "function",
+   "lines_before": 134,
+   "moved_in_phase5": true
+  },
+  "stream_library_media": {
+   "module": "src/gurumoji/web/library_routes.py",
+   "defined_in": "register_library_routes()",
+   "kind": "function",
+   "lines_before": 9,
+   "moved_in_phase5": true
+  },
+  "summarize_codebook_change": {
+   "module": "src/gurumoji/services/analysis_annotations.py",
+   "defined_in": "make_analysis_annotation_save()",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": true
+  },
+  "system_activity_snapshot": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 78,
+   "moved_in_phase5": true
+  },
+  "thumbnail_cache_path": {
+   "module": "src/gurumoji/services/media_files.py",
+   "defined_in": "make_media_files()",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": true
+  },
+  "total_system_memory_gib": {
+   "module": "src/gurumoji/services/machine_profile.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 30,
+   "moved_in_phase5": true
+  },
+  "training_status": {
+   "module": "src/gurumoji/web/training_routes.py",
+   "defined_in": "register_training_routes()",
+   "kind": "function",
+   "lines_before": 24,
+   "moved_in_phase5": true
+  },
+  "transcript_formatting_result": {
+   "module": "src/gurumoji/services/transcription/formatting.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 21,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "trusted_request_hosts": {
+   "module": "src/gurumoji/web/security.py",
+   "defined_in": "make_request_guards()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "unlock_instance_stream": {
+   "module": "src/gurumoji/services/instance_lock.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "update_insight_request": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_insight_jobs()",
+   "kind": "function",
+   "lines_before": 7,
+   "moved_in_phase5": true
+  },
+  "update_job": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 22,
+   "moved_in_phase5": false
+  },
+  "update_library_analysis": {
+   "module": "src/gurumoji/web/analysis_view_routes.py",
+   "defined_in": "register_analysis_view_routes()",
+   "kind": "function",
+   "lines_before": 13,
+   "moved_in_phase5": true
+  },
+  "update_library_from_payload": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "update_library_group": {
+   "module": "src/gurumoji/web/library_group_routes.py",
+   "defined_in": "register_library_group_routes()",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": true
+  },
+  "update_token_model": {
+   "module": "src/gurumoji/services/ai/settings.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 19,
+   "moved_in_phase5": true
+  },
+  "update_transformer_request": {
+   "module": "src/gurumoji/services/analysis_jobs.py",
+   "defined_in": "make_transformer_jobs()",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  },
+  "upsert_library_item": {
+   "module": "src/gurumoji/services/library_store.py",
+   "defined_in": "make_library_store()",
+   "kind": "function",
+   "lines_before": 111,
+   "moved_in_phase5": true
+  },
+  "validate_json_value": {
+   "module": "src/gurumoji/text_utils.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 28,
+   "moved_in_phase5": true
+  },
+  "vault_publications": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 10,
+   "moved_in_phase5": false
+  },
+  "vault_registry": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false
+  },
+  "whisper_vault_settings": {
+   "module": "src/gurumoji/app.py",
+   "defined_in": "top level",
+   "note": "stays in the composition root",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false
+  },
+  "whisper_vocabulary_prompt": {
+   "module": "src/gurumoji/services/transcription/vocabulary.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 17,
+   "moved_in_phase5": true
+  },
+  "word_cloud_svg": {
+   "module": "src/gurumoji/services/word_cloud.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 51,
+   "moved_in_phase5": true
+  },
+  "write_edit_preparation_marker": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "write_edit_transaction_manifest": {
+   "module": "src/gurumoji/services/edit_transactions.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 3,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "write_outputs": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 4,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "write_subtitled_video_assets": {
+   "module": "src/gurumoji/services/outputs.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 14,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "write_training_exports": {
+   "module": "src/gurumoji/services/training_corpus.py",
+   "defined_in": "top level",
+   "app_py": "thin wrapper kept (composition seam)",
+   "kind": "function",
+   "lines_before": 2,
+   "moved_in_phase5": false,
+   "note": "already implemented there before phase 5; app.py delegates"
+  },
+  "write_word_cloud": {
+   "module": "src/gurumoji/services/word_cloud.py",
+   "defined_in": "top level",
+   "kind": "function",
+   "lines_before": 6,
+   "moved_in_phase5": true
+  }
+ }
+}
