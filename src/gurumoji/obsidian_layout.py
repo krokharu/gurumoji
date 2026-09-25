@@ -385,6 +385,22 @@ class ObsidianLayout:
             self.configure(records)
 
     def configure(self, records: list[dict]) -> None:
+        """Write recommended Obsidian settings once, when the app creates the Vault (OBS-03).
+
+        A Vault that already has `.obsidian/` belongs to the user's settings: plugins,
+        appearance, graph and workspaces are left as they are. Later syncs only refresh
+        the app's own bookmark group, and only while it still exists.
+        """
+        data = self.load()
+        applied = data.get("obsidian_settings")
+        if applied is None:
+            fresh = not safe_path(self.vault, ".obsidian").exists()
+            applied = {"mode": "initialized" if fresh else "existing", "at": utc_now_iso()}
+            data["obsidian_settings"] = applied
+            self.save(data)
+            initialize = fresh
+        else:
+            initialize = False
         def read(name, default, valid=lambda value: isinstance(value, dict)):
             p = safe_path(self.vault, ".obsidian/" + name)
             if not p.exists():
@@ -402,24 +418,27 @@ class ObsidianLayout:
             p = safe_path(self.vault, ".obsidian/" + name)
             b = json.dumps(value, ensure_ascii=False, indent=2).encode()
             if not p.exists() or p.read_bytes() != b: write_atomic(p, b)
-        core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
-            "command-palette": True, "file-recovery": True, "outline": True},
-            lambda value: isinstance(value, (dict, list)))
-        enabled = ("search", "global-search", "graph", "bookmarks", "workspaces", "bases", "backlink", "properties", "canvas")
-        if isinstance(core, list): write("core-plugins.json", list(dict.fromkeys(core + list(enabled))))
-        elif core is not None: write("core-plugins.json", core | {key: True for key in enabled})
+        if initialize:
+            core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
+                "command-palette": True, "file-recovery": True, "outline": True},
+                lambda value: isinstance(value, (dict, list)))
+            enabled = ("search", "global-search", "graph", "bookmarks", "workspaces", "bases", "backlink", "properties", "canvas")
+            if isinstance(core, list): write("core-plugins.json", list(dict.fromkeys(core + list(enabled))))
+            elif core is not None: write("core-plugins.json", core | {key: True for key in enabled})
+        # The snippet is the app's own hash-protected file; enabling it is a one-time setting.
         self.managed_note(".obsidian/snippets/gurumoji-reading.css",
             ".gurumoji-reading .metadata-container, .gurumoji-reading .inline-title { display: none !important; }\n"
             ".gurumoji-control .metadata-property:not([data-property-key=\"provider\"]), "
             ".gurumoji-control .metadata-add-button { display: none; }\n"
             ".gurumoji-reading h1 { font-size: 1.6em; }\n")
-        appearance = read("appearance.json", {}, lambda value: isinstance(value, dict)
-                          and isinstance(value.get("enabledCssSnippets", []), list))
-        if appearance is not None:
-            appearance["enabledCssSnippets"] = list(dict.fromkeys(appearance.get("enabledCssSnippets", []) + ["gurumoji-reading"]))
-            write("appearance.json", appearance)
-        if not safe_path(self.vault, ".obsidian/graph.json").exists(): write("graph.json", graph_options())
-        bookmarks = read("bookmarks.json", {"items": []},
+        if initialize:
+            appearance = read("appearance.json", {}, lambda value: isinstance(value, dict)
+                              and isinstance(value.get("enabledCssSnippets", []), list))
+            if appearance is not None:
+                appearance["enabledCssSnippets"] = list(dict.fromkeys(appearance.get("enabledCssSnippets", []) + ["gurumoji-reading"]))
+                write("appearance.json", appearance)
+            if not safe_path(self.vault, ".obsidian/graph.json").exists(): write("graph.json", graph_options())
+        bookmarks = read("bookmarks.json", {"items": []} if initialize else None,
                          lambda value: isinstance(value, dict) and isinstance(value.get("items"), list))
         items = [g for g in (bookmarks or {"items": []})["items"] if isinstance(g, dict)]
         group = next((g for g in items if g.get("gurumoji") == "navigation"), None)
@@ -447,9 +466,13 @@ class ObsidianLayout:
             {"type": "group", "title": "インタビュー別", "ctime": 0, "items": [
                 {"type": "graph", "title": r["code"] + " " + display_title(r["title"]), "ctime": 0, "options": graph_options(interview_query(r))} for r in records]}]}
         if bookmarks is not None:
-            if group: bookmarks["items"][bookmarks["items"].index(group)] = generated
-            else: bookmarks["items"].append(generated)
-            write("bookmarks.json", bookmarks)
+            if group:
+                bookmarks["items"][bookmarks["items"].index(group)] = generated
+                write("bookmarks.json", bookmarks)
+            elif initialize:
+                bookmarks["items"].append(generated)
+                write("bookmarks.json", bookmarks)
+            # A group the user removed is not added back.
         # Native workspace leaf shapes, matching the installed Obsidian format.
         def leaf(kind, state):
             return {"id": hashlib.sha256((kind + json.dumps(state)).encode()).hexdigest()[:16],
@@ -468,6 +491,8 @@ class ObsidianLayout:
                         "search": "-tag:#graph/support -tag:#graph/history",
                         "localJumps": 1}})]), "width": 280, "collapsed": not local},
                     "lastOpenFiles": [path]}
+        if not initialize:
+            return
         layouts = read("workspaces.json", {"workspaces": {}, "active": ""},
                        lambda value: isinstance(value, dict) and isinstance(value.get("workspaces"), dict))
         if layouts is not None:

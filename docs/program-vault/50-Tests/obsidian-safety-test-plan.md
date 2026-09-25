@@ -74,7 +74,7 @@ obsidian-safety-vault/
 | 異常終了：書き込み途中 | `test_analysis_storage.py`: `test_mid_write_failure_retries_deterministically_and_detects_tamper`、`test_interrupted_save_recovers_original_package_after_edit_without_reanalysis`、`test_obsidian_layout.py`: `test_interrupted_migration_resumes_from_same_backup` | 一部 | `VaultRegistry` の `pending` hashからの回復。`os.replace` が失敗したときに一時ファイルが残らないこと |
 | 移行：リンクと引用 | `test_obsidian_layout.py`: `test_migration_updates_catalog_links_and_preserves_literal_quotes_and_backup`、`test_legacy_fences_and_quote_literals_are_never_rewritten` | あり | 利用者が作った空フォルダーを削除しないこと（OBS-13）、Dry Run（OBS-16） |
 | Vaultの誤認：入れ子・書き込み禁止のルート | `test_four_vaults.py`: `test_software_and_research_vaults_are_not_generated_roots` | 一部 | 親フォルダーに `.obsidian` がある場合に停止すること（OBS-10） |
-| `.obsidian` を変更しない | `test_obsidian_layout.py`（ワークスペース編集の保持） | 一部 | 既存Vaultの `core-plugins.json`・`appearance.json` を変更しないこと（OBS-03、ADR-103 の採用後） |
+| `.obsidian` を変更しない | `test_obsidian_layout.py`: `test_existing_vault_settings_are_never_rewritten`、`test_new_vault_is_configured_once_and_user_changes_stay`、ワークスペース編集の保持 | あり | Obsidian起動中にアプリのブックマークグループを更新したときの競合（OBS-04） |
 | ファイル名：禁止文字・末尾・同名・長さ | なし | なし | `register`、`graph_node_path` の規則とパス長の上限（OBS-14） |
 | CSRF：ブラウザー由来のPOST | `test_interview_comparison.py`: `test_browser_requests_require_csrf_and_save_the_displayed_input_version`、`test_browser_e2e.py`: `test_comparison_and_unsaved_navigation_regressions` | あり | Origin／Sec-Fetchヘッダーと実ブラウザーで比較・保存を検証。`apiFetch`内部の`window.fetch`は許可する |
 | 監視：停止の表示・ログ | `test_obsidian_finishing.py`: `test_application_watcher_executes_saved_checkbox_and_stops`、`test_watcher_reports_stop_reason_and_polling_errors` | 一部 | スキップのログに本文が含まれないことの自動確認（OBS-15）。実ブラウザーでの表示確認 |

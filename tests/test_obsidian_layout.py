@@ -112,6 +112,39 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(memo.read_bytes(), before)
         self.assertEqual(json.loads(bookmark.read_text(encoding='utf-8'))['items'][-1]['title'], '自分用')
 
+    def test_existing_vault_settings_are_never_rewritten(self):
+        settings = self.layout.vault / '.obsidian'
+        settings.mkdir(parents=True)
+        files = {
+            'core-plugins.json': '{"graph": false, "file-explorer": true}',
+            'appearance.json': '{"enabledCssSnippets": []}',
+            'bookmarks.json': '{"items": [{"type": "file", "path": "mine.md"}]}',
+            'workspaces.json': '{"workspaces": {}, "active": ""}',
+        }
+        for name, text in files.items():
+            (settings / name).write_text(text, encoding='utf-8')
+        for i in range(2):
+            self.layout.update('existing', '既存.wav', {}, '保存済み')
+        for name, text in files.items():
+            self.assertEqual((settings / name).read_text(encoding='utf-8'), text, name)
+        self.assertFalse((settings / 'graph.json').exists())
+        self.assertFalse((settings / 'workspace.json').exists())
+        self.assertEqual(self.layout.load()['obsidian_settings']['mode'], 'existing')
+
+    def test_new_vault_is_configured_once_and_user_changes_stay(self):
+        self.layout.update('new', '新規.wav', {}, '保存済み')
+        settings = self.layout.vault / '.obsidian'
+        self.assertEqual(self.layout.load()['obsidian_settings']['mode'], 'initialized')
+        self.assertTrue(json.loads((settings / 'core-plugins.json').read_text(encoding='utf-8'))['graph'])
+        # The user turns the graph off and removes the Gurumoji bookmarks.
+        (settings / 'core-plugins.json').write_text('{"graph": false}', encoding='utf-8')
+        (settings / 'bookmarks.json').write_text('{"items": []}', encoding='utf-8')
+        (settings / 'graph.json').unlink()
+        self.layout.update('second', '二件目.wav', {}, '保存済み')
+        self.assertEqual((settings / 'core-plugins.json').read_text(encoding='utf-8'), '{"graph": false}')
+        self.assertEqual((settings / 'bookmarks.json').read_text(encoding='utf-8'), '{"items": []}')
+        self.assertFalse((settings / 'graph.json').exists())
+
     def test_deleted_conversation_is_marked_and_notes_are_kept(self):
         record = self.layout.register('gone', '削除する会議.wav')
         self.layout.update('gone', '削除する会議.wav', {}, '保存済み')

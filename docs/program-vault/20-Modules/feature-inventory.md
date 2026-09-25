@@ -76,7 +76,7 @@ tags:
 | グループインタビュー比較 | Experimental（未コミット） | 分析・可視化の下部の折りたたみ／`POST /api/library/interview-comparison`、`POST/GET …/runs` | `build_interview_comparison`、`archive_interview_comparison`、`static/interview-comparison.js` | ブラウザーからのPOSTが403になる疑い（BUG-01） |
 | 事前アンケート分析 | Implemented | 話者管理 | `app.js`（クライアント側で集計） | 話者台帳の属性を使う |
 | くしなだ学習データ | Implemented | 一覧の学習状態／`GET /api/training`、`…/corrections.jsonl`、`…/manifest.csv` | `record_training_corrections`、`write_training_exports` | `training_events`、`<data>/kushinada_training` |
-| ResearchVaultのナビゲーション・グラフ・テーマ同期 | Implemented | Obsidian側 | `ObsidianLayout.publish_navigation`、`configure`、`sync_themes` | `.obsidian` も変更する（OBS-03） |
+| ResearchVaultのナビゲーション・グラフ・テーマ同期 | Implemented | Obsidian側 | `ObsidianLayout.publish_navigation`、`configure`、`sync_themes` | `.obsidian` は新規Vaultの初回だけ書く（OBS-03） |
 | 4 Vaultへの書き出し | Experimental（未コミット、実データでは未生成） | 自動 | `vault_registry.py`、`AnalysisStore.publish_vaults`、`publish_input_vault` | [[30-Data/four-vaults-v1]] |
 | Google Colab | Implemented | `notebooks/Gurumoji_Colab.ipynb` | `is_colab_runtime` | なし |
 | 保守スクリプト | Implemented | 手動 | `scripts/check_*.py`、`repair_qwen_download.py`、`bootstrap_s3prl.py`、`cleanup_env.bat`、`setup_emotion.bat` | 開発・診断用 |

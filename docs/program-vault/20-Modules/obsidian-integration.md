@@ -154,7 +154,7 @@ tags:
 | `ObsidianWorkbench.save_note`、`note` | 仕上げノート、状態ノート | 状態以外は排他的な新規作成。状態は毎回更新。管理状態を失い初期ノートが残る場合は停止 | 状態以外は同名ノートがあれば停止して保持 | 新しい生成パスに作成。移動済み作業ノートは既存の探索規則に従う |
 | `ObsidianLayout.sync_finishing` | 概要・ナビゲーション | 生成側の所有hashを確認。人の作業ノートは読み書きしない | 人の編集をそのまま保持 | 人のノートは作らない |
 | `ObsidianLayout.sync_themes` | `40-研究/テーマ関連/*.md` | `managed_note`の所有hash。人のテーマノートは存在確認のみ | 生成関連ノートの競合は警告しスキップ | 管理済み関連ノートの欠落は再作成しない |
-| `ObsidianLayout.configure` | `.obsidian/*.json` | **判定なし**。読んで変更して書く。CSSスニペットだけ `managed_note` | 利用者の設定を変更する。Obsidianが起動中なら互いに上書きしうる（OBS-03） | 作成する |
+| `ObsidianLayout.configure` | `.obsidian/*.json` | `.obsidian/` がなかった新規Vaultだけ初回に書く（`obsidian_settings` に記録）。以後はアプリのブックマークグループが残っていれば更新するだけ。CSSスニペットは `managed_note` | 既存Vaultの設定は変更しない（OBS-03、ADR-103） | 作成する |
 | `ObsidianWorkbench.execute`（反映） | DB | revision一致、元ノートのfingerprint一致、反映中の結果ノートの変更なし、`library_write_lock` | 停止してエラーを状態ノートに表示 | `note_id` で1件に特定できなければ停止 |
 | `obsidian_migration.migrate` | ResearchVault全体 | バックアップと移行前後のhash | 中断（`ValueError`） | 移行先に別の内容があれば中断 |
 
@@ -213,7 +213,7 @@ tags:
 ## 今後変更するときの注意事項
 
 1. 新しい書き込み処理を作らない。まず [[40-Design/decisions]] ADR-101 の方針（1つの書き込み関数、書き込み前の予定hash、conflict・missingの表示）に合わせる。
-2. 人が所有するノートの全体を再生成して上書きしない。テーマと仕上げノートにはADR-109を適用し、関連情報・現在の参照を別の生成ノートへ書く。hash再確認だけを外部編集に対する排他保証と扱わない。`.obsidian`の設定保護はOBS-03として残る。
+2. 人が所有するノートの全体を再生成して上書きしない。テーマと仕上げノートにはADR-109を適用し、関連情報・現在の参照を別の生成ノートへ書く。hash再確認だけを外部編集に対する排他保証と扱わない。`.obsidian`は新規Vaultの初回だけ書く（OBS-03、ADR-103）。
 3. Vaultのパスは既存の算出元から得る。新しくパスを組み立てない。ユーザーのVaultを推測しない。
 4. 判断できない状態では書かずに止め、理由を状態ノート・索引・ログに残す。対象は、Vaultが特定できない、同じ名前がある、YAMLを解析できない、`note_id` が重複している、revisionが一致しない、など。
 5. 削除・移動・一括変換を追加する場合は、バックアップ、変更予定の一覧を出すDry Run、再開可能な記録を先に設計する。
