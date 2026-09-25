@@ -9,7 +9,11 @@ import unittest
 import wave
 from pathlib import Path
 
-from app import run_audio_interval_preprocess, run_audio_preprocess
+from app import (
+    run_audio_interval_preprocess,
+    run_audio_preprocess,
+    run_diarization_audio_preprocess,
+)
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
@@ -134,6 +138,49 @@ class AudioPreprocessTests(unittest.TestCase):
                 samples = self.read_wav(output)
                 self.assertEqual(len(samples), 64001)
                 self.assertFalse(any(samples))
+
+    def test_diarization_input_lifts_only_too_quiet_speech(self):
+        rate = 16000
+
+        def tone(seconds, amplitude):
+            return [
+                round(amplitude * 32767 * math.sin(2 * math.pi * 180 * index / rate))
+                for index in range(int(seconds * rate))
+            ]
+
+        # Quiet speaker (-34 dBFS peak), a loud speaker (-6 dBFS), then silence.
+        samples = tone(3, 0.02) + tone(3, 0.5) + [0] * (2 * rate)
+        source = self.write_wav("speakers.wav", samples, rate=rate)
+        output = self.root / "diarization.wav"
+        run_diarization_audio_preprocess(source, output)
+        processed = self.read_wav(output)
+
+        def rms(values, start, end):
+            window = values[int(start * rate):int(end * rate)]
+            return math.sqrt(sum(value * value for value in window) / len(window))
+
+        self.assertAlmostEqual(len(processed), len(samples), delta=1)
+        quiet_gain = rms(processed, 2.0, 3.0) / rms(samples, 2.0, 3.0)
+        loud_gain = rms(processed, 3.5, 5.5) / rms(samples, 3.5, 5.5)
+        self.assertGreater(quiet_gain, 3.0)
+        self.assertLessEqual(quiet_gain, 4.05)
+        self.assertAlmostEqual(loud_gain, 1.0, delta=0.02)
+        self.assertLessEqual(max(abs(value) for value in processed), 0.5 * 32767 * 1.01)
+        self.assertFalse(any(processed[int(6.2 * rate):]))
+
+    def test_diarization_input_preserves_timing_and_tail(self):
+        for rate in (16000, 48000):
+            frames = round(rate * 4.013)
+            samples = [0] * frames
+            samples[rate] = 16000
+            samples[frames - round(rate * 0.0125)] = 16000
+            source = self.write_wav("markers.wav", samples, rate)
+            with self.subTest(rate=rate):
+                output = self.root / "diarization.wav"
+                run_diarization_audio_preprocess(source, output)
+                self.assert_markers_preserved(
+                    self.read_wav(output), round(frames / rate * 16000)
+                )
 
 
 if __name__ == "__main__":

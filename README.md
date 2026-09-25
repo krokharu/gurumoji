@@ -46,7 +46,7 @@
 - 本文・話者・時刻・くしなだ感情ラベルの修正差分を、音声クリップ付き学習データとして蓄積
 - API キーは画面へ入力せず、`config/tokens.json` からだけ読込
 
-分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[2つのVaultの開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
+分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。このほかアプリが台帳を書き出す Input・Visualization・Orchestrator の3つのVaultがあります。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[Vaultの構成と開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
 
 Obsidian がインストール済みの場合は、`run.bat` と同じフォルダーに **「可視化用Obsidianを開く」** ショートカットが自動作成されます。クリックすると `runtime/data/obsidian/VisualizationVault` を開きます。
 
@@ -196,7 +196,7 @@ AI 仕上げやアウトライン作成を有効にした場合、文字起こ�
 
 ## 音声前処理
 
-文字起こしと話者分離の前に、FFmpeg で一時的な 16kHz / mono / WAV を作成します。前処理済み WAV は処理後に削除します。元メディアは発話確認用としてローカルの `runtime/data/media` に保存します。
+文字起こしの前に、FFmpeg で一時的な 16kHz / mono / WAV を作成します。前処理は音声認識だけに使います。ノイズ除去や音量正規化で声質や音量の起伏を変えると、話者の区別や感情推定の手がかりが失われるためです。話者分離には、元音声のうち小さすぎる声だけを最大4倍（+12 dB）まで持ち上げた音声を使います。普通以上の大きさの声と背景の静かな部分はそのままです（前処理を「加工なし」にした場合は元音声をそのまま使います）。音声感情分析には元音声をそのまま使います。前処理は時刻を変えないため、どの工程の結果も同じ時刻で対応します。前処理済み WAV は処理後に削除します。元メディアは発話確認用としてローカルの `runtime/data/media` に保存します。
 
 | モード | 内容 | 使いどころ |
 | --- | --- | --- |
@@ -325,6 +325,8 @@ CSVはUTF-8 BOM付きで、ExcelまたはGoogle Sheetsへ取り込めます。�
 
 GeForce GTX 970 など Compute Capability 7.0 未満の GPU では、文字起こしに PyTorch 版 OpenAI Whisper を使用します。`tiny` / `base` だけを選んでください。話者分離は CPU を推奨します。
 
+文字起こしを CPU で行う場合も OpenAI Whisper を使用します。OpenAI Whisper には VAD（音声区間検出）がないため、「小さい声を拾いやすくする」の VAD onset / offset は適用されず、無音判定しきい値だけが効きます。
+
 ## 出力
 
 既定ではこのフォルダーの `runtime/output` に、実行ごとの専用フォルダーを作成します（`MOJIOKOSI_OUTPUT_DIR` で変更可）。
@@ -344,7 +346,7 @@ JSON は画面設定にかかわらず必ず生成され、話者ラベル、自
 
 研究分析のExcel、分析全体JSON、個別CSVは「分析・可視化」で選択中の処理済みデータからダウンロード時に生成します。これらは保存済みrevisionを記録しますが、`runtime/output` フォルダーへ自動複製はしません。
 
-選択した元ファイルは変更・削除しません。開始時にアプリ内のジョブ専用フォルダーへスナップショットコピーし、そのコピーを処理するため、実行中に元ファイルが置換されても処理内容は変わりません。前処理用ファイルを含む一時コピーは処理終了後に削除します。確認再生用のコピーは `runtime/data/media`、ライブラリのメタデータは `runtime/data/library.sqlite3` に保存されます（`MOJIOKOSI_DATA_DIR` で変更可）。
+選択した元ファイルは変更・削除しません。開始時にアプリ内のジョブ専用フォルダーへスナップショットコピーし、そのコピーを処理するため、実行中に元ファイルが置換されても処理内容は変わりません。前処理用ファイルを含む一時コピーは処理終了後に削除します。確認再生用のコピーは `runtime/data/media`、ライブラリのメタデータは `runtime/data/library.sqlite3` に保存されます（`MOJIOKOSI_DATA_DIR` で変更可）。処理済みデータを削除すると、会話と確認再生用のコピーは `runtime/data/trash` のゴミ箱に移り、一覧の「ゴミ箱」から復元できます。30日後に自動で完全に削除されます（日数は `MOJIOKOSI_TRASH_RETENTION_DAYS` で変更でき、0で自動削除しません）。
 
 ## くしなだ学習用データ
 
@@ -407,7 +409,7 @@ FlaskのHTTPサーバーを `0.0.0.0` などへbindし、`http://PCのIPアド�
 
 リモートアクセス時、サーバー上の任意のローカルパスを指定する機能は既定で無効です。必要なファイルはブラウザーからアップロードしてください。この状態ではAPIのエラー、警告、ログに含まれる絶対ローカルパスも伏せて返します。例外として `MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS=1` を設定すると、認証済みのリモート利用者にもサーバー内パスの指定と診断上のパス表示を許可できます。これは直結接続とリバースプロキシ経由の両方で、サーバー内ファイルへアクセスできる範囲を広げる高リスクな設定です。隔離された専用環境以外では有効にしないでください。
 
-アプリは `runtime/data` ディレクトリに対して単一インスタンスで動作します。同じデータディレクトリを使う複数プロセスは起動できず、1インスタンス内で同時に実行できる文字起こしジョブも1件です。削除中に強制終了した場合は、次回起動時にSQLiteの有無を正本として隔離中メディアを復元または削除完了へ進めます。並列処理のために同じ `runtime/data` や `runtime/output` を複数プロセスで共有しないでください。
+アプリは `runtime/data` ディレクトリに対して単一インスタンスで動作します。同じデータディレクトリを使う複数プロセスは起動できず、1インスタンス内で同時に実行できる文字起こしジョブも1件です。削除中に強制終了した場合は、次回起動時にSQLiteの有無を正本として隔離中メディアを復元するか、ゴミ箱（`runtime/data/trash`）へ移して削除を完了します。並列処理のために同じ `runtime/data` や `runtime/output` を複数プロセスで共有しないでください。
 
 文字起こしの編集保存では、出力を置換する前に `.edit-transaction.json` と旧ファイルのバックアップを同じ出力先へ記録します。保存中にプロセスが強制終了した場合、次回起動時にSQLiteのrevisionを正本として、未確定の出力は旧版へ戻し、確定済みの出力は新版のまま後片付けします。journalの改ざん、別データベースのjournal、外部変更などで安全に判定できない場合は、出力を推測で変更したり自動取り込みしたりせず起動を停止します。
 
@@ -422,6 +424,8 @@ FlaskのHTTPサーバーを `0.0.0.0` などへbindし、`http://PCのIPアド�
 | `MAX_JSON_MB` | `MOJIOKOSI_MAX_JSON_MB` | 32 MB | JSON形式のAPIリクエスト |
 | `MAX_RETAINED_JOBS` | `MOJIOKOSI_MAX_RETAINED_JOBS` | 50件 | メモリー内に保持するジョブ状態 |
 | `JOB_TTL_SECONDS` | `MOJIOKOSI_JOB_TTL_SECONDS` | 86400秒（24時間） | 完了・失敗・キャンセル済みジョブ状態の保持時間 |
+| `BACKUP_DIR` | `MOJIOKOSI_BACKUP_DIR` | `runtime/backups` | 「バックアップを作成」と `scripts/backup_data.py` の保存先 |
+| `TRASH_RETENTION_DAYS` | `MOJIOKOSI_TRASH_RETENTION_DAYS` | 30日 | 削除した会話（DBの行・元音声・動画・サムネイル）を `runtime/data/trash` に保管する日数。その間は処理済みデータ一覧の「ゴミ箱」から復元・完全削除でき、過ぎた分は起動時に完全削除します。0で自動削除しない |
 
 ジョブ保持上限とTTLは、進捗表示や再接続に使うメモリー内の状態を整理する設定です。処理済みライブラリや `runtime/output` の成果物を自動削除する設定ではありません。送信直後に接続が切れたりページを再読み込みした場合は、ブラウザーが同じ送信IDで受付中・実行中・保存済み結果を照会し、未受付を確認した再送でも同じIDを再利用して二重実行を防ぎます。
 

@@ -51,7 +51,7 @@ tags:
 | 会話プロファイル・会話話者連携 | Implemented | 作業画面「会話・話者」／`PUT /api/library/<id>`、`GET …/speakers.csv` | `normalize_session_profile`、`normalize_conversation_speaker_profiles` | `library_items` のJSON列 | InputVaultの会話種別 |
 | 出力ファイル（TXT／JSON／SRT／アウトライン／感情CSV／ワードクラウド） | Implemented | ダウンロードリンク／`GET /api/jobs/<id>/files/<name>`、`GET /api/library/<id>/files/<name>` | `write_outputs`、`write_word_cloud` | `runtime/output` | なし |
 | メディア保管・再生・サムネイル | Implemented | 作業画面「発話の確認・編集」、新規作成のファイル選択／`GET …/media`、`GET …/thumbnail`、`POST /api/source-thumbnail`、`POST /api/select-input` | `archive_media`、`stream_library_media`、`generate_video_thumbnail` | `<data>/media`、`thumbnails` | 相対パスとサイズをInputVaultへ |
-| データ削除 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>` | `_delete_library_item_locked`（隔離 → DB削除 → `rmtree`） | tombstone | `retire_input_vault`（台帳を `deleted` にする）。ResearchVaultは変更しない |
+| データ削除 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>` | `_delete_library_item_locked`（隔離 → DB削除 → `services/library_trash` のゴミ箱へ移動。復元・完全削除・保持期間後の自動削除） | tombstone | `retire_input_vault`（台帳を `deleted` にする）。ResearchVaultは概要・一覧の状態だけ「アプリから削除済み」にし、ノートは残す |
 | 出力JSONの自動取り込み | Implemented | 起動時 | `import_existing_outputs`、`repair_output_import_provenance` | `output_import_provenance`、`output_import_tombstones` | InputVault（`imported`） |
 | リクエストのセキュリティ | Implemented | 全API | `enforce_request_security`（Host、CSRFヘッダー、リモート認証、サイズ上限） | なし | なし |
 | AI接続・モデル選択 | Implemented | 上部バーのトークン表示と「接続と処理装置」／`GET /api/ai/models`、`PUT /api/ai/model`、`GET /api/ai/lmstudio-reasoning` | `available_ai_models`、`update_token_model`、`call_ai_json`、`ai_http_worker.py` | `config/tokens.json` | APIキーは書かない |
@@ -63,7 +63,7 @@ tags:
 | 機能 | 状態 | 入口 | 実装 | 補足 |
 | --- | --- | --- | --- | --- |
 | Obsidianで仕上げる（既定） | Implemented | 新規作成「AI仕上げ」のチェック（既定ON）、作業画面の保存バー「Obsidianで仕上げ」／`POST/GET …/obsidian-finishing` | `ObsidianWorkbench`、`start_obsidian_watcher`、`run_obsidian_finishing` | 下記「アプリ内AI仕上げ」と目的が重複する（Duplicate） |
-| アプリ内AI仕上げ（ジョブ内の校正・話者特定・アウトライン） | Implemented（既定では使われない） | `finish_in_obsidian=0` のときだけ有効。校正のチェック欄はUIで非表示（`data-app-finishing-only hidden`） | `run_transcription_job` 内の `clean_segments_with_ai`、`detect_speaker_names_with_ai`、`create_outline_with_ai` | Duplicate |
+| アプリ内AI仕上げ（ジョブ内の校正・話者特定・アウトライン） | Implemented | `finish_in_obsidian=0` のときだけ有効。新規作成の文章整形モード「おすすめ」「高度」、または「Obsidianに保存してあとで整える」を外したときに使われる（`handlers/transcription_start.py`） | `run_transcription_job` 内。校正の手順は `run_full_cleanup`（Obsidian方式と共通）、ほかに `clean_recommended_segments_with_ai`、`detect_speaker_names_with_ai`、`create_outline_with_ai` | Duplicate |
 | 話者名のAI再特定 | Implemented | 作業画面「会話・話者」の「自己紹介から話者名を再特定」／`POST …/speaker-identification` | `rerun_library_speaker_identification` | ジョブ・仕上げと合わせて入口が3つ（Duplicate） |
 | 音声感情分析（AIST） | Implemented | 新規作成「設定」の「音声感情分析」 | `run_aist_emotion_analysis` | 追加の依存とモデル同意が必要 |
 | 字幕付き動画 | Implemented | 出力形式 | `write_subtitled_video_assets`、`burn_ass_subtitles_into_video` | なし |
@@ -76,7 +76,7 @@ tags:
 | グループインタビュー比較 | Experimental（未コミット） | 分析・可視化の下部の折りたたみ／`POST /api/library/interview-comparison`、`POST/GET …/runs` | `build_interview_comparison`、`archive_interview_comparison`、`static/interview-comparison.js` | ブラウザーからのPOSTが403になる疑い（BUG-01） |
 | 事前アンケート分析 | Implemented | 話者管理 | `app.js`（クライアント側で集計） | 話者台帳の属性を使う |
 | くしなだ学習データ | Implemented | 一覧の学習状態／`GET /api/training`、`…/corrections.jsonl`、`…/manifest.csv` | `record_training_corrections`、`write_training_exports` | `training_events`、`<data>/kushinada_training` |
-| ResearchVaultのナビゲーション・グラフ・テーマ同期 | Implemented | Obsidian側 | `ObsidianLayout.publish_navigation`、`configure`、`sync_themes` | `.obsidian` も変更する（OBS-03） |
+| ResearchVaultのナビゲーション・グラフ・テーマ同期 | Implemented | Obsidian側 | `ObsidianLayout.publish_navigation`、`configure`、`sync_themes` | `.obsidian` は新規Vaultの初回だけ書く（OBS-03） |
 | 4 Vaultへの書き出し | Experimental（未コミット、実データでは未生成） | 自動 | `vault_registry.py`、`AnalysisStore.publish_vaults`、`publish_input_vault` | [[30-Data/four-vaults-v1]] |
 | Google Colab | Implemented | `notebooks/Gurumoji_Colab.ipynb` | `is_colab_runtime` | なし |
 | 保守スクリプト | Implemented | 手動 | `scripts/check_*.py`、`repair_qwen_download.py`、`bootstrap_s3prl.py`、`cleanup_env.bat`、`setup_emotion.bat` | 開発・診断用 |
@@ -85,7 +85,7 @@ tags:
 
 | 重複 | 併存している理由（推定を含む） | 収束の方向 |
 | --- | --- | --- |
-| AI仕上げ：アプリ内ジョブ／Obsidian作業台 | Obsidian方式を既定にした後も、API互換（`finish_in_obsidian=0`）とテストのためにジョブ内の経路が残った | Obsidian方式を正にする。ジョブ内の経路はAPI互換として残し、UIからは出さない（[[40-Design/decisions]] ADR-010） |
+| AI仕上げ：アプリ内ジョブ／Obsidian作業台 | Obsidian方式を既定にした後も、API互換（`finish_in_obsidian=0`）とテストのためにジョブ内の経路が残った | Obsidian方式を正にする。ジョブ内の経路は「おすすめ」「高度」モードが使うため残す。校正の手順（全体アウトライン → 全文校正 → Jev比較）は `services/ai/transcript_finishing.run_full_cleanup` に共通化済み（2026-09-25、ARCH-07） |
 | 話者特定：ジョブ／作業画面の再特定／仕上げのオプション | 機能を追加するたびに入口が増えた | 実装は `detect_speaker_names_with_ai` の1つ。UIの入口を整理する |
 | 議事録Markdown：`format_meeting_minutes_markdown`（出力・API）／`meeting_minutes_note`（Obsidian） | Obsidian用にリンク付きの形式を別途作った | 同じ中間データからレンダラーを2つ作る形に整理する |
 | 議事録のVault出力：作業台の会議ノート（`I###-会議議事録-*.md`）／固定保存の実行（`meeting_minutes` run） | 閲覧用と、再現用の固定保存を分けた | ノートの役割をドキュメントに明記し、ナビでは一方へ誘導する |

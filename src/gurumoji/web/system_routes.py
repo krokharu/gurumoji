@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +30,8 @@ def register_system_routes(
     available_ai_models: Callable[[str, Any], list[dict[str, Any]]],
     update_token_model: Callable[[Any, Any, Path], Any],
     system_activity_snapshot: Callable[[], dict[str, Any]],
+    obsidian_watcher_status: Callable[[], dict[str, Any]] = lambda: {},
+    create_backup: Callable[[bool], dict[str, Any]] | None = None,
 ) -> None:
     def index() -> str:
         runtime = runtime_info()
@@ -43,6 +46,13 @@ def register_system_routes(
             local_llm_short_label=local_llm_short_label(),
         )
 
+    def watcher_public() -> dict[str, Any]:
+        status = dict(obsidian_watcher_status())
+        if not local_path_access_allowed():
+            # Exception text can name local paths; remote viewers get the summary only.
+            status.pop("detail", None)
+        return status
+
     def api_config():
         machine = get_machine_profile()
         try:
@@ -56,6 +66,7 @@ def register_system_routes(
                 "default_output_dir": str(default_output_directory()) if local_path_access_allowed() else "",
                 "machine": machine,
                 "runtime": runtime_info(),
+                "obsidian_watcher": watcher_public(),
             })
         except RuntimeError as exc:
             return jsonify({
@@ -64,6 +75,7 @@ def register_system_routes(
                 "token_file": token_file().name,
                 "machine": machine,
                 "runtime": runtime_info(),
+                "obsidian_watcher": watcher_public(),
             }), 500
 
     def api_custom_vocabulary():
@@ -129,6 +141,22 @@ def register_system_routes(
     def api_system_activity():
         return jsonify({"ok": True, **system_activity_snapshot()})
 
+    def api_create_backup():
+        # The backup is written on this PC; only its own browser may start one.
+        if create_backup is None or not local_path_access_allowed():
+            return jsonify({"error": "バックアップは保存PCから作成してください。"}), 403
+        payload = request.get_json(silent=True)
+        payload = payload if isinstance(payload, dict) else {}
+        try:
+            result = create_backup(payload.get("include_media") is True)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return jsonify({"error": f"バックアップを作成できませんでした: {exc}"}), 500
+        return jsonify({
+            "ok": True, "path": str(result["path"]), "file_count": result["file_count"],
+            "total_bytes": result["total_bytes"], "include_media": result["include_media"],
+            "excluded": result["excluded"],
+        })
+
     # Keep established endpoint names for compatibility and security hooks.
     endpoints = (
         ("/", "index", index, "GET"),
@@ -138,6 +166,7 @@ def register_system_routes(
         ("/api/ai/models", "api_ai_models", api_ai_models, "GET"),
         ("/api/ai/model", "api_update_ai_model", api_update_ai_model, "PUT"),
         ("/api/system/activity", "api_system_activity", api_system_activity, "GET"),
+        ("/api/system/backup", "api_create_backup", api_create_backup, "POST"),
     )
     for rule, endpoint, view, method in endpoints:
         app.add_url_rule(rule, endpoint, view, methods=[method])

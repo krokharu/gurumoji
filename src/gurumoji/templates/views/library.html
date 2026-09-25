@@ -1,0 +1,80 @@
+    <section id="library-card" class="view library-card" role="tabpanel" aria-labelledby="show-library-list-button" hidden>
+      <header class="view-header library-header">
+        <div>
+          <p class="view-kicker">処理済みデータ</p>
+          <h1 id="library-title">処理済みデータ</h1>
+          <p>過去の文字起こしを探して開き、内容の確認・修正・分析に進みます。</p>
+        </div>
+        <div class="library-header-actions">
+          <button id="library-refresh-button" class="secondary-button compact-button" type="button">↻ 更新</button>
+          <button id="manage-library-groups-button" class="secondary-button compact-button" type="button">グループ管理</button>
+          <button id="add-record-button" class="secondary-button" type="button">空のデータを追加</button>
+          <button id="library-create-new-button" class="primary-button small" type="button">＋ 新しい文字起こし</button>
+        </div>
+      </header>
+
+      <div class="library-overview" aria-label="処理済みデータの概要">
+        <div><span>表示中</span><strong id="library-total-metric">—</strong><small>件</small></div>
+        <div><span>合計時間</span><strong id="library-duration-metric">—</strong></div>
+        <div><span>話者</span><strong id="library-speaker-metric">—</strong><small>人</small></div>
+        <div><span>最終更新</span><strong id="library-updated-metric">—</strong></div>
+      </div>
+
+      <button id="library-filter-toggle" class="library-filter-toggle mobile-only" type="button" aria-expanded="false" aria-controls="library-filter-panel">
+        <span>検索・絞り込み</span><strong id="library-filter-badge">条件なし</strong>
+      </button>
+
+      <div class="library-workspace">
+        <aside id="library-filter-panel" class="library-filter-panel" aria-label="検索・絞り込み">
+          <div class="library-filter-heading">
+            <div><strong>データを絞り込む</strong></div>
+            <button id="library-clear-filters" type="button">条件をクリア</button>
+          </div>
+          <div class="library-filters">
+            <label class="field filter-keyword">
+              <span>キーワード</span>
+              <input id="library-keyword" type="search" placeholder="本文・ファイル名を検索">
+            </label>
+            <label class="field">
+              <span>話者</span>
+              <select id="library-speaker"><option value="">すべての話者</option></select>
+            </label>
+            <label class="field">
+              <span>感情</span>
+              <select id="library-emotion"><option value="">すべての感情</option></select>
+            </label>
+            <label class="field">
+              <span>グループ</span>
+              <select id="library-group"><option value="">すべてのグループ</option><option value="__ungrouped__">未分類</option></select>
+            </label>
+            <label class="field">
+              <span>並べ替え</span>
+              <select id="library-sort">
+                <option value="updated_desc">更新が新しい順</option>
+                <option value="created_desc">作成が新しい順</option>
+                <option value="name">名前順</option>
+                <option value="group">グループ順</option>
+                <option value="speaker">話者別</option>
+                <option value="emotion">感情別</option>
+                <option value="keyword">キーワード一致数順</option>
+              </select>
+            </label>
+          </div>
+          <p id="library-filter-summary" class="library-filter-summary">すべてのデータを表示しています</p>
+        </aside>
+
+        <div class="library-results">
+          <div class="library-status-row">
+            <p id="library-count" aria-live="polite">読み込んでいます…</p>
+            <div id="training-status" class="training-status"></div>
+          </div>
+          <div id="library-message" class="alert error" role="alert" hidden></div>
+          <div id="library-list" class="library-list" aria-live="polite"></div>
+          <details id="library-trash" class="library-trash">
+            <summary>ゴミ箱 <span data-trash-summary></span></summary>
+            <p class="library-trash-note" data-trash-note>削除した会話はここに移り、保持期間を過ぎると自動で完全に削除されます。</p>
+            <div class="library-trash-list" data-trash-list aria-live="polite"></div>
+          </details>
+        </div>
+      </div>
+    </section>

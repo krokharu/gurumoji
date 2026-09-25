@@ -191,8 +191,6 @@ def migrate(database_file: Path) -> dict:
         if path.is_dir() and not path.is_symlink() and not any(path.iterdir()):
             safe_path(layout.vault, path.relative_to(layout.vault).as_posix()).rmdir()
     layout.publish_navigation()
-    from .obsidian_finishing import ObsidianWorkbench
-    workbench = ObsidianWorkbench(database_file)
     for path in (layout.data / 'obsidian_workbench').glob('*/state.json'):
         layout.sync_finishing(json.loads(path.read_text(encoding='utf-8')))
     # Existing saved analyses may exist without a finishing workbench.

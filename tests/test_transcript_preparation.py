@@ -67,6 +67,24 @@ class TranscriptPreparationTests(unittest.TestCase):
         self.assertEqual(inventory['時刻または元ファイル内の位置'], '不明')
         self.assertEqual(inventory['このレコードの参加者数'], '不明')
 
+    def test_null_or_numeric_text_from_imported_json_does_not_break_analysis(self):
+        # Existing *_話者分離.json files are imported as-is and may carry these values.
+        self.fixture.create_analysis_item('odd_text', [
+            {'id': 'n', 'start': 0, 'end': 1, 'speaker': 'S1', 'text': None},
+            {'id': 'i', 'start': 1, 'end': 2, 'speaker': 'S2', 'text': 123}])
+        rows = self.analysis('odd_text')['manual']['preparation']['rows']
+        self.assertEqual([row['text'] for row in rows], ['', '123'])
+        self.assertFalse(any(row['content_ready'] for row in rows))
+        for suffix in ('export.json', 'export.csv?dataset=timeline', 'export.xlsx'):
+            response = self.client.get(f'/api/library/odd_text/analysis/{suffix}')
+            self.assertEqual(response.status_code, 200, suffix)
+        p = self.analysis('odd_text')['manual']['preparation']
+        confirm = self.client.put('/api/library/odd_text/preparation', json={
+            'revision': p['revision'], 'source_hash': p['source_hash'], 'confirm': True,
+            'records': {row['segment_id']: {'text_status': 'transcript_checked', 'boundary_verified': True}
+                        for row in p['rows']}})
+        self.assertEqual(confirm.status_code, 400, confirm.data)
+
     def test_confirm_and_stale_on_edit_preserve_all_versions(self):
         payload = self.payload()
         result = self.save({**payload, 'confirm': True})

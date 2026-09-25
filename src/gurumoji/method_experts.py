@@ -6,11 +6,16 @@ Only the experts selected for the analysis at hand are parsed. Their knowledge n
 literature notes they cite are hashed so that saved results can tell when the knowledge
 changed; note contents are never sent to an AI provider. Experts are definitions that
 constrain procedure and explanation, not retrained models.
+
+A second, local-only tree under ``LOCAL_KNOWLEDGE_DIR`` (outside the git-tracked Software
+Vault) can add experts or literature notes, or shadow a base note by relative path, so each
+installation can extend the shared knowledge without committing it. See ADR-120.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 from collections import Counter
@@ -27,6 +32,10 @@ SCHEMA_VERSION = 1
 EXPERTS_DIR = Path("50-Analysis-Methods") / "10-Experts"
 LITERATURE_DIR = Path("50-Analysis-Methods") / "20-Literature"
 COMMON_DIR = Path("50-Analysis-Methods") / "08-Common-Knowledge"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOCAL_KNOWLEDGE_DIR = Path(
+    os.environ.get("MOJIOKOSI_DATA_DIR", str(_PROJECT_ROOT / "runtime" / "data"))
+) / "local_knowledge"
 DEFINITION_NOTE = "01-Expert.md"
 KNOWLEDGE_NOTES = ("00-Overview.md", "01-Expert.md", "02-Procedure.md", "03-Quality.md",
                    "04-Applicability-and-Limits.md", "05-Cases.md", "06-Open-Issues.md")
@@ -383,17 +392,23 @@ def validate_definition(definition: Any, *, folder: str, props: dict | None = No
 class ExpertCatalog:
     """Loads expert definitions lazily; every file read is logged for traceability tests."""
 
-    def __init__(self, root: Path | str | None = None):
+    def __init__(self, root: Path | str | None = None, local_root: Path | str | None = None):
         self.root = Path(root) if root is not None else SOFTWARE_ROOT
+        self.local_root = Path(local_root) if local_root is not None else LOCAL_KNOWLEDGE_DIR
         self.read_log: list[str] = []
         self._lock = threading.RLock()
         self._files: dict[str, tuple[tuple[int, int], dict]] = {}
         self._frontmatter: dict[str, tuple[tuple[int, int], dict]] = {}
         self._definitions: dict[str, dict] = {}
 
+    def _resolve(self, relative: Path) -> Path:
+        """A local note shadows the base note at the same relative path; otherwise fall back."""
+        local = self.local_root / relative
+        return local if local.exists() else self.root / relative
+
     def _stat(self, relative: Path) -> tuple[int, int] | None:
         try:
-            stat = (self.root / relative).stat()
+            stat = self._resolve(relative).stat()
         except OSError:
             return None
         return stat.st_mtime_ns, stat.st_size
@@ -407,7 +422,7 @@ class ExpertCatalog:
             cached = self._files.get(key)
             if cached and cached[0] == stamp:
                 return cached[1]
-            data = (self.root / relative).read_bytes()
+            data = self._resolve(relative).read_bytes()
             self.read_log.append(key)
             try:
                 props, body = unpack(data.decode("utf-8"))
@@ -428,7 +443,7 @@ class ExpertCatalog:
             if cached and cached[0] == stamp:
                 return cached[1]
             lines = []
-            with (self.root / relative).open("r", encoding="utf-8") as handle:
+            with self._resolve(relative).open("r", encoding="utf-8") as handle:
                 if handle.readline().strip() == "---":
                     for line in handle:
                         if line.rstrip("\r\n") == "---":
@@ -442,13 +457,24 @@ class ExpertCatalog:
             self._frontmatter[key] = (stamp, props)
             return props
 
-    def index(self) -> dict[str, dict]:
+    def _expert_folders(self) -> dict[str, str]:
+        """Every expert folder name, mapped to its source: local-only, local override, or base."""
         try:
-            folders = sorted(path.name for path in (self.root / EXPERTS_DIR).iterdir() if path.is_dir())
+            base = {path.name for path in (self.root / EXPERTS_DIR).iterdir() if path.is_dir()}
         except OSError:
-            return {}
+            base = set()
+        try:
+            local = {path.name for path in (self.local_root / EXPERTS_DIR).iterdir() if path.is_dir()}
+        except OSError:
+            local = set()
+        sources = {folder: "base" for folder in base}
+        for folder in local:
+            sources[folder] = "local_override" if folder in base else "local"
+        return dict(sorted(sources.items()))
+
+    def index(self) -> dict[str, dict]:
         entries = {}
-        for folder in folders:
+        for folder, source in self._expert_folders().items():
             props = self._properties(EXPERTS_DIR / folder / DEFINITION_NOTE)
             if props.get("note_type") != "expert-definition" or not EXPERT_ID.match(str(props.get("expert_id") or "")):
                 continue
@@ -460,6 +486,7 @@ class ExpertCatalog:
                 "definition_version": props.get("definition_version"),
                 "knowledge_verified": str(props.get("knowledge_verified") or ""),
                 "definition_note": (EXPERTS_DIR / folder / "01-Expert").as_posix(),
+                "source": source,
             }
         return entries
 

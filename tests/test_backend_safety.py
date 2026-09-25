@@ -5,6 +5,7 @@ import json
 import math
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import subprocess
 import sys
@@ -208,6 +209,31 @@ class RequestSecurityTests(unittest.TestCase):
             response.get_json()["machine"]["gpu"]["reason"],
             app.HIDDEN_LOCAL_PATH_MESSAGE,
         )
+
+    def test_config_reports_a_stopped_obsidian_watcher(self):
+        from gurumoji.services.obsidian_watcher import WatcherStatus
+        status = WatcherStatus()
+        status.set("failed", "OSError: C:/Users/researcher/data is locked")
+        token = "remote-token-for-tests-1234567890"
+        with (
+            patch.object(app, "obsidian_watcher_status", status),
+            patch.object(app, "load_token_config", return_value=app.TokenConfig()),
+        ):
+            local = self.client.get("/api/config").get_json()["obsidian_watcher"]
+            with (
+                patch.object(app, "REMOTE_ACCESS_ENABLED", True),
+                patch.object(app, "REMOTE_ACCESS_TOKEN", token),
+                patch.object(app, "REMOTE_LOCAL_PATHS_ENABLED", False),
+            ):
+                remote = self.client.get(
+                    "/api/config",
+                    headers={"Authorization": f"Bearer {token}", "Host": "localhost"},
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).get_json()["obsidian_watcher"]
+        self.assertEqual(local["state"], "failed")
+        self.assertIn("locked", local["detail"])
+        self.assertEqual(remote["state"], "failed")
+        self.assertNotIn("detail", remote)
 
     def test_sensitive_responses_are_not_cached_and_have_security_headers(self):
         response = self.client.get("/api/config")
@@ -1549,17 +1575,18 @@ class TranscriptCasTests(unittest.TestCase):
         media_dir.mkdir(parents=True)
         (media_dir / "meeting.wav").write_bytes(b"media")
         thumbnail_root.mkdir(parents=True)
-        real_rmtree = shutil.rmtree
+        real_move = app.durable_move
 
-        def fail_quarantine_cleanup(path, *args, **kwargs):
-            if ".delete-staging-" in str(path):
+        def fail_move_into_trash(source, target, *args, **kwargs):
+            # DATA-01: after the commit the quarantine moves into the trash; that move fails here.
+            if "trash" in Path(target).parts:
                 raise OSError("file is locked")
-            return real_rmtree(path, *args, **kwargs)
+            return real_move(source, target, *args, **kwargs)
 
         with (
             patch.object(app, "MEDIA_DIRECTORY", media_root),
             patch.object(app, "THUMBNAIL_DIRECTORY", thumbnail_root),
-            patch.object(app.shutil, "rmtree", side_effect=fail_quarantine_cleanup),
+            patch.object(app, "durable_move", side_effect=fail_move_into_trash),
         ):
             response = self.client.delete(f"/api/library/{self.item_id}")
 
@@ -1569,6 +1596,10 @@ class TranscriptCasTests(unittest.TestCase):
         self.assertEqual(len(payload["recovery_paths"]), 1)
         self.assertTrue(Path(payload["recovery_paths"][0]).is_dir())
         self.assertIsNone(app.library_row(self.item_id))
+        # The trash entry still holds the rows, so the conversation can be restored without its media.
+        trash = app.list_library_trash()["entries"]
+        self.assertEqual([entry["item_id"] for entry in trash], [self.item_id])
+        self.assertEqual(trash[0]["media_files"], 0)
 
     def test_startup_recovers_delete_quarantine_when_database_row_remains(self):
         media_root = self.root / "media"
@@ -1621,6 +1652,113 @@ class TranscriptCasTests(unittest.TestCase):
         self.assertEqual(warnings, [])
         self.assertFalse((media_root / self.item_id).exists())
         self.assertEqual(list(media_root.glob(".delete-staging-*")), [])
+
+    def _media_patches(self):
+        media_root = self.root / "media"
+        thumbnail_root = self.root / "thumbnails"
+        (media_root / self.item_id).mkdir(parents=True)
+        (media_root / self.item_id / "meeting.wav").write_bytes(b"media")
+        thumbnail_root.mkdir(parents=True)
+        (thumbnail_root / f"word_cloud_{self.item_id}.svg").write_text("<svg/>", encoding="utf-8")
+        return media_root, thumbnail_root
+
+    def test_deleted_conversation_goes_to_trash_and_restores_whole(self):
+        # DATA-01: deletion is recoverable until the trash entry is purged or expires.
+        media_root, thumbnail_root = self._media_patches()
+        before = dict(app.library_row(self.item_id))
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", media_root),
+            patch.object(app, "THUMBNAIL_DIRECTORY", thumbnail_root),
+        ):
+            deleted = self.client.delete(f"/api/library/{self.item_id}")
+            self.assertEqual(deleted.status_code, 200, deleted.get_json())
+            self.assertIn("ゴミ箱", deleted.get_json()["message"])
+            self.assertIsNone(app.library_row(self.item_id))
+            self.assertFalse((media_root / self.item_id).exists())
+            self.assertEqual(list(media_root.glob(".delete-staging-*")), [])
+            listing = self.client.get("/api/library/trash").get_json()
+            self.assertEqual(listing["retention_days"], 30)
+            [entry] = listing["entries"]
+            self.assertEqual((entry["item_id"], entry["source_name"]), (self.item_id, "meeting.wav"))
+            self.assertEqual(entry["media_files"], 2)
+            self.assertTrue(entry["restorable"] and entry["expires_at"] and entry["bytes"] > 0)
+
+            restored = self.client.post(f"/api/library/trash/{entry['id']}/restore")
+            self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual(dict(app.library_row(self.item_id)), before)
+        self.assertEqual((media_root / self.item_id / "meeting.wav").read_bytes(), b"media")
+        self.assertTrue((thumbnail_root / f"word_cloud_{self.item_id}.svg").is_file())
+        self.assertEqual(self.client.get("/api/library/trash").get_json()["entries"], [])
+        with app.database_connection() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM output_import_tombstones").fetchone()[0], 0)
+
+    def test_trash_restore_refuses_a_conflict_and_purge_removes_the_entry(self):
+        media_root, thumbnail_root = self._media_patches()
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", media_root),
+            patch.object(app, "THUMBNAIL_DIRECTORY", thumbnail_root),
+        ):
+            self.client.delete(f"/api/library/{self.item_id}")
+            [entry] = app.list_library_trash()["entries"]
+            (media_root / self.item_id).mkdir()  # something new now occupies the old place
+            conflict = self.client.post(f"/api/library/trash/{entry['id']}/restore")
+            self.assertEqual(conflict.status_code, 409)
+            self.assertIsNone(app.library_row(self.item_id))
+            self.assertEqual(len(app.list_library_trash()["entries"]), 1)
+            self.assertEqual(self.client.delete("/api/library/trash/../x").status_code, 404)
+            self.assertEqual(self.client.delete("/api/library/trash/not-an-entry").status_code, 404)
+            purged = self.client.delete(f"/api/library/trash/{entry['id']}")
+            self.assertEqual(purged.status_code, 200)
+        self.assertEqual(app.list_library_trash()["entries"], [])
+        self.assertFalse((app.trash_directory() / entry["id"]).exists())
+
+    def test_trash_expiry_follows_the_retention_setting(self):
+        from gurumoji.services import library_trash
+        self.client.delete(f"/api/library/{self.item_id}")
+        [entry] = app.list_library_trash()["entries"]
+        root = app.trash_directory()
+        soon = datetime.now(timezone.utc) + timedelta(days=29)
+        later = datetime.now(timezone.utc) + timedelta(days=31)
+        self.assertEqual(library_trash.purge_expired(root, 30, soon), [])
+        self.assertEqual(library_trash.purge_expired(root, 0, later), [])  # 0 keeps it
+        self.assertEqual(library_trash.purge_expired(root, 30, later), [entry["id"]])
+        self.assertEqual(library_trash.retention_days("7"), 7)
+        self.assertEqual(library_trash.retention_days("-1"), 30)
+        self.assertEqual(library_trash.retention_days("abc"), 30)
+        with patch.dict("os.environ", {"MOJIOKOSI_TRASH_RETENTION_DAYS": "0"}):
+            self.assertEqual(app.list_library_trash()["retention_days"], 0)
+
+    def test_startup_moves_a_committed_but_unfinished_delete_into_the_trash(self):
+        from gurumoji.services import library_trash
+        media_root = self.root / "media"
+        quarantine = media_root / ".delete-staging-crash" / self.item_id
+        quarantine.mkdir(parents=True)
+        (quarantine / "meeting.wav").write_bytes(b"media")
+        with app.database_connection() as connection:
+            rows = library_trash.snapshot_rows(connection, self.item_id)
+            connection.execute("DELETE FROM library_items WHERE id = ?", (self.item_id,))
+        library_trash.begin(app.trash_directory(), item_id=self.item_id, source_name="meeting.wav", rows=rows,
+                            tombstones_added=[], tombstones_replaced=[],
+                            assets=[("media", quarantine, media_root / self.item_id)])
+        with patch.object(app, "MEDIA_DIRECTORY", media_root):
+            self.assertEqual(app.recover_delete_quarantines(), [])
+        [entry] = app.list_library_trash()["entries"]
+        self.assertEqual(entry["media_files"], 1)
+        self.assertEqual(list(media_root.glob(".delete-staging-*")), [])
+
+    def test_startup_drops_a_pending_trash_entry_when_the_delete_rolled_back(self):
+        from gurumoji.services import library_trash
+        media_root = self.root / "media"
+        quarantine = media_root / ".delete-staging-crash" / self.item_id
+        quarantine.mkdir(parents=True)
+        (quarantine / "meeting.wav").write_bytes(b"media")
+        library_trash.begin(app.trash_directory(), item_id=self.item_id, source_name="meeting.wav", rows={},
+                            tombstones_added=[], tombstones_replaced=[],
+                            assets=[("media", quarantine, media_root / self.item_id)])
+        with patch.object(app, "MEDIA_DIRECTORY", media_root):
+            app.recover_delete_quarantines()
+        self.assertEqual(list(app.trash_directory().iterdir()), [])
+        self.assertEqual((media_root / self.item_id / "meeting.wav").read_bytes(), b"media")
 
     def test_existing_output_import_skips_referenced_and_intentionally_deleted_results(self):
         first = self.client.put(f"/api/library/{self.item_id}", json=self.payload())

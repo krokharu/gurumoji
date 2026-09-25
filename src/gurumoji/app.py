@@ -74,7 +74,7 @@ from .web.job_routes import register_job_routes
 from .web.obsidian_routes import register_obsidian_routes
 from .web.speaker_routes import register_speaker_routes
 from .web.system_routes import register_system_routes
-from .services.obsidian_watcher import ObsidianWatcher
+from .services.obsidian_watcher import ObsidianWatcher, WatcherStatus
 from .services.obsidian_workflows import ObsidianWorkflowService
 from .services.transcription_reporting import TranscriptionReporter
 from .services.vault_publication import VaultPublicationService, whisper_settings
@@ -82,6 +82,8 @@ from .services.ai import client as ai_client
 from .services.ai import transcript_finishing as ai_transcript_finishing
 from .services import durable_files
 from .services import edit_transactions
+from .services import data_backup
+from .services import library_trash
 from .services.edit_transactions import (
     EDIT_PREPARATION_MARKER_NAME,
     EDIT_TRANSACTION_MANIFEST_NAME,
@@ -330,6 +332,9 @@ JOB_TTL_SECONDS = positive_env_int(
 ORPHAN_UPLOAD_GRACE_SECONDS = positive_env_int(
     "MOJIOKOSI_ORPHAN_GRACE_SECONDS", 15 * 60, minimum=60, maximum=7 * 86400
 )
+BACKUP_DIRECTORY = Path(
+    os.environ.get("MOJIOKOSI_BACKUP_DIR", str(RUNTIME_DIRECTORY / "backups"))
+).expanduser()
 REMOTE_ACCESS_ENABLED = env_enabled("MOJIOKOSI_ALLOW_REMOTE")
 REMOTE_LOCAL_PATHS_ENABLED = env_enabled("MOJIOKOSI_ENABLE_REMOTE_LOCAL_PATHS")
 REMOTE_ACCESS_TOKEN = os.environ.get("MOJIOKOSI_ACCESS_TOKEN", "").strip()
@@ -747,6 +752,7 @@ audio_preprocess_label = _audio_processor.label
 audio_preprocess_filters = _audio_processor.filters
 run_audio_preprocess = _audio_processor.preprocess
 run_audio_interval_preprocess = _audio_processor.preprocess_interval
+run_diarization_audio_preprocess = _audio_processor.preprocess_for_diarization
 
 
 TRANSCRIPT_FINISHING_MODES = transcript_formatting.TRANSCRIPT_FINISHING_MODES
@@ -1083,6 +1089,7 @@ def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
         "run_aist_emotion_analysis": run_aist_emotion_analysis,
         "run_audio_interval_preprocess": run_audio_interval_preprocess,
         "run_audio_preprocess": run_audio_preprocess,
+        "run_diarization_audio_preprocess": run_diarization_audio_preprocess,
         "safe_output_stem": safe_output_stem,
         "safe_token_count": safe_token_count,
         "session_profile_from_media": session_profile_from_media,
@@ -1168,7 +1175,13 @@ def vault_publications() -> VaultPublicationService:
         row_session_profile=row_session_profile,
         database_error=sqlite3.Error,
         warn=lambda message, exc: app.logger.warning("%s: %s", message, exc),
+        research_layout=research_layout,
     )
+
+
+def research_layout():
+    from .obsidian_layout import ObsidianLayout
+    return ObsidianLayout(DATABASE_FILE)
 
 
 def publish_input_vault(row, whisper: dict[str, Any] | None = None, *, source_kind: str | None = None) -> None:
@@ -1212,12 +1225,66 @@ _update_library_from_payload_locked = make_library_update(
 )
 
 
+def trash_directory() -> Path:
+    # Beside the database, like analysis_store, so a relocated library keeps its trash.
+    return Path(DATABASE_FILE).parent / "trash"
+
+
+def trash_retention_days() -> int:
+    return library_trash.retention_days(
+        os.environ.get("MOJIOKOSI_TRASH_RETENTION_DAYS", str(library_trash.DEFAULT_RETENTION_DAYS)))
+
+
+def _trash_move(source: Path, target: Path) -> None:
+    durable_move(source, target, replace_existing=False)
+
+
 def recover_delete_quarantines() -> list[str]:
-    return edit_transactions.recover_delete_quarantines(
+    def row_exists(item_id: str) -> bool:
+        with database_connection() as connection:
+            return connection.execute("SELECT 1 FROM library_items WHERE id=?", (item_id,)).fetchone() is not None
+
+    # Committed deletes reach the trash first; the quarantine recovery then sees nothing left.
+    warnings = library_trash.recover_pending(trash_directory(), row_exists=row_exists, move=_trash_move)
+    warnings += edit_transactions.recover_delete_quarantines(
         connect=database_connection,
         media_directory=MEDIA_DIRECTORY,
         thumbnail_directory=THUMBNAIL_DIRECTORY,
     )
+    for entry_id in library_trash.purge_expired(trash_directory(), trash_retention_days()):
+        app.logger.info("保持期間を過ぎたゴミ箱の項目を完全に削除しました: %s", entry_id)
+    return warnings
+
+
+def list_library_trash() -> dict[str, Any]:
+    days = trash_retention_days()
+    entries = library_trash.list_entries(trash_directory(), days)
+    return {"entries": entries, "retention_days": days, "total_bytes": sum(e["bytes"] for e in entries)}
+
+
+def restore_library_trash(entry_id: str) -> str:
+    item_id = library_trash.restore(
+        trash_directory(), entry_id, connect=database_connection,
+        targets={"media": MEDIA_DIRECTORY, "thumbnail": THUMBNAIL_DIRECTORY}, move=_trash_move)
+    # Clears the ResearchVault deletion mark and republishes the InputVault ledger.
+    publish_input_vault(library_row(item_id))
+    return item_id
+
+
+def purge_library_trash(entry_id: str) -> None:
+    library_trash.purge(trash_directory(), entry_id)
+
+
+def create_data_backup(include_media: bool = False) -> dict[str, Any]:
+    """Back up the data directory while every Vault and library writer is paused (DATA-03)."""
+    from .analysis_store import STORE_LOCK
+    from .obsidian_layout import LAYOUT_LOCK
+    from .vault_registry import VAULT_LOCK
+    # Same order as the writers take them: library -> store -> layout -> generated Vaults.
+    with library_write_lock, STORE_LOCK, LAYOUT_LOCK, VAULT_LOCK:
+        return data_backup.create_backup(
+            DATABASE_FILE.parent, BACKUP_DIRECTORY, include_media=include_media, app_version=APP_VERSION,
+        )
 
 
 def discover_edit_transaction_staging_dirs(
@@ -1371,6 +1438,9 @@ def run_obsidian_finishing(action: str, state: dict, segments: list[dict],
     return obsidian_workflows().run_finishing(action, state, segments, context, provider, check)
 
 
+obsidian_watcher_status = WatcherStatus()
+
+
 def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     from .obsidian_migration import migrate
     return ObsidianWatcher(
@@ -1378,6 +1448,7 @@ def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
         engine=run_obsidian_finishing,
         migrate=migrate,
         log_exception=app.logger.exception,
+        status=obsidian_watcher_status,
     ).start()
 
 
@@ -1643,6 +1714,8 @@ _delete_library_item_locked = make_library_deletion(
     local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
     reconcile_edit_transactions_before_delete=lambda *args, **kwargs: reconcile_edit_transactions_before_delete(*args, **kwargs),
     retire_input_vault=lambda *args, **kwargs: retire_input_vault(*args, **kwargs),
+    trash_directory=lambda: trash_directory(),
+    trash_retention_days=lambda: trash_retention_days(),
 )
 
 
@@ -1717,6 +1790,8 @@ def create_app() -> Flask:
         available_ai_models=lambda provider, config: available_ai_models(provider, config),
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
+        obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        create_backup=lambda include_media: create_data_backup(include_media),
     )
 
     register_analysis_routes(
@@ -1748,6 +1823,7 @@ def create_app() -> Flask:
         archive_meeting_minutes=archive_meeting_minutes,
         publish_meeting_minutes=publish_meeting_minutes_to_obsidian,
         log_warning=flask_app.logger.warning,
+        watcher_status=lambda: obsidian_watcher_status.snapshot(),
     )
 
     register_library_group_routes(
@@ -1815,6 +1891,9 @@ def create_app() -> Flask:
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         runtime_info=runtime_info,
         upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+        list_library_trash=lambda: list_library_trash(),
+        restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
+        purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
     )
     return flask_app
 

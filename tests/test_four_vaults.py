@@ -71,19 +71,28 @@ class VaultRegistryTests(unittest.TestCase):
         self.assertIn("large-v3", body)
         self.assertIn("Whisper文字起こし", body)
 
-    def test_human_edits_and_deletions_are_preserved_not_overwritten(self):
+    def test_human_edits_are_kept_in_history_and_deletions_are_not_recreated(self):
         self.publish()
         root = self.registry.root("input")
         path = root / self.note
         with path.open("a", encoding="utf-8") as handle:
             handle.write("\n研究者のメモ\n")
-        self.assertEqual(self.publish(revision=1), "conflict")
-        self.assertIn("研究者のメモ", path.read_text(encoding="utf-8"))
-        self.assertEqual(read_notes(root)[self.note][0]["revision"], 0)
-        self.assertIn("手動編集を保持", (root / "00-Index.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.publish(revision=1), "overwritten")
+        self.assertNotIn("研究者のメモ", path.read_text(encoding="utf-8"))
+        self.assertEqual(read_notes(root)[self.note][0]["revision"], 1)
+        history = sorted((root / "99-Archive/history").rglob("*.md"))
+        self.assertEqual(sorted(p.name.split("-", 1)[1] for p in history if p.parent.name.startswith("input-")),
+                         ["edited.md", "first.md"])
+        edited = next(p for p in history if p.name.endswith("-edited.md"))
+        self.assertIn("研究者のメモ", edited.read_text(encoding="utf-8"))
+        self.assertNotIn("99-Archive", (root / "00-Index.md").read_text(encoding="utf-8"))
         path.unlink()
         self.assertEqual(self.publish(revision=2), "missing")
         self.assertFalse(path.exists())
+        self.assertIn("削除を検出", (root / "00-Index.md").read_text(encoding="utf-8"))
+        (root / "00-Index.md").unlink()
+        self.publish(revision=2)
+        self.assertTrue((root / "00-Index.md").exists())
 
     def test_software_and_research_vaults_are_not_generated_roots(self):
         data = self.registry.load()
@@ -149,6 +158,20 @@ class AnalysisVaultTests(unittest.TestCase):
         self.assertEqual(read_notes(roots["orchestrator"])[f"20-Runs/run-{run['id']}.md"][0]["status"], "stale")
         self.assertTrue(all(note[0]["status"] == "stale" for path, note in read_notes(roots["visualization"]).items()
                             if path.startswith(f"10-Visuals/run-{run['id']}/")))
+
+    def test_deleting_conversation_marks_research_vault_and_keeps_notes(self):
+        with patch.object(app, "call_ai_json"):
+            response = self.client.post(self.fixture.url + "/runs", json=self.fixture.payload("archive-request-000001"))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        notes_before = {p for p in self.store.vault.rglob("*.md")}
+        deleted = self.client.delete("/api/library/content")
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        record = self.store.layout.load()["interviews"]["content"]
+        self.assertEqual(record["status"], "アプリから削除済み")
+        self.assertTrue(record["deleted_at"])
+        hub = (self.store.vault / record["hub"]).read_text(encoding="utf-8")
+        self.assertEqual(unpack(hub)[0]["status"], "アプリから削除済み")
+        self.assertTrue(notes_before <= set(self.store.vault.rglob("*.md")))
 
     def test_whisper_hook_records_settings_and_edit_keeps_them(self):
         row = app.library_row("content")

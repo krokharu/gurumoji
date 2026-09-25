@@ -6,7 +6,7 @@ summary: Gurumojiの主要モジュール、データフロー、保存先、設
 status: current
 feature: architecture
 verified: 2026-09-14
-updated: 2026-09-15
+updated: 2026-09-25
 tags:
   - gurumoji/program
   - gurumoji/architecture
@@ -28,7 +28,7 @@ tags:
 
 | 層 | 担当 | 主なファイル（行数） |
 | --- | --- | --- |
-| UI | 画面・状態管理・API呼び出し | `templates/index.html`（約1,000）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
+| UI | 画面・状態管理・API呼び出し | `templates/index.html`（外枠・ダイアログ、約270）と `templates/views/`（画面ごとの断片：`create`・`library`・`result`・`analysis`・`speakers`）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
 | API | Flaskのルート（84件、`tests/fixtures/route_map.json`）、要求の検証・セキュリティ | `web/*_routes.py`、`web/security.py`。`app.py`（約1,900行）は `create_app()` で登録し、依存を組み立てる（2026-09-25、[[70-Changes/app-py-phase5]]） |
 | Core／Service | ジョブ、文字起こしパイプライン、編集トランザクション、話者台帳、会話集計、議事録、出力、AI呼び出し | `handlers/`、`services/`、実行時状態は `runtime_state.py`。`app.py` には依存を渡す関数が残る |
 | 分析サービス | 日本語解析・統計・Excel、見解・KWIC、Transformer、手法登録、逐語録の準備 | `research_analysis.py`、`analysis_insights.py`、`transformer_analysis.py`、`analysis_method_registry.py`、`transcript_preparation.py` |
@@ -73,6 +73,8 @@ flowchart LR
 
 ## 主要なデータフロー（操作から保存まで）
 
+図で見るときは、同じフォルダーの `data-flow.html` をブラウザーで開く。流れを選ぶと、通るモジュールと書き込み先が強調される。
+
 ### 1. 新規文字起こし
 
 1. 「新規作成」フォームを `POST /api/jobs` に送る。`create_job` が `JobOptions` を作り、スレッドで `run_transcription_job` を実行する。
@@ -113,9 +115,9 @@ flowchart LR
 
 1. `DELETE /api/library/<id>` → `_delete_library_item_locked` を呼ぶ。
 2. メディアとサムネイルを隔離フォルダーへ移す。
-3. SQLiteの行と準備履歴を削除し、tombstoneを記録する。
-4. `retire_input_vault` を呼ぶ。
-5. 隔離フォルダーを `rmtree` で恒久削除する。
+3. 削除する行（会話・逐語録の版と準備・取り込み来歴・置き換えるtombstone）を `library_trash.snapshot_rows` で写し、SQLiteの行と準備履歴を削除し、tombstoneを記録する。同じトランザクションのコミット前に、ゴミ箱の保留manifest（`<data>/trash/<日時-ID>/manifest.pending.json`）を書く。
+4. `retire_input_vault` を呼ぶ。InputVaultの台帳を `deleted` にし、ResearchVaultでは `ObsidianLayout.mark_deleted` が `interviews.json` と概要ノート・一覧を「アプリから削除済み」にする（OBS-11）。同じIDで再取り込みされると `publish_input_vault` が `clear_deleted` で元の状態に戻す。
+5. 隔離したファイルをゴミ箱の項目へ移し、`manifest.json` を確定する（DATA-01）。ゴミ箱の一覧・復元・完全削除は `GET /api/library/trash`、`POST /api/library/trash/<id>/restore`、`DELETE /api/library/trash/<id>`。復元はファイルを戻してから行とtombstoneを戻し、`publish_input_vault` でVaultの削除表示を外す。起動時は `recover_delete_quarantines` が保留項目を完了させ、保持日数（`MOJIOKOSI_TRASH_RETENTION_DAYS`、既定30日、0で自動削除なし）を過ぎた項目を完全に削除する。
 
 出力ファイル、`analysis_store`、ResearchVault、`obsidian_workbench` は削除せずに残る。
 
@@ -144,6 +146,7 @@ flowchart LR
 | `<data>/obsidian/ResearchVault` | 研究者が読むノート・仕上げ作業台 | `ObsidianLayout`、`ObsidianWorkbench`、`AnalysisStore` の3か所で個別に算出 |
 | `<data>/obsidian/{InputVault,VisualizationVault,OrchestratorVault}` | IDでつなぐ台帳型のVault。2026-09-14時点では実データで未生成 | `obsidian_layout/vaults.json` |
 | `<data>/obsidian_layout` | `interviews.json`（インタビューコード・管理ノートのhash）、`vaults.json`、移行記録・バックアップ | `ObsidianLayout.registry`、`VaultRegistry.catalog_file` |
+| `<data>/trash/<日時-ID>/` | 削除した会話のメディア・サムネイルと、削除した行を記録した `manifest.json`（DATA-01） | `app.trash_directory`（DBファイルの隣） |
 | `<data>/obsidian_workbench/<key>/` | 仕上げの `state.json`、過去の `state-*.json`、`source-*.json`、`result-*.json` | `ObsidianWorkbench.root` |
 | `runtime/output` | 文字起こしの出力。`MOJIOKOSI_OUTPUT_DIR` で変更できる | `DEFAULT_OUTPUT_DIRECTORY` |
 | `runtime/uploads`, `models`, `logs` | 一時アップロード・インスタンスロック、モデル、ログ | `app.py`、ランチャー |
@@ -157,7 +160,7 @@ flowchart LR
 | FFmpeg | 前処理、クリップ、字幕焼き込み、サムネイル | サブプロセス（タイムアウトは環境変数で指定） |
 | Whisper／WhisperX、pyannote | 文字起こし、話者分離 | Python内。Hugging Faceトークンが必要（gatedモデル） |
 | AIST感情モデル | 音声感情分析 | Hugging Faceから初回取得し、ローカルで実行 |
-| OpenAI、Google Gemini、LM Studio | 校正、話者特定、アウトライン、見解 | `call_ai_json` → `ai_http_worker.py`（別プロセス、リダイレクト拒否） |
+| OpenAI、Google Gemini、LM Studio | 校正、話者特定、アウトライン、見解 | `call_ai_json` → `ai_http_worker.py`（別プロセス、リダイレクト拒否）。HTTP 429・5xxは `services/ai/client.py:post_json` が最大2回再試行（`Retry-After` は30秒まで尊重、キャンセル可）。出力上限・安全判定・拒否による未完了応答は `ensure_complete_response` が理由付きのエラーにする |
 | Transformerモデル | テーマ分析、意味検索 | `transformer_analysis.py`（`MOJIOKOSI_TRANSFORMER_MODEL`） |
 | Obsidian | 閲覧、仕上げ・テーマの編集 | ファイルを直接読み書きする。Obsidian本体とは通信せず、`obsidian://open?path=` で開くだけ |
 
@@ -174,6 +177,6 @@ flowchart LR
 | 分析条件・コードブック | `library_items.analysis_config_json`（会話ごと） | `PUT …/analysis` |
 | Vault保存先 | 生成Vaultは `vaults.json` の `root`。ResearchVaultとSoftwareはコード内で算出 | 設定UIなし |
 
-注：文字起こしの既定値は、`index.html` の初期値、`app.js` の会話モード設定（`conversationModePresets`）、`JobOptions` の既定、`parse_bool` の既定、`recommend_machine_settings` に分散している。
+注：文字起こしの既定値は、`views/create.html` の初期値、`app.js` の会話モード設定（`conversationModePresets`）、`JobOptions` の既定、`parse_bool` の既定、`recommend_machine_settings` に分散している。
 
 関連：[[10-Architecture/overview]]、[[20-Modules/feature-inventory]]、[[20-Modules/obsidian-integration]]、[[30-Data/current-storage]]、[[40-Design/storage-policy]]。

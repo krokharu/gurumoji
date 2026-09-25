@@ -31,6 +31,7 @@ Gurumojiの4 Vaultのうち、プログラムの構造・保存契約・手法�
 | モジュール | [[20-Modules/module-map]]、[[20-Modules/feature-inventory]]、[[20-Modules/obsidian-integration]]、[[20-Modules/ui-screens]] | 機能・コード・テストの対応、機能分類、Obsidian連携の構造と安全性、Web UIの画面構成と旧画面からの移動先 |
 | 収束・問題点 | [[40-Design/convergence-plan]]、[[40-Design/known-issues]]、[[40-Design/decisions]]、[[40-Design/ai-development-rules]] | 整理計画、問題点と改善方法、ADR、AI開発ルール |
 | テスト計画 | [[50-Tests/obsidian-safety-test-plan]] | Obsidian連携の安全性テスト |
+| 運用 | [[60-Operations/backup-restore]] | DB・メディア・成果物・各Vault・台帳を1組でバックアップ・復元する手順 |
 | データ | [[30-Data/four-vaults-v1]]、[[30-Data/analysis-storage-v1]]、[[30-Data/current-storage]] | 4 Vault、分析の固定保存、既存の保存形式 |
 | 設計 | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]、[[40-Design/method-rules]]、[[40-Design/ui-ux-issues]]、[[40-Design/video-ui-redesign-plan]]、[[40-Design/quantification-statistics-plan]]、[[40-Design/core-handler-routing-reorganization-plan]]、[[40-Design/analysis-execution-ux-plan]] | 正本の分類、ID・同期、手法の登録規約、UI/UXの問題点、動画処理・確認画面UI改善設計図、発話の数値化とjamovi型統計の自動実行計画、コア再編案、分析実行UXと段階分析（提案） |
 | 分析手法・知識 | [[50-Analysis-Methods/00-Index]] | 19手法の定義・限界・オーケストレーター契約、専門家定義、共通知識、文献・調査記録 |

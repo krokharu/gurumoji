@@ -12,6 +12,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..ai.transcript_finishing import run_full_cleanup
+
 def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any]) -> None:
     TranscriptionReporter = dependencies["TranscriptionReporter"]
     CONVERSATION_MODES = dependencies["CONVERSATION_MODES"]
@@ -67,6 +69,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
     run_aist_emotion_analysis = dependencies["run_aist_emotion_analysis"]
     run_audio_interval_preprocess = dependencies["run_audio_interval_preprocess"]
     run_audio_preprocess = dependencies["run_audio_preprocess"]
+    run_diarization_audio_preprocess = dependencies["run_diarization_audio_preprocess"]
     safe_output_stem = dependencies["safe_output_stem"]
     safe_token_count = dependencies["safe_token_count"]
     session_profile_from_media = dependencies["session_profile_from_media"]
@@ -173,14 +176,30 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 f"単語登録をWhisperの認識ヒントに使用します"
                 f"（{len(options.custom_vocabulary)}語登録・先頭から順に使用）。"
             )
+
+        def decoding_settings_text(
+            vad_onset: float, vad_offset: float, no_speech_threshold: float
+        ) -> str:
+            # OpenAI Whisper has no VAD stage, so only the no-speech threshold
+            # reaches the decoder there; never report VAD values it ignores.
+            if use_openai_whisper:
+                return (
+                    f"VADなし・無音判定しきい値 no_speech_threshold={no_speech_threshold:.2f}"
+                )
+            return f"VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}"
+
         if options.triple_pass:
             status(
-                "詳細処理を使います。通常結果の3秒以上の空白だけを、軽め・強めの順で切り出して補完します。"
+                f"詳細処理を使います。通常結果の{TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白だけを、"
+                "軽め・強めの順で切り出して補完します。"
             )
         elif options.boost_quiet_speech:
             status(
-                "小さい声を拾いやすくする設定を使います"
-                f"（VAD onset={options.vad_onset:.2f}, offset={options.vad_offset:.2f}）…"
+                "小さい声を拾いやすくする設定を使います（"
+                + decoding_settings_text(
+                    options.vad_onset, options.vad_offset, options.no_speech_threshold
+                )
+                + "）…"
             )
 
         def release_asr_model() -> None:
@@ -197,7 +216,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             vad_onset: float,
             vad_offset: float,
             no_speech_threshold: float,
-        ) -> Any:
+        ) -> None:
             nonlocal model
             if use_openai_whisper:
                 import whisper
@@ -221,7 +240,6 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     asr_options=asr_options,
                     vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
                 )
-            return model
 
         def transcribe_pass(
             pass_label: str,
@@ -234,7 +252,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         ) -> tuple[dict[str, Any], Any]:
             set_stage("transcription", f"{pass_label}の文字起こし", 10)
             status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            pass_model = load_asr_model(
+            # The model is held only by the enclosing ``model`` binding so that
+            # release_asr_model() can actually return its memory.
+            load_asr_model(
                 language_hint,
                 vad_onset,
                 vad_offset,
@@ -244,8 +264,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             set_stage("transcription", f"{pass_label}の文字起こし", 35)
 
             status(
-                f"{pass_label}: 音声を読み込み、文字起こししています"
-                f"（VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}）…"
+                f"{pass_label}: 音声を読み込み、文字起こししています（"
+                + decoding_settings_text(vad_onset, vad_offset, no_speech_threshold)
+                + "）…"
             )
             pass_audio = whisperx.load_audio(str(audio_path))
             if use_openai_whisper:
@@ -261,7 +282,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 transcribe_kwargs = {"batch_size": 1}
             if vocabulary_prompt and use_openai_whisper:
                 transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-            pass_result = pass_model.transcribe(pass_audio, **transcribe_kwargs)
+            pass_result = model.transcribe(pass_audio, **transcribe_kwargs)
             set_stage("transcription", f"{pass_label}の文字起こし", 90)
             release_asr_model()
             check_cancelled()
@@ -282,7 +303,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         ) -> dict[str, Any]:
             if not gaps:
                 set_stage("transcription", f"{pass_label}の文字起こし", 100)
-                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:.0f}秒以上の空白はありません。")
+                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白はありません。")
                 progress(progress_value)
                 return {"segments": [], "language": language_hint}
 
@@ -292,7 +313,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 f"{pass_label}: {len(gaps)}か所、計{total_gap_seconds:.1f}秒の空白だけを再確認します。"
             )
             status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            pass_model = load_asr_model(
+            # The model is held only by the enclosing ``model`` binding so that
+            # release_asr_model() can actually return its memory.
+            load_asr_model(
                 language_hint,
                 vad_onset,
                 vad_offset,
@@ -338,7 +361,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                             transcribe_kwargs = {"batch_size": 1}
                         if vocabulary_prompt and use_openai_whisper:
                             transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-                        clip_result = pass_model.transcribe(clip_audio, **transcribe_kwargs)
+                        clip_result = model.transcribe(clip_audio, **transcribe_kwargs)
                         if not detected_language:
                             detected_language = clip_result.get("language")
                         collected.extend(
@@ -459,6 +482,23 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         progress(64)
 
         set_stage("diarization", "話者の分離", 10)
+        if processing_input_path != options.input_path:
+            # The transcription presets denoise, band-limit and normalize, which
+            # reshapes the voice characteristics speaker embeddings compare.
+            # Diarize the original recording instead, with only too-quiet speech
+            # lifted so soft speakers still reach the segmentation model.
+            # Both filters preserve timing, so every stage shares one clock.
+            status("話者分離用に、元音声の小さすぎる声だけを持ち上げています…")
+            diarization_path = run_diarization_audio_preprocess(
+                options.input_path,
+                internal_work_dir / "diarization.wav",
+                check_cancelled,
+            )
+            audio = None
+            gc.collect()
+            audio = whisperx.load_audio(str(diarization_path))
+            diarization_path.unlink(missing_ok=True)
+            check_cancelled()
         status(f"話者を分離しています（{diarization_device.upper()}）…")
         try:
             diarize_model = create_diarization_pipeline(
@@ -570,68 +610,66 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     "おすすめのJev判定・発話単位LLM整形を省略しました。元の文字起こしを保存します: "
                     + details
                 )
-        if options.clean_transcript and not options.finish_in_obsidian:
-            try:
+        if ((options.clean_transcript or options.jev_compare)
+                and not options.finish_in_obsidian):
+            # The same order and stage record as the Obsidian workbench (ARCH-07).
+            def create_context_outline(source: list[dict[str, Any]]) -> dict[str, Any]:
                 status("再校正に先立ち、会話全体のアウトラインを作成しています…")
-                context_outline = create_outline_with_ai(
-                    segments, {}, options.ai_provider, options.ai_api_key, options.ai_model,
+                return create_outline_with_ai(
+                    source, {}, options.ai_provider, options.ai_api_key, options.ai_model,
                     status, check_cancelled, record_ai_usage, **ai_base_kwargs,
                 )
-                if not context_outline.get("sections"):
-                    raise RuntimeError("会話全体のアウトラインが空でした。")
-                finishing_stages["outline_context"] = "completed"
-            except InterruptedError:
-                raise
-            except Exception as exc:
-                context_outline = None
-                finishing_stages["outline_context"] = "failed"
-                record_warning("再校正用の全体アウトラインを作成できませんでした: " + str(exc))
-        if options.clean_transcript and not options.finish_in_obsidian:
-            try:
-                if context_outline is None:
-                    raise RuntimeError("参照する全体アウトラインがないため再校正を実行できません。")
-                segments = clean_segments_with_ai(
-                    segments,
+
+            def clean_with_outline(
+                source: list[dict[str, Any]], outline: dict[str, Any]
+            ) -> list[dict[str, Any]]:
+                return clean_segments_with_ai(
+                    source,
                     options.ai_provider,
                     options.ai_api_key,
                     options.ai_model,
                     status,
                     check_cancelled,
                     record_ai_usage,
-                    outline=context_outline,
+                    outline=outline,
                     **ai_base_kwargs,
                 )
-                finishing_stages["cleanup"] = "completed"
-                check_cancelled()
-            except InterruptedError:
-                raise
-            except Exception as exc:
+
+            def review_original_with_jev(outline: dict[str, Any]) -> tuple[dict, dict]:
+                return review_segments_with_jev(
+                    imported_transcript,
+                    options.jev_api_key,
+                    options.jev_model,
+                    status,
+                    check_cancelled,
+                    outline=outline,
+                )
+
+            def warn_full_cleanup(stage: str, exc: BaseException | None) -> None:
+                if exc is None:
+                    record_warning("現行AIの文字整形が完了しなかったため、Jevとの比較を省略しました。")
+                    return
                 details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                finishing_stages["cleanup"] = "failed"
-                record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
-        if options.jev_compare and not options.finish_in_obsidian:
-            if finishing_stages["cleanup"] != "completed":
-                finishing_stages["jev_comparison"] = "skipped"
-                record_warning("現行AIの文字整形が完了しなかったため、Jevとの比較を省略しました。")
-            else:
-                try:
-                    reviews, jev_usage = review_segments_with_jev(
-                        imported_transcript,
-                        options.jev_api_key,
-                        options.jev_model,
-                        status,
-                        check_cancelled,
-                        outline=context_outline,
-                    )
-                    segments = attach_jev_comparison(segments, reviews)
-                    finishing_stages["jev_comparison"] = "completed"
-                    check_cancelled()
-                except InterruptedError:
-                    raise
-                except Exception as exc:
-                    details = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-                    finishing_stages["jev_comparison"] = "failed"
+                if stage == "outline_context":
+                    record_warning("再校正用の全体アウトラインを作成できませんでした: " + str(exc))
+                elif stage == "cleanup":
+                    record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
+                else:
                     record_warning("Jevによる修正要否の比較を省略しました: " + details)
+
+            full_cleanup = run_full_cleanup(
+                segments,
+                check_cancelled=check_cancelled,
+                create_context_outline=create_context_outline,
+                clean_with_outline=clean_with_outline if options.clean_transcript else None,
+                review_with_jev=review_original_with_jev if options.jev_compare else None,
+                attach_jev=attach_jev_comparison,
+                on_failure=warn_full_cleanup,
+            )
+            segments = full_cleanup["segments"]
+            finishing_stages.update(full_cleanup["stages"])
+            if full_cleanup["stages"].get("jev_comparison") == "completed":
+                jev_usage = full_cleanup["jev_usage"]
         set_stage("finishing", "文字起こしの仕上げ", 100)
         progress(88)
         emotion_analysis: dict[str, Any] | None = None
@@ -639,8 +677,10 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             emotion_model_keys = aist_emotion_model_keys(options.emotion_model)
             try:
                 set_stage("emotion", "音声感情の分析", 10)
+                # Emotion models depend on loudness dynamics that the
+                # transcription preprocessing deliberately flattens.
                 segments, emotion_analysis = run_aist_emotion_analysis(
-                    processing_input_path,
+                    options.input_path,
                     segments,
                     options.emotion_model,
                     options.hf_token,

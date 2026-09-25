@@ -131,8 +131,13 @@ def main() -> int:
             return 0
     except urllib.error.HTTPError as exc:
         # Do not relay an error body: a provider or intermediary could reflect
-        # request text or credentials into it.
-        emit({"ok": False, "kind": "http", "status": int(exc.code)})
+        # request text or credentials into it.  Only a numeric Retry-After is
+        # passed on so the parent can pace a retry.
+        result: dict[str, Any] = {"ok": False, "kind": "http", "status": int(exc.code)}
+        retry_after = str((exc.headers or {}).get("Retry-After") or "").strip()
+        if retry_after.isascii() and retry_after.isdigit() and len(retry_after) <= 4:
+            result["retry_after"] = int(retry_after)
+        emit(result)
         return 0
     except (urllib.error.URLError, TimeoutError, OSError):
         emit({"ok": False, "kind": "network"})

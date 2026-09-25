@@ -67,7 +67,7 @@ class InterviewComparisonApiTests(unittest.TestCase):
         self.assertEqual(same["comparison_source"], "comparison_group")
 
     def test_comparison_group_is_editable_and_comparison_ui_is_loaded(self):
-        template = (app.APP_DIRECTORY / "templates" / "index.html").read_text(encoding="utf-8")
+        template = self.client.get("/").get_data(as_text=True)
         script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
         comparison_script = (app.APP_DIRECTORY / "static" / "interview-comparison.js").read_text(encoding="utf-8")
         self.assertIn('id="session-comparison-group"', template)

@@ -53,6 +53,10 @@ class AnalysisStorageTests(unittest.TestCase):
         # Graph result nodes deliberately retain compact finding previews.
         self.assertIn('graph_kind: analysis_result', notes)
         self.assertIn('先頭10行まで', notes)
+        # Reproduction files link through the app only; no machine-specific file:/// path (OBS-12).
+        self.assertIn('/api/analysis/artifacts/', notes)
+        self.assertNotIn('file://', notes)
+        self.assertNotIn(str(self.store.root.absolute()), notes)
 
     def test_moved_interview_folder_keeps_catalog_ownership(self):
         run = self.save().get_json()['run']
@@ -204,28 +208,55 @@ class AnalysisStorageTests(unittest.TestCase):
         for key, _, _, _ in METHOD_GROUPS:
             self.assertIn(method_group_path(key)[:-3], index)
         self.assertEqual({key for key, _, _ in METHODS}, {key for _, _, _, keys in METHOD_GROUPS for key in keys})
-        before = text_path.read_bytes() + '\n手書きの考察\n'.encode()
-        text_path.write_bytes(before)
+        generated = text_path.read_bytes()
+        text_path.write_bytes(generated + '\n手書きの考察\n'.encode())
         with patch.object(app, 'call_ai_json') as ai:
             self.store.publish_index('content')
             ai.assert_not_called()
-        self.assertEqual(text_path.read_bytes(), before)
+        # OBS-04: the latest navigation is written, and the researcher's edit is kept in the history.
+        self.assertEqual(text_path.read_bytes(), generated)
+        history = [p for p in (self.store.vault / '90-運用/変更履歴').rglob('*-研究者の編集.md')
+                   if p.parent.name.startswith(text_path.stem[:40])]
+        self.assertEqual(len(history), 1)
+        self.assertIn('手書きの考察', history[0].read_text(encoding='utf-8'))
 
-    def test_human_notes_are_never_overwritten_and_retry_never_calls_ai(self):
+    def test_edited_note_is_kept_in_history_and_updated_without_ai(self):
+        from gurumoji.obsidian_layout import unpack
         run = self.save().get_json()['run']
-        path = self.store.vault / self.store.get(run['id'])['note_path']
+        relative = self.store.get(run['id'])['note_path']
+        path = self.store.vault / relative
         original = path.read_bytes()
-        edited = original + '\n手書きの解釈\n'.encode()
-        path.write_bytes(edited)
+        history_dir = next(p for p in (path.parent.parent.parent / 'ノート変更').iterdir()
+                           if p.name.startswith(path.stem[:40]))
+        first = next(history_dir.glob('*-最初の版.md'))
+        self.assertEqual(unpack(first.read_text(encoding='utf-8'))[1].split('\n\n', 1)[1].strip(),
+                         unpack(original.decode())[1].strip())
+        path.write_bytes(original + '\n手書きの解釈\n'.encode())
         with patch.object(app, 'call_ai_json') as ai:
             result = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
-            self.assertEqual(result['vault_status'], 'conflict')
-            self.assertEqual(path.read_bytes(), edited)
-            self.assertEqual(result['status'], 'completed')
-            path.write_bytes(original)
-            result = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
-            self.assertEqual(result['vault_status'], 'completed')
             ai.assert_not_called()
+        self.assertEqual((result['status'], result['vault_status']), ('completed', 'completed'))
+        self.assertEqual(path.read_bytes(), original)
+        edited = next(history_dir.glob('*-研究者の編集.md'))
+        props, body = unpack(edited.read_text(encoding='utf-8'))
+        self.assertIn('手書きの解釈', body)
+        self.assertEqual((props['history_of'], props['note_type']), (relative, 'note-history'))
+        self.assertNotEqual(props['note_id'], unpack(original.decode())[0]['note_id'])
+        self.assertIn('graph/history', props['tags'])
+        self.assertEqual([e['path'] for e in result['vault_notes']['edit_saved']], [relative])
+        log = [json.loads(line) for line in self.store.note_log.read_text(encoding='utf-8').splitlines()]
+        self.assertIn(('edit_saved', relative), [(e['action'], e['path']) for e in log])
+
+    def test_deleted_content_note_is_reported_not_recreated(self):
+        run = self.save().get_json()['run']
+        relative = self.store.get(run['id'])['note_path']
+        (self.store.vault / relative).unlink()
+        result = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
+        self.assertEqual(result['vault_status'], 'completed')
+        self.assertFalse((self.store.vault / relative).exists())
+        self.assertIn({'vault': 'research', 'path': relative}, result['vault_notes']['missing'])
+        sync = (self.store.vault / '90-運用/同期状況.md').read_text(encoding='utf-8')
+        self.assertIn('削除を検出', sync)
 
     def test_vault_failure_keeps_artifacts_and_recovers_from_saved_package(self):
         with patch.object(analysis_store.AnalysisStore, 'write_note', side_effect=OSError('disk')):
@@ -236,6 +267,20 @@ class AnalysisStorageTests(unittest.TestCase):
             result = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
         self.assertEqual(result['vault_status'], 'completed')
         self.assertEqual(self.artifact(result, 'result.json'), before)
+
+    def test_generated_vault_failure_is_reported_and_retryable(self):
+        # OBS-18: ResearchVault succeeds but Input/Orchestrator/Visualization fail.
+        with patch('gurumoji.vault_registry.VaultRegistry.publish_analysis', side_effect=OSError('generated vault is locked')):
+            run = self.save().get_json()['run']
+        self.assertEqual((run['status'], run['vault_status']), ('completed', 'completed'))
+        self.assertFalse(run['vault_outputs_complete'])
+        self.assertEqual(set(run['vault_outputs']), {'input', 'orchestrator', 'visualization'})
+        self.assertTrue(any(value['status'] != 'published' for value in run['vault_outputs'].values()))
+        listed = next(r for r in self.client.get(self.url).get_json()['runs'] if r['id'] == run['id'])
+        self.assertFalse(listed['vault_outputs_complete'])
+        retried = self.client.post(f"/api/analysis/runs/{run['id']}/vault").get_json()['run']
+        self.assertTrue(retried['vault_outputs_complete'], retried['vault_outputs'])
+        self.assertEqual({value['status'] for value in retried['vault_outputs'].values()}, {'published'})
 
     def test_mid_write_failure_retries_deterministically_and_detects_tamper(self):
         write = analysis_store.write_atomic

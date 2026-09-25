@@ -23,6 +23,7 @@ def register_obsidian_routes(
     archive_meeting_minutes: Callable[[Any], Any],
     publish_meeting_minutes: Callable[[Any], dict[str, Any]],
     log_warning: Callable[..., None],
+    watcher_status: Callable[[], dict[str, Any]] = lambda: {},
 ) -> None:
     def prepare_finishing(item_id: str):
         if not local_access_allowed():
@@ -57,7 +58,15 @@ def register_obsidian_routes(
             return jsonify({"error": "保存PCから確認してください。"}), 403
         try:
             state = workbench().load(item_id)
-            return jsonify({"status": state.get("status", "ready"), "message": state.get("message", "")}) if state else jsonify({"status": "unprepared"})
+            # Without the watcher, checks in the operation note are never read (OBS-09).
+            watcher = watcher_status()
+            if not state:
+                return jsonify({"status": "unprepared", "watcher": watcher})
+            return jsonify({
+                "status": state.get("status", "ready"),
+                "message": state.get("message", ""),
+                "watcher": watcher,
+            })
         except (OSError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
 

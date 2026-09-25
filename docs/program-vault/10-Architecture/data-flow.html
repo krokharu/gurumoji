@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gurumoji データフロー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Zen+Kaku+Gothic+New:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#F3F6F7;--surface:#FFFFFF;--ink:#1B2A33;--muted:#586A74;--line:#D3DDE2;--faint:#CBD5DB;
+  --accent:#1F6F8B;--accent-soft:#E1EFF4;
+  --k-entry:#6F7E88;--k-proc:#1F6F8B;--k-ext:#B0513A;--k-store:#8C6A16;--k-vault:#6A4DA3;
+  --display:"Zen Kaku Gothic New","BIZ UDPGothic","Yu Gothic",Meiryo,system-ui,sans-serif;
+  --body:"BIZ UDPGothic","Yu Gothic",Meiryo,system-ui,sans-serif;
+  --mono:"JetBrains Mono",Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0F1519;--surface:#172127;--ink:#E2EAEE;--muted:#98A9B2;--line:#2B3942;--faint:#34444E;
+    --accent:#62B6D2;--accent-soft:#16323D;
+    --k-entry:#8E9DA7;--k-proc:#62B6D2;--k-ext:#E38C75;--k-store:#D6B55E;--k-vault:#AC90E3;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0F1519;--surface:#172127;--ink:#E2EAEE;--muted:#98A9B2;--line:#2B3942;--faint:#34444E;
+  --accent:#62B6D2;--accent-soft:#16323D;
+  --k-entry:#8E9DA7;--k-proc:#62B6D2;--k-ext:#E38C75;--k-store:#D6B55E;--k-vault:#AC90E3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.7}
+.wrap{max-width:1320px;margin:0 auto;padding-inline:20px;padding-block:32px 48px;display:grid;gap:22px}
+header{display:grid;gap:6px}
+.eyebrow{margin:0;font-size:12px;letter-spacing:.16em;color:var(--accent);font-weight:700}
+h1{margin:0;font-family:var(--display);font-weight:900;font-size:clamp(24px,3.4vw,34px);letter-spacing:.02em;text-wrap:balance}
+.lede{margin:0;color:var(--muted);max-width:68ch}
+code,.mono{font-family:var(--mono);font-size:.86em}
+nav.flows{display:flex;flex-wrap:wrap;gap:8px}
+nav.flows button{font:inherit;font-size:14px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:8px;padding:7px 12px;display:flex;gap:8px;align-items:center}
+nav.flows button .n{font-family:var(--mono);font-size:12px;color:var(--accent)}
+nav.flows button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+nav.flows button[aria-pressed="true"] .n{color:var(--bg)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+.diagram svg{display:block;width:100%;min-width:900px;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);padding:10px 16px;border-top:1px solid var(--line);min-width:900px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.panel{display:grid;gap:10px}
+.panel h2{margin:0;font-family:var(--display);font-size:20px;text-wrap:balance}
+.panel .trigger{margin:0;color:var(--muted);font-size:13px}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+ol.steps li{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid transparent;cursor:default}
+ol.steps li:hover,ol.steps li.on{background:var(--accent-soft);border-color:var(--line)}
+ol.steps .badge{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--surface);background:var(--accent);border-radius:999px;height:22px;min-width:22px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;justify-self:start;margin-top:2px}
+ol.steps .t{font-size:14px}
+ol.steps .ref{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+.note{font-size:13px;color:var(--muted);border-left:3px solid var(--k-store);padding:4px 10px;margin:0}
+/* SVG */
+.edge{fill:none;stroke:var(--faint);stroke-width:1.2;opacity:.55;transition:opacity .2s,stroke .2s}
+.edge.active{stroke:var(--accent);stroke-width:2;opacity:1}
+.edge.hot{stroke-width:3.4}
+.elabel{opacity:0;transition:opacity .2s}
+.elabel.active{opacity:1}
+.elabel circle{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.elabel.hot circle{fill:var(--accent)}
+.elabel text{fill:var(--accent);font:600 10.5px var(--mono);text-anchor:middle;dominant-baseline:central}
+.elabel.hot text{fill:var(--surface)}
+.node rect.box{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.node rect.stripe{stroke:none}
+.node text.title{fill:var(--ink);font:700 13px var(--body)}
+.node text.sub{fill:var(--muted);font:400 10.5px var(--mono)}
+.node.dim{opacity:.45}
+.node.touched rect.box{stroke:var(--ink);stroke-width:1.4}
+.col{fill:var(--muted);font:700 11px var(--body);letter-spacing:.12em}
+.k-entry{fill:var(--k-entry)}.k-proc{fill:var(--k-proc)}.k-ext{fill:var(--k-ext)}.k-store{fill:var(--k-store)}.k-vault{fill:var(--k-vault)}
+#arrow path{fill:var(--faint)}#arrow-on path{fill:var(--accent)}
+/* storage table */
+section.storage h2{font-family:var(--display);font-size:20px;margin:0 0 8px}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);letter-spacing:.08em;font-weight:700}
+tr:last-child td{border-bottom:none}
+td:first-child{white-space:nowrap}
+td .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;vertical-align:middle}
+footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+@media (max-width:980px){.stage{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">SOFTWARE VAULT · 10-ARCHITECTURE</p>
+    <h1>録音から逐語録・分析・Obsidianへのデータフロー</h1>
+    <p class="lede">操作ごとに、データがどのモジュールを通り、どこに書かれるかを示します。流れを選ぶと該当する矢印が強調され、番号が右の手順に対応します。</p>
+  </header>
+
+  <nav class="flows" id="flows" aria-label="データフローの選択"></nav>
+
+  <div class="stage">
+    <div class="diagram">
+      <svg id="map" viewBox="0 0 1160 640" role="img" aria-labelledby="map-title">
+        <title id="map-title">Gurumojiのモジュールと保存先の関係図</title>
+      </svg>
+      <div class="legend">
+        <span><i style="background:var(--k-entry)"></i>入口</span>
+        <span><i style="background:var(--k-proc)"></i>アプリの処理</span>
+        <span><i style="background:var(--k-ext)"></i>外部ツール・AI</span>
+        <span><i style="background:var(--k-store)"></i>アプリの保存先 <code>&lt;data&gt;</code></span>
+        <span><i style="background:var(--k-vault)"></i>Obsidian Vault</span>
+      </div>
+    </div>
+    <aside class="panel" aria-live="polite">
+      <h2 id="flow-title"></h2>
+      <p class="trigger" id="flow-trigger"></p>
+      <ol class="steps" id="steps"></ol>
+      <p class="note" id="flow-note" hidden></p>
+    </aside>
+  </div>
+
+  <section class="storage">
+    <h2>保存先</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>場所</th><th>内容</th><th>主に書く処理</th></tr></thead>
+        <tbody>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/library.sqlite3</code></td><td>正本の逐語録（<code>library_items</code>）、版、話者台帳、分析条件、AI要求、固定保存の台帳、Obsidianノート台帳、tombstone</td><td>文字起こし・編集保存・分析・削除</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>runtime/output</code></td><td>TXT／JSON／SRT、アウトライン、感情分析。起動時に既存JSONを取り込む</td><td><code>write_outputs</code>、編集トランザクション</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/media</code>・<code>thumbnails</code></td><td>元の音声・動画、再生成できるサムネイル</td><td>文字起こし・削除</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/trash</code></td><td>削除した会話のDB行・元の音声・動画・サムネイルと <code>manifest.json</code>（既定30日保管、一覧から復元可）</td><td>削除・復元・完全削除、起動時の期限切れ消去</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/analysis_store</code></td><td>不変の入力スナップショット、実行結果、表CSV、manifest</td><td><code>AnalysisStore.save</code></td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/obsidian_workbench</code></td><td>仕上げの <code>state.json</code>、<code>source-*.json</code>、<code>result-*.json</code></td><td><code>ObsidianWorkbench</code></td></tr>
+          <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/ResearchVault</code></td><td>研究者が読むノート、操作ノート、分析ノート、テーマ。生成ノートの最初の版と研究者の編集版は <code>履歴/ノート変更/</code> に写す</td><td>仕上げ・分析の公開・テーマ同期</td></tr>
+          <tr><td><span class="dot" style="background:var(--k-store)"></span><code>&lt;data&gt;/obsidian_layout/note_changes.jsonl</code></td><td>生成ノートの作成・更新・編集の保存・欠落の記録。<code>90-運用/同期状況</code> に表示</td><td>共通の書き込み判定 <code>vault_note_policy</code></td></tr>
+          <tr><td><span class="dot" style="background:var(--k-vault)"></span><code>&lt;data&gt;/obsidian/InputVault</code> ほか2件</td><td>IDでつなぐ台帳型Vault（Input／Visualization／Orchestrator）</td><td><code>publish_input_vault</code>、<code>publish_vaults</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    2026-09-25にコードと照合（<code>services/</code>・<code>web/</code>・<code>handlers/</code> への分割後）。文章での説明は <code>10-Architecture/system-map.md</code> の「主要なデータフロー」にあります。<code>&lt;data&gt;</code> は <code>MOJIOKOSI_DATA_DIR</code>（既定は <code>runtime/data</code>）です。
+  </footer>
+</div>
+
+<script>
+(function(){
+  var NODES = {
+    ui:    {x:20,  y:70,  w:180, h:56, k:"entry", t:"ブラウザ画面", s:"static/*.js"},
+    obs:   {x:20,  y:300, w:180, h:56, k:"entry", t:"Obsidianでの編集", s:"操作ノート・研究メモ"},
+    boot:  {x:20,  y:540, w:180, h:56, k:"entry", t:"起動", s:"run.bat → gurumoji.app"},
+
+    api:   {x:250, y:40,  w:220, h:56, k:"proc", t:"Flask API", s:"web/*_routes.py"},
+    job:   {x:250, y:120, w:220, h:56, k:"proc", t:"文字起こしジョブ", s:"transcription/job_runner.py"},
+    edit:  {x:250, y:200, w:220, h:56, k:"proc", t:"逐語録の編集保存", s:"services/library_edits.py"},
+    ana:   {x:250, y:280, w:220, h:56, k:"proc", t:"分析・固定保存", s:"group_analysis / analysis_archive"},
+    watch: {x:250, y:380, w:220, h:56, k:"proc", t:"常駐watcher", s:"services/obsidian_watcher.py"},
+    del:   {x:250, y:460, w:220, h:56, k:"proc", t:"削除", s:"web/library_deletion.py"},
+    init:  {x:250, y:540, w:220, h:56, k:"proc", t:"起動時の初期化", s:"initialize_application"},
+
+    ml:    {x:520, y:110, w:180, h:56, k:"ext", t:"FFmpeg・WhisperX", s:"pyannote・感情モデル"},
+    ai:    {x:520, y:330, w:180, h:56, k:"ext", t:"AIプロバイダー", s:"ai_http_worker 経由"},
+
+    out:   {x:750, y:40,  w:180, h:56, k:"store", t:"出力ファイル", s:"runtime/output"},
+    db:    {x:750, y:130, w:180, h:70, k:"store", t:"SQLite（正本）", s:"library.sqlite3"},
+    media: {x:750, y:230, w:180, h:56, k:"store", t:"メディア", s:"media / thumbnails"},
+    store: {x:750, y:320, w:180, h:56, k:"store", t:"固定保存", s:"analysis_store/"},
+    wb:    {x:750, y:410, w:180, h:56, k:"store", t:"仕上げ作業台", s:"obsidian_workbench/"},
+
+    rv:    {x:970, y:220, w:170, h:70, k:"vault", t:"ResearchVault", s:"研究者が読む"},
+    iv:    {x:970, y:340, w:170, h:56, k:"vault", t:"InputVault", s:"会話の台帳"},
+    vv:    {x:970, y:430, w:170, h:56, k:"vault", t:"Visualization", s:"＋OrchestratorVault"}
+  };
+
+  // e: [from, to, step label]; steps: [label, text, code reference]
+  var FLOWS = [
+    {id:"transcribe", n:"1", name:"新規文字起こし", trigger:"「新規作成」から録音・動画を送信したとき",
+     e:[["ui","api","1"],["api","job","2"],["job","ml","3"],["job","wb","4a"],["job","rv","4a"],["job","ai","4b"],["job","out","5"],["job","db","6"],["job","media","6"],["job","iv","7"],["job","store","8"]],
+     steps:[["1","フォームを送信し、ジョブを作る","POST /api/jobs · web/job_routes.py create_job"],
+            ["2","スレッドで文字起こしを実行する","run_transcription_job"],
+            ["3","FFmpeg前処理 → WhisperX → pyannote → 任意の感情分析","services/transcription/*"],
+            ["4a","既定（Obsidianで仕上げる）：保存原文・全文・操作ノート・状態ノートを書く","ObsidianWorkbench.prepare"],
+            ["4b","「おすすめ」「高度」モードなど、Obsidianで仕上げない場合は、ジョブ内でAI校正・話者特定・アウトラインを実行する","run_full_cleanup（流れ4の5と共通の手順）ほか"],
+            ["5","TXT／JSON／SRTなどを出力する","services/outputs.py write_outputs"],
+            ["6","逐語録をSQLiteに保存し、メディアを移す","services/library_store.py upsert_library_item"],
+            ["7","InputVaultの台帳を更新する","publish_input_vault"],
+            ["8","会議の場合は議事録を固定保存し、Vaultへ公開する","archive_meeting_minutes · publish_meeting_minutes_to_obsidian"]]},
+    {id:"edit", n:"2", name:"逐語録の編集保存", trigger:"画面で発話や話者名を直して保存したとき",
+     e:[["ui","api","1"],["api","edit","2"],["edit","out","3"],["edit","db","4"],["edit","store","5"],["store","rv","5"],["store","vv","5"],["edit","iv","6"]],
+     steps:[["1","編集内容を送る","PUT /api/library/<id>"],
+            ["2","revisionを確認して排他的に更新する","update_library_from_payload → _update_library_from_payload_locked"],
+            ["3","出力ファイルを差し替える（失敗時は回復）","services/edit_transactions.py"],
+            ["4","library_items・transcript_versions・学習イベントを記録する","services/library_edits.py"],
+            ["5","保存済み分析をstaleにし、索引をResearchVaultと3 Vaultに反映する","refresh_archive_index → AnalysisStore.publish_index"],
+            ["6","InputVaultの台帳を更新する","publish_input_vault"]],
+     note:"別の保存APIとして PUT /api/jobs/<id>/transcript（save_transcript）もある。"},
+    {id:"analysis", n:"3", name:"分析と固定保存", trigger:"分析画面で閲覧・保存・AI見解を実行したとき",
+     e:[["ui","api","1"],["api","ana","2"],["db","ana","3"],["ana","ai","4"],["ana","store","5"],["ana","db","6"],["store","iv","7"],["store","vv","7"],["store","rv","8"]],
+     steps:[["1","閲覧・条件保存・固定保存を要求する","GET / PUT /api/library/<id>/analysis · POST …/analysis/runs"],
+            ["2","会話ごとに集計・日本語解析を行う（キャッシュあり）","services/group_analysis.py group_analysis_for_row → research_analysis"],
+            ["3","発話・分析条件・手動コードをDBから読む","library_items.analysis_config_json"],
+            ["4","AI見解はスレッドで実行する。Transformerはローカルモデル","POST …/insights · POST …/transformer"],
+            ["5","入力スナップショットと結果を不変ファイルとして保存する","archive_group_analysis → AnalysisStore.save"],
+            ["6","実行台帳と成果物のhashを確定する","analysis_runs · analysis_artifacts"],
+            ["7","InputVault・Visualization・OrchestratorVaultへ公開する","AnalysisStore.publish → publish_vaults"],
+            ["8","分析ノート・引用原文・グラフ用ノードと分析まとめを書く","AnalysisStore.publish · publish_index"]]},
+    {id:"finishing", n:"4", name:"Obsidianでの仕上げ", trigger:"作業版を作り、Obsidianの操作ノートでAI処理を選んだとき",
+     e:[["ui","api","1"],["api","wb","2"],["api","rv","2"],["obs","rv","3"],["rv","watch","4"],["watch","ai","5"],["watch","rv","6"],["watch","wb","6"],["watch","edit","7"],["edit","db","8"],["edit","iv","8"],["watch","store","9"]],
+     steps:[["1","作業版の作成を要求する","POST /api/library/<id>/obsidian-finishing"],
+            ["2","作業台の状態と、操作ノート・全文をResearchVaultに書く","ObsidianWorkbench.prepare"],
+            ["3","研究者が操作ノートにチェックを付け、providerを選ぶ","Obsidian側の編集"],
+            ["4","2秒ごとに操作ノートを読む","ObsidianWorkbench.poll_once"],
+            ["5","選ばれたAI処理を実行する。全体アウトライン → 全文校正 → Jev比較の手順はジョブ内の仕上げと共通","run_obsidian_finishing → run_full_cleanup"],
+            ["6","結果を新しいパスのノートと result-*.json に書く","obsidian_finishing.py"],
+            ["7","「結果をアプリへ反映」ではrevisionと元ノートのfingerprintを再確認する","_update_library_from_payload_locked"],
+            ["8","逐語録を更新し、InputVaultの台帳を更新する","publish_input_vault"],
+            ["9","校正前後と議題の根拠を固定保存する","archive_ai_finishing"]]},
+    {id:"themes", n:"5", name:"テーマ同期", trigger:"研究メモにテーマへのリンクを書いたとき",
+     e:[["obs","rv","1"],["rv","watch","2"],["watch","rv","3"]],
+     steps:[["1","研究メモに [[20-テーマ/…]] を書く","Obsidian側の編集"],
+            ["2","10秒ごとに研究メモのリンクを読む","ObsidianLayout.sync_themes"],
+            ["3","20-テーマ のノートのプロパティと関連欄を書き換える","obsidian_layout.py"]]},
+    {id:"delete", n:"6", name:"削除", trigger:"ライブラリーから会話を削除したとき",
+     e:[["ui","api","1"],["api","del","2"],["del","media","3"],["del","db","4"],["del","iv","5"],["del","rv","5"]],
+     steps:[["1","削除を要求する","DELETE /api/library/<id>"],
+            ["2","排他的に削除処理を始める","_delete_library_item_locked"],
+            ["3","メディアとサムネイルを隔離フォルダーへ移す。削除確定後、DB行とあわせてゴミ箱（既定30日保管・復元可）へ移す","隔離 → <data>/trash · services/library_trash.py"],
+            ["4","SQLiteの行と準備履歴を削除し、tombstoneを記録する","output_import_tombstones"],
+            ["5","InputVaultから取り下げ、ResearchVaultの概要と一覧を「アプリから削除済み」にする","retire_input_vault · ObsidianLayout.mark_deleted"]],
+     note:"出力ファイル、analysis_store、ResearchVaultのノート、obsidian_workbench は記録として残る。ゴミ箱の保持期間が過ぎたメディアは、次の起動時に完全に削除される。"},
+    {id:"boot", n:"7", name:"起動", trigger:"run.bat でアプリを起動したとき",
+     e:[["boot","init","1"],["init","db","2"],["out","init","3"],["init","watch","4"],["watch","rv","5"]],
+     steps:[["1","ランチャーからアプリを起動する","run.bat → scripts/run_launcher.ps1 → python -m gurumoji.app"],
+            ["2","単一インスタンスのロック、DB初期化、編集トランザクション・削除隔離・学習データの回復、期限切れのゴミ箱の消去","initialize_application"],
+            ["3","既存の出力JSONを取り込み、来歴を修復する","services/output_import.py"],
+            ["4","常駐watcherを起動する。稼働・停止の状態と停止理由は画面の「Obsidian監視」に出る","start_obsidian_watcher · WatcherStatus"],
+            ["5","作業台の recover と旧階層の migrate を実行し、その後Flaskを起動する","obsidian_migration.py"]]}
+  ];
+
+  var NS = "http://www.w3.org/2000/svg";
+  var svg = document.getElementById("map");
+  function el(name, attrs, parent){
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  var defs = el("defs", {}, svg);
+  [["arrow",""],["arrow-on",""]].forEach(function(a){
+    var m = el("marker", {id:a[0], viewBox:"0 0 10 10", refX:"9", refY:"5", markerWidth:"7", markerHeight:"7", orient:"auto-start-reverse"}, defs);
+    el("path", {d:"M0,0 L10,5 L0,10 z"}, m);
+  });
+
+  [["入口",20],["アプリの処理",250],["外部ツール・AI",520],["保存先 <data>",750],["Obsidian Vault",970]].forEach(function(c){
+    var t = el("text", {x:c[1], y:22, "class":"col"}, svg); t.textContent = c[0];
+  });
+
+  // Collect all edges, then spread their attachment points along each node side.
+  var edges = [];
+  FLOWS.forEach(function(f){ f.e.forEach(function(e){ edges.push({flow:f.id, from:e[0], to:e[1], label:e[2]}); }); });
+
+  function sides(e){
+    var a = NODES[e.from], b = NODES[e.to];
+    if (a.x === b.x) return ["L","L"];            // same column: bulge out to the left
+    return a.x < b.x ? ["R","L"] : ["L","R"];
+  }
+  var slots = {};
+  edges.forEach(function(e){
+    var s = sides(e);
+    e.sa = s[0]; e.sb = s[1];
+    (slots[e.from+s[0]] = slots[e.from+s[0]] || []).push({e:e, end:"a"});
+    (slots[e.to+s[1]] = slots[e.to+s[1]] || []).push({e:e, end:"b"});
+  });
+  Object.keys(slots).forEach(function(key){
+    var list = slots[key];
+    list.sort(function(p, q){
+      var op = NODES[p.end === "a" ? p.e.to : p.e.from], oq = NODES[q.end === "a" ? q.e.to : q.e.from];
+      return (op.y + op.h/2) - (oq.y + oq.h/2);
+    });
+    var node = NODES[key.slice(0, -1)], n = list.length, span = Math.min(node.h - 12, n * 7);
+    list.forEach(function(p, i){
+      var y = node.y + node.h/2 + (n === 1 ? 0 : -span/2 + span * i / (n - 1));
+      p.e[p.end === "a" ? "ya" : "yb"] = y;
+    });
+  });
+
+  var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), labelLayer = el("g", {}, svg);
+
+  edges.forEach(function(e){
+    var a = NODES[e.from], b = NODES[e.to];
+    var x1 = e.sa === "R" ? a.x + a.w : a.x, x2 = e.sb === "R" ? b.x + b.w : b.x;
+    var y1 = e.ya, y2 = e.yb, d, mx, my;
+    if (e.sa === e.sb){
+      var bx = Math.min(x1, x2) - 34 - Math.abs(y2 - y1) * 0.08;
+      d = "M"+x1+","+y1+" C"+bx+","+y1+" "+bx+","+y2+" "+(x2-2)+","+y2;
+      mx = 0.125*x1 + 0.75*bx + 0.125*x2; my = (y1 + y2) / 2;
+    } else {
+      var dx = Math.max(40, Math.abs(x2 - x1) * 0.45), s = x2 > x1 ? 1 : -1;
+      var c1 = x1 + s*dx, c2 = x2 - s*dx;
+      d = "M"+x1+","+y1+" C"+c1+","+y1+" "+c2+","+y2+" "+(x2 - s*2)+","+y2;
+      mx = 0.125*x1 + 0.375*c1 + 0.375*c2 + 0.125*x2; my = (y1 + y2) / 2;
+    }
+    e.path = el("path", {d:d, "class":"edge", "marker-end":"url(#arrow)"}, edgeLayer);
+    e.lab = el("g", {"class":"elabel", transform:"translate("+mx+","+my+")"}, labelLayer);
+    el("circle", {r: e.label.length > 1 ? 11 : 9}, e.lab);
+    el("text", {}, e.lab).textContent = e.label;
+  });
+
+  Object.keys(NODES).forEach(function(id){
+    var n = NODES[id];
+    var g = el("g", {"class":"node", "data-id":id}, nodeLayer);
+    el("rect", {"class":"box", x:n.x, y:n.y, width:n.w, height:n.h, rx:7}, g);
+    el("rect", {"class":"stripe k-"+n.k, x:n.x, y:n.y+8, width:3.5, height:n.h-16, rx:1.5}, g);
+    el("text", {"class":"title", x:n.x+14, y:n.y+n.h/2-5}, g).textContent = n.t;
+    el("text", {"class":"sub", x:n.x+14, y:n.y+n.h/2+13}, g).textContent = n.s;
+    n.g = g;
+  });
+
+  // Controls
+  var nav = document.getElementById("flows");
+  var stepsEl = document.getElementById("steps");
+  var current = null;
+
+  function hot(label, on){
+    edges.forEach(function(e){
+      if (e.flow !== current || e.label !== label) return;
+      e.path.classList.toggle("hot", on);
+      e.lab.classList.toggle("hot", on);
+    });
+  }
+
+  function select(id){
+    current = id;
+    var f = FLOWS.filter(function(x){ return x.id === id; })[0];
+    Array.prototype.forEach.call(nav.children, function(b){ b.setAttribute("aria-pressed", String(b.dataset.id === id)); });
+    var touched = {};
+    edges.forEach(function(e){
+      var on = e.flow === id;
+      e.path.classList.toggle("active", on);
+      e.path.classList.remove("hot");
+      e.path.setAttribute("marker-end", on ? "url(#arrow-on)" : "url(#arrow)");
+      e.lab.classList.toggle("active", on);
+      e.lab.classList.remove("hot");
+      if (on){ touched[e.from] = 1; touched[e.to] = 1; edgeLayer.appendChild(e.path); }
+    });
+    Object.keys(NODES).forEach(function(k){
+      NODES[k].g.classList.toggle("dim", !touched[k]);
+      NODES[k].g.classList.toggle("touched", !!touched[k]);
+    });
+    document.getElementById("flow-title").textContent = f.n + ". " + f.name;
+    document.getElementById("flow-trigger").textContent = f.trigger;
+    stepsEl.innerHTML = "";
+    f.steps.forEach(function(s){
+      var li = document.createElement("li");
+      li.innerHTML = '<span class="badge"></span><span class="t"></span>';
+      li.children[0].textContent = s[0];
+      li.children[1].textContent = s[1];
+      var ref = document.createElement("span"); ref.className = "ref"; ref.textContent = s[2];
+      li.children[1].appendChild(ref);
+      li.addEventListener("mouseenter", function(){ li.classList.add("on"); hot(s[0], true); });
+      li.addEventListener("mouseleave", function(){ li.classList.remove("on"); hot(s[0], false); });
+      stepsEl.appendChild(li);
+    });
+    var note = document.getElementById("flow-note");
+    note.hidden = !f.note; note.textContent = f.note || "";
+    try { localStorage.setItem("gurumoji-dataflow", id); } catch (err) {}
+  }
+
+  FLOWS.forEach(function(f){
+    var b = document.createElement("button");
+    b.type = "button"; b.dataset.id = f.id;
+    b.innerHTML = '<span class="n"></span><span></span>';
+    b.children[0].textContent = f.n; b.children[1].textContent = f.name;
+    b.addEventListener("click", function(){ select(f.id); });
+    nav.appendChild(b);
+  });
+
+  var start = "transcribe";
+  var hash = (location.hash || "").slice(1);
+  try { start = localStorage.getItem("gurumoji-dataflow") || start; } catch (err) {}
+  if (FLOWS.some(function(f){ return f.id === hash; })) start = hash;
+  if (!FLOWS.some(function(f){ return f.id === start; })) start = "transcribe";
+  select(start);
+})();
+</script>
+</body>
+</html>

@@ -1,14 +1,15 @@
-"""DELETE /api/library/<item_id>: remove one library item and its managed media.
+"""DELETE /api/library/<item_id>: move one library item and its managed media to the trash.
 
-Managed media and thumbnails are first moved into a .delete-staging-* folder
-and removed only after the database rows are deleted; if the database step
-fails they are moved back. A crash in between is resolved at startup by
+Managed media and thumbnails are first moved into a .delete-staging-* folder.
+The rows the delete removes are written to a pending trash manifest inside the
+same transaction; after the commit the files move into the trash entry
+(DATA-01). If the database step fails they are moved back. A crash in between
+is resolved at startup by library_trash.recover_pending and
 recover_delete_quarantines. Output files and training history are kept, and
 tombstones stop the deleted output from being imported again."""
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 import uuid
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Any, Callable
 from flask import jsonify
 
 from ..text_utils import json_load, utc_now_iso
+from ..services import library_trash
 from ..services.durable_files import file_sha256, path_is_within
 from ..services.outputs import safe_output_stem
 from ..services.transcription.options import ACTIVE_JOB_STATUSES
@@ -36,6 +38,8 @@ def make_library_deletion(
     local_path_access_allowed: Any,
     reconcile_edit_transactions_before_delete: Any,
     retire_input_vault: Any,
+    trash_directory: Callable[[], Path],
+    trash_retention_days: Callable[[], int],
 ) -> Callable[..., Any]:
     def _delete_library_item_locked(item_id: str):
         row = library_row(item_id)
@@ -124,6 +128,7 @@ def make_library_deletion(
                 "recovery_paths": retained,
             }), 409
 
+        trash_entry: Path | None = None
         try:
             with database_connection() as connection:
                 files = json_load(row["files_json"], [])
@@ -179,6 +184,16 @@ def make_library_deletion(
                     else:
                         fingerprint = provenance_fingerprint if is_provenance else ""
                     tombstone_records.append((canonical_path, fingerprint))
+                rows = library_trash.snapshot_rows(connection, item_id)
+                replaced = [
+                    dict(zip(("canonical_path", "content_sha256", "deleted_at"), existing))
+                    for canonical_path, _ in tombstone_records
+                    for existing in connection.execute(
+                        "SELECT canonical_path, content_sha256, deleted_at "
+                        "FROM output_import_tombstones WHERE canonical_path=?",
+                        (canonical_path,),
+                    ).fetchall()
+                ]
                 for canonical_path, fingerprint in tombstone_records:
                     connection.execute(
                         "INSERT OR REPLACE INTO output_import_tombstones "
@@ -192,7 +207,17 @@ def make_library_deletion(
                 for table in ("transcript_versions", "transcript_preparations", "transcript_preparation_events"):
                     connection.execute(f"DELETE FROM {table} WHERE item_id=?", (item_id,))
                 connection.execute("DELETE FROM library_items WHERE id = ?", (item_id,))
-        except sqlite3.Error as exc:
+                # Written before the commit so a crash after it still reaches the trash.
+                trash_entry = library_trash.begin(
+                    trash_directory(), item_id=item_id, source_name=str(row["source_name"]),
+                    rows=rows, tombstones_added=[path for path, _ in tombstone_records],
+                    tombstones_replaced=replaced,
+                    assets=[("media" if quarantined.parent.parent.resolve() == media_root else "thumbnail",
+                             quarantined, original) for quarantined, original in moved],
+                )
+        except (sqlite3.Error, OSError) as exc:
+            if trash_entry is not None:
+                library_trash.discard(trash_entry)
             restore_errors = restore_assets()
             cleanup_empty_quarantine_roots()
             retained = retained_quarantine_paths()
@@ -206,16 +231,22 @@ def make_library_deletion(
         with jobs_lock:
             jobs.pop(item_id, None)
         retire_input_vault(item_id)
-        cleanup_errors: list[str] = []
-        for quarantine_root in quarantine_roots:
-            try:
-                shutil.rmtree(quarantine_root)
-            except OSError as exc:
-                cleanup_errors.append(str(exc))
+        try:
+            cleanup_errors = library_trash.finish(
+                trash_entry, lambda source, target: durable_move(source, target, replace_existing=False))
+        except (OSError, ValueError, KeyError) as exc:
+            cleanup_errors = [str(exc)]
+        cleanup_empty_quarantine_roots()
         retained = retained_quarantine_paths()
+        days = trash_retention_days()
         result: dict[str, Any] = {
             "ok": True,
-            "message": "ライブラリ項目と管理対象メディアを削除しました。出力と学習履歴は保持しています。",
+            "message": (
+                "ライブラリ項目と管理対象メディアをゴミ箱に移しました。"
+                + (f"{days}日後に自動で完全に削除されます。" if days else "完全に削除するまでゴミ箱に残ります。")
+                + "出力と学習履歴は保持しています。"
+            ),
+            "trash_entry": trash_entry.name,
             "recovery_paths": retained,
         }
         if cleanup_errors or retained:

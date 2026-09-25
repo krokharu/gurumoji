@@ -113,6 +113,12 @@ def valid_time(segment):
         return False
 
 
+def segment_text(segment):
+    """Imported transcripts may carry a null or numeric text; treat it as text, never crash."""
+    value = segment.get("text")
+    return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
 def basis_hash(source_hash, state):
     return digest({"source_hash": source_hash, "records": state.get("records", {}),
                    "order_verified": state.get("order_verified", False)})
@@ -140,7 +146,7 @@ def view(connection, row, segments):
         text_status = record.get("text_status", "unreviewed")
         speaker = segment.get("speaker")
         known = bool(speaker and speaker != "UNKNOWN")
-        content_ready = bool(segment.get("text", "").strip()) and text_status in {"transcript_checked", "audio_verified"} and record.get("boundary_verified", False)
+        content_ready = bool(segment_text(segment).strip()) and text_status in {"transcript_checked", "audio_verified"} and record.get("boundary_verified", False)
         interaction_ready = bool(content_ready and order_verified and known and record.get("speaker_verified") and record.get("role", "unknown") != "unknown")
         rows.append({
             "interview_id": row["id"], "group_id": source_value["session_profile"].get("interview_group_id") or None,
@@ -153,7 +159,7 @@ def view(connection, row, segments):
             "source_locator": record.get("source_locator", ""),
             "source_segment_ids": record.get("source_segment_ids", [sid] if sid in originals else []),
             "original_text": originals.get(sid, {}).get("text"), "original_status": original_status if sid in originals else "unavailable",
-            "text": segment.get("text", ""), "text_status": text_status,
+            "text": segment_text(segment), "text_status": text_status,
             "boundary_verified": bool(record.get("boundary_verified")),
             "previous_segment_id": segments[index - 1]["id"] if index else None,
             "next_segment_id": segments[index + 1]["id"] if index + 1 < len(segments) else None,
@@ -234,7 +240,7 @@ def save(connection, row, segments, payload):
         raise ValueError("実参加人数を記入する場合は、名簿等の確認根拠を記入してください。")
     if payload.get("confirm") and (not segments or any(
         clean.get(s["id"], {}).get("text_status") not in {"transcript_checked", "audio_verified"}
-        or not clean.get(s["id"], {}).get("boundary_verified") or not s.get("text", "").strip()
+        or not clean.get(s["id"], {}).get("boundary_verified") or not segment_text(s).strip()
         for s in segments
     )):
         raise ValueError("版の確定には全発言の本文と発言区切りの確認が必要です。話者不明は内容分析の制約として残ります。")

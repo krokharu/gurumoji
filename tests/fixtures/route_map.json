@@ -511,6 +511,27 @@
   "analysis_queries.save_interview_comparison_run"
  ],
  [
+  "/api/library/trash",
+  [
+   "GET"
+  ],
+  "list_library_trash"
+ ],
+ [
+  "/api/library/trash/<entry_id>",
+  [
+   "DELETE"
+  ],
+  "purge_library_trash"
+ ],
+ [
+  "/api/library/trash/<entry_id>/restore",
+  [
+   "POST"
+  ],
+  "restore_library_trash"
+ ],
+ [
   "/api/select-input",
   [
    "POST"
@@ -558,6 +579,13 @@
    "GET"
   ],
   "api_system_activity"
+ ],
+ [
+  "/api/system/backup",
+  [
+   "POST"
+  ],
+  "api_create_backup"
  ],
  [
   "/api/training",

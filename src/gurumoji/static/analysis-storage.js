@@ -36,7 +36,7 @@ function refreshAnalysisStorage() {
       : state.error || `${state.runs.length}件の保存履歴 / AI仕上げ・AI見解は成功時に自動で記録します。`;
   });
   document.querySelectorAll('[data-archive-history]').forEach(host => {
-    const key = JSON.stringify(state.runs.map(r => [r.id, r.status, r.vault_status, r.stale, r.error]));
+    const key = JSON.stringify(state.runs.map(r => [r.id, r.status, r.vault_status, r.stale, r.error, r.vault_outputs]));
     if (host.dataset.renderKey === key) return;
     host.dataset.renderKey = key; host.replaceChildren();
     const labels = {text_analysis: '文章分析', ai_insights: 'AI見解', ai_finishing: 'AI仕上げ', kwic: '文脈検索'};
@@ -46,11 +46,13 @@ function refreshAnalysisStorage() {
       const body = analysisElement('div', 'analysis-archive-body');
       body.append(analysisElement('p', 'analysis-caption', `元データ ${run.source_revision}版 / 分析 ${run.analysis_revision}版${run.model ? ` / ${run.model}` : ''}`));
       if (run.error) body.append(analysisElement('p', 'content-inline-notice', run.error));
+      const unpublished = generatedVaultProblems(run);
+      if (unpublished) body.append(analysisElement('p', 'content-inline-notice', unpublished));
       if (run.obsidian_uri) {
         const open = analysisElement('a', 'secondary-button compact-button', 'Obsidianで開く');
         open.href = run.obsidian_uri; body.append(open);
       }
-      if (run.status !== 'writing' && (run.status !== 'completed' || run.vault_status !== 'completed')) {
+      if (run.status !== 'writing' && (run.status !== 'completed' || run.vault_status !== 'completed' || generatedVaultProblems(run))) {
         body.append(contentButton('保存済み結果から再試行', () => retrySavedVault(run.id)));
       }
       const files = analysisElement('div', 'analysis-archive-files');
@@ -107,13 +109,35 @@ async function saveAnalysisPackage(kwic = null) {
     if (!response.ok) throw new Error(data.error || '分析結果を保存できませんでした。');
     state.pending = null;
     try { sessionStorage.removeItem(storageKey); } catch (_) { /* optional storage */ }
-    state.error = data.run?.vault_status === 'completed' ? '分析結果とVaultを保存しました。'
-      : data.run?.error || '結果ファイルは保存済みです。Vaultの状態を確認してください。';
+    state.error = (data.run?.vault_status !== 'completed'
+      ? data.run?.error || '結果ファイルは保存済みです。Vaultの状態を確認してください。'
+      : generatedVaultProblems(data.run) || '分析結果とVaultを保存しました。') + vaultNotesMessage(data.run);
   } catch (error) { state.error = error.message; }
   finally {
     state.busy = false;
     if (itemId === analysisState.itemId) { await loadAnalysisStorage(); refreshAnalysisStorage(); }
   }
+}
+
+// OBS-04: say which researcher-touched notes the shared Vault note policy handled.
+function vaultNotesMessage(run) {
+  const notes = run && run.vault_notes && typeof run.vault_notes === 'object' ? run.vault_notes : {};
+  const count = key => (Array.isArray(notes[key]) ? notes[key].length : 0);
+  const parts = [];
+  if (count('edit_saved')) parts.push(`Obsidianで編集されていたノート${count('edit_saved')}件は、編集した版を履歴に保存してから最新版に更新しました。`);
+  if (count('missing')) parts.push(`削除されていたノート${count('missing')}件は作り直していません。`);
+  return parts.length ? ` ${parts.join(' ')}詳しくはResearchVaultの「90-運用/同期状況」を確認してください。` : '';
+}
+
+// OBS-18: vault_status covers ResearchVault; the Input/Orchestrator/Visualization Vaults are reported here.
+function generatedVaultProblems(run) {
+  const labels = {input: 'InputVault', orchestrator: 'OrchestratorVault', visualization: 'VisualizationVault'};
+  const problems = Object.entries(run?.vault_outputs || {})
+    .filter(([, value]) => value && value.status !== 'published')
+    .map(([kind, value]) => `${labels[kind] || kind}（${value.error || value.status}）`);
+  return problems.length
+    ? `分析結果とResearchVaultは保存済みですが、${problems.join('、')}への書き出しが完了していません。「保存済み結果から再試行」で書き出せます。`
+    : '';
 }
 
 async function retrySavedVault(runId) {
@@ -125,7 +149,7 @@ async function retrySavedVault(runId) {
     const response = await apiFetch(`/api/analysis/runs/${encodeURIComponent(runId)}/vault`, {method: 'POST'});
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Vaultを保存できませんでした。');
-    state.error = data.run.error || '保存済みの結果からVaultを保存しました。';
+    state.error = (data.run.error || generatedVaultProblems(data.run) || '保存済みの結果からVaultを保存しました。') + vaultNotesMessage(data.run);
   } catch (error) { state.error = error.message; }
   finally {
     state.busy = false;

@@ -48,7 +48,7 @@ Whisperの文字起こしと各分析の保存結果を、役割の異なる4つ
 
 管理ノートのプロパティは `note_id`、`vault_kind`、`note_type`、`title`、`summary`、`source_ids`、`artifact_ids`、`revision`、`source_hash`、`status`（`current`／`stale`）、`updated`、`schema_version`、`managed_by: gurumoji`。実行記録と図表仕様は `run_id`、`input_snapshot_id`、`method_id` を追加する。ファイル名はASCIIのIDで、日本語の名前は `title` に置く。
 
-`<data>/obsidian_layout/vaults.json` がVaultのルートと、ノートごとの書き込みhash・`revision`・`source_hash` を記録する。ノートがObsidianで編集されていれば上書きせず `conflict`、移動・削除されていれば再作成せず `missing` として `00-Index.md` に表示する。書き込み前に予定hashを記録するため、途中で止まった書き込みは次回に完了し、競合とは扱わない。
+`<data>/obsidian_layout/vaults.json` がVaultのルートと、ノートごとの書き込みhash・`revision`・`source_hash` を記録する。ノートがObsidianで編集されていれば、編集版を `99-Archive/history/` に写してから最新版で上書きする（`overwritten`）。移動・削除されていれば再作成せず `missing` として `00-Index.md` に表示する（00-Home・00-Indexだけは作り直す）。共通の判定は [[20-Modules/obsidian-integration]] の「書き込み主体ごとの競合処理」。書き込み前に予定hashを記録するため、途中で止まった書き込みは次回に完了し、競合とは扱わない。
 
 ## 含めないもの
 
