@@ -449,6 +449,95 @@ class EmotionRegressionTests(unittest.TestCase):
         self.assertIn("'+cmd", body)
         self.assertIn("'=HYPERLINK", body)
 
+    @staticmethod
+    def fake_huggingface_hub(downloads):
+        config = app.emotion_analysis.AIST_EMOTION_MODELS["kushinada"]
+        module = types.ModuleType("huggingface_hub")
+
+        def snapshot_download(repo_id, token, local_dir, allow_patterns):
+            downloads.append((repo_id, Path(local_dir)))
+            s3prl = Path(local_dir) / "s3prl"
+            if repo_id == config["emotion_repo"]:
+                checkpoint = (
+                    s3prl / "result" / "downstream" / config["checkpoint_dir"] / "dev-best.ckpt"
+                )
+                checkpoint.parent.mkdir(parents=True, exist_ok=True)
+                checkpoint.write_bytes(b"checkpoint")
+            else:
+                upstream = s3prl / config["upstream_file"]
+                upstream.parent.mkdir(parents=True, exist_ok=True)
+                upstream.write_bytes(b"upstream")
+            return local_dir
+
+        module.snapshot_download = snapshot_download
+        return module
+
+    def test_aist_model_files_download_into_the_runtime_directory(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-emotion-files-") as temporary:
+            root = Path(temporary)
+            runtime_directory = root / "runtime"
+            s3prl_dir = root / "s3prl"
+            downloads = []
+            with patch.dict(sys.modules, {"huggingface_hub": self.fake_huggingface_hub(downloads)}):
+                app.emotion_analysis.prepare_aist_s3prl_files(
+                    "kushinada", "token", s3prl_dir, lambda _message: None,
+                    runtime_directory=runtime_directory,
+                )
+
+            config = app.emotion_analysis.AIST_EMOTION_MODELS["kushinada"]
+            self.assertEqual(
+                [repo_id for repo_id, _local_dir in downloads],
+                [config["emotion_repo"], config["upstream_repo"]],
+            )
+            for _repo_id, local_dir in downloads:
+                self.assertEqual(local_dir.parent, runtime_directory / "models" / "aist")
+            self.assertTrue((s3prl_dir / "upstream_models" / config["upstream_file"]).is_file())
+            self.assertTrue((
+                s3prl_dir / "result" / "downstream" / config["checkpoint_dir"] / "dev-best.ckpt"
+            ).is_file())
+
+    def run_s3prl_with_fake_runner(self, root: Path, prediction_text: str | None):
+        config = app.emotion_analysis.AIST_EMOTION_MODELS["kushinada"]
+        runtime_directory = root / "runtime"
+        s3prl_dir = runtime_directory / "models" / "s3prl-v0.4.17"
+        s3prl_dir.mkdir(parents=True)
+        (s3prl_dir / "run_downstream.py").write_text("", encoding="utf-8")
+        prediction = (
+            s3prl_dir / "result" / "downstream" / config["checkpoint_dir"]
+            / f"test_{config['fold']}_predict.txt"
+        )
+        prediction.parent.mkdir(parents=True)
+        prediction.write_text("seg_000000 ang\n", encoding="utf-8")
+        wav_root = root / "wavs"
+        wav_root.mkdir()
+        segment_wavs = [{"index": 0, "path": wav_root / "seg_000000.wav", "stem": "seg_000000"}]
+
+        def run_subprocess(command, **_kwargs):
+            if "run_downstream.py" in command and prediction_text is not None:
+                prediction.write_text(prediction_text, encoding="utf-8")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        environment = {key: value for key, value in app.os.environ.items()
+                       if key != "MOJIOKOSI_S3PRL_ROOT"}
+        with patch.dict(app.os.environ, environment, clear=True), \
+                patch.dict(sys.modules, {"huggingface_hub": self.fake_huggingface_hub([])}):
+            return app.emotion_analysis.run_s3prl_emotion_model(
+                "kushinada", wav_root, segment_wavs, "token", "cpu", root / "work",
+                lambda _message: None, lambda: None,
+                runtime_directory=runtime_directory, run_subprocess=run_subprocess,
+            )
+
+    def test_s3prl_predictions_are_read_from_the_current_run(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-emotion-run-") as temporary:
+            predictions = self.run_s3prl_with_fake_runner(Path(temporary), "seg_000000 neu\n")
+        self.assertEqual(predictions, {0: "neu"})
+
+    def test_stale_s3prl_predictions_are_never_reused(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-emotion-stale-") as temporary:
+            with self.assertRaisesRegex(RuntimeError, "感情予測ファイル"):
+                self.run_s3prl_with_fake_runner(Path(temporary), None)
+
+
 
 class TranscriptionJobRegressionTests(unittest.TestCase):
     @staticmethod
@@ -935,6 +1024,77 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
 
             self.assertEqual(job.status, "cancelled")
             calls["upsert"].assert_not_called()
+
+    def test_preprocessing_is_limited_to_asr_while_speaker_and_emotion_use_original_audio(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-job-original-audio-") as temporary:
+            root = Path(temporary)
+            source = root / "input.wav"
+            source.write_bytes(b"source")
+            job = self.job(root)
+            options = self.options(
+                root,
+                audio_preprocess="standard",
+                emotion_analysis=True,
+                ai_provider="none",
+            )
+            diarized_audio = []
+            emotion_sources = []
+
+            class RecordingDiarizationPipeline:
+                def __init__(self, model_name=None, token=None, device=None):
+                    pass
+
+                def __call__(self, audio, **_kwargs):
+                    diarized_audio.append(audio)
+                    return []
+
+            def emotion(audio_path, segments, *_args):
+                emotion_sources.append(audio_path)
+                return segments, app.build_emotion_analysis_summary(segments, ["kushinada"])
+
+            with self.fake_pipeline(), \
+                    patch.object(app, "run_audio_preprocess",
+                                 side_effect=lambda _source, destination, _preset, _check: destination), \
+                    patch.object(app, "run_aist_emotion_analysis", side_effect=emotion):
+                sys.modules["whisperx"].load_audio = lambda path: [path]
+                sys.modules["whisperx.diarize"].DiarizationPipeline = RecordingDiarizationPipeline
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            self.assertEqual(diarized_audio, [[str(source)]])
+            self.assertEqual(emotion_sources, [source])
+
+    def test_openai_whisper_status_does_not_claim_ignored_vad_settings(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-job-vad-") as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            options = self.options(
+                root,
+                boost_quiet_speech=True,
+                vad_onset=0.35,
+                vad_offset=0.25,
+                no_speech_threshold=0.8,
+            )
+            with self.fake_pipeline():
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            log = "\n".join(job.logs)
+            self.assertNotIn("VAD onset", log)
+            self.assertIn("no_speech_threshold=0.80", log)
+
+    def test_whisperx_status_reports_the_applied_vad_settings(self):
+        with tempfile.TemporaryDirectory(prefix="gurumoji-job-vad-") as temporary:
+            root = Path(temporary)
+            job = self.job(root)
+            options = self.options(
+                root, device="cuda", boost_quiet_speech=True, vad_onset=0.35, vad_offset=0.25,
+            )
+            with self.fake_pipeline(cuda_available=True):
+                app.run_transcription_job(job, options)
+
+            self.assertEqual(job.status, "completed")
+            self.assertIn("VAD onset=0.35, offset=0.25", "\n".join(job.logs))
 
 
 if __name__ == "__main__":

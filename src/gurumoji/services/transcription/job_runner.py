@@ -173,14 +173,30 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 f"単語登録をWhisperの認識ヒントに使用します"
                 f"（{len(options.custom_vocabulary)}語登録・先頭から順に使用）。"
             )
+
+        def decoding_settings_text(
+            vad_onset: float, vad_offset: float, no_speech_threshold: float
+        ) -> str:
+            # OpenAI Whisper has no VAD stage, so only the no-speech threshold
+            # reaches the decoder there; never report VAD values it ignores.
+            if use_openai_whisper:
+                return (
+                    f"VADなし・無音判定しきい値 no_speech_threshold={no_speech_threshold:.2f}"
+                )
+            return f"VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}"
+
         if options.triple_pass:
             status(
-                "詳細処理を使います。通常結果の3秒以上の空白だけを、軽め・強めの順で切り出して補完します。"
+                f"詳細処理を使います。通常結果の{TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白だけを、"
+                "軽め・強めの順で切り出して補完します。"
             )
         elif options.boost_quiet_speech:
             status(
-                "小さい声を拾いやすくする設定を使います"
-                f"（VAD onset={options.vad_onset:.2f}, offset={options.vad_offset:.2f}）…"
+                "小さい声を拾いやすくする設定を使います（"
+                + decoding_settings_text(
+                    options.vad_onset, options.vad_offset, options.no_speech_threshold
+                )
+                + "）…"
             )
 
         def release_asr_model() -> None:
@@ -197,7 +213,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             vad_onset: float,
             vad_offset: float,
             no_speech_threshold: float,
-        ) -> Any:
+        ) -> None:
             nonlocal model
             if use_openai_whisper:
                 import whisper
@@ -221,7 +237,6 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     asr_options=asr_options,
                     vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
                 )
-            return model
 
         def transcribe_pass(
             pass_label: str,
@@ -234,7 +249,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         ) -> tuple[dict[str, Any], Any]:
             set_stage("transcription", f"{pass_label}の文字起こし", 10)
             status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            pass_model = load_asr_model(
+            # The model is held only by the enclosing ``model`` binding so that
+            # release_asr_model() can actually return its memory.
+            load_asr_model(
                 language_hint,
                 vad_onset,
                 vad_offset,
@@ -244,8 +261,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             set_stage("transcription", f"{pass_label}の文字起こし", 35)
 
             status(
-                f"{pass_label}: 音声を読み込み、文字起こししています"
-                f"（VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}）…"
+                f"{pass_label}: 音声を読み込み、文字起こししています（"
+                + decoding_settings_text(vad_onset, vad_offset, no_speech_threshold)
+                + "）…"
             )
             pass_audio = whisperx.load_audio(str(audio_path))
             if use_openai_whisper:
@@ -261,7 +279,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 transcribe_kwargs = {"batch_size": 1}
             if vocabulary_prompt and use_openai_whisper:
                 transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-            pass_result = pass_model.transcribe(pass_audio, **transcribe_kwargs)
+            pass_result = model.transcribe(pass_audio, **transcribe_kwargs)
             set_stage("transcription", f"{pass_label}の文字起こし", 90)
             release_asr_model()
             check_cancelled()
@@ -282,7 +300,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         ) -> dict[str, Any]:
             if not gaps:
                 set_stage("transcription", f"{pass_label}の文字起こし", 100)
-                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:.0f}秒以上の空白はありません。")
+                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白はありません。")
                 progress(progress_value)
                 return {"segments": [], "language": language_hint}
 
@@ -292,7 +310,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 f"{pass_label}: {len(gaps)}か所、計{total_gap_seconds:.1f}秒の空白だけを再確認します。"
             )
             status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            pass_model = load_asr_model(
+            # The model is held only by the enclosing ``model`` binding so that
+            # release_asr_model() can actually return its memory.
+            load_asr_model(
                 language_hint,
                 vad_onset,
                 vad_offset,
@@ -338,7 +358,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                             transcribe_kwargs = {"batch_size": 1}
                         if vocabulary_prompt and use_openai_whisper:
                             transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-                        clip_result = pass_model.transcribe(clip_audio, **transcribe_kwargs)
+                        clip_result = model.transcribe(clip_audio, **transcribe_kwargs)
                         if not detected_language:
                             detected_language = clip_result.get("language")
                         collected.extend(
@@ -459,6 +479,16 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         progress(64)
 
         set_stage("diarization", "話者の分離", 10)
+        if processing_input_path != options.input_path:
+            # speechnorm/loudnorm flatten the level differences between speakers,
+            # afftdn reshapes their spectra, and the expansion lifts pause noise
+            # into the segmentation model. Preprocessing preserves timing, so
+            # the original recording can be diarized against the same clock.
+            status("話者分離には前処理前の元音声を使用します。")
+            audio = None
+            gc.collect()
+            audio = whisperx.load_audio(str(options.input_path))
+            check_cancelled()
         status(f"話者を分離しています（{diarization_device.upper()}）…")
         try:
             diarize_model = create_diarization_pipeline(
@@ -639,8 +669,10 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             emotion_model_keys = aist_emotion_model_keys(options.emotion_model)
             try:
                 set_stage("emotion", "音声感情の分析", 10)
+                # Emotion models depend on loudness dynamics that the
+                # transcription preprocessing deliberately flattens.
                 segments, emotion_analysis = run_aist_emotion_analysis(
-                    processing_input_path,
+                    options.input_path,
                     segments,
                     options.emotion_model,
                     options.hf_token,
