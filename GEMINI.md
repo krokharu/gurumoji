@@ -34,3 +34,7 @@ Obsidianノートは「設計上の根拠・記録」であり、現行コード
   - 研究者が執筆した考察、タグ、別名を破壊・上書きしない。
   - 生成ノートは必ず `VaultRegistry` によるハッシュ検証・競合検知を通す。
   - テストは実際の運用Vaultではなく、一時Vault（テンポラリ）を使用して実行する。
+
+## 「Obsidianを更新」と依頼されたとき
+
+プログラム資料Vault（`docs/program-vault`）の更新をGitから取り込む依頼として扱う（実行時Vaultは対象外）。`python scripts/update_program_vault.py check` で取り込まれるノートを示し、続けて `python scripts/update_program_vault.py apply` を実行する。別フォルダーのVaultには `--target <フォルダー>` または環境変数 `GURUMOJI_PROGRAM_VAULT_TARGET` を使う。終了コード1（ローカル編集やローカルだけのコミットとの競合）は、表示された対象を報告して利用者の判断を待ち、merge・rebase・reset・上書きで解消しない。手順は [docs/OBSIDIAN_VAULTS.md](docs/OBSIDIAN_VAULTS.md#プログラム資料vaultの更新)。

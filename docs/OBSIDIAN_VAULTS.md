@@ -29,3 +29,17 @@ Obsidianの保管庫管理で「保管庫としてフォルダーを開く」を
 全件データは `runtime/data/analysis_store`、実行・同期状態はSQLite、読むための見解・引用は研究Vaultに保存します。[実装済みの保存仕様と使い方](program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは後続の実装対象です。
 
 分析用Vaultはローカルの `runtime/data/` 配下にあるためGit管理対象外です。復元用にはアプリを停止してDB・`analysis_store`・`obsidian_workbench`・研究Vault・必要なメディアを一緒にバックアップしてください。プログラム用Vaultの資料はGit管理でき、個人の `.obsidian` 設定は除外されます。
+
+## プログラム資料Vaultの更新
+
+プログラム資料Vault（`docs/program-vault`）の正本はGitです。GitHubに届いた資料の更新は、次のスクリプトで確認して取り込みます。AIエージェントに「Obsidianを更新」と頼んだ場合も、同じ手順を実行します。
+
+```powershell
+python scripts/update_program_vault.py check   # 取り込まれるノートを一覧（何も変更しない）
+python scripts/update_program_vault.py apply   # 取り込む
+```
+
+- `docs/program-vault` をそのままObsidianで開いている場合、`apply` は現在のブランチを早送り（fast-forward）で更新します。Obsidianは変更を自動で読み込みます。同じノートをローカルで編集中の場合や、ローカルだけのコミットがある場合は、何も変更せずに中止して対象を表示します。
+- 別のフォルダーに作ったVaultへ取り込む場合は、`--target "<フォルダー>"` を付けるか、環境変数 `GURUMOJI_PROGRAM_VAULT_TARGET` を設定します。前回の取り込み以降にローカルで編集したノートは上書きせず、新しい版を `<フォルダー>/.gurumoji-sync/incoming/` に保存します。上流で削除されたノートは `.gurumoji-sync/removed/` へ移します（削除はしません）。
+- どちらの方法でも、個人設定の `.obsidian` フォルダーと、分析用の実行時Vault（`runtime/data/obsidian/...`）には触れません。
+- 取り込み元は、現在のブランチの追跡先（未設定なら `origin/main`）です。`--remote` と `--branch` で変更できます。

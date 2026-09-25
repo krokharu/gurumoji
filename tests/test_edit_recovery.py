@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from support import use_temporary_library
 
 
 class EditTransactionRecoveryTests(unittest.TestCase):
@@ -20,16 +21,10 @@ class EditTransactionRecoveryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.output = self.root / 'output'
         self.output.mkdir()
-        self.original_database = app.DATABASE_FILE
-        self.original_output = app.DEFAULT_OUTPUT_DIRECTORY
-        app.DATABASE_FILE = self.root / 'library.sqlite3'
-        app.DEFAULT_OUTPUT_DIRECTORY = self.output
-        app.initialize_library()
+        use_temporary_library(self, self.root, output=self.output)
         self.item_id = 'recovery-item'
 
     def tearDown(self):
-        app.DATABASE_FILE = self.original_database
-        app.DEFAULT_OUTPUT_DIRECTORY = self.original_output
         self.temporary.cleanup()
 
     def create_item(self, files):
@@ -1099,7 +1094,11 @@ class EditTransactionRecoveryTests(unittest.TestCase):
                 raise OSError(errno.EIO, 'simulated source unlink failure')
             return real_unlink(path, *args, **kwargs)
 
-        with patch.object(Path, 'unlink', new=fail_source_unlink):
+        # Force the hard-link fallback even where renameat2/renamex_np exists.
+        with (
+            patch('gurumoji.services.durable_files.ctypes.CDLL', return_value=object()),
+            patch.object(Path, 'unlink', new=fail_source_unlink),
+        ):
             with self.assertRaises(OSError):
                 app.posix_move_no_replace(source, destination)
 

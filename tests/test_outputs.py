@@ -87,7 +87,10 @@ class TranscriptOutputTests(unittest.TestCase):
             self.assertIn("PlayResY: 180", body)
             self.assertGreater(body.count("Dialogue:"), 1)
 
-    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
+    @unittest.skipUnless(
+        shutil.which("ffmpeg") and shutil.which("ffprobe"),
+        "ffmpeg and ffprobe are required",
+    )
     def test_burns_ass_subtitles_into_mp4(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-video-") as temporary:
             root = Path(temporary)

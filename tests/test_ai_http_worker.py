@@ -8,41 +8,37 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from support import use_temporary_library
 
 
 class AiHttpWorkerTests(unittest.TestCase):
     def test_ai_usage_is_persisted_and_returned_with_library_item(self):
-        original_database = app.DATABASE_FILE
-        try:
-            with tempfile.TemporaryDirectory(prefix="gurumoji-ai-usage-") as temporary:
-                root = Path(temporary)
-                app.DATABASE_FILE = root / "library.sqlite3"
-                app.initialize_library()
-                row = app.upsert_library_item(
-                    item_id="ai-usage-item",
-                    source_name="sample.wav",
-                    output_dir=root / "output",
-                    media_path=None,
-                    language="ja",
-                    segments=[],
-                    speaker_names={},
-                    outline=None,
-                    emotion_analysis=None,
-                    files=[],
-                    write_srt=False,
-                    write_json=True,
-                    ai_usage={
-                        "provider": "google", "model": "gemini-test", "request_count": 3,
-                        "input_tokens": 300, "output_tokens": 60, "total_tokens": 360,
-                        "cached_tokens": 20, "reasoning_tokens": 12, "reported": True,
-                    },
-                )
-                usage = app.library_public(row)["ai_usage"]
-                self.assertEqual(usage["provider"], "google")
-                self.assertEqual(usage["request_count"], 3)
-                self.assertEqual(usage["total_tokens"], 360)
-        finally:
-            app.DATABASE_FILE = original_database
+        with tempfile.TemporaryDirectory(prefix="gurumoji-ai-usage-") as temporary:
+            root = Path(temporary)
+            use_temporary_library(self, root)
+            row = app.upsert_library_item(
+                item_id="ai-usage-item",
+                source_name="sample.wav",
+                output_dir=root / "output",
+                media_path=None,
+                language="ja",
+                segments=[],
+                speaker_names={},
+                outline=None,
+                emotion_analysis=None,
+                files=[],
+                write_srt=False,
+                write_json=True,
+                ai_usage={
+                    "provider": "google", "model": "gemini-test", "request_count": 3,
+                    "input_tokens": 300, "output_tokens": 60, "total_tokens": 360,
+                    "cached_tokens": 20, "reasoning_tokens": 12, "reported": True,
+                },
+            )
+            usage = app.library_public(row)["ai_usage"]
+            self.assertEqual(usage["provider"], "google")
+            self.assertEqual(usage["request_count"], 3)
+            self.assertEqual(usage["total_tokens"], 360)
 
     def test_openai_and_gemini_token_usage_is_normalized(self):
         schema = {

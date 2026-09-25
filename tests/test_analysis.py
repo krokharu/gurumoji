@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from support import use_temporary_library
 
 
 ANALYSIS_DATASETS = {
@@ -87,9 +88,7 @@ ANALYSIS_DATASETS = {
 class AnalysisApiTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gurumoji-analysis-")
-        self.original_database = app.DATABASE_FILE
-        app.DATABASE_FILE = Path(self.temporary.name) / "library.sqlite3"
-        app.initialize_library()
+        use_temporary_library(self, Path(self.temporary.name))
         app.save_speaker_registry_records(
             [{
                 "id": "speaker_analysis_a",
@@ -195,7 +194,6 @@ class AnalysisApiTests(unittest.TestCase):
         )
 
     def tearDown(self):
-        app.DATABASE_FILE = self.original_database
         self.temporary.cleanup()
 
     def create_analysis_item(
@@ -378,7 +376,7 @@ class AnalysisApiTests(unittest.TestCase):
                 "config", "annotations", "classification", "cautions",
                 "automatic", "manual", "segments", "exports", "research", "insights", "transformer",
                 "experts", "plan_items", "executed",
-                "segment_classification",
+                "segment_classification", "session_outline",
             },
         )
         self.assertEqual(

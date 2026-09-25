@@ -11,7 +11,7 @@ tags:
 
 # 現在の保存形式と拡張点
 
-確認元は `app.py` の `initialize_library`、`group_analysis_for_row`、出力・再取込処理、および `research_analysis.py` です。個々の研究データの内容はこの資料に含めません。
+確認元は `services/library_schema.py` の `initialize_library`、`app.py` の `group_analysis_for_row`、`services/output_import.py` の出力・再取込処理、および `research_analysis.py` です。個々の研究データの内容はこの資料に含めません。
 
 ## SQLite：`data/library.sqlite3`
 

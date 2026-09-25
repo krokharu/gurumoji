@@ -5,12 +5,14 @@ title: Software Vault 索引
 summary: Gurumoji のプログラム資料（Software Vault）の索引。分析・AI・UI再設計への入口と、既存の問題点・対応計画を示す。
 status: current
 verified: 2026-09-15
-updated: 2026-09-20
+updated: 2026-09-25
 tags:
   - gurumoji/program
 ---
 
 # Software Vault 索引
+
+最新の構造変更：[[70-Changes/app-py-phase5|app.py 分割 Phase 5（2026-09-25）]]。`app.py` を組み立て役に縮め、処理を `web/`・`handlers/`・`services/` へ移した。旧関数の移動先は同じフォルダーのJSONにある。
 
 最新の設計：[[40-Design/core-handler-routing-reorganization-plan|分析・AI・UI再設計（2026-09-20）]]。LLM／Jev、ローカルの専用オーケストレーター、疑似人格の相談、結果の型と追加分析、RAWと出力の分離、7つの設計図、現行21手法と追加予定の手法に対応するUIを記録。分析ボタンの統合、自動／手動実行、進捗画面、段階分析の具体案は [[40-Design/analysis-execution-ux-plan]]。[[00-Home#分析・AI・UIの再設計（2026-09-20、設計案）|ホームの入口]]から関連計画・設計判断・HTML見本も辿れる。
 
@@ -32,4 +34,5 @@ Gurumojiの4 Vaultのうち、プログラムの構造・保存契約・手法�
 | データ | [[30-Data/four-vaults-v1]]、[[30-Data/analysis-storage-v1]]、[[30-Data/current-storage]] | 4 Vault、分析の固定保存、既存の保存形式 |
 | 設計 | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]、[[40-Design/method-rules]]、[[40-Design/ui-ux-issues]]、[[40-Design/video-ui-redesign-plan]]、[[40-Design/quantification-statistics-plan]]、[[40-Design/core-handler-routing-reorganization-plan]]、[[40-Design/analysis-execution-ux-plan]] | 正本の分類、ID・同期、手法の登録規約、UI/UXの問題点、動画処理・確認画面UI改善設計図、発話の数値化とjamovi型統計の自動実行計画、コア再編案、分析実行UXと段階分析（提案） |
 | 分析手法・知識 | [[50-Analysis-Methods/00-Index]] | 19手法の定義・限界・オーケストレーター契約、専門家定義、共通知識、文献・調査記録 |
+| 変更履歴 | [[70-Changes/app-py-phase5]] | 構造変更の記録、互換性、機械可読の移動先データ |
 | テンプレート | `90-Templates/` | 登録票。検索の既定対象外 |

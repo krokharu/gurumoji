@@ -10,6 +10,7 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+from support import use_temporary_library
 from gurumoji.web import system_routes
 
 
@@ -30,9 +31,7 @@ class BrowserJobRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gurumoji-browser-")
         self.root = Path(self.temporary.name)
-        self.original_database = app.DATABASE_FILE
-        app.DATABASE_FILE = self.root / "library.sqlite3"
-        app.initialize_library()
+        use_temporary_library(self, self.root)
         with app.jobs_lock:
             app.jobs.clear()
             app._job_admission_id = None
@@ -41,7 +40,6 @@ class BrowserJobRecoveryTests(unittest.TestCase):
         with app.jobs_lock:
             app.jobs.clear()
             app._job_admission_id = None
-        app.DATABASE_FILE = self.original_database
         self.temporary.cleanup()
 
     def test_real_browser_restores_the_active_job(self):
