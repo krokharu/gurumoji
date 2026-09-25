@@ -392,6 +392,30 @@ from .services.machine_profile import (
     recommend_machine_settings,
     system_activity_snapshot,
 )
+from .services.ai import settings as ai_settings
+from .services.ai.settings import (
+    AI_MODEL_PROVIDERS,
+    AI_PROVIDERS,
+    TOKEN_FILE_NAME,
+    TokenConfig,
+    ai_provider_label,
+    available_ai_models,
+    configured_ai_credentials,
+    is_colab_runtime,
+    lmstudio_base_url,
+    lmstudio_connection_status,
+    lmstudio_model_id,
+    lmstudio_reasoning_settings,
+    local_llm_label,
+    local_llm_model_required_message,
+    local_llm_short_label,
+)
+from .services.ai.client import (
+    extract_google_text,
+    extract_lmstudio_text,
+    extract_openai_text,
+    safe_token_count,
+)
 
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
@@ -427,7 +451,7 @@ CUSTOM_VOCABULARY_FILE = DATA_DIRECTORY / "custom_vocabulary.json"
 DATABASE_FILE = DATA_DIRECTORY / "library.sqlite3"
 INSTANCE_LOCK_FILE = UPLOAD_DIRECTORY / ".gurumoji.instance.lock"
 DATA_INSTANCE_LOCK_FILE = DATA_DIRECTORY / ".gurumoji.instance.lock"
-TOKEN_FILE = PROJECT_DIRECTORY / "config" / "tokens.json"
+TOKEN_FILE = PROJECT_DIRECTORY / "config" / TOKEN_FILE_NAME
 DIARIZATION_MODEL = os.environ.get(
     "MOJIOKOSI_DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1"
 )
@@ -465,15 +489,6 @@ UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "committing"})
 MODEL_NAMES = {"tiny", "base", "small", "medium", "large-v3"}
 LANGUAGES = {None, "ja", "en", "zh", "ko"}
-AI_PROVIDERS = {"none", "openai", "google", "lmstudio"}
-AI_MODEL_PROVIDERS = frozenset(AI_PROVIDERS - {"none"})
-LMSTUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
-LMSTUDIO_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
-AI_PROVIDER_LABELS = {
-    "openai": "OpenAI",
-    "google": "Google Gemini",
-    "lmstudio": "LM Studio（ローカル）",
-}
 AIST_EMOTION_MODEL_CHOICES = {"kushinada", "izanami", "both"}
 MAX_LOG_LINES = 200
 NORMAL_VAD_ONSET = 0.5
@@ -772,40 +787,6 @@ def disable_development_cache(response):
 
 
 @dataclass(frozen=True)
-class TokenConfig:
-    huggingface_token: str = ""
-    openai_api_key: str = ""
-    google_api_key: str = ""
-    openai_model: str = "gpt-5.6-luna"
-    google_model: str = "gemini-flash-latest"
-    lmstudio_api_key: str = ""
-    lmstudio_base_url: str = LMSTUDIO_DEFAULT_BASE_URL
-    lmstudio_model: str = ""
-    typesafe_api_key: str = ""
-    typesafe_model: str = JEV_DEFAULT_MODEL
-
-    def availability(self) -> dict[str, Any]:
-        return {
-            "token_file": TOKEN_FILE.name,
-            "huggingface": bool(self.huggingface_token),
-            "openai": bool(self.openai_api_key),
-            "google": bool(self.google_api_key),
-            "openai_model": self.openai_model,
-            "google_model": self.google_model,
-            "lmstudio_base_url": self.lmstudio_base_url,
-            "lmstudio_model": self.lmstudio_model,
-            "lmstudio_has_api_key": bool(self.lmstudio_api_key),
-            "typesafe": bool(self.typesafe_api_key),
-            "typesafe_model": self.typesafe_model,
-            # Keep the lmstudio_* keys for backwards compatibility. The same
-            # loopback-only OpenAI-compatible provider is backed by Ollama in
-            # the Colab notebook.
-            "local_llm_label": local_llm_label(),
-            "local_llm_short_label": local_llm_short_label(),
-        }
-
-
-@dataclass(frozen=True)
 class JobOptions:
     input_path: Path
     work_dir: Path
@@ -966,7 +947,6 @@ transformer_jobs_lock = threading.RLock()
 transformer_cancel_events: dict[str, threading.Event] = {}
 training_lock = threading.Lock()
 file_dialog_lock = threading.Lock()
-token_config_lock = threading.Lock()
 custom_vocabulary_lock = threading.Lock()
 _job_admission_id: str | None = None
 _instance_lock_streams: list[Any] = []
@@ -1177,13 +1157,6 @@ def copy_file_limited(source: Path, target: Path, maximum: int) -> int:
         target.unlink(missing_ok=True)
         raise ValueError("The selected media file is empty.")
     return total
-
-
-def is_colab_runtime() -> bool:
-    return (
-        os.environ.get("MOJIOKOSI_RUNTIME", "").strip().casefold() == "colab"
-        or "COLAB_RELEASE_TAG" in os.environ
-    )
 
 
 def runtime_info() -> dict[str, Any]:
@@ -2481,234 +2454,6 @@ def import_existing_outputs() -> None:
             continue
 
 
-def clean_secret(value: Any) -> str:
-    text = str(value or "").strip()
-    if text.lower() in {"your_token_here", "your_api_key_here", "hf_xxx", "sk-xxx", "aizaxxx"}:
-        return ""
-    return text
-
-
-def load_token_config(path: Path = TOKEN_FILE) -> TokenConfig:
-    """Read all credentials from tokens.json; credentials are never accepted by the UI."""
-    if not path.is_file():
-        return TokenConfig()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"{path.name} を読み込めません: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise RuntimeError(f"{path.name} の最上位は JSON オブジェクトにしてください。")
-    return TokenConfig(
-        huggingface_token=clean_secret(raw.get("huggingface_token", raw.get("hf_token"))),
-        openai_api_key=clean_secret(raw.get("openai_api_key")),
-        google_api_key=clean_secret(raw.get("google_api_key", raw.get("gemini_api_key"))),
-        openai_model=clean_secret(raw.get("openai_model")) or "gpt-5.6-luna",
-        google_model=clean_secret(raw.get("google_model")) or "gemini-flash-latest",
-        lmstudio_api_key=clean_secret(raw.get("lmstudio_api_key")),
-        lmstudio_base_url=clean_single_line(
-            raw.get("lmstudio_base_url"), 300
-        ) or LMSTUDIO_DEFAULT_BASE_URL,
-        lmstudio_model=clean_single_line(raw.get("lmstudio_model"), 200),
-        typesafe_api_key=clean_secret(raw.get("typesafe_api_key")),
-        typesafe_model=clean_single_line(raw.get("typesafe_model"), 200) or JEV_DEFAULT_MODEL,
-    )
-
-
-def lmstudio_headers(api_key: str) -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    return headers
-
-
-def lmstudio_model_id(value: Any) -> str:
-    model = clean_single_line(value, 200)
-    if not model or any(ord(character) < 33 or ord(character) == 127 for character in model):
-        raise ValueError("モデルIDの形式が不正です。")
-    return model
-
-
-def configured_ai_credentials(config: TokenConfig, provider: str) -> tuple[str, str]:
-    if provider == "openai":
-        return config.openai_api_key, config.openai_model
-    if provider == "google":
-        return config.google_api_key, config.google_model
-    if provider == "lmstudio":
-        lmstudio_base_url(config.lmstudio_base_url)
-        return config.lmstudio_api_key, config.lmstudio_model
-    raise ValueError("AI プロバイダーが不正です。")
-
-
-def local_llm_short_label() -> str:
-    return "Ollama" if is_colab_runtime() else "LM Studio"
-
-
-def local_llm_label() -> str:
-    return "Ollama（ColabローカルLLM）" if is_colab_runtime() else "LM Studio（ローカル）"
-
-
-def local_llm_model_required_message() -> str:
-    return (
-        f"{local_llm_short_label()} のモデルが未選択です。"
-        "上部のローカルLLMライトをクリックして選択してください。"
-    )
-
-
-def ai_provider_label(provider: str) -> str:
-    if provider == "lmstudio":
-        return local_llm_label()
-    return AI_PROVIDER_LABELS.get(provider, "AI")
-
-
-def available_ai_models(
-    provider: str,
-    config: TokenConfig,
-    *,
-    timeout: float = 30,
-) -> list[dict[str, Any]]:
-    provider = str(provider or "").strip().casefold()
-    if provider == "google":
-        if not config.google_api_key:
-            raise ValueError("Google Gemini のAPIキーが設定されていません。")
-        request_object = urllib.request.Request(
-            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
-            headers={"x-goog-api-key": config.google_api_key, "Accept": "application/json"},
-            method="GET",
-        )
-    elif provider == "openai":
-        if not config.openai_api_key:
-            raise ValueError("OpenAI のAPIキーが設定されていません。")
-        request_object = urllib.request.Request(
-            "https://api.openai.com/v1/models",
-            headers={
-                "Authorization": f"Bearer {config.openai_api_key}",
-                "Accept": "application/json",
-            },
-            method="GET",
-        )
-    elif provider == "lmstudio":
-        base_url = lmstudio_base_url(config.lmstudio_base_url)
-        request_object = urllib.request.Request(
-            f"{base_url}/models",
-            headers={**lmstudio_headers(config.lmstudio_api_key), "Accept": "application/json"},
-            method="GET",
-        )
-    else:
-        raise ValueError("モデル一覧を取得できるAIを選択してください。")
-    try:
-        with urllib.request.urlopen(request_object, timeout=max(0.2, min(30.0, float(timeout)))) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"モデル一覧APIが HTTP {exc.code} を返しました。") from exc
-    except (OSError, TimeoutError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"モデル一覧を取得できません: {exc}") from exc
-    models: list[dict[str, Any]] = []
-    if provider == "google":
-        raw_models = payload.get("models") if isinstance(payload, dict) else None
-        for item in raw_models if isinstance(raw_models, list) else []:
-            if not isinstance(item, dict):
-                continue
-            methods = item.get("supportedGenerationMethods")
-            if not isinstance(methods, list) or "generateContent" not in methods:
-                continue
-            model_id = str(item.get("name") or "").removeprefix("models/").strip()
-            if not model_id.startswith("gemini-") or len(model_id) > 200:
-                continue
-            models.append({
-                "id": model_id,
-                "label": clean_single_line(item.get("displayName") or model_id, 200),
-                "description": clean_single_line(item.get("description"), 300),
-            })
-    elif provider == "openai":
-        raw_models = payload.get("data") if isinstance(payload, dict) else None
-        excluded = (
-            "embedding", "dall-e", "tts", "transcribe", "whisper", "moderation",
-            "realtime", "audio", "image", "search", "computer-use",
-        )
-        for item in raw_models if isinstance(raw_models, list) else []:
-            if not isinstance(item, dict):
-                continue
-            model_id = str(item.get("id") or "").strip()
-            lowered = model_id.casefold()
-            if (
-                not model_id
-                or len(model_id) > 200
-                or not (lowered.startswith("gpt-") or re.fullmatch(r"o\d(?:[-.].+)?", lowered))
-                or any(value in lowered for value in excluded)
-            ):
-                continue
-            models.append({"id": model_id, "label": model_id, "description": ""})
-    else:
-        raw_models = payload.get("data") if isinstance(payload, dict) else None
-        for item in raw_models if isinstance(raw_models, list) else []:
-            if not isinstance(item, dict):
-                continue
-            try:
-                model_id = lmstudio_model_id(item.get("id"))
-            except ValueError:
-                continue
-            model_type = clean_single_line(item.get("type") or item.get("object"), 80)
-            models.append({
-                "id": model_id,
-                "label": model_id,
-                "description": model_type,
-            })
-    unique = {item["id"]: item for item in models}
-    return [unique[key] for key in sorted(unique, key=str.casefold)]
-
-
-def lmstudio_connection_status(config: TokenConfig) -> dict[str, Any]:
-    """Probe only the local model-list endpoint for the UI connection light."""
-    try:
-        base_url = lmstudio_base_url(config.lmstudio_base_url)
-        models = available_ai_models("lmstudio", config, timeout=0.75)
-    except (ValueError, RuntimeError):
-        if is_colab_runtime():
-            message = "起動待ちです。ノートブックの「ColabローカルLLM」セルを実行してください。"
-        else:
-            message = "起動待ちです。LM Studio の Developer で Start server を有効にしてください。"
-        return {
-            "reachable": False,
-            "model_count": 0,
-            "message": message,
-        }
-    empty_message = (
-        "接続済みです。ノートブックでモデルを選択・取得してから、ライトをクリックしてください。"
-        if is_colab_runtime()
-        else "接続済みです。LM Studio でモデルを読み込み、ライトをクリックして選択してください。"
-    )
-    return {
-        "reachable": True,
-        "model_count": len(models),
-        "base_url": base_url,
-        "message": (
-            f"接続済み（{len(models)} モデル）。ライトをクリックして使用モデルを選択してください。"
-            if models else empty_message
-        ),
-    }
-
-
-def update_token_model(provider: str, model: str, path: Path = TOKEN_FILE) -> TokenConfig:
-    provider = str(provider or "").strip().casefold()
-    if provider not in AI_MODEL_PROVIDERS:
-        raise ValueError("OpenAI、Google Gemini、またはローカルLLMを選択してください。")
-    model = lmstudio_model_id(model)
-    with token_config_lock:
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"{path.name} を更新できません: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise RuntimeError(f"{path.name} の最上位は JSON オブジェクトにしてください。")
-        raw[f"{provider}_model"] = model
-        atomic_write_text(
-            path,
-            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    return load_token_config(path)
-
-
 def configure_huggingface_hub_compatibility() -> None:
     """Bridge legacy pyannote callers to Hugging Face Hub v1's token API."""
     import huggingface_hub
@@ -3079,139 +2824,13 @@ def run_aist_emotion_analysis(
     )
 
 
-def extract_openai_text(response: dict[str, Any]) -> str:
-    if isinstance(response.get("output_text"), str):
-        return response["output_text"]
-    for item in response.get("output") or []:
-        for content in item.get("content") or []:
-            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
-                return content["text"]
-    raise RuntimeError("OpenAI API 応答に出力テキストがありません。")
+def load_token_config(path: Path = TOKEN_FILE) -> TokenConfig:
+    """Read all credentials from tokens.json; credentials are never accepted by the UI."""
+    return ai_settings.load_token_config(path)
 
 
-def extract_google_text(response: dict[str, Any]) -> str:
-    candidates = response.get("candidates") or []
-    if not candidates:
-        feedback = response.get("promptFeedback") or response
-        raise RuntimeError(f"Google API に候補がありません: {feedback}")
-    parts = candidates[0].get("content", {}).get("parts") or []
-    text = "".join(str(part.get("text", "")) for part in parts if part.get("text"))
-    if not text:
-        raise RuntimeError("Google API 応答に出力テキストがありません。")
-    return text
-
-
-def extract_lmstudio_text(response: dict[str, Any]) -> str:
-    choices = response.get("choices") or []
-    if not isinstance(choices, list) or not choices:
-        raise RuntimeError("LM Studio API 応答に候補がありません。")
-    first = choices[0] if isinstance(choices[0], dict) else {}
-    message = first.get("message") if isinstance(first.get("message"), dict) else {}
-    text = message.get("content")
-    if isinstance(text, str) and text.strip():
-        return text
-    raise RuntimeError("LM Studio API 応答に出力テキストがありません。")
-
-
-def safe_token_count(value: Any) -> int:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 0
-    if not math.isfinite(float(value)):
-        return 0
-    return max(0, min(10**12, int(value)))
-
-
-def extract_ai_token_usage(
-    provider: str,
-    model: str,
-    response: dict[str, Any],
-) -> dict[str, Any]:
-    if provider == "openai":
-        raw = response.get("usage")
-        usage = raw if isinstance(raw, dict) else {}
-        input_details = usage.get("input_tokens_details")
-        output_details = usage.get("output_tokens_details")
-        input_details = input_details if isinstance(input_details, dict) else {}
-        output_details = output_details if isinstance(output_details, dict) else {}
-        result = {
-            "provider": provider,
-            "model": model,
-            "request_count": 1,
-            "input_tokens": safe_token_count(usage.get("input_tokens")),
-            "output_tokens": safe_token_count(usage.get("output_tokens")),
-            "total_tokens": safe_token_count(usage.get("total_tokens")),
-            "cached_tokens": safe_token_count(input_details.get("cached_tokens")),
-            "reasoning_tokens": safe_token_count(output_details.get("reasoning_tokens")),
-            "reported": bool(usage),
-        }
-    elif provider == "google":
-        raw = response.get("usageMetadata")
-        usage = raw if isinstance(raw, dict) else {}
-        result = {
-            "provider": provider,
-            "model": model,
-            "request_count": 1,
-            "input_tokens": safe_token_count(usage.get("promptTokenCount")),
-            "output_tokens": safe_token_count(usage.get("candidatesTokenCount")),
-            "total_tokens": safe_token_count(usage.get("totalTokenCount")),
-            "cached_tokens": safe_token_count(usage.get("cachedContentTokenCount")),
-            "reasoning_tokens": safe_token_count(usage.get("thoughtsTokenCount")),
-            "reported": bool(usage),
-        }
-    elif provider == "lmstudio":
-        raw = response.get("usage")
-        usage = raw if isinstance(raw, dict) else {}
-        prompt_details = usage.get("prompt_tokens_details")
-        completion_details = usage.get("completion_tokens_details")
-        prompt_details = prompt_details if isinstance(prompt_details, dict) else {}
-        completion_details = completion_details if isinstance(completion_details, dict) else {}
-        result = {
-            "provider": provider,
-            "model": model,
-            "request_count": 1,
-            "input_tokens": safe_token_count(usage.get("prompt_tokens")),
-            "output_tokens": safe_token_count(usage.get("completion_tokens")),
-            "total_tokens": safe_token_count(usage.get("total_tokens")),
-            "cached_tokens": safe_token_count(
-                prompt_details.get("cached_tokens") or prompt_details.get("cached_tokens_count")
-            ),
-            "reasoning_tokens": safe_token_count(completion_details.get("reasoning_tokens")),
-            "reported": bool(usage),
-        }
-    else:
-        return {}
-    if not result["total_tokens"]:
-        result["total_tokens"] = (
-            result["input_tokens"]
-            + result["output_tokens"]
-            + result["reasoning_tokens"]
-        )
-    return normalize_ai_usage(result)
-
-
-def lmstudio_reasoning_settings(base_url: str, api_key: str, model: str) -> dict:
-    endpoint = lmstudio_base_url(base_url).removesuffix('/v1') + '/api/v1/models'
-    request_object = urllib.request.Request(endpoint, headers=lmstudio_headers(api_key))
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
-    try:
-        with urllib.request.build_opener(NoRedirect()).open(request_object, timeout=3) as response:
-            payload = json.loads(response.read(2 * 1024 * 1024).decode('utf-8'))
-        for row in payload.get('models', []):
-            identifiers = [row.get('key')] + [r.get('id') for r in row.get('loaded_instances', [])]
-            if model in identifiers:
-                return row.get('capabilities', {}).get('reasoning', {})
-    except (OSError, ValueError, AttributeError, TypeError):
-        pass
-    return {}
-
-
-# AI transport composition boundary.
-def lmstudio_base_url(value: str) -> str:
-    return ai_client.lmstudio_base_url(
-        value, LMSTUDIO_DEFAULT_BASE_URL, LMSTUDIO_LOOPBACK_HOSTS
-    )
+def update_token_model(provider: str, model: str, path: Path = TOKEN_FILE) -> TokenConfig:
+    return ai_settings.update_token_model(provider, model, path)
 
 
 def post_json(
