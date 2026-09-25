@@ -46,7 +46,7 @@
 - 本文・話者・時刻・くしなだ感情ラベルの修正差分を、音声クリップ付き学習データとして蓄積
 - API キーは画面へ入力せず、`config/tokens.json` からだけ読込
 
-分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[2つのVaultの開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
+分析内容用の `runtime/data/obsidian/ResearchVault` と、プログラム資料用の `docs/program-vault` を独立したObsidian Vaultとして用意しています。このほかアプリが台帳を書き出す Input・Visualization・Orchestrator の3つのVaultがあります。「分析・可視化」の「分析結果をObsidianに保存」で、見解・根拠・分析表を登録できます。AI仕上げの校正前後・根拠付き議題と、AI見解は自動で履歴に残します。全件JSON／CSVは `runtime/data/analysis_store`、実行台帳はSQLiteで保持します。[Vaultの構成と開き方](docs/OBSIDIAN_VAULTS.md)と[保存仕様・手法登録ルール](docs/program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは今後実装します。
 
 Obsidian がインストール済みの場合は、`run.bat` と同じフォルダーに **「可視化用Obsidianを開く」** ショートカットが自動作成されます。クリックすると `runtime/data/obsidian/VisualizationVault` を開きます。
 
