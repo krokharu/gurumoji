@@ -9,7 +9,7 @@ from contextlib import closing
 
 from gurumoji.obsidian_layout import ObsidianLayout, unpack, pack, GLOBAL_QUERY, interview_query
 from gurumoji.obsidian_finishing import ObsidianWorkbench, read_text, parse_transcript
-from gurumoji.obsidian_migration import migrate, rewrite_links
+from gurumoji.obsidian_migration import migrate, plan_migration, rewrite_links
 
 
 class ObsidianLayoutTests(unittest.TestCase):
@@ -206,6 +206,30 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.layout.sync_themes()
         write.assert_not_called()
 
+    def test_idle_theme_sync_reads_only_changed_interview_notes(self):
+        # OBS-08: unchanged notes are skipped by size and modification time.
+        self.layout.update('a', '会議', {})
+        (self.layout.vault / '20-テーマ/働き方.md').write_text('# 働き方\n', encoding='utf-8')
+        (self.layout.vault / '20-テーマ/評価.md').write_text('# 評価\n', encoding='utf-8')
+        memo = self.layout.vault / self.layout.note_path('a', '会議', '研究メモ')
+        with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/働き方]]\n')
+        self.layout.sync_themes()
+        folder = memo.parent
+        original = Path.read_text
+        reads = []
+        def counting(path, *args, **kwargs):
+            if path.parent == folder: reads.append(path.name)
+            return original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', counting):
+            self.layout.sync_themes()
+            self.assertEqual(reads, [])
+            with memo.open('a', encoding='utf-8') as handle: handle.write('\n[[20-テーマ/評価]]\n')
+            self.layout.sync_themes()
+        self.assertEqual(reads, [memo.name])
+        relations = [unpack(p.read_text(encoding='utf-8'))[0]['theme_target']
+                     for p in (self.layout.vault / '40-研究/テーマ関連').glob('*.md')]
+        self.assertEqual(sorted(relations), ['20-テーマ/働き方.md', '20-テーマ/評価.md'])
+
     def test_renamed_interview_folder_is_followed_instead_of_recreated(self):
         self.layout.update('a', '会議', {})
         record = self.layout.register('a', '会議')
@@ -269,6 +293,9 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.assertEqual(row, (target, hashlib.sha256((self.layout.vault / target).read_bytes()).hexdigest()))
             self.assertEqual(conn.execute('SELECT note_path FROM analysis_runs').fetchone()[0], target)
         self.assertEqual(migrate(self.database), report)
+        # OBS-15: each move is in the change log with its old path.
+        moves = [json.loads(line) for line in self.layout.note_log.read_text(encoding='utf-8').splitlines()]
+        self.assertIn((old, target), {(m['source'], m['path']) for m in moves if m['action'] == 'migrated'})
 
     def test_interrupted_migration_resumes_from_same_backup(self):
         self.seed_legacy()
@@ -284,6 +311,46 @@ class ObsidianLayoutTests(unittest.TestCase):
         report = migrate(self.database)
         self.assertEqual(report['backup'], before['backup'])
         self.assertFalse(pending.exists())
+
+    def test_migration_removes_only_the_folders_it_emptied(self):
+        self.seed_legacy()
+        mine = self.layout.vault / '研究者の空フォルダー/下位'
+        mine.mkdir(parents=True)
+        migrate(self.database)
+        self.assertFalse((self.layout.vault / '25-Sources').exists())
+        self.assertTrue(mine.is_dir())
+
+    def test_migration_plan_matches_migrate_and_writes_nothing(self):
+        self.seed_legacy()
+        def snapshot():
+            return {p.relative_to(self.database.parent).as_posix(): p.read_bytes()
+                    for p in self.database.parent.rglob('*') if p.is_file()}
+        before = snapshot()
+        plan = plan_migration(self.database)
+        self.assertEqual(snapshot(), before)
+        self.assertTrue(plan['needed'])
+        self.assertEqual(plan['moves'], 2)
+        # Only the home note: the quoted link in the source note stays literal.
+        self.assertEqual(plan['link_rewrites'], 1)
+        self.assertEqual(plan['existing_targets'], [])
+        self.assertEqual(migrate(self.database)['mapping'], plan['mapping'])
+        self.assertFalse(plan_migration(self.database)['needed'])
+
+    def test_generated_and_researcher_notes_share_one_property_rule(self):
+        # OBS-06: same delimiter, size limit and messages; only newline handling differs.
+        from gurumoji.obsidian_finishing import split_properties
+        for reader in (unpack, split_properties):
+            with self.assertRaisesRegex(ValueError, '区切りが不正'):
+                reader('---\ntitle: x\n本文\n')
+            with self.assertRaisesRegex(ValueError, '大きすぎます'):
+                reader('---\nnote: ' + 'x' * 64001 + '\n---\n本文\n')
+            with self.assertRaisesRegex(ValueError, '読み取れませんでした'):
+                reader('---\ntitle: [\n---\n本文\n')
+            with self.assertRaisesRegex(ValueError, '項目名と値'):
+                reader('---\n- a\n---\n本文\n')
+        self.assertEqual(unpack('\ufeff---\r\ntitle: x\r\n---\r\n本文\r\n'), ({'title': 'x'}, '本文\n'))
+        # A researcher note keeps its own line endings in the body.
+        self.assertEqual(split_properties('---\ntitle: x\n---\n本文\r\n'), ({'title': 'x'}, '本文\r\n'))
 
     def test_legacy_fences_and_quote_literals_are_never_rewritten(self):
         original = '~~~text\n[[old]]\n~~~\n> [[old]]\n\n[[old#^s-61|引用]]\n'

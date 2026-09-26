@@ -21,6 +21,11 @@ from ..durable_files import atomic_write_text
 
 
 TOKEN_FILE_NAME = "tokens.json"
+# Model choices are not secret: the app writes them here, beside tokens.json,
+# and never rewrites the credentials file. tokens.json values are still read
+# when this file does not name a model (CFG-02).
+MODEL_SETTINGS_FILE_NAME = "ai_models.json"
+MODEL_KEYS = ("openai_model", "google_model", "lmstudio_model", "typesafe_model")
 AI_PROVIDERS = {"none", "openai", "google", "lmstudio"}
 AI_MODEL_PROVIDERS = frozenset(AI_PROVIDERS - {"none"})
 LMSTUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1"
@@ -82,16 +87,31 @@ def clean_secret(value: Any) -> str:
     return text
 
 
-def load_token_config(path: Path) -> TokenConfig:
-    """Read all credentials from tokens.json; credentials are never accepted by the UI."""
+def model_settings_path(token_path: Path) -> Path:
+    return Path(token_path).with_name(MODEL_SETTINGS_FILE_NAME)
+
+
+def _read_json_object(path: Path) -> dict:
     if not path.is_file():
-        return TokenConfig()
+        return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"{path.name} を読み込めません: {exc}") from exc
     if not isinstance(raw, dict):
         raise RuntimeError(f"{path.name} の最上位は JSON オブジェクトにしてください。")
+    return raw
+
+
+def load_token_config(path: Path) -> TokenConfig:
+    """Read all credentials from tokens.json; credentials are never accepted by the UI.
+
+    Model names come from ai_models.json first, then from tokens.json.
+    """
+    raw = _read_json_object(path)
+    models = _read_json_object(model_settings_path(path))
+    # A key present here wins even when empty: clearing a model must not revive an old one.
+    raw.update({key: models[key] for key in MODEL_KEYS if key in models})
     return TokenConfig(
         huggingface_token=clean_secret(raw.get("huggingface_token", raw.get("hf_token"))),
         openai_api_key=clean_secret(raw.get("openai_api_key")),
@@ -287,16 +307,16 @@ def update_token_model(provider: str, model: str, path: Path) -> TokenConfig:
     if provider not in AI_MODEL_PROVIDERS:
         raise ValueError("OpenAI、Google Gemini、またはローカルLLMを選択してください。")
     model = lmstudio_model_id(model)
+    target = model_settings_path(path)
     with token_config_lock:
+        # Only the non-secret model file is written; tokens.json is left untouched (CFG-02).
         try:
-            raw = json.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"{path.name} を更新できません: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise RuntimeError(f"{path.name} の最上位は JSON オブジェクトにしてください。")
+            raw = _read_json_object(target)
+        except RuntimeError as exc:
+            raise RuntimeError(f"{target.name} を更新できません: {exc}") from exc
         raw[f"{provider}_model"] = model
         atomic_write_text(
-            path,
+            target,
             json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )

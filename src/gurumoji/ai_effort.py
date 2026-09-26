@@ -13,6 +13,17 @@ SCHEMA_STAGES = {"meeting_outline": "outline", "transcript_outline_context": "ou
                  "speaker_identity_link_verification": "name_verify"}
 
 
+STAGE_LABELS = {"outline": "会話の流れを整理", "cleanup": "文章の仕上げ",
+                "name_extract": "話者名を確認", "name_verify": "話者を再確認"}
+LEVEL_LABELS = {"auto": "自動", "off": "なし", "low": "低", "medium": "中", "high": "高", "ultra": "最大"}
+
+
+def describe_efforts(value=None) -> str:
+    """One line naming each stage's level, as the app's effort settings label them (CFG-04)."""
+    efforts = normalize_efforts(value)
+    return "、".join(f"{STAGE_LABELS[stage]}：{LEVEL_LABELS[efforts[stage]]}" for stage in STAGES)
+
+
 def normalize_efforts(value=None):
     if value is None:
         return dict.fromkeys(STAGES, "auto")

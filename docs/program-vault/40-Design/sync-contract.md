@@ -3,7 +3,7 @@ note_id: design-obsidian-sync-contract
 note_type: interface-design
 title: ID・更新・取り込み・APIの契約
 status: proposed
-updated: 2026-09-15
+updated: 2026-09-25
 schema_version: 1
 tags:
   - gurumoji/design
@@ -12,9 +12,20 @@ tags:
 
 # ID・更新・取り込み・APIの契約
 
-2026-09-13更新：組み込み手法の固定保存・AI仕上げの変更記録・Vault生成は実装済みです。現行API・テーブル・登録契約は [[30-Data/analysis-storage-v1]] を参照してください。この文書は差分取り込み・外部手法等の後続計画も含みます。
+この文書は設計時の案である。実装済みの部分の正本は `30-Data` のノートで、ここに同じ説明を重ねない（DOC-02）。以下の命名例・旧フォルダー名・拡張案を現行仕様として実装し直さない。
 
-本ノートは将来案を含む設計資料で、すべてが未実装という意味ではない。`analysis_runs`・`analysis_artifacts`・入力スナップショット・固定保存／再試行APIは実装済み。現行のAPI名・保存先・schemaは[[30-Data/analysis-storage-v1]]、4 Vaultは[[30-Data/four-vaults-v1]]、分析準備は[[30-Data/transcript-preparation-v1]]を正本とする。以下の命名例・旧フォルダー名・拡張案を現行仕様として実装し直さない。
+## 実装状況（2026-09-25確認）
+
+| 節 | 状況 | 現行の正本・残る提案 |
+| --- | --- | --- |
+| 識別子と版 | 実装済み | `library_id`（`application_metadata`）、入力スナップショット、`analysis_id`、`artifact_id`、`note_id`：[[30-Data/analysis-storage-v1]]、[[30-Data/four-vaults-v1]] |
+| ノートの所有権と命名 | 一部 | 所有と競合は [[20-Modules/obsidian-integration]]（`vault_note_policy`）。ASCII IDのファイル名案は不採用で、現行は `10-インタビュー/I001-…` |
+| 原文とリンク | 一部 | 引用スナップショットは実装済み（[[30-Data/analysis-storage-v1]]）。端末別のアプリURL設定と音声確認の新しい導線は未実装 |
+| 分析結果のmanifest | 実装済み | [[30-Data/analysis-storage-v1]] |
+| DBに追加する台帳 | 一部 | 実装：`analysis_runs`、`analysis_artifacts`、`obsidian_notes`。未実装：`analysis_method_definitions`、`obsidian_vaults`（生成Vaultは `vaults.json`）、`obsidian_sync_jobs`、`research_note_imports` |
+| 書き込み・中断・競合 | 一部 | 固定保存を先に確定し入口を最後に更新する方式と、競合時の履歴保存は実装済み。同期outboxとstagingは未実装 |
+| Obsidianからの取り込み | 未実装 | 範囲は確定済み（下記） |
+| API案 | 一部 | 実装：`/api/library/<id>/analysis/runs`、`/api/analysis/runs/<id>`、`/api/analysis/artifacts/<id>`、`/api/analysis/methods`。未実装：`/api/obsidian/settings`、登録プレビュー・同期ジョブ、外部結果の登録、ノート差分の取り込み |
 
 ## 識別子と版
 

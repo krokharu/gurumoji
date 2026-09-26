@@ -8,11 +8,9 @@ from __future__ import annotations
 import copy
 import csv
 import hashlib
-import html
 import io
 import json
 import logging
-import os
 import re
 import threading
 import uuid
@@ -21,6 +19,11 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
+# Re-exported: callers and tests still use analysis_store.<name> (ARCH-02).
+from .vault_files import (  # noqa: F401
+    FRONTMATTER_LIMIT, canonical, markdown, parse_frontmatter, research_vault_root, safe_path,
+    write_atomic,
+)
 
 LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
@@ -31,8 +34,7 @@ class StoreConflict(ValueError):
     pass
 
 
-def canonical(value) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
 
 
 def digest(value) -> str:
@@ -80,42 +82,7 @@ def initialize_store(connection) -> None:
     connection.execute("UPDATE analysis_runs SET status='interrupted',error='保存が中断されました。再保存してください。' WHERE status='writing'")
 
 
-def safe_path(root: Path, relative: str) -> Path:
-    if not relative or "\\" in relative or ":" in relative:
-        raise ValueError("保存パスが正しくありません。")
-    parts = Path(relative).parts
-    if Path(relative).is_absolute() or any(part in {"..", "."} for part in parts):
-        raise ValueError("保存先の外は参照できません。")
-    # Detect links in each component, including the configured root itself.
-    target = root / relative
-    for part in [root, *root.parents, *target.parents, target]:
-        if part.is_symlink() or getattr(part, "is_junction", lambda: False)():
-            raise ValueError("リンクを経由する保存先には書き出せません。")
-    if not target.resolve().is_relative_to(root.resolve()):
-        raise ValueError("保存先の外は参照できません。")
-    return target
 
-
-def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if create_only:
-            # Publish the complete file without replacing a concurrently created note.
-            os.link(temporary, path)
-        else:
-            os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def markdown(value) -> str:
-    text = html.escape(str(value or ""), quote=False)
-    return re.sub(r"([\\`*_{}\[\]()#+.!|^~$])", r"\\\1", text)
 
 
 def graph_node_path(run_dir: str, prefix: str, label: str) -> str:
@@ -156,7 +123,7 @@ class AnalysisStore:
         self.vaults = VaultRegistry(database_file)
         self.connect = connect
         self.root = Path(database_file).parent / "analysis_store"
-        self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
         self._last_publication_outcomes: dict[str, dict[str, dict[str, str]]] = {}
         self.note_log = Path(database_file).parent / "obsidian_layout" / "note_changes.jsonl"
         self.run_notes = Path(database_file).parent / "obsidian_layout" / "run_notes"
@@ -329,9 +296,11 @@ class AnalysisStore:
 
     def save(self, *, item_id: str, kind: str, snapshot: dict, result: dict, datasets: dict,
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
-             app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
+             app_url: str = "", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
              publish: bool = True) -> dict:
+        from .env_settings import local_app_url
+        app_url = app_url or local_app_url()
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()

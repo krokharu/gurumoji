@@ -22,6 +22,7 @@ import secrets
 import shutil
 import stat
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -199,6 +200,69 @@ def durable_move(
     sync_rename_metadata(source, destination, required=True)
 
 
+# Sync clients and antivirus scanners hold a just-written file for a moment;
+# a short retry rides that out instead of failing the save (OBS-17).
+LOCKED_FILE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8)
+_WINDOWS_LOCK_ERRORS = {5, 32, 33}  # access denied, sharing violation, lock violation
+
+
+def is_transient_lock_error(error: OSError) -> bool:
+    if getattr(error, 'winerror', None) in _WINDOWS_LOCK_ERRORS:
+        return True
+    return isinstance(error, PermissionError) and os.name == 'nt'
+
+
+def durable_move_with_retry(
+    source: Path,
+    destination: Path,
+    *,
+    replace_existing: bool = True,
+    delays: tuple[float, ...] = LOCKED_FILE_RETRY_DELAYS,
+    is_transient: Callable[[OSError], bool] = is_transient_lock_error,
+) -> None:
+    """durable_move, retried briefly while another program holds the target."""
+    for delay in (*delays, None):
+        try:
+            durable_move(source, destination, replace_existing=replace_existing)
+            return
+        except FileExistsError:
+            raise
+        except OSError as exc:
+            if delay is None or not is_transient(exc):
+                if delay is None and is_transient(exc):
+                    _log_lock_failure(destination, exc)
+                raise
+            time.sleep(delay)
+
+
+def _log_lock_failure(destination: Path, error: OSError) -> None:
+    import logging
+    # The file name only: the full path can name the PC user.
+    logging.getLogger(__name__).warning(
+        '他のプログラムが使用中のため書き込めませんでした: %s (%s)', Path(destination).name, type(error).__name__)
+
+
+def write_bytes_atomically(target: Path, value: bytes, *, create_only: bool = False) -> Path:
+    """The one atomic write: a complete, fsynced sibling file moved into place (ARCH-04).
+
+    ``create_only`` never replaces an existing file and raises FileExistsError.
+    The move syncs the directory entry and retries while the target is locked.
+    """
+    target = Path(target)
+    ensure_path_fits(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = temporary_output_path(target)
+    try:
+        with temporary.open('xb') as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        durable_move_with_retry(temporary, target, replace_existing=not create_only)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def durable_write_json(target: Path, payload: dict[str, Any]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f'.{target.name}.{uuid.uuid4().hex}.tmp')
@@ -291,8 +355,47 @@ def file_sha256(path: Path) -> str:
 
 
 def temporary_output_path(target: Path) -> Path:
-    """Create a collision-resistant sibling name that preserves file suffix."""
-    return target.with_name(f".{target.stem}.{uuid.uuid4().hex}.tmp{target.suffix}")
+    """Create a collision-resistant sibling name that preserves file suffix.
+
+    The name is never longer than a few characters over the target's, so the
+    temporary file does not cross a path length limit the target fits (OBS-14).
+    """
+    return target.with_name(f".{target.stem[:24]}.{uuid.uuid4().hex[:16]}.tmp{target.suffix}")
+
+
+# Windows without long path support rejects a full path over 259 characters;
+# every file system here limits one name to 255 bytes.
+WINDOWS_MAX_PATH = 259
+MAX_NAME_BYTES = 255
+
+
+def windows_long_paths_enabled() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            return winreg.QueryValueEx(key, "LongPathsEnabled")[0] == 1
+    except OSError:
+        return False
+
+
+def ensure_path_fits(target: Path, *, windows: bool | None = None) -> None:
+    """Refuse, before writing, a path the file system would reject (OBS-14).
+
+    Raises OSError(ENAMETOOLONG) naming the file and the length, instead of the
+    platform's later, harder-to-read failure.
+    """
+    target = Path(os.path.abspath(target))
+    too_long = [part for part in target.parts if len(os.fsencode(part)) > MAX_NAME_BYTES]
+    if too_long:
+        raise OSError(errno.ENAMETOOLONG,
+                      f'ファイル名が長すぎます（{len(os.fsencode(too_long[0]))}バイト、上限{MAX_NAME_BYTES}バイト）: {too_long[0][:40]}…',
+                      target.name)
+    windows = os.name == 'nt' if windows is None else windows
+    if windows and len(str(target)) > WINDOWS_MAX_PATH and not windows_long_paths_enabled():
+        raise OSError(errno.ENAMETOOLONG,
+                      f'保存先のパスが長すぎます（{len(str(target))}文字、Windowsの上限{WINDOWS_MAX_PATH}文字）。'
+                      'データフォルダーを短い場所に移すか、Windowsの長いパスを有効にしてください。',
+                      target.name)
 
 
 def atomic_write_text(target: Path, value: str, *, encoding: str = "utf-8") -> Path:
@@ -300,11 +403,12 @@ def atomic_write_text(target: Path, value: str, *, encoding: str = "utf-8") -> P
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = temporary_output_path(target)
     try:
+        # Text mode keeps the platform's newline translation for user-facing outputs.
         with temporary.open('w', encoding=encoding) as stream:
             stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
-        durable_move(temporary, target)
+        durable_move_with_retry(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
     return target
@@ -312,17 +416,7 @@ def atomic_write_text(target: Path, value: str, *, encoding: str = "utf-8") -> P
 
 def atomic_write_bytes(target: Path, value: bytes) -> Path:
     """Replace a binary file only after its sibling temporary file is complete."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = temporary_output_path(target)
-    try:
-        with temporary.open('wb') as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
-        durable_move(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
+    return write_bytes_atomically(target, value)
 
 
 def atomic_copy_file(

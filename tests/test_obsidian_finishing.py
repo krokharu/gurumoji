@@ -38,6 +38,12 @@ class ObsidianWorkbenchTests(unittest.TestCase):
         self.workbench.prepare('recording', '会議.wav', self.segments, revision=0)
         self.assertEqual(self.workbench.load('recording')['ai_efforts']['name_verify'], 'low')
         self.assertEqual(read_text(self.workbench.note_path(self.state['work'])), original)
+        # CFG-04: the saved per-conversation value is what Obsidian shows and the app reports.
+        status = read_text(self.workbench.note_path(self.state['status_note']))
+        self.assertIn('AIの詳しさ：会話の流れを整理：自動、文章の仕上げ：高、話者名を確認：自動、話者を再確認：低', status)
+        public = self.workbench.public(self.workbench.load('recording'))
+        self.assertEqual(public['ai_efforts']['cleanup'], 'high')
+        self.assertIn('文章の仕上げ：高', public['ai_efforts_label'])
 
     def test_jev_comparison_option_is_written_and_parsed(self):
         workbench = ObsidianWorkbench(Path(self.temporary.name) / 'jev.sqlite3')
@@ -295,16 +301,17 @@ class ObsidianWorkbenchTests(unittest.TestCase):
 
     def test_create_only_write_preserves_a_concurrent_file(self):
         from gurumoji import analysis_store
+        from gurumoji.services import durable_files
         target = self.workbench.note_path('concurrent.md')
-        original_link = analysis_store.os.link
-        def concurrent_create(source, destination):
+        original_move = durable_files.durable_move
+        def concurrent_create(source, destination, **kwargs):
             destination.write_bytes(b'Human concurrent edit')
-            original_link(source, destination)
-        with patch.object(analysis_store.os, 'link', side_effect=concurrent_create):
+            original_move(source, destination, **kwargs)
+        with patch.object(durable_files, 'durable_move', side_effect=concurrent_create):
             with self.assertRaises(FileExistsError):
                 analysis_store.write_atomic(target, b'Generated note', create_only=True)
         self.assertEqual(target.read_bytes(), b'Human concurrent edit')
-        self.assertFalse(list(target.parent.glob('.concurrent.md.*.tmp')))
+        self.assertFalse(list(target.parent.glob('.concurrent*.tmp*')))
 
     def test_notes_do_not_add_per_utterance_ai_calls_or_markdown_overhead(self):
         segments = [{**self.segments[0], 'id': f's{i}', 'text': f'発話{i}'} for i in range(100)]

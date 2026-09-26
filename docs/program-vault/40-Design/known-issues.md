@@ -14,7 +14,9 @@ tags:
 
 # 既知の問題点と改善方法（収束フェーズ）
 
-**現在の状態（2026-09-25）：** 登録50件（BUG-03を追加）のうち、対応済み24件、一部対応1件（OBS-15）、未対応21件、状態欄が空のもの4件（DEV-01、UI-01〜03）。今回は、P1の未対応だったOBS-03／09／11／12／18とDATA-01／02／03、および新規のBUG-03に対応した。DATA-01は利用者の選択により「ゴミ箱＋一定期間後の自動削除」とした。残りの未対応は、収束計画で「保留」とした設計上の項目。
+**現在の状態（2026-09-26）：** 登録50件のうち、対応済み44件、一部対応4件（ARCH-07、OBS-14、DOC-01、PERF-01）、対応しない1件（UI-01：選別どおり集約しない）、保留1件（DEV-01：利用者のPCの `runtime/` の整理で、利用者の確認待ち）。2026-09-25〜26に、未対応だった保留項目を、改善案と選別の方針のうち一方を選んで実装した（各行の状態に選んだ方と理由を記載）。
+
+**前回の状態（2026-09-25）：**  登録50件（BUG-03を追加）のうち、対応済み24件、一部対応1件（OBS-15）、未対応21件、状態欄が空のもの4件（DEV-01、UI-01〜03）。今回は、P1の未対応だったOBS-03／09／11／12／18とDATA-01／02／03、および新規のBUG-03に対応した。DATA-01は利用者の選択により「ゴミ箱＋一定期間後の自動削除」とした。残りの未対応は、収束計画で「保留」とした設計上の項目。
 
 **前回の状態（2026-09-15）：** コミット`1b8fe41`に8件の対応を収録し、プッシュ済み。43件中、対応済み8件・一部対応1件（DOC-03）・未対応34件。元の問題・根拠・改善案は調査時点の記録で、採用した修正は「状態」のリンクを参照する。全体の集計は[[40-Design/convergence-plan#プッシュ済みの対応状況（2026-09-15）]]。
 
@@ -50,13 +52,13 @@ tags:
 
 | ID | 重要度 | 問題 | 根拠 | 影響 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ARCH-01 | 中 | `app.py`（約15,700行）に、API・パイプライン・編集トランザクション・分析集計・議事録・出力・AI呼び出し・Obsidian監視が集中している | [[10-Architecture/system-map]] | 変更の影響が読めない。AIや人が既存関数を見落とし、同じものを再実装しやすい | 全面的な書き換えはしない。責務ごとに既存モジュールへ関数を移すだけの変更を、1レビュー1責務で行う（例：議事録 → 新設ではなく既存の分析側へ。Obsidian呼び出し → `obsidian_finishing`・`vault_registry` 側へ）。ルートは最後まで `app.py` に残す | 未対応 | 保留：大規模移設は不具合修正後 |
-| ARCH-02 | 中 | 保存・Vault系のモジュール間に循環依存があり、関数内importで回避している | `analysis_store` ⇄ `obsidian_layout`／`vault_registry`、`obsidian_finishing` ⇄ `obsidian_layout`、`obsidian_migration` → `obsidian_finishing` | 読み込み順に依存する不具合、テストしにくい | 下位の共通関数（`safe_path`、`write_atomic`、`markdown`、frontmatterの入出力）を、依存の最下層になる1か所にまとめ、一方向の依存にする。既存の上位モジュールには置けないため、新しいファイルが必要な数少ないケースになる（理由をADRに書く） | 未対応 | 保留：共通層が必要になった時点で局所抽出 |
-| ARCH-03 | 中 | 同じ値を複数の場所で算出している | ResearchVaultのパス3か所（`ObsidianLayout`・`ObsidianWorkbench`・`AnalysisStore` の `__init__`）、Software Vaultのパス2か所（`vault_registry.SOFTWARE_ROOT`、`app.vault_registry`）、アプリURL・ポート3か所（`archive_ai_finishing` 内、`archive_app_url`、既定引数の `http://127.0.0.1:7860`） | 保存先の変更やポート変更の一部だけが反映され、リンク切れや別フォルダーへの書き込みが起きる | パスは `VaultRegistry`（または既存の台帳）から、URLは `archive_app_url` から取得するように統一する | 未対応 | 保留：保存先変更の実害を確認してから |
-| ARCH-04 | 低中 | 原子的書き込みの関数が重複している | `analysis_store.write_atomic`、`app.py`: `atomic_write_text`、`atomic_write_bytes`、`durable_write_json`、`temporary_output_path`、`sync_directory_metadata` | `fsync` やフォルダー同期の扱いに差があり、片方だけ修正される | フォルダーの同期も含む1実装に統一し、他は薄い呼び出しにする | 未対応 | 保留：原子性・耐久性の要件を先に比較 |
+| ARCH-01 | 中 | `app.py`（約15,700行）に、API・パイプライン・編集トランザクション・分析集計・議事録・出力・AI呼び出し・Obsidian監視が集中している | [[10-Architecture/system-map]] | 変更の影響が読めない。AIや人が既存関数を見落とし、同じものを再実装しやすい | 全面的な書き換えはしない。責務ごとに既存モジュールへ関数を移すだけの変更を、1レビュー1責務で行う（例：議事録 → 新設ではなく既存の分析側へ。Obsidian呼び出し → `obsidian_finishing`・`vault_registry` 側へ）。ルートは最後まで `app.py` に残す | 対応済み（2026-09-25確認。[[70-Changes/app-py-phase5]] で `app.py` を8,361行から約1,900行の組み立て役に縮め、ルートは `web/`、処理は `handlers/`・`services/` へ責務ごとに移した。現在は約1,980行で、設定・依存の配線・起動だけを持つ。問題欄の「約15,700行」は調査時点の値） | 保留：大規模移設は不具合修正後 |
+| ARCH-02 | 中 | 保存・Vault系のモジュール間に循環依存があり、関数内importで回避している | `analysis_store` ⇄ `obsidian_layout`／`vault_registry`、`obsidian_finishing` ⇄ `obsidian_layout`、`obsidian_migration` → `obsidian_finishing` | 読み込み順に依存する不具合、テストしにくい | 下位の共通関数（`safe_path`、`write_atomic`、`markdown`、frontmatterの入出力）を、依存の最下層になる1か所にまとめ、一方向の依存にする。既存の上位モジュールには置けないため、新しいファイルが必要な数少ないケースになる（理由をADRに書く） | 対応済み（2026-09-25、ADR-121。`safe_path`・`write_atomic`・`markdown`・`canonical`・frontmatterの読み取り・ResearchVaultのパスを最下層の `vault_files.py` に移した。Vaultの書き込み主体はここからimportし、`analysis_store` は同じ名前を再exportする。先頭のimportで循環しないことをテストで確認する） | 保留：共通層が必要になった時点で局所抽出 |
+| ARCH-03 | 中 | 同じ値を複数の場所で算出している | ResearchVaultのパス3か所（`ObsidianLayout`・`ObsidianWorkbench`・`AnalysisStore` の `__init__`）、Software Vaultのパス2か所（`vault_registry.SOFTWARE_ROOT`、`app.vault_registry`）、アプリURL・ポート3か所（`archive_ai_finishing` 内、`archive_app_url`、既定引数の `http://127.0.0.1:7860`） | 保存先の変更やポート変更の一部だけが反映され、リンク切れや別フォルダーへの書き込みが起きる | パスは `VaultRegistry`（または既存の台帳）から、URLは `archive_app_url` から取得するように統一する | 対応済み（2026-09-25。ResearchVaultのパスは `analysis_store.research_vault_root`、Software Vaultは `vault_registry.SOFTWARE_ROOT`（`app.vault_registry` の別計算を削除）、アプリURLは `env_settings.local_app_url`（`MOJIOKOSI_PORT` を反映）の1か所で算出する。既定引数の `http://127.0.0.1:7860` は空にして保存時に解決する。保存先の変更UI・`vaults.json` への一元化は選別どおり行わない） | 保留：保存先変更の実害を確認してから |
+| ARCH-04 | 低中 | 原子的書き込みの関数が重複している | `analysis_store.write_atomic`、`app.py`: `atomic_write_text`、`atomic_write_bytes`、`durable_write_json`、`temporary_output_path`、`sync_directory_metadata` | `fsync` やフォルダー同期の扱いに差があり、片方だけ修正される | フォルダーの同期も含む1実装に統一し、他は薄い呼び出しにする | 対応済み（2026-09-25。書き込みの本体を `services/durable_files.write_bytes_atomically`（一時ファイルをfsync → `durable_move` → フォルダーのfsync）に1つにした。`analysis_store.write_atomic` と `atomic_write_bytes` はその薄い呼び出し。`atomic_write_text` は改行変換を保つため文字モードのまま同じ移動処理を使う。`durable_write_json` と編集トランザクションの専用処理は要件が違うため残す） | 保留：原子性・耐久性の要件を先に比較 |
 | ARCH-05 | 中 | フロントエンドのAPI呼び出しが各JSに散らばり、`apiFetch` と生の `fetch` が混在している | [[10-Architecture/system-map]]、BUG-01 | セキュリティヘッダーやエラー処理の漏れ | 全ての呼び出しを `apiFetch` に統一する。エンドポイント文字列の重複は、画面を整理するときに合わせて整理する | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | 統合 → BUG-01 |
-| ARCH-06 | 低 | AI入力の分割関数が3種類ある | `app.chunk_segments`（テストからしか参照されない）、`analysis_insights.bounded_batches`、`ai_finishing.fragments` | 使われていないコードが残る | `chunk_segments` をDeprecated候補にする（[[20-Modules/feature-inventory]] の確認項目を満たしてから整理） | 未対応 | 保留：利用箇所とテストの意図を確認してから |
-| ARCH-07 | 中 | 同じ目的の処理経路が二重になっている | AI仕上げ（ジョブ内／Obsidian）、話者特定3経路、議事録Markdown生成2種、議事録のVault出力2系統、保存API2系統、ダウンロードAPI2系統 | 片方の経路だけ修正される。UIの入口が増える | [[20-Modules/feature-inventory]] の「Duplicate」表の方針で1つにまとめる。APIの互換は残し、実装は共通化する | 一部対応（2026-09-25。AI仕上げは入口を2つ残し、「全体アウトライン → 全文校正 → Jev比較」と段階の記録を `services/ai/transcript_finishing.run_full_cleanup` に共通化した。失敗時はジョブ内が警告して続行、Obsidianが停止。話者特定・議事録・保存API・ダウンロードAPIは未対応） | 保留：用途の異なる経路を一律統合しない |
+| ARCH-06 | 低 | AI入力の分割関数が3種類ある | `app.chunk_segments`（テストからしか参照されない）、`analysis_insights.bounded_batches`、`ai_finishing.fragments` | 使われていないコードが残る | `chunk_segments` をDeprecated候補にする（[[20-Modules/feature-inventory]] の確認項目を満たしてから整理） | 対応済み（2026-09-25。`chunk_segments` を削除し、テストの意図を `ai_finishing.cleanup_batches`（全文校正の実際の分割）へ移した） | 保留：利用箇所とテストの意図を確認してから |
+| ARCH-07 | 中 | 同じ目的の処理経路が二重になっている | AI仕上げ（ジョブ内／Obsidian）、話者特定3経路、議事録Markdown生成2種、議事録のVault出力2系統、保存API2系統、ダウンロードAPI2系統 | 片方の経路だけ修正される。UIの入口が増える | [[20-Modules/feature-inventory]] の「Duplicate」表の方針で1つにまとめる。APIの互換は残し、実装は共通化する | 一部対応（2026-09-25。AI仕上げは入口を2つ残し、校正の手順を `services/ai/transcript_finishing.run_full_cleanup` に共通化した。議事録Markdownは、ダウンロード用（`format_meeting_minutes_markdown`）とObsidian用（`meeting_minutes_note`）が同じ `normalize_meeting_minutes` の結果を描画する形にした（優先度の表記も共通）。保存API・ダウンロードAPIは内部実装が共通で、APIは互換のため残す。話者特定3経路・議事録のVault出力2系統は用途が異なるため統合しない） | 保留：用途の異なる経路を一律統合しない |
 
 ## OBS：Obsidian連携（データ保全）
 
@@ -67,18 +69,18 @@ tags:
 | OBS-03 | 中 | アプリが `.obsidian` の設定を変更する | `ObsidianLayout.configure`：`core-plugins.json`（コアプラグインを有効化）、`appearance.json`（CSSスニペットを有効化）、`bookmarks.json`（Gurumojiグループを置き換え）、`workspaces.json`（追加）、`workspace.json`・`graph.json`（無ければ作成） | 利用者の表示設定が変わる。Obsidianの起動中は互いに上書きしうる。`publish_navigation` から頻繁に呼ばれる | Vaultを新規作成したときの初期化だけで書く。既存のVaultでは画面で「推奨設定を適用」の明示操作にし、書く前に差分を表示する | 対応済み（`d989318`：新規Vaultの初回だけ設定を書き、`obsidian_settings`に記録。ADR-103をaccepted。「推奨設定を適用」画面は後続） | P1：優先 |
 | OBS-04 | 高（統合課題） | 書き込み主体が5つ・台帳が4つあり、競合時の挙動が統一されていない | `VaultRegistry._write`（conflict／missingを表示）、`AnalysisStore.write_note`（例外）、`ObsidianLayout.managed_note`（黙ってスキップ・削除されたノートは再作成）、`ObsidianWorkbench.save_note`（判定なし）、`decorate`・`sync_themes`（判定なし）。台帳は SQLite `obsidian_notes`、`interviews.json`、`vaults.json`、`state.json` | 「人の編集を上書きしない」保証がノートの種類によって異なる | `VaultRegistry._write` の方式（予定hashを記録 → 書き込み → 確定、conflict／missingを索引に表示）を基準にし、判定ロジックを1つの関数に統合する。台帳は当面併存させ、移行は別ADRで決める | 対応済み（2026-09-25。判定を `vault_note_policy.write_generated_note` に統合。利用者の決定により、研究者が編集した生成ノートは編集版を履歴に写してから最新版で上書きし、最初の版も作成時に履歴へ写す。削除はナビだけ作り直す。台帳は併存） | 保留：P0後に所有別の契約を整理 |
 | OBS-05 | 中 | 作業台の初期ノートを、既存ファイルを確認せずに書く | `ObsidianWorkbench.prepare` → `save_note` → `note`（`write_atomic`）。`state.json` が無いと初回扱いになる | バックアップを片側だけ戻した、`obsidian_workbench` を消した、などの場合に、研究者が編集した `I###-全文.md`・`I###-操作.md` が上書きされる | 対象のパスにファイルがあり、台帳にhashがなければ、連番の新しいパスに作成して状態ノートで知らせる | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | P0：最優先 |
-| OBS-06 | 中 | frontmatterの生成・解析が複数実装されている | 生成：`analysis_store.frontmatter`、`obsidian_layout.pack`、`obsidian_finishing.with_properties`、`VaultRegistry._write`。解析：`obsidian_layout.unpack`（上限なし）、`obsidian_finishing.split_properties`（64KB上限）、旧形式の `provider:` 正規表現 | 型や書式が揺れる。片方だけ修正される | 既存の `obsidian_layout` の `unpack`／`pack` に集約する（新しいファイルは作らない。ARCH-02で共通層を作る場合はそこへ移す）。上限とエラーメッセージを統一する | 未対応 | 保留：人のノートと生成物を同じYAML処理にしない |
+| OBS-06 | 中 | frontmatterの生成・解析が複数実装されている | 生成：`analysis_store.frontmatter`、`obsidian_layout.pack`、`obsidian_finishing.with_properties`、`VaultRegistry._write`。解析：`obsidian_layout.unpack`（上限なし）、`obsidian_finishing.split_properties`（64KB上限）、旧形式の `provider:` 正規表現 | 型や書式が揺れる。片方だけ修正される | 既存の `obsidian_layout` の `unpack`／`pack` に集約する（新しいファイルは作らない。ARCH-02で共通層を作る場合はそこへ移す）。上限とエラーメッセージを統一する | 対応済み（2026-09-25。解析は `analysis_store.parse_frontmatter` の1つにし、区切り・上限（64,000文字）・エラーメッセージを揃えた。`obsidian_layout.unpack`（生成ノート：BOM・改行を正規化）、`obsidian_finishing.split_properties`（研究者のノート：本文をそのまま返す）、履歴の写しはその呼び出し。選別どおり、人のノートと生成物の前処理は分けたまま。生成側（`frontmatter`・`pack`・`with_properties`・`VaultRegistry._write`）と旧形式の `provider:` 行は出力形式が異なるため残す） | 保留：人のノートと生成物を同じYAML処理にしない |
 | OBS-07 | 中 | プロパティの書き戻しが、全体の再シリアライズになっている | `pack` と `yaml.safe_dump` | コメントや書式が失われる。`tags` の文字列が配列に型変換される | 変更するキーだけを行単位で更新する。未知の形式（複数行の文字列、アンカーなど）があれば書かずに停止する。依存を追加する場合（YAMLのround-trip対応ライブラリ）は別途判断する | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | 統合 → OBS-01／OBS-02 |
-| OBS-08 | 低中 | 監視がポーリングで、テーマ同期のたびに全インタビューのトップのノートを全読み込みする | `start_obsidian_watcher`（2秒、10秒）、`sync_themes` | Vaultが大きくなるとI/Oが増える。クラウド同期フォルダーで負荷が高くなる | mtimeとサイズのキャッシュで、変更があったファイルだけを読む | 未対応 | 保留：性能を計測してから |
+| OBS-08 | 低中 | 監視がポーリングで、テーマ同期のたびに全インタビューのトップのノートを全読み込みする | `start_obsidian_watcher`（2秒、10秒）、`sync_themes` | Vaultが大きくなるとI/Oが増える。クラウド同期フォルダーで負荷が高くなる | mtimeとサイズのキャッシュで、変更があったファイルだけを読む | 対応済み（2026-09-25。改善案どおり、テーマ同期はインタビューのノートごとに更新時刻とサイズを覚え、変わったファイルだけを読む（`obsidian_layout.memo_links`）。監視自体はポーリングのまま（2秒・10秒）。計測は未実施） | 保留：性能を計測してから |
 | OBS-09 | 中 | 起動時の復旧・移行が失敗すると、監視が停止したまま気づけない | `start_obsidian_watcher` の例外時に `stop.set()` して終了する | 操作ノートのチェックに反応せず、利用者には理由が分からない | 監視の状態（稼働中／停止と理由）を `GET /api/config` などに含め、画面に表示する | 対応済み（2026-09-25。`services/obsidian_watcher.WatcherStatus` が状態を持ち、`GET /api/config` と `GET …/obsidian-finishing` の `watcher` で返す。接続ダイアログの「Obsidian監視」と仕上げパネルに停止理由を表示する。例外の本文はリモート閲覧では返さない） | P1：優先 |
-| OBS-10 | 中 | Vaultが入れ子になる危険を検出していない | 実環境の `runtime/data/obsidian/` に `.obsidian` と `無題のファイル*.base` があり、親フォルダーが保管庫として開かれた痕跡がある。3つの生成Vaultも同じ `obsidian/` の直下に作られる | 親Vaultの検索・グラフ・リンク解決に、子Vaultのノートが混ざる | Vaultを作成・書き込みする前に、ルートの親方向に `.obsidian` がないか確認し、あれば停止して警告する。痕跡のファイルは削除せず、利用者に案内する | 未対応 | 保留：生成先の警告を検討。全保存停止案は不採用 |
+| OBS-10 | 中 | Vaultが入れ子になる危険を検出していない | 実環境の `runtime/data/obsidian/` に `.obsidian` と `無題のファイル*.base` があり、親フォルダーが保管庫として開かれた痕跡がある。3つの生成Vaultも同じ `obsidian/` の直下に作られる | 親Vaultの検索・グラフ・リンク解決に、子Vaultのノートが混ざる | Vaultを作成・書き込みする前に、ルートの親方向に `.obsidian` がないか確認し、あれば停止して警告する。痕跡のファイルは削除せず、利用者に案内する | 対応済み（2026-09-25。保存は止めない方針（選別どおり）。`VaultRegistry.nesting_warnings` が、ResearchVaultと3つの生成Vaultの親方向に `.obsidian` があるかを調べ、`GET /api/config` の `vault_warnings` と接続ダイアログの「Vaultの入れ子」に案内を出す。親の `.obsidian` は削除・移動しない。リモート閲覧ではフルパスを返さない） | 保留：生成先の警告を検討。全保存停止案は不採用 |
 | OBS-11 | 低中 | 会話を削除した後も、ResearchVaultの概要・一覧が「保存済み」のまま | `_delete_library_item_locked` は `retire_input_vault` だけを呼び、`interviews.json` と概要ノートは更新しない | 削除済みの会話を判別できない | 状態を「アプリから削除済み」に更新する（ノートは来歴として残す） | 対応済み（`a64c1c2`、`bf2a82d`：`ObsidianLayout.mark_deleted`／`clear_deleted`） | P1：優先 |
 | OBS-12 | 低中 | 分析ノートに `file:///` の絶対パスリンクを書く | `AnalysisStore.publish` の `local_links` | 端末に依存する。Vaultを共有するとPCのユーザー名などが残る。移動するとリンクが切れる | アプリ経由のURLだけにする。既存のノートは再生成で置き換える（所有hashが一致するものだけ） | 対応済み（`8fd1c3d`：新規ノートはアプリURLだけ。既存ノートは再生成時に置き換わる） | P1：優先 |
-| OBS-13 | 低 | 移行処理が、Vault全体の空フォルダーを削除する | `obsidian_migration.migrate` の最後の `rmdir` ループ | 他の環境で初めて移行するとき、利用者の空フォルダーが消える（移行済みの環境では実行されない） | 移行元フォルダーだけに限定する | 未対応 | P2：後続 |
-| OBS-14 | 中 | パス長の上限を事前に確認していない | 例：`10-インタビュー/I001-<最大48字>/履歴/分析/<run_id 32字>/graph/結果-<手法>-表-01-<最大72字>.md` にデータフォルダーの位置が加わる（未計測） | Windowsで書き込みに失敗し、`vault_status=conflict` になる | 書き込み前にフルパスの長さを計算する。上限を超える場合は、短いID名とtitleで作る。ファイル名の生成を1つの関数にまとめる（`ObsidianLayout.register` の正規表現、`graph_node_path`、`safe_output_stem` を統一） | 未対応 | 保留：長いパスで再現・環境条件を確認してから |
-| OBS-15 | 中 | Obsidian操作の監査ログがない | `managed_note` のスキップ、`sync_themes` の書き込みは記録されない | 「なぜ更新されないか」「いつ書き換えたか」を追跡できない | 既存の `<data>/obsidian_layout/` に、操作ログ（日時・Vault・相対パス・操作 CREATE／UPDATE／SKIP／CONFLICT／MISSING／MIGRATE・前後hash・理由）をJSON Lines形式で残す。本文は記録しない | 一部対応（2026-09-25。生成ノートの作成・更新・編集の保存・欠落・再作成を `<data>/obsidian_layout/note_changes.jsonl` に記録し、`90-運用/同期状況.md` に表示する。移行・`.obsidian` 設定・`.base`／CSSのスキップは未記録） | 統合 → OBS-09 |
-| OBS-16 | 低中 | 大量変更にDry Runがない | `migrate` はバックアップを取るが、変更予定の一覧を事前に出さない | 移行・再生成の影響を事前に確認できない | 移行・一括再生成・リンク変換に「計画のみ」モードを設ける（件数、作成／更新／移動／削除の予定、競合） | 未対応 | 保留：次の一括移行の着手条件 |
-| OBS-17 | 低 | 原子的書き込みがロックされたファイルに弱い | `write_atomic` は `os.replace` だけで、フォルダーの `fsync` をしない | 同期ソフトやウイルス対策ソフトがファイルを掴むと失敗する | 短いリトライを入れ、失敗を記録する（ARCH-04と一緒に対応） | 未対応 | 保留：ロック失敗を再現してから |
+| OBS-13 | 低 | 移行処理が、Vault全体の空フォルダーを削除する | `obsidian_migration.migrate` の最後の `rmdir` ループ | 他の環境で初めて移行するとき、利用者の空フォルダーが消える（移行済みの環境では実行されない） | 移行元フォルダーだけに限定する | 対応済み（2026-09-25。移行で移したノートの親フォルダーだけを、空になった場合に削除する。研究者の空フォルダーは残す） | P2：後続 |
+| OBS-14 | 中 | パス長の上限を事前に確認していない | 例：`10-インタビュー/I001-<最大48字>/履歴/分析/<run_id 32字>/graph/結果-<手法>-表-01-<最大72字>.md` にデータフォルダーの位置が加わる（未計測） | Windowsで書き込みに失敗し、`vault_status=conflict` になる | 書き込み前にフルパスの長さを計算する。上限を超える場合は、短いID名とtitleで作る。ファイル名の生成を1つの関数にまとめる（`ObsidianLayout.register` の正規表現、`graph_node_path`、`safe_output_stem` を統一） | 一部対応（2026-09-25。書き込み前に `durable_files.ensure_path_fits` がフルパス（Windowsで長いパスが無効なら259文字）と名前（255バイト）を確認し、超える場合は理由と長さを示して停止する。一時ファイル名を目標の長さ＋数文字に抑えた。長い場合に短い名前で作る処理とファイル名生成の一本化は、実環境での再現を待つ） | 保留：長いパスで再現・環境条件を確認してから |
+| OBS-15 | 中 | Obsidian操作の監査ログがない | `managed_note` のスキップ、`sync_themes` の書き込みは記録されない | 「なぜ更新されないか」「いつ書き換えたか」を追跡できない | 既存の `<data>/obsidian_layout/` に、操作ログ（日時・Vault・相対パス・操作 CREATE／UPDATE／SKIP／CONFLICT／MISSING／MIGRATE・前後hash・理由）をJSON Lines形式で残す。本文は記録しない | 対応済み（2026-09-25。生成ノートの作成・更新・編集の保存・欠落・再作成に加え、`.base`／CSSの作成・更新・見送り（`skipped`）、`.obsidian` 設定の書き込み（`settings_written`）と読み取れない設定の見送り（`settings_skipped`）、移行の移動（`migrated`、元のパスを `source` に記録）を `<data>/obsidian_layout/note_changes.jsonl` に記録する。見送りは同じパスにつき1プロセス1回。見送りは `90-運用/同期状況.md` にも表示する。本文は記録しない） | 統合 → OBS-09 |
+| OBS-16 | 低中 | 大量変更にDry Runがない | `migrate` はバックアップを取るが、変更予定の一覧を事前に出さない | 移行・再生成の影響を事前に確認できない | 移行・一括再生成・リンク変換に「計画のみ」モードを設ける（件数、作成／更新／移動／削除の予定、競合） | 対応済み（2026-09-25。移行だけ。`python -m gurumoji.obsidian_migration <DB>` の `plan_migration` が、件数・移動・リンク書き換え・既存の移行先を何も書かずに示す。台帳は一時コピーでコードを割り当てる。一括再生成・リンク変換の計画モードは対象の処理がないため未作成） | 保留：次の一括移行の着手条件 |
+| OBS-17 | 低 | 原子的書き込みがロックされたファイルに弱い | `write_atomic` は `os.replace` だけで、フォルダーの `fsync` をしない | 同期ソフトやウイルス対策ソフトがファイルを掴むと失敗する | 短いリトライを入れ、失敗を記録する（ARCH-04と一緒に対応） | 対応済み（2026-09-25。`durable_move_with_retry` が、他のプログラムに掴まれた書き込み先（Windowsのアクセス拒否・共有違反・ロック違反）を約1.5秒まで短く再試行し、最後に失敗したらファイル名だけをログに残して例外にする。フォルダーのfsyncも行う。その他のエラーは再試行しない） | 保留：ロック失敗を再現してから |
 
 ## DATA：データ・保存
 
@@ -92,42 +94,43 @@ tags:
 
 | ID | 重要度 | 問題 | 根拠 | 影響 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| CFG-01 | 中 | 設定の置き場所が分散している | [[10-Architecture/system-map]] の「設定の所在」 | 同じ設定に正本が複数できる | 設定の種類ごとに正本を1つに決める（下表） | 未対応 | 保留：設定ごとの責務を維持 |
-| CFG-02 | 中 | 秘密情報と利用者設定が同じファイルにあり、UIが秘密ファイルを書き換える | `config/tokens.json` に、APIキーと `openai_model` などの使用モデルが同居している。`update_token_model` がこのファイルを書き換える | 秘密ファイルの破損リスク。共有してよい設定と秘密が分けられない | 使用モデルは秘密ではない設定ファイルへ段階的に移す（読み込みは新旧両対応、書き込みは新しい方だけ） | 未対応 | 保留：移行・復元仕様が必要 |
-| CFG-03 | 低 | 既定値が複数の場所に書かれている | 「Obsidianで仕上げ」の既定が、`JobOptions`・`parse_bool("finish_in_obsidian", default=True)`・`index.html` の `checked` の3か所。会話モードは `app.js` にだけある | 既定を変えるときに漏れる | サーバー側の既定を `GET /api/config` で返し、UIはそれを使う | 未対応 | 保留：既定値を変更する際に統合 |
-| CFG-04 | 低 | AIエフォートが2か所にある | `localStorage`、`state.json` | 画面とObsidianで値が食い違う | 正本を会話ごとの `state.json`（仕上げ）とアプリ設定のどちらかに決める | 未対応 | 保留：既定値と実行別指定を区別してから |
+| CFG-01 | 中 | 設定の置き場所が分散している | [[10-Architecture/system-map]] の「設定の所在」 | 同じ設定に正本が複数できる | 設定の種類ごとに正本を1つに決める（下表） | 対応済み（2026-09-25。CFG-02〜04とARCH-03で、下表の設定ごとに正本を1つにした。表を実際の正本に更新） | 保留：設定ごとの責務を維持 |
+| CFG-02 | 中 | 秘密情報と利用者設定が同じファイルにあり、UIが秘密ファイルを書き換える | `config/tokens.json` に、APIキーと `openai_model` などの使用モデルが同居している。`update_token_model` がこのファイルを書き換える | 秘密ファイルの破損リスク。共有してよい設定と秘密が分けられない | 使用モデルは秘密ではない設定ファイルへ段階的に移す（読み込みは新旧両対応、書き込みは新しい方だけ） | 対応済み（2026-09-25。使用モデルは秘密ではない `config/ai_models.json` に保存し、アプリとセットアップ画面は `tokens.json` のモデルを書き換えない。読み込みは `ai_models.json` を優先し、ないモデルは `tokens.json` から読む（新旧両対応）。空にしたモデルは古い値に戻らない。`ai_models.json` はGitの除外対象。バックアップの対象外（設定は選び直せる）） | 保留：移行・復元仕様が必要 |
+| CFG-03 | 低 | 既定値が複数の場所に書かれている | 「Obsidianで仕上げ」の既定が、`JobOptions`・`parse_bool("finish_in_obsidian", default=True)`・`index.html` の `checked` の3か所。会話モードは `app.js` にだけある | 既定を変えるときに漏れる | サーバー側の既定を `GET /api/config` で返し、UIはそれを使う | 対応済み（2026-09-25。新規ジョブの既定（録音の種類・「Obsidianで仕上げ」・録音の種類ごとの推奨値）を `services/transcription/options.py` の1か所にまとめた。フォームはそこから描画し、`GET /api/config` の `job_defaults` でも返す。開始処理の省略時の値も同じ定数を使う） | 保留：既定値を変更する際に統合 |
+| CFG-04 | 低 | AIエフォートが2か所にある | `localStorage`、`state.json` | 画面とObsidianで値が食い違う | 正本を会話ごとの `state.json`（仕上げ）とアプリ設定のどちらかに決める | 対応済み（2026-09-25。会話ごとの `state.json` を、その会話のObsidian仕上げの正本にした。画面の設定（`localStorage`）は新しく開くときの既定値だけ。アプリで「Obsidianで仕上げ」を開くと画面の設定をその会話に保存し、状態ノートとアプリのメッセージに使う値を表示する） | 保留：既定値と実行別指定を区別してから |
 
-設定ごとの正本（案）：
+設定ごとの正本（2026-09-25に確定。案から変えた行は理由を併記）：
 
 | 設定 | 正本 |
 | --- | --- |
-| APIキー・トークン | `tokens.json` だけ |
-| 使用モデル・既定の処理条件 | アプリ設定ファイル（秘密を含まない） |
-| 保存先・ポート・公開設定 | 環境変数（起動時に確定し、画面では表示だけ） |
-| Vaultのルート | `vaults.json`（ResearchVaultも登録し、コード内の算出をやめる） |
+| APIキー・トークン | `config/tokens.json` だけ。アプリは書き込まない（CFG-02） |
+| 使用モデル | `config/ai_models.json`（秘密を含まない。なければ `tokens.json` の値を読む。CFG-02） |
+| 新規ジョブの既定の処理条件 | `services/transcription/options.py` の定数。フォームと `GET /api/config` はここから作る（CFG-03）。案の「アプリ設定ファイル」は、利用者が既定値を変える画面がないため作らない |
+| 保存先・ポート・公開設定 | 環境変数（起動時に確定し、画面では表示だけ）。アプリURLは `env_settings.local_app_url`（ARCH-03） |
+| Vaultのルート | ResearchVaultは `vault_files.research_vault_root`、生成Vaultは `vaults.json`、Softwareは `vault_registry.SOFTWARE_ROOT`（ARCH-03）。案の「ResearchVaultも `vaults.json` に登録」は選別で不採用 |
 | 会話ごとの分析条件 | SQLite |
-| 仕上げの実行時オプション | 操作ノート → `state.json` |
+| 仕上げの実行時オプション | 操作ノート → `state.json`。AIの詳しさは会話の `state.json` が正本で、画面の設定は既定値（CFG-04） |
 
 ## DOC：ドキュメント
 
 | ID | 重要度 | 問題 | 根拠 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- |
-| DOC-01 | 中 | 同じ説明を別々の場所で管理している | `README.md`（約53KB）、`docs/*.md`（利用者向けの手順）、このVault（仕様） | 役割を決める。READMEは導入の入口、`docs/` は操作手順、Vaultは仕様・設計・問題点。同じ説明は書かずにリンクする | 未対応 | 統合 → DATA-02 |
-| DOC-02 | 低中 | 一部が実装済みなのに `proposed` のままのノートがある | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]（提案API `/api/obsidian/settings` などは未実装） | 実装済みの部分を `30-Data` へ移し、提案部分だけを残す | 未対応 | 統合 → DATA-02 |
+| DOC-01 | 中 | 同じ説明を別々の場所で管理している | `README.md`（約53KB）、`docs/*.md`（利用者向けの手順）、このVault（仕様） | 役割を決める。READMEは導入の入口、`docs/` は操作手順、Vaultは仕様・設計・問題点。同じ説明は書かずにリンクする | 一部対応（2026-09-25。README・`docs/`・Vaultの役割と書かないものを [[40-Design/program-vault-rules]] に確定した。README（約60KB）にある分析機能の詳しい仕様をVaultへ移し、リンクに置き換える整理は未実施） | 統合 → DATA-02 |
+| DOC-02 | 低中 | 一部が実装済みなのに `proposed` のままのノートがある | [[40-Design/storage-policy]]、[[40-Design/sync-contract]]（提案API `/api/obsidian/settings` などは未実装） | 実装済みの部分を `30-Data` へ移し、提案部分だけを残す | 対応済み（2026-09-25。[[40-Design/storage-policy]] と [[40-Design/sync-contract]] の冒頭に節ごとの実装状況表を置き、実装済みの部分は `30-Data`・運用手順の正本へリンクした。本文は提案として残し、現在の説明と将来案を同じ段落に混ぜない） | 統合 → DATA-02 |
 | DOC-03 | 中 | AI向けの開発ルールがリポジトリにない | `AGENTS.md`・`CONTRIBUTING.md` がない | 2026-09-16にルート `AGENTS.md` を追加し、日常作業用の短い優先順位・探索・検証ルールを置いた。詳細は [[40-Design/ai-development-rules]] に分離した | 対応済み（未コミット） | 今回のAI運用ルール監査で対応 |
 
 ## DEV：開発時の残骸
 
 | ID | 重要度 | 問題 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- |
-| DEV-01 | 低 | `runtime/` 直下に由来が分からないファイルと検証出力がある（[[20-Modules/feature-inventory]] の「Unknown」） | 削除しない。利用者に確認してから、`runtime/archive` へ移すなどで整理する。検証スクリプトの出力先は `runtime/logs` などに決める | 未対応 | 保留：由来不明。データ削除・移動の対象外 |
+| DEV-01 | 低 | `runtime/` 直下に由来が分からないファイルと検証出力がある（[[20-Modules/feature-inventory]] の「Unknown」） | 削除しない。利用者に確認してから、`runtime/archive` へ移すなどで整理する。検証スクリプトの出力先は `runtime/logs` などに決める | 保留（利用者の確認待ち。対象は利用者のPCの \`runtime/\` で、このリポジトリには含まれない。削除・移動は利用者の判断で行う） | 保留：由来不明。データ削除・移動の対象外 |
 
 ## UI：画面の収束（詳細は [[40-Design/ui-ux-issues]]）
 
 | ID | 重要度 | 問題 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- |
-| UI-01 | 中 | Obsidian関連の入口が5か所に分かれている：新規作成のチェック、結果画面「Obsidianで仕上げ」、議事録パネル「Obsidianに保存」、分析「分析結果をObsidianに保存」、比較「比較結果を保存」 | 「保存・Obsidian」の操作を、会話ごとの1パネル（状態表示と操作）に集約する | 未対応 | 保留：異なる保存対象の一律集約案は不採用 |
-| UI-02 | 中 | 「保存」の意味が複数ある：編集内容の保存、話者管理の保存、分析設定の保存、分析の固定保存、Obsidianへの保存 | ボタン名を「編集を保存」「分析条件を保存」「結果を記録（固定）」のように対象で区別する | 未対応 | 統合 → UX-04 |
+| UI-01 | 中 | Obsidian関連の入口が5か所に分かれている：新規作成のチェック、結果画面「Obsidianで仕上げ」、議事録パネル「Obsidianに保存」、分析「分析結果をObsidianに保存」、比較「比較結果を保存」 | 「保存・Obsidian」の操作を、会話ごとの1パネル（状態表示と操作）に集約する | 対応しない（2026-09-25。改善案と選別のうち、選別を採用：保存先・保存物が異なる5つの入口を1パネルへ集約しない。各入口のボタン名で保存対象を区別した（UI-02）） | 保留：異なる保存対象の一律集約案は不採用 |
+| UI-02 | 中 | 「保存」の意味が複数ある：編集内容の保存、話者管理の保存、分析設定の保存、分析の固定保存、Obsidianへの保存 | ボタン名を「編集を保存」「分析条件を保存」「結果を記録（固定）」のように対象で区別する | 対応済み（2026-09-25。保存ボタンを対象で区別：「編集内容を保存」「話者情報を保存」「分析条件・コードを保存」「分析結果をObsidianに保存」「議事録をObsidianに保存」「モデルを保存」。CFG-02に合わせ、誤りになった「tokens.jsonへ保存」も直した） | 統合 → UX-04 |
 | UI-03 | 中 | 移動の導線が重複し、URLにも反映されない（UX-01〜03） | [[40-Design/ui-ux-issues]] の推奨順に従う | 対応済み（UX-01／UX-03、UI再設計 2026-09-16、未コミット。[[20-Modules/ui-screens]]） | 統合 → UX-01／UX-03 |
 
 ## 追加調査：プログラム全体（2026-09-14）
@@ -139,7 +142,7 @@ tags:
 | BUG-02 | 高 | 比較結果の保存が、画面に表示した時点の入力版を確認せず、保存時点のデータで再集計する | `app.py:compare_group_interviews`、`save_interview_comparison_run`、`interview_comparison_request`。要求には会話IDと異内容比較の指定だけで、表示時の各revision・入力fingerprintがない。`static/interview-comparison.js:lastRequest`にも版を持たない | 比較を見た後に別画面・別タブで本文を編集すると、利用者が確認した結果と違うものが保存される。BUG-01のCSRF修正後にも残る独立した不具合 | 表示結果に構成会話ごとの入力fingerprint等を付け、保存時に照合。不一致なら409と再集計案内。クライアントの結果本文を無検証で保存しない。一時DBで表示時の対象発話2件→元データ編集→保存された結果1件、HTTP 200を再現した | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | P1：優先 |
 | DATA-04 | 中 | 分析準備のrevision変更が、保存済み実行のDB上の`stale`へ伝播しない | `transcript_preparation.py:save/write_state`は準備テーブルだけを更新。`analysis_store.py:initialize_store`のstale用triggerに準備テーブルがなく、`refresh_vaults`はDBのstaleだけを参照。`app.py:archive_source_stamp`は準備revisionを含むが、`list_interview_comparison_runs`はfingerprintを再検証しない | 準備状態を含む固定成果物が古くなっても、比較一覧・Orchestratorの更新要否に反映されない。単一会話の履歴APIはfingerprintで補正するため、表示先によって判定が違う | 準備更新と同じトランザクションで当該会話・構成比較の実行をstaleにするか、同じ版照合を各経路で共有する。一時DBで準備revision更新後のfingerprint変化と、一覧再生成後も比較APIのstaleが0のままであることを再現。通常の準備保存APIを通すE2Eは未実施 | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | P1：優先 |
 | OBS-18 | 中 | Input・Visualization・Orchestratorへの書き出し失敗が、保存結果APIの状態へ集約されない | `AnalysisStore.publish_vaults`は例外をwarningに記録し、`VaultRegistry.publish_analysis`の戻り値も利用しない。その後`publish`はResearchVault成功時に`vault_status=completed,error=''`とする。`public`には生成3Vaultの同期結果がない。`VaultRegistry.run_status`は内容のcurrent/staleを返し、同期のconflict/missingとは異なる | 生成Vaultが欠けてもUIでは「Vaultを保存しました」となり、再試行ボタンの条件も満たさない。OBS-09のwatcher停止やOBS-04の書き込み所有判定とは異なる、保存APIの結果集約漏れ | 正本保存の成功は維持したまま、Vaultごとの書き出し状態・理由をAPIで返し、未完了の出力を再試行できるようにする。一時Vaultで生成側の書き込み例外を注入し、ResearchVault成功後もAPIに公開する値がcompleted・空errorであることを再現 | 対応済み（`7c1cfeb`：保存APIに`vault_outputs`／`vault_outputs_complete`。障害注入テストあり） | P1：優先 |
-| PERF-01 | 中 | 会話一覧APIがページ分割なしで全会話・全発話JSONを読み込む | `app.py:list_library`の`SELECT * FROM library_items`→`fetchall`→各行の`row_segments`→全候補の`library_public`。検索語が空でも全文を展開する。`static/app.js:loadLibrary/loadAnalysisCatalog`と`interview-comparison.js:loadCatalog`が同じ一覧を要求する | 会話・発話が増えるほど、一覧表示や検索のたびに処理量とメモリー使用量が増える構造。Obsidian監視のI/O負荷（OBS-08）とは別。実環境で遅延が発生する件数・秒数は未計測 | まず100会話×各1万発話等のfixtureで時間・メモリー・応答サイズを測定。絞り込み用メタデータの索引、一覧用の軽い取得、ページ分割を検討し、検索・話者・感情facetの意味を保つ。負荷測定前に性能改善を断定しない | 未対応（構造確認・負荷未計測） | P2：測定後に判断 |
+| PERF-01 | 中 | 会話一覧APIがページ分割なしで全会話・全発話JSONを読み込む | `app.py:list_library`の`SELECT * FROM library_items`→`fetchall`→各行の`row_segments`→全候補の`library_public`。検索語が空でも全文を展開する。`static/app.js:loadLibrary/loadAnalysisCatalog`と`interview-comparison.js:loadCatalog`が同じ一覧を要求する | 会話・発話が増えるほど、一覧表示や検索のたびに処理量とメモリー使用量が増える構造。Obsidian監視のI/O負荷（OBS-08）とは別。実環境で遅延が発生する件数・秒数は未計測 | まず100会話×各1万発話等のfixtureで時間・メモリー・応答サイズを測定。絞り込み用メタデータの索引、一覧用の軽い取得、ページ分割を検討し、検索・話者・感情facetの意味を保つ。負荷測定前に性能改善を断定しない | 一部対応（2026-09-25。`scripts/measure_library_listing.py` で100会話×各1万発話を計測：一覧・検索とも1回13.7秒・ピーク340MiB。行を1件ずつ読み、発話JSONを1回だけ解析し（一覧では発話IDを作らない）、一覧用の小さな項目だけを保持するように変更して5.5秒・23MiB。応答内容と検索・話者・感情・グループの意味は同じ。残りは発話JSONの解析時間で、索引・軽い取得列・ページ分割は保存形式の変更を伴うため未実施） | P2：測定後に判断 |
 
 ## 追加調査：プログラム全体（2026-09-25）
 

@@ -1,4 +1,4 @@
-    <section id="create-view" class="view create-view" data-conversation-mode="meeting" role="tabpanel" aria-labelledby="show-new-button">
+    <section id="create-view" class="view create-view" data-conversation-mode="{{ job_defaults.conversation_mode }}" role="tabpanel" aria-labelledby="show-new-button">
       <section id="progress-card" class="progress-card" hidden aria-live="polite">
         <div class="progress-topline">
           <div><p class="view-kicker">処理状況</p><h2 id="progress-title">文字起こし中</h2></div>
@@ -184,7 +184,7 @@
             <legend>録音の種類</legend>
             <div class="conversation-mode-options" role="radiogroup" aria-label="文字起こしモード">
               <label class="conversation-mode-option">
-                <input name="conversation_mode" type="radio" value="meeting" checked>
+                <input name="conversation_mode" type="radio" value="meeting"{% if job_defaults.conversation_mode == "meeting" %} checked{% endif %}>
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">会</i>
                   <strong>会議</strong>
@@ -192,7 +192,7 @@
                 </span>
               </label>
               <label class="conversation-mode-option">
-                <input name="conversation_mode" type="radio" value="group_interview">
+                <input name="conversation_mode" type="radio" value="group_interview"{% if job_defaults.conversation_mode == "group_interview" %} checked{% endif %}>
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">問</i>
                   <strong>グループインタビュー</strong>
@@ -200,7 +200,7 @@
                 </span>
               </label>
               <label class="conversation-mode-option">
-                <input name="conversation_mode" type="radio" value="chat">
+                <input name="conversation_mode" type="radio" value="chat"{% if job_defaults.conversation_mode == "chat" %} checked{% endif %}>
                 <span class="conversation-mode-option-body">
                   <i aria-hidden="true">談</i>
                   <strong>雑談</strong>
@@ -208,8 +208,9 @@
                 </span>
               </label>
             </div>
-            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">会議向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。</p>
+            <p id="conversation-mode-hint" class="conversation-mode-hint" role="status">{{ job_defaults.conversation_mode_presets[job_defaults.conversation_mode].hint }}</p>
             <button id="conversation-mode-reset" class="conversation-mode-reset" type="button" hidden>このモードの推奨値に戻す</button>
+            <script id="conversation-mode-presets" type="application/json">{{ job_defaults.conversation_mode_presets | tojson }}</script>
           </fieldset>
 
           <div id="settings-summary" class="settings-summary" aria-label="現在の設定">
@@ -396,7 +397,7 @@
                 <div class="ai-box">
                   <label class="check-row obsidian-mode">
                     <input name="finish_in_obsidian" type="hidden" value="0">
-                    <input id="finish-in-obsidian" name="finish_in_obsidian" type="checkbox" value="1" checked>
+                    <input id="finish-in-obsidian" name="finish_in_obsidian" type="checkbox" value="1"{% if job_defaults.finish_in_obsidian %} checked{% endif %}>
                     <span><strong>Obsidianに保存してあとで整える</strong><small>文字起こし全文と作業ノートを保存します。文章の仕上げは後から行えます。</small></span>
                   </label>
                   <label class="field provider-field">

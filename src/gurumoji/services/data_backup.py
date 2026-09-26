@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 from contextlib import closing
@@ -58,6 +59,8 @@ def _skip(relative: Path) -> bool:
     parts = relative.parts
     return (
         name.endswith(".tmp")
+        # durable_files.temporary_output_path keeps the suffix: ".name.<hex>.tmp.md".
+        or (name.startswith(".") and re.search(r"\.[0-9a-f]{16}\.tmp\.[^.]+$", name) is not None)
         or name == ".gurumoji.instance.lock"
         or any(part.startswith((".delete-staging-", ".edit-staging-", ".edit-preparing-")) for part in parts)
         or (parts[:1] == ("obsidian_layout",) and len(parts) > 1 and parts[1].startswith("backup-"))

@@ -133,7 +133,7 @@
       <div id="ai-model-error" class="alert error" role="alert" hidden></div>
       <div class="app-dialog-actions">
         <button id="cancel-ai-model-button" class="secondary-button" type="button">キャンセル</button>
-        <button id="save-ai-model-button" class="primary-button small" type="submit">tokens.jsonへ保存</button>
+        <button id="save-ai-model-button" class="primary-button small" type="submit">モデルを保存</button>
       </div>
     </form>
   </dialog>
@@ -171,6 +171,10 @@
         <div class="connection-row">
           <span class="status-pill loading" data-obsidian-watcher-pill>Obsidian監視</span>
           <small data-obsidian-watcher-detail>操作ノートのチェックとテーマ同期を読む常駐処理</small>
+        </div>
+        <div class="connection-row" data-vault-nesting hidden>
+          <span class="status-pill missing">Vaultの入れ子</span>
+          <small data-vault-nesting-detail></small>
         </div>
         <div class="connection-row">
           <span class="status-pill ready">バックアップ</span>

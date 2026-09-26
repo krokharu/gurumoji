@@ -220,7 +220,7 @@ Coreは次の5つ。それ以外は [[20-Modules/feature-inventory]] で Support
 
 | 対象 | 分類 |
 | --- | --- |
-| `chunk_segments` | Deprecated候補 |
+| `chunk_segments` | 削除済み（2026-09-25、ARCH-06） |
 | `runtime/gurumoji.sqlite3` と `runtime/` 直下の検証出力 | Unknown |
 | `obsidian_migration`、旧形式の作業ノート解析、`src/*.py` の互換import | 互換のため残す |
 
@@ -280,7 +280,7 @@ OBS-01〜17。重要度の高いものは次のとおり。
 
 | 候補 | 判断に必要なこと |
 | --- | --- |
-| `app.chunk_segments` | `tests/test_ai_scaling.py` の意図を `ai_finishing.fragments` 側のテストへ移す |
+| `app.chunk_segments` | 削除済み（2026-09-25）。テストは `ai_finishing.cleanup_batches` へ移した |
 | `runtime/gurumoji.sqlite3`（0バイト） | 利用者に確認する（Git管理外の利用者データ領域） |
 | `runtime/` 直下の `*-check.json`・`*.png` | 生成したスクリプトを特定し、利用者に確認する |
 | `runtime/data/obsidian/.obsidian`、`無題のファイル*.base` | 利用者がそのフォルダーを保管庫として使っていないか確認する。ファイルは消さず、案内だけ行う |

@@ -29,23 +29,6 @@ from .transcription.segments import (
 )
 
 
-def chunk_segments(segments: list[dict[str, Any]], max_items: int = 80, max_chars: int = 12000) -> list[list[tuple[int, dict[str, Any]]]]:
-    chunks: list[list[tuple[int, dict[str, Any]]]] = []
-    current: list[tuple[int, dict[str, Any]]] = []
-    chars = 0
-    for index, segment in enumerate(segments):
-        item_chars = len(str(segment.get("text", ""))) + 80
-        if current and (len(current) >= max_items or chars + item_chars > max_chars):
-            chunks.append(current)
-            current = []
-            chars = 0
-        current.append((index, segment))
-        chars += item_chars
-    if current:
-        chunks.append(current)
-    return chunks
-
-
 def normalize_detected_speaker_name(value: Any, evidence: Any = "") -> str:
     name = clean_single_line(value, 80).strip(" 　、。,.・:：;；「」『』【】()（）[]")
     evidence_text = clean_single_line(evidence, 300)

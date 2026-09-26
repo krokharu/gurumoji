@@ -12,6 +12,8 @@ Add-Type -AssemblyName System.Drawing
 
 $script:Root = Split-Path -Parent $PSScriptRoot
 $script:TokenFile = Join-Path $script:Root 'config\tokens.json'
+# Model names are not secret; the app and this screen keep them apart from tokens.json (CFG-02).
+$script:ModelFile = Join-Path $script:Root 'config\ai_models.json'
 $script:RunBatch = Join-Path $script:Root 'run.bat'
 $script:PythonInstallerScript = Join-Path $PSScriptRoot 'install_python.ps1'
 $script:VisualizationShortcutScript = Join-Path $PSScriptRoot 'ensure_visualization_shortcut.ps1'
@@ -21,19 +23,20 @@ $script:ActiveLines = $null
 $script:ActiveTitle = ''
 
 function Get-JsonSettings {
+    param([string]$Path = $script:TokenFile)
     $settings = [ordered]@{}
-    if (-not (Test-Path -LiteralPath $script:TokenFile)) {
+    if (-not (Test-Path -LiteralPath $Path)) {
         return $settings
     }
     try {
-        $raw = Get-Content -LiteralPath $script:TokenFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -eq $raw) { return $settings }
         foreach ($property in $raw.PSObject.Properties) {
             $settings[$property.Name] = $property.Value
         }
         return $settings
     } catch {
-        throw "tokens.json を読み込めません: $($_.Exception.Message)"
+        throw "$(Split-Path -Leaf $Path) を読み込めません: $($_.Exception.Message)"
     }
 }
 
@@ -59,9 +62,12 @@ function Set-SettingValue {
 }
 
 function Save-JsonSettings {
-    param([System.Collections.IDictionary]$Settings)
-    $directory = Split-Path -Parent $script:TokenFile
-    $temporary = Join-Path $directory ('.tokens-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+    param(
+        [System.Collections.IDictionary]$Settings,
+        [string]$Path = $script:TokenFile
+    )
+    $directory = Split-Path -Parent $Path
+    $temporary = Join-Path $directory ('.settings-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
     try {
         $content = $Settings | ConvertTo-Json -Depth 20
         [System.IO.File]::WriteAllText(
@@ -69,7 +75,7 @@ function Save-JsonSettings {
             $content + [Environment]::NewLine,
             [System.Text.UTF8Encoding]::new($false)
         )
-        Move-Item -LiteralPath $temporary -Destination $script:TokenFile -Force
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
     } finally {
         if (Test-Path -LiteralPath $temporary) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
@@ -434,9 +440,10 @@ $hfToken = Add-SettingRow 'Hugging Face token（必須）' $hfValue $true
 $openAiKey = Add-SettingRow 'OpenAI API key（任意）' (Get-SettingText $settings 'openai_api_key') $true
 $googleKey = Add-SettingRow 'Google Gemini API key（任意）' (Get-SettingText $settings 'google_api_key') $true
 $typeSafeKey = Add-SettingRow 'TypeSafe API key（Jev比較用）' (Get-SettingText $settings 'typesafe_api_key') $true
-$typeSafeModel = Add-SettingRow 'TypeSafe model' (Get-SettingText $settings 'typesafe_model' 'jev-latest') $false
+$models = Get-JsonSettings -Path $script:ModelFile
+$typeSafeModel = Add-SettingRow 'TypeSafe model' (Get-SettingText $models 'typesafe_model' (Get-SettingText $settings 'typesafe_model' 'jev-latest')) $false
 $lmStudioUrl = Add-SettingRow 'LM Studio URL' (Get-SettingText $settings 'lmstudio_base_url' 'http://127.0.0.1:1234/v1') $false
-$lmStudioModel = Add-SettingRow 'LM Studio model（空欄でも可）' (Get-SettingText $settings 'lmstudio_model') $false
+$lmStudioModel = Add-SettingRow 'LM Studio model（空欄でも可）' (Get-SettingText $models 'lmstudio_model' (Get-SettingText $settings 'lmstudio_model')) $false
 $lmStudioKey = Add-SettingRow 'LM Studio API key（認証時のみ）' (Get-SettingText $settings 'lmstudio_api_key') $true
 
 $tokenHelp = [System.Windows.Forms.Label]::new()
@@ -446,6 +453,13 @@ $tokenHelp.MaximumSize = [System.Drawing.Size]::new(820, 0)
 $tokenHelp.Margin = [System.Windows.Forms.Padding]::new(3, 10, 3, 3)
 $tokenHelp.Location = [System.Drawing.Point]::new(12, 285)
 $tokenGroup.Controls.Add($tokenHelp)
+
+function Save-ModelSettings {
+    $nextModels = Get-JsonSettings -Path $script:ModelFile
+    Set-SettingValue $nextModels 'typesafe_model' $typeSafeModel.Text
+    Set-SettingValue $nextModels 'lmstudio_model' $lmStudioModel.Text
+    Save-JsonSettings $nextModels -Path $script:ModelFile
+}
 
 $buttonSave = [System.Windows.Forms.Button]::new()
 $buttonSave.Text = '設定を保存'
@@ -459,13 +473,12 @@ $buttonSave.add_Click({
         Set-SettingValue $next 'openai_api_key' $openAiKey.Text
         Set-SettingValue $next 'google_api_key' $googleKey.Text
         Set-SettingValue $next 'typesafe_api_key' $typeSafeKey.Text
-        Set-SettingValue $next 'typesafe_model' $typeSafeModel.Text
         Set-SettingValue $next 'lmstudio_base_url' (Normalize-LmStudioUrl $lmStudioUrl.Text)
-        Set-SettingValue $next 'lmstudio_model' $lmStudioModel.Text
         Set-SettingValue $next 'lmstudio_api_key' $lmStudioKey.Text
         Save-JsonSettings $next
+        Save-ModelSettings
         $statusBox.Text = Get-EnvironmentReport
-        [System.Windows.Forms.MessageBox]::Show('tokens.json に保存しました。', 'セットアップ')
+        [System.Windows.Forms.MessageBox]::Show('tokens.json と ai_models.json に保存しました。', 'セットアップ')
     } catch {
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '保存できません')
     }
@@ -506,9 +519,9 @@ $buttonInstallApp.add_Click({
         Set-SettingValue $next 'openai_api_key' $openAiKey.Text
         Set-SettingValue $next 'google_api_key' $googleKey.Text
         Set-SettingValue $next 'lmstudio_base_url' (Normalize-LmStudioUrl $lmStudioUrl.Text)
-        Set-SettingValue $next 'lmstudio_model' $lmStudioModel.Text
         Set-SettingValue $next 'lmstudio_api_key' $lmStudioKey.Text
         Save-JsonSettings $next
+        Save-ModelSettings
         $environment = @{
             MOJIOKOSI_LAUNCH_WORKER = '1'
             MOJIOKOSI_NO_PAUSE = '1'
@@ -533,9 +546,9 @@ $buttonLaunch.add_Click({
         Set-SettingValue $next 'openai_api_key' $openAiKey.Text
         Set-SettingValue $next 'google_api_key' $googleKey.Text
         Set-SettingValue $next 'lmstudio_base_url' (Normalize-LmStudioUrl $lmStudioUrl.Text)
-        Set-SettingValue $next 'lmstudio_model' $lmStudioModel.Text
         Set-SettingValue $next 'lmstudio_api_key' $lmStudioKey.Text
         Save-JsonSettings $next
+        Save-ModelSettings
         Start-Process -FilePath $env:ComSpec -WorkingDirectory $script:Root -ArgumentList @('/d', '/k', ('call "{0}"' -f $script:RunBatch))
     } catch {
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, '起動できません')

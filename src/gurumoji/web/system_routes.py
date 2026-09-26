@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from flask import Flask, jsonify, render_template, request
 
+from ..services.transcription.options import job_defaults
+
 
 def register_system_routes(
     app: Flask,
@@ -31,6 +33,7 @@ def register_system_routes(
     update_token_model: Callable[[Any, Any, Path], Any],
     system_activity_snapshot: Callable[[], dict[str, Any]],
     obsidian_watcher_status: Callable[[], dict[str, Any]] = lambda: {},
+    vault_warnings: Callable[[], list[dict[str, Any]]] = lambda: [],
     create_backup: Callable[[bool], dict[str, Any]] | None = None,
 ) -> None:
     def index() -> str:
@@ -44,6 +47,7 @@ def register_system_routes(
             runtime=runtime,
             local_llm_label=local_llm_label(),
             local_llm_short_label=local_llm_short_label(),
+            job_defaults=job_defaults(),
         )
 
     def watcher_public() -> dict[str, Any]:
@@ -52,6 +56,13 @@ def register_system_routes(
             # Exception text can name local paths; remote viewers get the summary only.
             status.pop("detail", None)
         return status
+
+    def vault_warnings_public() -> list[dict[str, Any]]:
+        warnings = [dict(w) for w in vault_warnings()]
+        if not local_path_access_allowed():
+            for warning in warnings:
+                warning.pop("parent_path", None)
+        return warnings
 
     def api_config():
         machine = get_machine_profile()
@@ -67,6 +78,8 @@ def register_system_routes(
                 "machine": machine,
                 "runtime": runtime_info(),
                 "obsidian_watcher": watcher_public(),
+                "job_defaults": job_defaults(),
+                "vault_warnings": vault_warnings_public(),
             })
         except RuntimeError as exc:
             return jsonify({

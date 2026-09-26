@@ -249,41 +249,14 @@ const mobileStepContent = {
   3: {label: '開始', next: '開始'}
 };
 
-const conversationModePresets = {
-  meeting: {
-    label: '会議モード',
-    minSpeakers: 2,
-    maxSpeakers: 10,
-    audioPreprocess: 'standard',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.35',
-    vadOffset: '0.25',
-    hint: '会議向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
-  },
-  group_interview: {
-    label: 'グループインタビューモード',
-    minSpeakers: 3,
-    maxSpeakers: 12,
-    audioPreprocess: 'standard',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.30',
-    vadOffset: '0.22',
-    hint: 'グループインタビュー向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
-  },
-  chat: {
-    label: '雑談モード',
-    minSpeakers: 2,
-    maxSpeakers: 6,
-    audioPreprocess: 'light',
-    boostQuietSpeech: true,
-    triplePass: false,
-    vadOnset: '0.42',
-    vadOffset: '0.30',
-    hint: '雑談向けの設定を適用中。話者数や前処理は「認識・話者分離」で変更できます。'
+// Recording-type presets come from the server's single set of job defaults (CFG-03).
+const conversationModePresets = (() => {
+  try {
+    return JSON.parse(document.querySelector('#conversation-mode-presets')?.textContent || '{}');
+  } catch (_) {
+    return {};
   }
-};
+})();
 
 loadConfig();
 loadCustomVocabulary();
@@ -691,7 +664,13 @@ function selectedConversationMode() {
   const selected = conversationModeInputs.find(input => input.checked);
   return selected && conversationModePresets[selected.value]
     ? selected.value
-    : 'meeting';
+    : defaultConversationMode();
+}
+
+// The radio the server rendered as checked is the default recording type.
+function defaultConversationMode() {
+  const rendered = conversationModeInputs.find(input => input.defaultChecked);
+  return rendered ? rendered.value : Object.keys(conversationModePresets)[0];
 }
 
 // Settings a conversation mode writes. A value the user changed by hand is kept
@@ -754,8 +733,9 @@ function setSpeakerCountFixed(fixed, {restoreRange = true} = {}) {
 }
 
 function applyConversationMode(mode = selectedConversationMode()) {
-  const preset = conversationModePresets[mode] || conversationModePresets.meeting;
-  if (createView) createView.dataset.conversationMode = conversationModePresets[mode] ? mode : 'meeting';
+  const preset = conversationModePresets[mode] || conversationModePresets[defaultConversationMode()];
+  if (!preset) return;
+  if (createView) createView.dataset.conversationMode = conversationModePresets[mode] ? mode : defaultConversationMode();
   const keptLabels = [];
   conversationModeFields.forEach(field => {
     const presetValue = field.property === 'checked' ? preset[field.key] : String(preset[field.key]);
@@ -790,7 +770,7 @@ function updateCreateSummary() {
   document.querySelectorAll('[data-setup-ready]').forEach(element => { element.textContent = readyMessage; });
 
   const modePreset = conversationModePresets[selectedConversationMode()];
-  const mode = modePreset ? modePreset.label : '会議モード';
+  const mode = modePreset ? modePreset.label : '';
   const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
   const language = selectedOptionText(languageSelect) || '自動判定';
   const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
@@ -1803,7 +1783,7 @@ function updateSpeakerRegistryOverview() {
 }
 
 function removeSpeakerRecord(record) {
-  if (!window.confirm(`${speakerRecordName(record)} を話者管理から削除しますか？\n「変更を保存」するまで削除は確定しません。`)) return;
+  if (!window.confirm(`${speakerRecordName(record)} を話者管理から削除しますか？\n「話者情報を保存」するまで削除は確定しません。`)) return;
   speakerRegistryDeletedIds.add(record.id);
   speakerRegistry = speakerRegistry.filter(item => item.id !== record.id);
   setSpeakerRegistryDirty();
@@ -2345,6 +2325,7 @@ async function loadConfig() {
     tokenConfigSnapshot = data && typeof data === 'object' ? data : {};
     applyMachineProfile(data.machine);
     applyObsidianWatcherStatus(data.obsidian_watcher);
+    applyVaultNestingWarnings(data.vault_warnings);
     const runtime = data.runtime || {};
     browserFilePickerOnly = Boolean(runtime.browser_upload);
     if (browsePathButton) {
@@ -2419,6 +2400,15 @@ function applyObsidianWatcherStatus(watcher) {
   });
   document.querySelectorAll('[data-obsidian-watcher-detail]').forEach(detail => {
     detail.textContent = [watcher.message, watcher.detail].filter(Boolean).join(' ');
+  });
+}
+
+// OBS-10: a Vault opened inside another Vault mixes notes into the parent's search and graph.
+function applyVaultNestingWarnings(warnings) {
+  const list = Array.isArray(warnings) ? warnings : [];
+  document.querySelectorAll('[data-vault-nesting]').forEach(row => { row.hidden = !list.length; });
+  document.querySelectorAll('[data-vault-nesting-detail]').forEach(detail => {
+    detail.textContent = list.map(warning => warning.message).join(' ');
   });
 }
 
@@ -3862,7 +3852,7 @@ listen(aiModelForm, 'submit', async event => {
     if (!response.ok) throw new Error(data.error || 'モデル設定を保存できませんでした。');
     if (aiModelDialog) aiModelDialog.close();
     await loadConfig();
-    setAlert(document.querySelector('#token-message'), `${model} をtokens.jsonに保存しました。`);
+    setAlert(document.querySelector('#token-message'), `${model} を使用モデルとして保存しました（config/ai_models.json）。`);
   } catch (error) {
     setAlert(aiModelError, error.message, true);
     if (saveAiModelButton) saveAiModelButton.disabled = false;
@@ -4025,8 +4015,9 @@ function applyMeetingObsidianStatus(data) {
   const state = data && data.status ? data.status : 'unprepared';
   meetingObsidianStatus.dataset.state = state;
   meetingObsidianStatus.textContent = data?.message || '会議議事録はObsidianに未保存です。';
-  meetingObsidianSaveButton.textContent = state === 'stale' ? '更新版をObsidianに保存'
-    : state === 'completed' ? 'Obsidianに保存済み' : 'Obsidianに保存';
+  // UI-02: the label names what is saved, not just "保存".
+  meetingObsidianSaveButton.textContent = state === 'stale' ? '議事録の更新版をObsidianに保存'
+    : state === 'completed' ? '議事録はObsidianに保存済み' : '議事録をObsidianに保存';
   meetingObsidianOpenLink.hidden = !data?.uri;
   if (data?.uri) meetingObsidianOpenLink.href = data.uri;
 }
@@ -5338,7 +5329,7 @@ listen(document.querySelector('#obsidian-finishing-button'), 'click', async () =
     });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '作業ノートを開けませんでした。');
-    setAlert(message, '作業ノートを用意しました。Gurumojiを起動したまま操作してください。 ');
+    setAlert(message, `作業ノートを用意しました。Gurumojiを起動したまま操作してください。${data.ai_efforts_label ? `この会話のAIの詳しさ：${data.ai_efforts_label}。` : ''} `);
     const link = document.createElement('a');
     link.href = data.uri;
     link.textContent = 'Obsidianで操作ノートを開く';
@@ -5481,7 +5472,7 @@ function setAnalysisDirty(dirty, trackMutation = true) {
     button.disabled = !analysisState.dirty || analysisSaveInProgress;
     button.textContent = analysisSaveInProgress
       ? '保存中…'
-      : analysisState.dirty ? '設定とコードを保存' : '保存済み';
+      : analysisState.dirty ? '分析条件・コードを保存' : '保存済み';
   });
   document.querySelectorAll('[data-analysis-save-state]').forEach(element => {
     element.textContent = analysisState.dirty ? '未保存の変更があります' : '分析設定は保存済みです';
@@ -7659,7 +7650,7 @@ function renderManualAnalysis(compact) {
     analysisElement('span', '', '保存すると自動集計とExcel・CSV・JSONも更新されます。')
   );
   saveText.firstElementChild.dataset.analysisSaveState = 'true';
-  const save = analysisElement('button', 'primary-button small', analysisState.dirty ? '設定とコードを保存' : '保存済み');
+  const save = analysisElement('button', 'primary-button small', analysisState.dirty ? '分析条件・コードを保存' : '保存済み');
   save.type = 'button';
   save.dataset.analysisSave = 'true';
   save.disabled = !analysisState.dirty;

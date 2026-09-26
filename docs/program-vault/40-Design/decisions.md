@@ -434,3 +434,12 @@ tags:
   - テスト：`tests/test_method_experts.py` の `LocalKnowledgeTests`（ローカル無し＝既存互換、ローカル専用フォルダーの追加、既存ノートのローカル上書きとhash変化）。
   - 原本資料（論文PDF等）自体はこの階層にもGitにも置かない前提は変わらない。研究者が要約・咀嚼した文章だけをノートとして置く運用は、[[40-Design/method-rules]] の登録手順に従う。
 - **関連：** ADR-115、[[40-Design/method-rules]]、[[50-Analysis-Methods/10-Experts/00-Index]]
+
+### ADR-121 保存・Vault系の下位関数を `vault_files` に置き、依存を一方向にする
+
+- **状態：** accepted、実装済み（2026-09-25、ARCH-02）
+- **背景：** `obsidian_layout`・`vault_registry`・`obsidian_finishing`・`vault_note_policy`・`obsidian_migration` が `analysis_store` の下位関数（`safe_path`、`write_atomic`、`markdown`、`canonical`、frontmatterの読み取り）をimportし、`analysis_store` 側は関数内importで `obsidian_layout`・`vault_registry` を使っていた。読み込み順に依存し、テストしにくかった。
+- **決定：** 下位関数を新しい `src/gurumoji/vault_files.py` に移す。このモジュールはパッケージ内の他モジュールを先頭でimportしない（`write_atomic` の本体は `services/durable_files`）。Vaultの書き込み主体は `vault_files` からimportし、`analysis_store` は互換のため同じ名前を再exportする。依存は `analysis_store` → `obsidian_layout`／`vault_registry` → `vault_files` の一方向になる。
+- **理由：** 既存の上位モジュールはいずれも別の上位モジュールに依存しており、共通層を置ける既存ファイルがない（新しいファイルが必要な数少ないケース）。`services/durable_files` はVault固有の規則（パスの検証、Markdownのエスケープ、frontmatter）を持たないため、そこには置かない。
+- **結果・影響：** 関数の内容と呼び出し方は変えない。`analysis_store.<名前>` での参照とテストの差し替えはそのまま動く。層の約束は `tests/test_durable_files.py` の `LayeringTests` で確認する。
+- **関連：** ARCH-02、ARCH-04、OBS-06、[[20-Modules/module-map]]

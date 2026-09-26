@@ -5,7 +5,7 @@ Generated versions are separate notes so editing a note cannot be overwritten by
 """
 from __future__ import annotations
 
-from .ai_effort import normalize_efforts
+from .ai_effort import describe_efforts, normalize_efforts
 
 import copy
 import hashlib
@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 import yaml
 
-from .analysis_store import safe_path, write_atomic, markdown
+from .vault_files import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 
 COMMANDS = {"outline": "アウトラインを作成", "finish": "AI仕上げを実行",
             "apply": "結果をアプリへ反映"}
@@ -31,19 +31,12 @@ QUOTE_BLOCK = re.compile(
 
 
 def split_properties(note: str) -> tuple[dict, str]:
-    """Accept Obsidian's YAML rewrites; keep all properties out of AI inputs."""
-    if not note.startswith("---\n"):
-        return {}, note
-    match = re.match(r"\A---\n(.*?)\n---(?:\n|$)", note, re.S)
-    if not match or len(match.group(1)) > 64000:
-        raise ValueError("ノート先頭のプロパティが不正です。--- の区切りを確認してください。")
-    try:
-        properties = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError as exc:
-        raise ValueError("Obsidianのプロパティを読み取れませんでした。") from exc
-    if not isinstance(properties, dict):
-        raise ValueError("ノートのプロパティは項目名と値で指定してください。")
-    return properties, note[match.end():]
+    """Accept Obsidian's YAML rewrites; keep all properties out of AI inputs.
+
+    Researcher notes are read as written (no newline normalisation) with the
+    shared delimiter, limit and messages (OBS-06).
+    """
+    return parse_frontmatter(note)
 
 
 def with_properties(body: str, properties: dict) -> str:
@@ -132,11 +125,17 @@ def meeting_source_link(transcript_path: str, segment_id: str, start) -> str:
 
 def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
                          tasks_path: str, json_path: str) -> str:
-    """Render a meeting note that stays useful inside Obsidian without plugins."""
-    tasks = minutes.get("tasks") if isinstance(minutes.get("tasks"), list) else []
-    decisions = minutes.get("decisions") if isinstance(minutes.get("decisions"), list) else []
-    analysis = minutes.get("analysis") if isinstance(minutes.get("analysis"), dict) else {}
-    priority_labels = {"high": "高", "medium": "中", "low": "低", "unspecified": "未設定"}
+    """Render a meeting note that stays useful inside Obsidian without plugins.
+
+    Reads the same normalised minutes as the download renderer
+    (format_meeting_minutes_markdown); only the presentation differs (ARCH-07).
+    """
+    from .services.meeting_minutes import MEETING_TASK_PRIORITY_LABELS, normalize_meeting_minutes
+    minutes = normalize_meeting_minutes(minutes)
+    tasks = minutes.get("tasks", [])
+    decisions = minutes.get("decisions", [])
+    analysis = minutes.get("analysis", {})
+    priority_labels = MEETING_TASK_PRIORITY_LABELS
     lines = [
         f"# {markdown(Path(title).stem)} 会議議事録",
         "",
@@ -146,11 +145,11 @@ def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
         "## サマリー",
         "",
     ]
-    summary = minutes.get("summary") if isinstance(minutes.get("summary"), list) else []
-    lines.extend("- " + markdown(value) for value in summary if str(value or "").strip())
+    summary = minutes.get("summary", [])
+    lines.extend("- " + markdown(value) for value in summary)
     if not summary:
         lines.append("- サマリーはありません。")
-    priority_counts = analysis.get("priority_counts") if isinstance(analysis.get("priority_counts"), dict) else {}
+    priority_counts = analysis.get("priority_counts", {})
     lines.extend([
         "",
         "## 集計",
@@ -195,7 +194,7 @@ def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
     else:
         lines.append("決定事項候補は検出されませんでした。")
     lines.extend(["", "## 発話量", ""])
-    activity = analysis.get("speaker_activity") if isinstance(analysis.get("speaker_activity"), list) else []
+    activity = analysis.get("speaker_activity", [])
     if activity:
         for item in activity:
             lines.append(
@@ -250,7 +249,7 @@ class ObsidianWorkbench:
         from .obsidian_layout import ObsidianLayout
         self.layout = ObsidianLayout(database_file)
         self.root = Path(database_file).parent / "obsidian_workbench"
-        self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
 
     def key(self, item_id: str) -> str:
         return sha(item_id.encode())[:32]
@@ -344,9 +343,10 @@ class ObsidianWorkbench:
         existing = self.load(item_id)
         if existing and (existing["revision"] == revision or existing["status"] == "running"):
             if existing["status"] != "running":
-                if update_efforts:
+                if update_efforts and existing.get("ai_efforts") != ai_efforts:
                     existing["ai_efforts"] = ai_efforts
                     self.save(existing)
+                    self.publish_status(existing)
                 self.refresh_paths(existing)
             return existing
         version = uuid.uuid4().hex
@@ -419,6 +419,9 @@ class ObsidianWorkbench:
 
     def public(self, state: dict) -> dict:
         return {"status": state["status"], "message": state["message"],
+                # This conversation's saved efforts are what its Obsidian operations use (CFG-04).
+                "ai_efforts": normalize_efforts(state.get("ai_efforts")),
+                "ai_efforts_label": describe_efforts(state.get("ai_efforts")),
                 "path": str(self.note_path(state["control"])),
                 "uri": "obsidian://open?path=" + quote(str(self.note_path(state["control"]).resolve()), safe="")}
 
@@ -484,7 +487,9 @@ class ObsidianWorkbench:
                 f"- 操作：[[{state['control'][:-3]}]]",
                 f"- 編集する会話：[[{state['work'][:-3]}]]",
                 f"- 編集する全体アウトライン：[[{state['outline'][:-3]}]]",
-                f"- 保存原文：[[{state['original_note'][:-3]}]]"]
+                f"- 保存原文：[[{state['original_note'][:-3]}]]",
+                # The app's effort setting is only a default; this saved value is what runs here (CFG-04).
+                f"- AIの詳しさ：{describe_efforts(state.get('ai_efforts'))}（アプリの「Obsidianで仕上げ」を開いた時点の設定。変更するときはアプリで設定してから開き直してください）"]
         if state.get("result_note"):
             body.append(f"- 仕上げ結果：[[{state['result_note'][:-3]}]]")
         if state.get("final_outline_note"):

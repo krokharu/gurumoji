@@ -235,6 +235,29 @@ class RequestSecurityTests(unittest.TestCase):
         self.assertEqual(remote["state"], "failed")
         self.assertNotIn("detail", remote)
 
+    def test_config_reports_nested_vaults_without_local_paths_for_remote_viewers(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        use_temporary_library(self, Path(temporary.name))
+        (app.DATABASE_FILE.parent / "obsidian" / ".obsidian").mkdir(parents=True)
+        token = "remote-token-for-tests-1234567890"
+        with patch.object(app, "load_token_config", return_value=app.TokenConfig()):
+            local = self.client.get("/api/config").get_json()["vault_warnings"]
+            with (
+                patch.object(app, "REMOTE_ACCESS_ENABLED", True),
+                patch.object(app, "REMOTE_ACCESS_TOKEN", token),
+                patch.object(app, "REMOTE_LOCAL_PATHS_ENABLED", False),
+            ):
+                remote = self.client.get(
+                    "/api/config",
+                    headers={"Authorization": f"Bearer {token}", "Host": "localhost"},
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).get_json()["vault_warnings"]
+        self.assertIn("ResearchVault", {w["vault"] for w in local})
+        self.assertTrue(all("parent_path" in w for w in local))
+        self.assertEqual({w["vault"] for w in remote}, {w["vault"] for w in local})
+        self.assertFalse(any("parent_path" in w for w in remote))
+
     def test_sensitive_responses_are_not_cached_and_have_security_headers(self):
         response = self.client.get("/api/config")
         self.assertEqual(response.status_code, 200)

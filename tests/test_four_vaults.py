@@ -104,6 +104,20 @@ class VaultRegistryTests(unittest.TestCase):
             self.registry.roots()
 
 
+    def test_vault_opened_inside_a_parent_vault_is_reported_not_blocked(self):
+        data_dir = self.registry.data
+        research = data_dir / "obsidian" / "ResearchVault"
+        self.assertEqual(self.registry.nesting_warnings(research), [])
+        (data_dir / "obsidian" / ".obsidian").mkdir(parents=True)
+        warnings = self.registry.nesting_warnings(research)
+        self.assertEqual({w["vault"] for w in warnings},
+                         {"ResearchVault", "InputVault", "VisualizationVault", "OrchestratorVault"})
+        self.assertTrue(all(w["parent"] == "<data>/obsidian" for w in warnings))
+        # Saving still works and the parent's settings are left alone.
+        self.publish()
+        self.assertTrue((self.registry.root("input") / self.note).exists())
+        self.assertTrue((data_dir / "obsidian" / ".obsidian").is_dir())
+
 class AnalysisVaultTests(unittest.TestCase):
     def setUp(self):
         self.fixture = support.ContentApiTests("test_generated_result_persists_and_becomes_stale_on_edit")

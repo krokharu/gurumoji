@@ -130,6 +130,29 @@ class LayoutPolicyTests(unittest.TestCase):
         self.assertIn("[[00-ホーム]]", sync)
         self.assertIn("\\|履歴]]", sync)
 
+    def events(self, action):
+        if not self.layout.note_log.exists():
+            return []
+        rows = [json.loads(line) for line in self.layout.note_log.read_text(encoding="utf-8").splitlines()]
+        return [row for row in rows if row["action"] == action]
+
+    def test_settings_and_edited_base_files_are_recorded_once(self):
+        self.layout.update("a", "会議.wav", {})
+        written = {row["path"] for row in self.events("settings_written")}
+        self.assertIn(".obsidian/core-plugins.json", written)
+        self.assertIn(".obsidian/bookmarks.json", written)
+        self.assertIn(".obsidian/snippets/gurumoji-reading.css", {row["path"] for row in self.events("created")})
+        base = self.layout.vault / "インタビュー一覧.base"
+        base.write_text(base.read_text(encoding="utf-8") + "# 研究者の列\n", encoding="utf-8")
+        (self.layout.vault / ".obsidian/bookmarks.json").write_bytes(b'{"items": [')
+        for _ in range(2):
+            self.layout.update("a", "会議.wav", {}, status="完了")
+        self.assertEqual([row["path"] for row in self.events("skipped")], ["インタビュー一覧.base"])
+        self.assertEqual([row["path"] for row in self.events("settings_skipped")], [".obsidian/bookmarks.json"])
+        sync = (self.layout.vault / "90-運用/同期状況.md").read_text(encoding="utf-8")
+        self.assertIn("編集された設定ファイル（.base・CSS）のため更新を見送り", sync)
+        self.assertIn("読み取れないObsidian設定のため変更せず", sync)
+
     def test_deleted_overview_is_not_recreated_but_home_is(self):
         record = self.layout.register("a", "会議.wav")
         self.layout.update("a", "会議.wav", {})

@@ -73,7 +73,7 @@ def make_insight_jobs(
 
     def run_analysis_insight_job(request_id: str, analysis: dict, provider: str, api_key: str,
                                  model: str, cancel_event: threading.Event, base_url: str = "",
-                                 app_url: str = "http://127.0.0.1:7860",
+                                 app_url: str = "",
                                  ai_efforts: dict | None = None) -> None:
         usage: dict[str, Any] = {}
         progress_value = 0
@@ -310,7 +310,7 @@ def make_transformer_jobs(
     def run_transformer_analysis_job(
         request_id: str, analysis: dict, model: str, max_topics: int,
         min_topic_size: int, topic_count: int, cancel_event: threading.Event,
-        app_url: str = "http://127.0.0.1:7860", mode: str = "auto",
+        app_url: str = "", mode: str = "auto",
         manual_topics: list[dict] | None = None,
         min_similarity: float = DEFAULT_MANUAL_MIN_SIMILARITY,
         saved_result: dict | None = None,

@@ -8,12 +8,11 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
-from .analysis_store import safe_path, write_atomic, markdown
+from .vault_files import markdown, parse_frontmatter, research_vault_root, safe_path, write_atomic
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
 
@@ -65,16 +64,8 @@ def find_notes(vault: Path, note_ids: set[str]) -> dict[str, list[str]]:
 
 
 def unpack(text: str) -> tuple[dict, str]:
-    text = text.removeprefix("\ufeff").replace("\r\n", "\n")
-    if not text.startswith("---\n"):
-        return {}, text
-    match = re.match(r"\A---\n(.*?)\n---(?:\n|$)", text, re.S)
-    if not match:
-        raise ValueError("ノートのプロパティ区切りが不正です。")
-    props = yaml.safe_load(match[1]) or {}
-    if not isinstance(props, dict):
-        raise ValueError("ノートのプロパティが不正です。")
-    return props, text[match.end():]
+    """Generated and navigation notes: BOM and CRLF are normalised before reading."""
+    return parse_frontmatter(text.removeprefix("\ufeff").replace("\r\n", "\n"))
 
 
 def pack(props: dict, body: str) -> str:
@@ -123,10 +114,42 @@ def graph_options(query: str = GLOBAL_QUERY) -> dict:
             "collapse-display": True, "collapse-forces": True}
 
 
+# path -> (mtime_ns, size, wikilinks of a research memo or None). The watcher
+# syncs themes every 10 s; only notes whose size or time changed are read (OBS-08).
+_MEMO_LINKS: dict[str, tuple[int, int, list[str] | None]] = {}
+_MEMO_LINKS_LIMIT = 20000
+
+
+def memo_links(path: Path) -> list[str] | None:
+    """Wikilinks written in a research memo, outside code; None for other notes."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = str(path)
+    cached = _MEMO_LINKS.get(key)
+    if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+        return cached[2]
+    try:
+        props, body = unpack(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, yaml.YAMLError):
+        warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
+        return None  # not cached: a note being saved is read again next time
+    links = None
+    if props.get("graph_kind") == "memo":
+        body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
+        body = re.sub(r"`[^`\n]*`", "", body)
+        links = WIKILINK.findall(body)
+    if len(_MEMO_LINKS) >= _MEMO_LINKS_LIMIT:
+        _MEMO_LINKS.clear()
+    _MEMO_LINKS[key] = (stat.st_mtime_ns, stat.st_size, links)
+    return links
+
+
 class ObsidianLayout:
     def __init__(self, database_file: Path):
         self.data = Path(database_file).parent
-        self.vault = self.data / "obsidian" / "ResearchVault"
+        self.vault = research_vault_root(database_file)
         self.registry = self.data / "obsidian_layout" / "interviews.json"
         self.note_log = self.data / "obsidian_layout" / "note_changes.jsonl"
 
@@ -240,19 +263,25 @@ class ObsidianLayout:
                     data["managed"][relative] = result.sha256
                     self.save(data)
                 return True
+        from .vault_note_policy import NoteWrite, append_change
         with LAYOUT_LOCK:
             data = self.load()
             path = safe_path(self.vault, relative)
-            if path.exists():
+            encoded = text.encode()
+            digest = hashlib.sha256(encoded).hexdigest()
+            existed = path.exists()
+            if existed:
                 actual = hashlib.sha256(path.read_bytes()).hexdigest()
                 if actual != data["managed"].get(relative):
                     reason = "未管理の既存ノート" if relative not in data["managed"] else "人が編集したノート"
                     warn_once(("skip", relative), f"{reason}のため生成ノートを更新しませんでした: {relative}")
+                    append_change(self.note_log, "research", NoteWrite("skipped", relative, digest, actual))
                     return False
-            encoded = text.encode()
-            if not path.exists() or path.read_bytes() != encoded:
+            if not existed or path.read_bytes() != encoded:
                 write_atomic(path, encoded)
-            digest = hashlib.sha256(encoded).hexdigest()
+                append_change(self.note_log, "research",
+                              NoteWrite("updated" if existed else "created", relative, digest,
+                                        data["managed"].get(relative) or ""))
             if data["managed"].get(relative) != digest:
                 data["managed"][relative] = digest
                 self.save(data)
@@ -312,7 +341,9 @@ class ObsidianLayout:
         """List what the shared note policy did to researcher-touched notes (OBS-04, OBS-15)."""
         from .vault_note_policy import recent_changes
         labels = {"edit_saved": "研究者の編集を履歴に保存して更新", "missing": "削除を検出（再作成しません）",
-                  "recreated": "削除を検出して再作成（ナビゲーション）"}
+                  "recreated": "削除を検出して再作成（ナビゲーション）",
+                  "skipped": "編集された設定ファイル（.base・CSS）のため更新を見送り",
+                  "settings_skipped": "読み取れないObsidian設定のため変更せず"}
         vault_names = {"research": "ResearchVault", "input": "InputVault",
                        "visualization": "VisualizationVault", "orchestrator": "OrchestratorVault"}
         rows = []
@@ -455,6 +486,7 @@ class ObsidianLayout:
         appearance, graph and workspaces are left as they are. Later syncs only refresh
         the app's own bookmark group, and only while it still exists.
         """
+        from .vault_note_policy import NoteWrite, append_change
         data = self.load()
         applied = data.get("obsidian_settings")
         if applied is None:
@@ -476,12 +508,17 @@ class ObsidianLayout:
             if value is None or not valid(value):
                 # Unreadable or half-written by Obsidian: never replace the user's settings.
                 warn_once(("settings", name), f"Obsidian設定 {name} を読み取れないため、変更しませんでした。")
+                append_change(self.note_log, "research", NoteWrite("settings_skipped", ".obsidian/" + name, ""))
                 return None
             return value
         def write(name, value):
             p = safe_path(self.vault, ".obsidian/" + name)
             b = json.dumps(value, ensure_ascii=False, indent=2).encode()
-            if not p.exists() or p.read_bytes() != b: write_atomic(p, b)
+            if not p.exists() or p.read_bytes() != b:
+                previous = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else ""
+                write_atomic(p, b)
+                append_change(self.note_log, "research", NoteWrite(
+                    "settings_written", ".obsidian/" + name, hashlib.sha256(b).hexdigest(), previous))
         if initialize:
             core = read("core-plugins.json", {"file-explorer": True, "global-search": True, "switcher": True,
                 "command-palette": True, "file-recovery": True, "outline": True},
@@ -590,15 +627,9 @@ class ObsidianLayout:
             memberships = {}
             for record in records:
                 for path in safe_path(self.vault, record["folder"]).glob("*.md"):
-                    try:
-                        props, body = unpack(path.read_text(encoding="utf-8-sig"))
-                    except (OSError, ValueError, yaml.YAMLError):
-                        warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
-                        continue
-                    if props.get("graph_kind") != "memo": continue
-                    body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
-                    body = re.sub(r"`[^`\n]*`", "", body)
-                    for target in dict.fromkeys(resolve(value) for value in WIKILINK.findall(body)):
+                    links = memo_links(path)
+                    if links is None: continue
+                    for target in dict.fromkeys(resolve(value) for value in links):
                         if target:
                             memberships.setdefault(target, []).append(record)
             managed = self.load()["managed"]

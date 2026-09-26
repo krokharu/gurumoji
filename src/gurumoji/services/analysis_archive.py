@@ -7,7 +7,6 @@ the store's snapshot/result/datasets contract."""
 from __future__ import annotations
 
 import hashlib
-import os
 import sqlite3
 from collections import Counter
 from typing import Any, Callable
@@ -17,6 +16,7 @@ from ..ai_finishing import FINISHING_VERSION, finishing_changes
 from ..analysis_insights import INSIGHT_VERSION, KWIC_FIELDS
 from ..analysis_method_registry import method_results
 from ..analysis_store import AnalysisStore, digest as archive_digest
+from ..env_settings import local_app_url
 from ..jev_review import (
     JEV_DEFAULT_MODEL,
     JEV_REVIEW_VERSION,
@@ -70,7 +70,7 @@ def make_analysis_archive(
                                     "session_profile": row_session_profile(row)}}
 
     def archive_group_analysis(row, analysis: dict, request_id: str, *, kind: str = "text_analysis",
-                               kwic: dict | None = None, app_url: str = "http://127.0.0.1:7860",
+                               kwic: dict | None = None, app_url: str = "",
                                check_cancelled: Callable[[], None] = lambda: None,
                                store: AnalysisStore | None = None) -> dict:
         datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
@@ -107,7 +107,7 @@ def make_analysis_archive(
 
     def archive_segment_classification(
         row: sqlite3.Row, analysis: dict[str, Any], classification: dict[str, Any],
-        request_id: str, *, app_url: str = "http://127.0.0.1:7860",
+        request_id: str, *, app_url: str = "",
     ) -> dict[str, Any]:
         """Persist one immutable proposal run without changing manual annotations."""
         analysis_with_result = dict(analysis)
@@ -202,17 +202,14 @@ def make_analysis_archive(
             algorithms["jev_review"] = JEV_REVIEW_VERSION
         result = {"schema_version": 1, "methods": methods, "parameters": {"stages": stages},
                   "algorithms": algorithms, "finishing": details, "outline": outline}
-        port = os.environ.get("MOJIOKOSI_PORT", "7860")
-        if not port.isdigit() or not 1 <= int(port) <= 65535: port = "7860"
         return analysis_archive_store().save(item_id=str(row["id"]), kind="ai_finishing",
             snapshot=archive_snapshot(row, analysis), result=result, datasets=datasets,
             request_id=request_id or "finishing-" + str(row["id"]), input_fingerprint=archive_source_stamp(row),
             source_revision=int(row["revision_count"]), analysis_revision=int(row["analysis_revision"]),
-            provider=provider, model=model, app_url=f"http://127.0.0.1:{port}")
+            provider=provider, model=model, app_url=archive_app_url())
 
     def archive_app_url() -> str:
-        port = os.environ.get("MOJIOKOSI_PORT", "7860")
-        return f"http://127.0.0.1:{port if port.isdigit() and 1 <= int(port) <= 65535 else '7860'}"
+        return local_app_url()
 
     def archive_meeting_minutes(row) -> dict | None:
         """Save meeting minutes as their own run, never inside the conversation's text analysis."""

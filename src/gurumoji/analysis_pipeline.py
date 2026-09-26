@@ -25,6 +25,7 @@ from .analysis_core import (
     validate_definition,
     validate_planning_proposal,
 )
+from .env_settings import local_app_url
 
 
 ACTIVE_STEP_STATES = (
@@ -757,7 +758,7 @@ class AnalysisPipelineService:
         if (ensure_running and row["status"] == "waiting" and row["wait_reason"] == "retry"
                 and any(step["status"] == "interrupted" and step["error_code"] == "process_restart"
                         for step in steps)):
-            self.retry(item_id, pipeline_id, {}, app_url="http://127.0.0.1:7860")
+            self.retry(item_id, pipeline_id, {}, app_url=local_app_url())
             return self.status(item_id, pipeline_id, ensure_running=False)
         milestones = []
         for milestone in MILESTONES:

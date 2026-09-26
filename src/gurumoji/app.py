@@ -209,7 +209,6 @@ from .services.ai.client import (
 from .services import speaker_identification
 from .services.speaker_identification import (
     apply_speaker_identity_repairs,
-    chunk_segments,
     make_speaker_registration,
     normalize_detected_speaker_name,
     speaker_identity_context_records,
@@ -1163,7 +1162,17 @@ def update_library_from_payload(item_id: str, payload: Any) -> dict[str, Any]:
 
 def vault_registry():
     from .vault_registry import VaultRegistry
-    return VaultRegistry(DATABASE_FILE, PROJECT_DIRECTORY / "docs" / "program-vault")
+    # Software Vault root: vault_registry.SOFTWARE_ROOT, the one definition (ARCH-03).
+    return VaultRegistry(DATABASE_FILE)
+
+
+def vault_nesting_warnings() -> list[dict[str, Any]]:
+    """OBS-10: Vault roots inside a folder that Obsidian opened as a Vault."""
+    try:
+        return vault_registry().nesting_warnings(research_layout().vault)
+    except OSError as exc:
+        app.logger.warning("Vaultの入れ子を確認できませんでした: %s", exc)
+        return []
 
 
 def vault_publications() -> VaultPublicationService:
@@ -1791,6 +1800,7 @@ def create_app() -> Flask:
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
         obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        vault_warnings=lambda: vault_nesting_warnings(),
         create_backup=lambda include_media: create_data_backup(include_media),
     )
 
