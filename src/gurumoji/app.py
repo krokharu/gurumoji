@@ -209,7 +209,6 @@ from .services.ai.client import (
 from .services import speaker_identification
 from .services.speaker_identification import (
     apply_speaker_identity_repairs,
-    chunk_segments,
     make_speaker_registration,
     normalize_detected_speaker_name,
     speaker_identity_context_records,

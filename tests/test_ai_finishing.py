@@ -19,6 +19,24 @@ class AiFinishingTests(unittest.TestCase):
         return {'items': [{'id': r['id'], 'text': r['text'], 'noise_candidate': False, 'reason': ''}
                           for r in json.loads(prompt.split('\n', 1)[1])['targets']]}
 
+    def test_cleanup_batches_use_a_character_budget_not_small_fixed_batches(self):
+        # Moved from test_ai_scaling (ARCH-06): the retired chunk_segments was never on this path.
+        segments = [{'id': f's{index}', 'speaker': f'SPEAKER_{index % 8:02d}', 'text': '発話' * 20}
+                    for index in range(435)]
+        sizes = []
+
+        def call(system, prompt, name, schema):
+            payload = json.loads(prompt.split('\n', 1)[1])
+            if 'targets' in payload:
+                sizes.append(len(payload['targets']))
+            return self.echo(system, prompt, name, schema)
+
+        result = self.clean(call, segments)
+        self.assertEqual([row['text'] for row in result], [row['text'] for row in segments])
+        self.assertEqual(sum(sizes), 435)
+        self.assertLessEqual(len(sizes), 5)  # a few large batches, not many small ones
+        self.assertTrue(all(size <= 160 for size in sizes))
+
     def test_recommended_cleanup_calls_llm_only_for_jev_candidates(self):
         reviews = {
             "a": {"flagged": True, "decision": "cutoff_suspected"},

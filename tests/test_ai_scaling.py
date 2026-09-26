@@ -4,16 +4,6 @@ import app
 
 
 class AiScalingTests(unittest.TestCase):
-    def test_cleanup_chunking_uses_character_budget_without_small_fixed_batches(self):
-        segments = [
-            {"speaker": f"SPEAKER_{index % 8:02d}", "text": "発話" * 20}
-            for index in range(435)
-        ]
-
-        chunks = app.chunk_segments(segments)
-
-        self.assertEqual([len(chunk) for chunk in chunks], [80, 80, 80, 80, 80, 35])
-
     def test_community_diarization_is_the_default(self):
         self.assertEqual(
             app.DIARIZATION_MODEL,
