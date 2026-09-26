@@ -94,6 +94,20 @@ class VaultRegistryTests(unittest.TestCase):
         self.publish(revision=2)
         self.assertTrue((root / "00-Index.md").exists())
 
+    def test_parent_folder_opened_as_a_vault_is_reported(self):
+        from gurumoji.vault_registry import nesting_warnings
+        data = Path(self.temp.name) / "data"
+        self.assertEqual(nesting_warnings(data), [])
+        (data / "obsidian" / ".obsidian").mkdir(parents=True)  # OBS-10: the parent was opened in Obsidian
+        warnings = nesting_warnings(data)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("「obsidian」フォルダー", warnings[0])
+        self.assertNotIn(str(data), warnings[0])  # folder name only, no full path
+        self.assertTrue((data / "obsidian" / ".obsidian").is_dir())  # never removed
+        with patch.object(app, "DATABASE_FILE", data / "library.sqlite3"):
+            watcher = app.app.test_client().get("/api/config").get_json()["obsidian_watcher"]
+        self.assertEqual(watcher["warnings"], warnings)
+
     def test_software_and_research_vaults_are_not_generated_roots(self):
         data = self.registry.load()
         with self.assertRaises(ValueError):

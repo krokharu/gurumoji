@@ -140,6 +140,41 @@ def run_members(snapshot: dict) -> list[dict]:
     return [member for member in members if isinstance(member, dict)] if isinstance(members, list) else []
 
 
+def enclosing_vaults(root: Path, limit: int = 32) -> list[Path]:
+    """Folders above ``root`` that Obsidian has opened as a Vault (they hold ``.obsidian/``)."""
+    found: list[Path] = []
+    for parent in list(Path(root).resolve().parents)[:limit]:
+        try:
+            if (parent / ".obsidian").is_dir():
+                found.append(parent)
+        except OSError:
+            continue
+    return found
+
+
+def nesting_warnings(data_dir: Path) -> list[str]:
+    """Warn when a folder above the app's Vaults is itself open as a Vault (OBS-10).
+
+    Saving continues: the notes are still correct, but the outer Vault's search,
+    graph and link resolution would mix them in. Only folder names are shown, and
+    the leftover ``.obsidian`` folder is never removed automatically.
+    """
+    obsidian = Path(data_dir) / "obsidian"
+    roots = [obsidian / "ResearchVault"] + [obsidian / VAULTS[kind][0] for kind in GENERATED]
+    parents: list[Path] = []
+    for root in roots:
+        for parent in enclosing_vaults(root):
+            if parent not in parents:
+                parents.append(parent)
+    return [
+        f"「{parent.name or parent}」フォルダーがObsidianの保管庫として開かれています（`.obsidian` があります）。"
+        "その中にあるResearchVaultなどのノートが、親の保管庫の検索・グラフ・リンクに混ざります。"
+        "親フォルダーではなく、各Vaultのフォルダーを保管庫として開いてください。"
+        "親フォルダーの `.obsidian` は自動では削除しません。"
+        for parent in parents
+    ]
+
+
 class VaultRegistry:
     def __init__(self, database_file: Path, software_root: Path | None = None):
         self.data = Path(database_file).parent

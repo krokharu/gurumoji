@@ -518,6 +518,14 @@ def copy_file_limited(source: Path, target: Path, maximum: int) -> int:
     return total
 
 
+def _vault_nesting_warnings() -> list[str]:
+    from .vault_registry import nesting_warnings
+    try:
+        return nesting_warnings(Path(DATABASE_FILE).parent)
+    except OSError:
+        return []
+
+
 def runtime_info() -> dict[str, Any]:
     colab = is_colab_runtime()
     native_file_dialog = platform.system() == "Windows" and not colab and not REMOTE_ACCESS_ENABLED
@@ -1790,7 +1798,7 @@ def create_app() -> Flask:
         available_ai_models=lambda provider, config: available_ai_models(provider, config),
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
-        obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        obsidian_watcher_status=lambda: {**obsidian_watcher_status.snapshot(), "warnings": _vault_nesting_warnings()},
         create_backup=lambda include_media: create_data_backup(include_media),
     )
 
