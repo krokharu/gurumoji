@@ -150,9 +150,11 @@ def register_library_routes(
 
         all_speakers: set[str] = set()
         all_emotions: set[str] = set()
-        candidates: list[tuple[sqlite3.Row, int, list[str], list[str], str]] = []
+        candidates: list[tuple[sqlite3.Row, int, list[dict[str, Any]], list[str], str, list[str]]] = []
         for row in rows:
-            segments = row_segments(row)
+            # Parsed once per row and without stable IDs, which the list does not show (PERF-01).
+            raw_segments = json_load(row["segments_json"], [])
+            segments = [item for item in raw_segments if isinstance(item, dict)] if isinstance(raw_segments, list) else []
             names = json_load(row["speaker_names_json"], {})
             if not isinstance(names, dict):
                 names = {}
@@ -177,12 +179,12 @@ def register_library_routes(
                 continue
             if group_filter and group_filter != "__ungrouped__" and row_group_id != group_filter:
                 continue
-            candidates.append((row, match_count, speakers, emotions, group_names.get(row_group_id, "")))
+            candidates.append((row, match_count, segments, emotions, group_names.get(row_group_id, ""), speakers))
 
         if sort_key == "created_desc":
             candidates.sort(key=lambda item: item[0]["created_at"], reverse=True)
         elif sort_key == "speaker":
-            candidates.sort(key=lambda item: ((item[2][0] if item[2] else "￿"), item[0]["updated_at"]))
+            candidates.sort(key=lambda item: ((item[5][0] if item[5] else "￿"), item[0]["updated_at"]))
         elif sort_key == "emotion":
             candidates.sort(key=lambda item: ((item[3][0] if item[3] else "￿"), item[0]["updated_at"]))
         elif sort_key == "keyword":
@@ -197,8 +199,8 @@ def register_library_routes(
             candidates.sort(key=lambda item: item[0]["updated_at"], reverse=True)
         return jsonify({
             "items": [
-                library_public(row, full=False, match_count=count, group_name=group_name)
-                for row, count, _, _, group_name in candidates
+                library_public(row, full=False, match_count=count, group_name=group_name, segments=segments)
+                for row, count, segments, _, group_name, _ in candidates
             ],
             "total": len(candidates),
             "groups": groups,
