@@ -145,6 +145,18 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual((settings / 'bookmarks.json').read_text(encoding='utf-8'), '{"items": []}')
         self.assertFalse((settings / 'graph.json').exists())
 
+    def test_interview_folder_name_leaves_room_under_the_path_limit(self):
+        from gurumoji import analysis_store
+        title = '非常に長い会議の録音ファイル名' * 6 + '.wav'
+        limit = len(str(self.layout.vault)) + 170
+        with patch.object(analysis_store, 'PATH_LIMIT', limit):
+            record = self.layout.register('long', title)
+        # Room for history and graph notes stays below the interview folder.
+        self.assertLessEqual(len(str(self.layout.vault / record['folder'])) + 130, limit)
+        self.assertLess(len(record['folder']), len('10-インタビュー/I001-') + len(title))
+        self.assertEqual(record['title'], title)  # the full title is kept in the note
+        self.assertEqual(len(self.layout.register('plain', '短い.wav')['folder'].split('-', 2)[-1]), 2)
+
     def test_deleted_conversation_is_marked_and_notes_are_kept(self):
         record = self.layout.register('gone', '削除する会議.wav')
         self.layout.update('gone', '削除する会議.wav', {}, '保存済み')

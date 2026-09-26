@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from . import analysis_store
 from .analysis_store import safe_path, write_atomic, markdown
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
@@ -184,7 +185,10 @@ class ObsidianLayout:
                 self.save(data)
             if item_id not in data["interviews"]:
                 code = f"I{len(data['interviews']) + 1:03d}"
-                name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')[:48] or "インタビュー"
+                # Leave room below the folder for history and graph notes (OBS-14).
+                room = analysis_store.PATH_LIMIT - len(str(self.vault)) - len(f"/10-インタビュー/{code}-") - 130
+                name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')
+                name = analysis_store.fit_name(name, min(48, max(12, room))).strip(' ._') or "インタビュー"
                 folder = f"10-インタビュー/{code}-{name}"
                 data["interviews"][item_id] = {"item_id": item_id, "code": code, "title": title,
                     "folder": folder, "hub": f"{folder}/{code}-概要.md", "links": {}, "status": "保存済み"}
