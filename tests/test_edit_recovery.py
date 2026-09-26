@@ -1081,6 +1081,53 @@ class EditTransactionRecoveryTests(unittest.TestCase):
         self.assertEqual(raised.exception.errno, errno.EIO)
         self.assertEqual(destination.read_bytes(), b'value')
 
+    def test_durable_move_retries_while_another_process_holds_the_file(self):
+        # OBS-17: sync clients and virus scanners hold a file briefly; the move waits and retries.
+        real_replace = app.os.replace
+        calls = []
+
+        def locked_twice(source, destination):
+            calls.append(destination)
+            if len(calls) <= 2:
+                raise PermissionError(13, 'being used by another process')
+            return real_replace(source, destination)
+
+        target = self.root / 'locked-note.md'
+        target.write_bytes(b'old')
+        with (
+            patch.object(app.os, 'replace', side_effect=locked_twice),
+            patch.object(app.durable_files.time, 'sleep') as sleep,
+        ):
+            from gurumoji.analysis_store import write_atomic
+            write_atomic(target, b'new')
+        self.assertEqual(target.read_bytes(), b'new')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(list(self.root.glob('.locked-note.md.*.tmp')), [])
+
+        with (
+            patch.object(app.os, 'replace', side_effect=PermissionError(13, 'still locked')),
+            patch.object(app.durable_files.time, 'sleep') as sleep,
+        ):
+            with self.assertRaises(PermissionError):
+                write_atomic(target, b'newer')
+        self.assertEqual(sleep.call_count, len(app.durable_files.LOCKED_RETRY_DELAYS))
+        self.assertEqual(target.read_bytes(), b'new')
+        self.assertEqual(list(self.root.glob('.locked-note.md.*.tmp')), [])
+
+        with patch.object(app.os, 'replace', side_effect=FileNotFoundError(2, 'gone')), \
+                patch.object(app.durable_files.time, 'sleep') as sleep:
+            with self.assertRaises(FileNotFoundError):
+                write_atomic(target, b'x')
+        sleep.assert_not_called()  # only a held file is retried
+
+    def test_text_writes_keep_platform_line_endings(self):
+        target = self.root / 'lines.txt'
+        app.atomic_write_text(target, 'a\nb\n')
+        self.assertEqual(target.read_bytes(), ('a' + os.linesep + 'b' + os.linesep).encode())
+        app.durable_files.durable_write_json(self.root / 'x.json', {'k': 'あ'})
+        self.assertEqual((self.root / 'x.json').read_bytes(), '{"k":"あ"}\n'.encode())
+
     def test_posix_link_fallback_never_deletes_replaced_destination(self):
         source = self.root / 'link-source.txt'
         destination = self.root / 'link-destination.txt'

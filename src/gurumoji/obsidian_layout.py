@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from . import analysis_store
 from .analysis_store import safe_path, write_atomic, markdown
 from .text_utils import utc_now_iso
 from .analysis_method_registry import METHOD_GROUPS, method_status_label
@@ -32,6 +33,29 @@ WIKILINK = re.compile(r"(?<![!\\])\[\[([^\]#|]+)(?:[^\]]*)\]\]")
 # Process-wide, so the 10-second watcher reports a persistent condition once.
 _WARNED: set[tuple[str, str]] = set()
 _SCANNED: dict[tuple[str, str], float] = {}
+# Theme sync runs every 10 seconds; unchanged notes are not read again (OBS-08).
+_NOTE_LINKS: dict[str, tuple[int, int, object, list[str]]] = {}
+
+
+def note_links(path: Path) -> tuple[object, list[str]]:
+    """The note's graph_kind and, for research memos, its raw wikilink targets.
+
+    Cached by modification time and size, so an idle Vault is only stat()ed.
+    """
+    stat = path.stat()
+    key = str(path)
+    cached = _NOTE_LINKS.get(key)
+    if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+        return cached[2], cached[3]
+    props, body = unpack(path.read_text(encoding="utf-8-sig"))
+    kind = props.get("graph_kind")
+    links: list[str] = []
+    if kind == "memo":
+        body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
+        body = re.sub(r"`[^`\n]*`", "", body)
+        links = WIKILINK.findall(body)
+    _NOTE_LINKS[key] = (stat.st_mtime_ns, stat.st_size, kind, links)
+    return kind, links
 
 
 def warn_once(key: tuple[str, str], message: str) -> None:
@@ -184,7 +208,10 @@ class ObsidianLayout:
                 self.save(data)
             if item_id not in data["interviews"]:
                 code = f"I{len(data['interviews']) + 1:03d}"
-                name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')[:48] or "インタビュー"
+                # Leave room below the folder for history and graph notes (OBS-14).
+                room = analysis_store.PATH_LIMIT - len(str(self.vault)) - len(f"/10-インタビュー/{code}-") - 130
+                name = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', '_', Path(title).stem).strip(' ._')
+                name = analysis_store.fit_name(name, min(48, max(12, room))).strip(' ._') or "インタビュー"
                 folder = f"10-インタビュー/{code}-{name}"
                 data["interviews"][item_id] = {"item_id": item_id, "code": code, "title": title,
                     "folder": folder, "hub": f"{folder}/{code}-概要.md", "links": {}, "status": "保存済み"}
@@ -591,14 +618,12 @@ class ObsidianLayout:
             for record in records:
                 for path in safe_path(self.vault, record["folder"]).glob("*.md"):
                     try:
-                        props, body = unpack(path.read_text(encoding="utf-8-sig"))
+                        kind, values = note_links(path)
                     except (OSError, ValueError, yaml.YAMLError):
                         warn_once(("memo", path.as_posix()), "テーマ同期で読めないメモをスキップしました。")
                         continue
-                    if props.get("graph_kind") != "memo": continue
-                    body = re.sub(r"(?ms)^\s*(`{3,}|~{3,}).*?^\s*\1\s*$", "", body)
-                    body = re.sub(r"`[^`\n]*`", "", body)
-                    for target in dict.fromkeys(resolve(value) for value in WIKILINK.findall(body)):
+                    if kind != "memo": continue
+                    for target in dict.fromkeys(resolve(value) for value in values):
                         if target:
                             memberships.setdefault(target, []).append(record)
             managed = self.load()["managed"]

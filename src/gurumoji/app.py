@@ -209,7 +209,6 @@ from .services.ai.client import (
 from .services import speaker_identification
 from .services.speaker_identification import (
     apply_speaker_identity_repairs,
-    chunk_segments,
     make_speaker_registration,
     normalize_detected_speaker_name,
     speaker_identity_context_records,
@@ -516,6 +515,14 @@ def copy_file_limited(source: Path, target: Path, maximum: int) -> int:
         target.unlink(missing_ok=True)
         raise ValueError("The selected media file is empty.")
     return total
+
+
+def _vault_nesting_warnings() -> list[str]:
+    from .vault_registry import nesting_warnings
+    try:
+        return nesting_warnings(Path(DATABASE_FILE).parent)
+    except OSError:
+        return []
 
 
 def runtime_info() -> dict[str, Any]:
@@ -1790,7 +1797,7 @@ def create_app() -> Flask:
         available_ai_models=lambda provider, config: available_ai_models(provider, config),
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
-        obsidian_watcher_status=lambda: obsidian_watcher_status.snapshot(),
+        obsidian_watcher_status=lambda: {**obsidian_watcher_status.snapshot(), "warnings": _vault_nesting_warnings()},
         create_backup=lambda include_media: create_data_backup(include_media),
     )
 

@@ -268,6 +268,23 @@ class AnalysisStorageTests(unittest.TestCase):
         self.assertEqual(result['vault_status'], 'completed')
         self.assertEqual(self.artifact(result, 'result.json'), before)
 
+    def test_generated_note_paths_fit_the_windows_path_limit(self):
+        # OBS-14: a deep data folder on Windows must not push note paths past the limit.
+        limit = len(str(self.store.vault)) + 120
+        with patch.object(analysis_store, 'PATH_LIMIT', limit):
+            run = self.save().get_json()['run']
+        self.assertEqual(run['vault_status'], 'completed', run)
+        notes = list(self.store.vault.rglob('*.md'))
+        self.assertTrue(any('/graph/' in p.as_posix() for p in notes))
+        too_long = [p for p in notes if len(str(p)) > limit and '/graph/' in p.as_posix()]
+        self.assertEqual(too_long, [])
+        shortened = [p.name for p in notes if '/graph/' in p.as_posix() and len(p.stem) < 40 and '-' in p.stem]
+        self.assertTrue(shortened)
+        self.assertEqual(analysis_store.fit_name('短い名前', 20), '短い名前')
+        long_name = analysis_store.fit_name('結果-表-' + 'あ' * 80, 30)
+        self.assertEqual(len(long_name), 30)
+        self.assertEqual(long_name, analysis_store.fit_name('結果-表-' + 'あ' * 80, 30))  # stable
+
     def test_generated_vault_failure_is_reported_and_retryable(self):
         # OBS-18: ResearchVault succeeds but Input/Orchestrator/Visualization fail.
         with patch('gurumoji.vault_registry.VaultRegistry.publish_analysis', side_effect=OSError('generated vault is locked')):

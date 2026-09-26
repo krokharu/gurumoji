@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .durable_files import write_durably
+
 MANIFEST = "manifest.json"
 PENDING = "manifest.pending.json"
 ENTRY_PATTERN = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{12}")
@@ -81,9 +83,7 @@ def snapshot_rows(connection: Any, item_id: str) -> dict[str, list[dict[str, Any
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    write_durably(path, json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
 def _read_json(path: Path) -> dict[str, Any]:

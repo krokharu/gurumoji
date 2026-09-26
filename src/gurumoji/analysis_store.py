@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
+from .services.durable_files import write_durably
 
 LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
@@ -97,20 +98,8 @@ def safe_path(root: Path, relative: str) -> Path:
 
 
 def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if create_only:
-            # Publish the complete file without replacing a concurrently created note.
-            os.link(temporary, path)
-        else:
-            os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # One implementation with the transcript outputs: folder sync and lock retries included (ARCH-04, OBS-17).
+    write_durably(path, data, create_only=create_only)
 
 
 def markdown(value) -> str:
@@ -118,11 +107,32 @@ def markdown(value) -> str:
     return re.sub(r"([\\`*_{}\[\]()#+.!|^~$])", r"\\\1", text)
 
 
-def graph_node_path(run_dir: str, prefix: str, label: str) -> str:
-    """Make readable, filesystem-safe names for nodes shown in Obsidian Graph."""
+# Windows without long-path support fails at 260 characters; stay below it with a margin (OBS-14).
+PATH_LIMIT = 250 if os.name == "nt" else 4000
+
+
+def fit_name(stem: str, available: int) -> str:
+    """Shorten ``stem`` to ``available`` characters, kept unique and stable by a short hash."""
+    if len(stem) <= available:
+        return stem
+    tag = "-" + hashlib.sha256(stem.encode("utf-8")).hexdigest()[:8]
+    keep = max(0, available - len(tag))
+    return stem[:keep].rstrip(" ._-") + tag if keep else tag[1:]
+
+
+def graph_node_path(run_dir: str, prefix: str, label: str, root: Path | None = None) -> str:
+    """Make readable, filesystem-safe names for nodes shown in Obsidian Graph.
+
+    With ``root``, the name is shortened when the full path would pass PATH_LIMIT.
+    """
     clean = re.sub(r'[\\/:*?"<>|#^\[\]%\x00-\x1f]', "_", str(label)).strip(" ._")
     clean = re.sub(r"\s+", " ", clean)[:72] or "結果"
-    return f"{run_dir}/graph/{prefix}-{clean}.md"
+    stem = f"{prefix}-{clean}"
+    if root is not None:
+        over = len(str(Path(root) / run_dir / "graph" / (stem + ".md"))) - PATH_LIMIT
+        if over > 0:
+            stem = fit_name(stem, max(12, len(stem) - over))
+    return f"{run_dir}/graph/{stem}.md"
 
 
 def csv_bytes(fields: list[str], rows: list[dict]) -> bytes:
@@ -710,11 +720,11 @@ class AnalysisStore:
             selected = grouped.get(group_id, [])
             if not selected:
                 continue
-            group_path = graph_node_path(run_dir, f"分類-{group_id}", group_title)
+            group_path = graph_node_path(run_dir, f"分類-{group_id}", group_title, self.vault)
             method_paths = []
             for method in selected:
                 method_id = str(method["method_id"])
-                method_path = graph_node_path(run_dir, f"手法-{method_id}", str(method["title"]))
+                method_path = graph_node_path(run_dir, f"手法-{method_id}", str(method["title"]), self.vault)
                 method_paths.append(method_path)
                 result_path = f"{run_dir}/method-{method_id}.md"
                 result_nodes = self._graph_result_nodes(run_dir, method)
@@ -750,8 +760,7 @@ class AnalysisStore:
             links.append(f"[[{group_path[:-3]}|{markdown(group_title)}]]")
         return links
 
-    @staticmethod
-    def _graph_result_nodes(run_dir: str, method: dict) -> list[tuple[str, str, str]]:
+    def _graph_result_nodes(self, run_dir: str, method: dict) -> list[tuple[str, str, str]]:
         """Return bounded, human-readable leaves for a method's graph branch."""
         method_id = str(method["method_id"])
         nodes: list[tuple[str, str, str]] = []
@@ -763,11 +772,11 @@ class AnalysisStore:
                 body += "\n".join("- " + markdown(item.get("text")) for item in bullets) + "\n"
             else:
                 body += "\n".join("- " + markdown(item) for item in section.get("bullets", [])) + "\n"
-            nodes.append((graph_node_path(run_dir, f"アウトライン-{index:02d}", title), "アウトライン：" + title, body))
+            nodes.append((graph_node_path(run_dir, f"アウトライン-{index:02d}", title, self.vault), "アウトライン：" + title, body))
         for index, finding in enumerate(method.get("findings", [])[:12], 1):
             title = str(finding.get("title") or f"見解 {index}")
             body = "## 結果の要約\n\n" + markdown(finding.get("text")) + "\n"
-            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-見解-{index:02d}", title), "結果：" + title, body))
+            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-見解-{index:02d}", title, self.vault), "結果：" + title, body))
         for index, preview in enumerate(method.get("previews", [])[:12], 1):
             dataset = str(preview.get("dataset") or f"データ {index}")
             body = f"## {markdown(dataset)}\n\n全{preview.get('total', 0)}行のうち先頭{len(preview.get('rows', []))}行を表示します。\n\n"
@@ -775,10 +784,10 @@ class AnalysisStore:
             for row in preview.get("rows", [])[:5]:
                 values = " / ".join(markdown(str(row.get(field, ""))[:120]) for field in fields)
                 body += "- " + values + "\n"
-            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-表-{index:02d}", dataset), "結果：" + dataset, body))
+            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-表-{index:02d}", dataset, self.vault), "結果：" + dataset, body))
         if not nodes:
             state = markdown(method.get("status") or "不明")
-            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-状態", "実行状態"), "結果：実行状態", "## 保存時点の状態\n\n" + state + "\n"))
+            nodes.append((graph_node_path(run_dir, f"結果-{method_id}-状態", "実行状態", self.vault), "結果：実行状態", "## 保存時点の状態\n\n" + state + "\n"))
         return nodes
 
     def publish_index(self, item_id: str) -> None:
