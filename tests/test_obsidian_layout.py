@@ -157,6 +157,28 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(record['title'], title)  # the full title is kept in the note
         self.assertEqual(len(self.layout.register('plain', '短い.wav')['folder'].split('-', 2)[-1]), 2)
 
+    def test_idle_theme_sync_reads_only_changed_memos(self):
+        # OBS-08: the 10-second theme sync stat()s unchanged notes instead of reading them.
+        for index in range(3):
+            self.layout.update(str(index), f'会議{index}.wav', {}, '保存済み')
+        (self.layout.vault / '20-テーマ').mkdir(exist_ok=True)
+        (self.layout.vault / '20-テーマ/働き方.md').write_text('# 働き方\n', encoding='utf-8')
+        self.layout.sync_themes()
+        memo = self.layout.vault / self.layout.note_path('1', '', '研究メモ')
+        real = Path.read_text
+        reads = []
+        def counting(path, *args, **kwargs):
+            reads.append(path)
+            return real(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', counting):
+            self.layout.sync_themes()
+        self.assertFalse([p for p in reads if p.name.endswith('研究メモ.md')])
+        with memo.open('a', encoding='utf-8') as handle:
+            handle.write('\n[[20-テーマ/働き方]]\n')
+        self.layout.sync_themes()
+        relation = next((self.layout.vault / '40-研究/テーマ関連').glob('*.md')).read_text(encoding='utf-8')
+        self.assertIn('interview/i002', relation)  # the edit is picked up on the next sync
+
     def test_deleted_conversation_is_marked_and_notes_are_kept(self):
         record = self.layout.register('gone', '削除する会議.wav')
         self.layout.update('gone', '削除する会議.wav', {}, '保存済み')
