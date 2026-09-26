@@ -125,11 +125,17 @@ def meeting_source_link(transcript_path: str, segment_id: str, start) -> str:
 
 def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
                          tasks_path: str, json_path: str) -> str:
-    """Render a meeting note that stays useful inside Obsidian without plugins."""
-    tasks = minutes.get("tasks") if isinstance(minutes.get("tasks"), list) else []
-    decisions = minutes.get("decisions") if isinstance(minutes.get("decisions"), list) else []
-    analysis = minutes.get("analysis") if isinstance(minutes.get("analysis"), dict) else {}
-    priority_labels = {"high": "高", "medium": "中", "low": "低", "unspecified": "未設定"}
+    """Render a meeting note that stays useful inside Obsidian without plugins.
+
+    Reads the same normalised minutes as the download renderer
+    (format_meeting_minutes_markdown); only the presentation differs (ARCH-07).
+    """
+    from .services.meeting_minutes import MEETING_TASK_PRIORITY_LABELS, normalize_meeting_minutes
+    minutes = normalize_meeting_minutes(minutes)
+    tasks = minutes.get("tasks", [])
+    decisions = minutes.get("decisions", [])
+    analysis = minutes.get("analysis", {})
+    priority_labels = MEETING_TASK_PRIORITY_LABELS
     lines = [
         f"# {markdown(Path(title).stem)} 会議議事録",
         "",
@@ -139,11 +145,11 @@ def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
         "## サマリー",
         "",
     ]
-    summary = minutes.get("summary") if isinstance(minutes.get("summary"), list) else []
-    lines.extend("- " + markdown(value) for value in summary if str(value or "").strip())
+    summary = minutes.get("summary", [])
+    lines.extend("- " + markdown(value) for value in summary)
     if not summary:
         lines.append("- サマリーはありません。")
-    priority_counts = analysis.get("priority_counts") if isinstance(analysis.get("priority_counts"), dict) else {}
+    priority_counts = analysis.get("priority_counts", {})
     lines.extend([
         "",
         "## 集計",
@@ -188,7 +194,7 @@ def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
     else:
         lines.append("決定事項候補は検出されませんでした。")
     lines.extend(["", "## 発話量", ""])
-    activity = analysis.get("speaker_activity") if isinstance(analysis.get("speaker_activity"), list) else []
+    activity = analysis.get("speaker_activity", [])
     if activity:
         for item in activity:
             lines.append(

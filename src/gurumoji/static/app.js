@@ -1783,7 +1783,7 @@ function updateSpeakerRegistryOverview() {
 }
 
 function removeSpeakerRecord(record) {
-  if (!window.confirm(`${speakerRecordName(record)} を話者管理から削除しますか？\n「変更を保存」するまで削除は確定しません。`)) return;
+  if (!window.confirm(`${speakerRecordName(record)} を話者管理から削除しますか？\n「話者情報を保存」するまで削除は確定しません。`)) return;
   speakerRegistryDeletedIds.add(record.id);
   speakerRegistry = speakerRegistry.filter(item => item.id !== record.id);
   setSpeakerRegistryDirty();
@@ -3852,7 +3852,7 @@ listen(aiModelForm, 'submit', async event => {
     if (!response.ok) throw new Error(data.error || 'モデル設定を保存できませんでした。');
     if (aiModelDialog) aiModelDialog.close();
     await loadConfig();
-    setAlert(document.querySelector('#token-message'), `${model} をtokens.jsonに保存しました。`);
+    setAlert(document.querySelector('#token-message'), `${model} を使用モデルとして保存しました（config/ai_models.json）。`);
   } catch (error) {
     setAlert(aiModelError, error.message, true);
     if (saveAiModelButton) saveAiModelButton.disabled = false;
@@ -4015,8 +4015,9 @@ function applyMeetingObsidianStatus(data) {
   const state = data && data.status ? data.status : 'unprepared';
   meetingObsidianStatus.dataset.state = state;
   meetingObsidianStatus.textContent = data?.message || '会議議事録はObsidianに未保存です。';
-  meetingObsidianSaveButton.textContent = state === 'stale' ? '更新版をObsidianに保存'
-    : state === 'completed' ? 'Obsidianに保存済み' : 'Obsidianに保存';
+  // UI-02: the label names what is saved, not just "保存".
+  meetingObsidianSaveButton.textContent = state === 'stale' ? '議事録の更新版をObsidianに保存'
+    : state === 'completed' ? '議事録はObsidianに保存済み' : '議事録をObsidianに保存';
   meetingObsidianOpenLink.hidden = !data?.uri;
   if (data?.uri) meetingObsidianOpenLink.href = data.uri;
 }
@@ -5471,7 +5472,7 @@ function setAnalysisDirty(dirty, trackMutation = true) {
     button.disabled = !analysisState.dirty || analysisSaveInProgress;
     button.textContent = analysisSaveInProgress
       ? '保存中…'
-      : analysisState.dirty ? '設定とコードを保存' : '保存済み';
+      : analysisState.dirty ? '分析条件・コードを保存' : '保存済み';
   });
   document.querySelectorAll('[data-analysis-save-state]').forEach(element => {
     element.textContent = analysisState.dirty ? '未保存の変更があります' : '分析設定は保存済みです';
@@ -7649,7 +7650,7 @@ function renderManualAnalysis(compact) {
     analysisElement('span', '', '保存すると自動集計とExcel・CSV・JSONも更新されます。')
   );
   saveText.firstElementChild.dataset.analysisSaveState = 'true';
-  const save = analysisElement('button', 'primary-button small', analysisState.dirty ? '設定とコードを保存' : '保存済み');
+  const save = analysisElement('button', 'primary-button small', analysisState.dirty ? '分析条件・コードを保存' : '保存済み');
   save.type = 'button';
   save.dataset.analysisSave = 'true';
   save.disabled = !analysisState.dirty;

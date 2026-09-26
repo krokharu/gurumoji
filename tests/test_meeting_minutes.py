@@ -169,5 +169,38 @@ class MeetingMinutesTests(unittest.TestCase):
         self.assertEqual(normalized["analysis"]["speaker_activity"][0]["seconds"], 0.0)
 
 
+
+class MeetingRendererTests(unittest.TestCase):
+    def test_download_and_obsidian_renderers_read_the_same_normalised_minutes(self):
+        # ARCH-07: one intermediate form, two presentations.
+        from gurumoji.obsidian_finishing import meeting_minutes_note
+        from gurumoji.services.meeting_minutes import format_meeting_minutes_markdown
+        raw = {
+            "summary": ["要点", "", None],
+            "tasks": [
+                {"title": "資料を送る", "priority": "HIGH", "due_date": "来週", "due_text": "来週まで",
+                 "owner": "佐藤", "evidence_start": 65, "evidence_segment_id": "s1"},
+                {"title": "", "priority": "urgent"},
+                "壊れた行",
+            ],
+            "decisions": [{"text": "採用する", "evidence_start": 3}, {"text": ""}],
+            "analysis": {"due_count": 99, "speaker_activity": [{"speaker": "佐藤", "turns": 2, "seconds": 61}]},
+        }
+        download = format_meeting_minutes_markdown("会議.wav", raw)
+        note = meeting_minutes_note("会議.wav", raw, "10-インタビュー/I001/I001-全文.md",
+                                    "添付/t.csv", "添付/j.json")
+        for text in (download, note):
+            self.assertIn("資料を送る", text)
+            self.assertIn("要確認のタスク候補", text)
+            self.assertIn("採用する", text)
+            self.assertNotIn("None", text)
+        # Invalid priority and a non-date due_date are normalised the same way in both.
+        self.assertIn("| 資料を送る | 佐藤 | 高 | 来週まで |", download)
+        self.assertIn("  - 優先度: **高**", note)
+        self.assertIn("  - 期限: 来週まで", note)
+        # Counts come from the normalised tasks, not from the raw analysis block.
+        self.assertIn("| 期限の言及 | 1 |", note)
+        self.assertIn("| タスク候補 | 2 |", note)
+
 if __name__ == "__main__":
     unittest.main()

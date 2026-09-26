@@ -87,7 +87,7 @@ tags:
 | --- | --- | --- |
 | AI仕上げ：アプリ内ジョブ／Obsidian作業台 | Obsidian方式を既定にした後も、API互換（`finish_in_obsidian=0`）とテストのためにジョブ内の経路が残った | Obsidian方式を正にする。ジョブ内の経路は「おすすめ」「高度」モードが使うため残す。校正の手順（全体アウトライン → 全文校正 → Jev比較）は `services/ai/transcript_finishing.run_full_cleanup` に共通化済み（2026-09-25、ARCH-07） |
 | 話者特定：ジョブ／作業画面の再特定／仕上げのオプション | 機能を追加するたびに入口が増えた | 実装は `detect_speaker_names_with_ai` の1つ。UIの入口を整理する |
-| 議事録Markdown：`format_meeting_minutes_markdown`（出力・API）／`meeting_minutes_note`（Obsidian） | Obsidian用にリンク付きの形式を別途作った | 同じ中間データからレンダラーを2つ作る形に整理する |
+| 議事録Markdown：`format_meeting_minutes_markdown`（出力・API）／`meeting_minutes_note`（Obsidian） | Obsidian用にリンク付きの形式を別途作った | 整理済み（2026-09-25、ARCH-07）：どちらも `normalize_meeting_minutes` の結果を描画する |
 | 議事録のVault出力：作業台の会議ノート（`I###-会議議事録-*.md`）／固定保存の実行（`meeting_minutes` run） | 閲覧用と、再現用の固定保存を分けた | ノートの役割をドキュメントに明記し、ナビでは一方へ誘導する |
 | 文字起こし保存API：`PUT /api/jobs/<id>/transcript`／`PUT /api/library/<id>` | ジョブ完了直後の保存と、ライブラリからの保存 | 内部の実装は共通。APIは互換として残す |
 | ダウンロードAPI：`/api/jobs/<id>/files/…`／`/api/library/<id>/files/…` | 同上 | 同上 |

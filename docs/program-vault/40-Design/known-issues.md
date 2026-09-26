@@ -14,7 +14,9 @@ tags:
 
 # 既知の問題点と改善方法（収束フェーズ）
 
-**現在の状態（2026-09-25）：** 登録50件（BUG-03を追加）のうち、対応済み24件、一部対応1件（OBS-15）、未対応21件、状態欄が空のもの4件（DEV-01、UI-01〜03）。今回は、P1の未対応だったOBS-03／09／11／12／18とDATA-01／02／03、および新規のBUG-03に対応した。DATA-01は利用者の選択により「ゴミ箱＋一定期間後の自動削除」とした。残りの未対応は、収束計画で「保留」とした設計上の項目。
+**現在の状態（2026-09-26）：** 登録50件のうち、対応済み44件、一部対応4件（ARCH-07、OBS-14、DOC-01、PERF-01）、対応しない1件（UI-01：選別どおり集約しない）、保留1件（DEV-01：利用者のPCの `runtime/` の整理で、利用者の確認待ち）。2026-09-25〜26に、未対応だった保留項目を、改善案と選別の方針のうち一方を選んで実装した（各行の状態に選んだ方と理由を記載）。
+
+**前回の状態（2026-09-25）：**  登録50件（BUG-03を追加）のうち、対応済み24件、一部対応1件（OBS-15）、未対応21件、状態欄が空のもの4件（DEV-01、UI-01〜03）。今回は、P1の未対応だったOBS-03／09／11／12／18とDATA-01／02／03、および新規のBUG-03に対応した。DATA-01は利用者の選択により「ゴミ箱＋一定期間後の自動削除」とした。残りの未対応は、収束計画で「保留」とした設計上の項目。
 
 **前回の状態（2026-09-15）：** コミット`1b8fe41`に8件の対応を収録し、プッシュ済み。43件中、対応済み8件・一部対応1件（DOC-03）・未対応34件。元の問題・根拠・改善案は調査時点の記録で、採用した修正は「状態」のリンクを参照する。全体の集計は[[40-Design/convergence-plan#プッシュ済みの対応状況（2026-09-15）]]。
 
@@ -50,13 +52,13 @@ tags:
 
 | ID | 重要度 | 問題 | 根拠 | 影響 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ARCH-01 | 中 | `app.py`（約15,700行）に、API・パイプライン・編集トランザクション・分析集計・議事録・出力・AI呼び出し・Obsidian監視が集中している | [[10-Architecture/system-map]] | 変更の影響が読めない。AIや人が既存関数を見落とし、同じものを再実装しやすい | 全面的な書き換えはしない。責務ごとに既存モジュールへ関数を移すだけの変更を、1レビュー1責務で行う（例：議事録 → 新設ではなく既存の分析側へ。Obsidian呼び出し → `obsidian_finishing`・`vault_registry` 側へ）。ルートは最後まで `app.py` に残す | 未対応 | 保留：大規模移設は不具合修正後 |
+| ARCH-01 | 中 | `app.py`（約15,700行）に、API・パイプライン・編集トランザクション・分析集計・議事録・出力・AI呼び出し・Obsidian監視が集中している | [[10-Architecture/system-map]] | 変更の影響が読めない。AIや人が既存関数を見落とし、同じものを再実装しやすい | 全面的な書き換えはしない。責務ごとに既存モジュールへ関数を移すだけの変更を、1レビュー1責務で行う（例：議事録 → 新設ではなく既存の分析側へ。Obsidian呼び出し → `obsidian_finishing`・`vault_registry` 側へ）。ルートは最後まで `app.py` に残す | 対応済み（2026-09-25確認。[[70-Changes/app-py-phase5]] で `app.py` を8,361行から約1,900行の組み立て役に縮め、ルートは `web/`、処理は `handlers/`・`services/` へ責務ごとに移した。現在は約1,980行で、設定・依存の配線・起動だけを持つ。問題欄の「約15,700行」は調査時点の値） | 保留：大規模移設は不具合修正後 |
 | ARCH-02 | 中 | 保存・Vault系のモジュール間に循環依存があり、関数内importで回避している | `analysis_store` ⇄ `obsidian_layout`／`vault_registry`、`obsidian_finishing` ⇄ `obsidian_layout`、`obsidian_migration` → `obsidian_finishing` | 読み込み順に依存する不具合、テストしにくい | 下位の共通関数（`safe_path`、`write_atomic`、`markdown`、frontmatterの入出力）を、依存の最下層になる1か所にまとめ、一方向の依存にする。既存の上位モジュールには置けないため、新しいファイルが必要な数少ないケースになる（理由をADRに書く） | 対応済み（2026-09-25、ADR-121。`safe_path`・`write_atomic`・`markdown`・`canonical`・frontmatterの読み取り・ResearchVaultのパスを最下層の `vault_files.py` に移した。Vaultの書き込み主体はここからimportし、`analysis_store` は同じ名前を再exportする。先頭のimportで循環しないことをテストで確認する） | 保留：共通層が必要になった時点で局所抽出 |
 | ARCH-03 | 中 | 同じ値を複数の場所で算出している | ResearchVaultのパス3か所（`ObsidianLayout`・`ObsidianWorkbench`・`AnalysisStore` の `__init__`）、Software Vaultのパス2か所（`vault_registry.SOFTWARE_ROOT`、`app.vault_registry`）、アプリURL・ポート3か所（`archive_ai_finishing` 内、`archive_app_url`、既定引数の `http://127.0.0.1:7860`） | 保存先の変更やポート変更の一部だけが反映され、リンク切れや別フォルダーへの書き込みが起きる | パスは `VaultRegistry`（または既存の台帳）から、URLは `archive_app_url` から取得するように統一する | 対応済み（2026-09-25。ResearchVaultのパスは `analysis_store.research_vault_root`、Software Vaultは `vault_registry.SOFTWARE_ROOT`（`app.vault_registry` の別計算を削除）、アプリURLは `env_settings.local_app_url`（`MOJIOKOSI_PORT` を反映）の1か所で算出する。既定引数の `http://127.0.0.1:7860` は空にして保存時に解決する。保存先の変更UI・`vaults.json` への一元化は選別どおり行わない） | 保留：保存先変更の実害を確認してから |
 | ARCH-04 | 低中 | 原子的書き込みの関数が重複している | `analysis_store.write_atomic`、`app.py`: `atomic_write_text`、`atomic_write_bytes`、`durable_write_json`、`temporary_output_path`、`sync_directory_metadata` | `fsync` やフォルダー同期の扱いに差があり、片方だけ修正される | フォルダーの同期も含む1実装に統一し、他は薄い呼び出しにする | 対応済み（2026-09-25。書き込みの本体を `services/durable_files.write_bytes_atomically`（一時ファイルをfsync → `durable_move` → フォルダーのfsync）に1つにした。`analysis_store.write_atomic` と `atomic_write_bytes` はその薄い呼び出し。`atomic_write_text` は改行変換を保つため文字モードのまま同じ移動処理を使う。`durable_write_json` と編集トランザクションの専用処理は要件が違うため残す） | 保留：原子性・耐久性の要件を先に比較 |
 | ARCH-05 | 中 | フロントエンドのAPI呼び出しが各JSに散らばり、`apiFetch` と生の `fetch` が混在している | [[10-Architecture/system-map]]、BUG-01 | セキュリティヘッダーやエラー処理の漏れ | 全ての呼び出しを `apiFetch` に統一する。エンドポイント文字列の重複は、画面を整理するときに合わせて整理する | 対応済み（[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]） | 統合 → BUG-01 |
 | ARCH-06 | 低 | AI入力の分割関数が3種類ある | `app.chunk_segments`（テストからしか参照されない）、`analysis_insights.bounded_batches`、`ai_finishing.fragments` | 使われていないコードが残る | `chunk_segments` をDeprecated候補にする（[[20-Modules/feature-inventory]] の確認項目を満たしてから整理） | 対応済み（2026-09-25。`chunk_segments` を削除し、テストの意図を `ai_finishing.cleanup_batches`（全文校正の実際の分割）へ移した） | 保留：利用箇所とテストの意図を確認してから |
-| ARCH-07 | 中 | 同じ目的の処理経路が二重になっている | AI仕上げ（ジョブ内／Obsidian）、話者特定3経路、議事録Markdown生成2種、議事録のVault出力2系統、保存API2系統、ダウンロードAPI2系統 | 片方の経路だけ修正される。UIの入口が増える | [[20-Modules/feature-inventory]] の「Duplicate」表の方針で1つにまとめる。APIの互換は残し、実装は共通化する | 一部対応（2026-09-25。AI仕上げは入口を2つ残し、「全体アウトライン → 全文校正 → Jev比較」と段階の記録を `services/ai/transcript_finishing.run_full_cleanup` に共通化した。失敗時はジョブ内が警告して続行、Obsidianが停止。話者特定・議事録・保存API・ダウンロードAPIは未対応） | 保留：用途の異なる経路を一律統合しない |
+| ARCH-07 | 中 | 同じ目的の処理経路が二重になっている | AI仕上げ（ジョブ内／Obsidian）、話者特定3経路、議事録Markdown生成2種、議事録のVault出力2系統、保存API2系統、ダウンロードAPI2系統 | 片方の経路だけ修正される。UIの入口が増える | [[20-Modules/feature-inventory]] の「Duplicate」表の方針で1つにまとめる。APIの互換は残し、実装は共通化する | 一部対応（2026-09-25。AI仕上げは入口を2つ残し、校正の手順を `services/ai/transcript_finishing.run_full_cleanup` に共通化した。議事録Markdownは、ダウンロード用（`format_meeting_minutes_markdown`）とObsidian用（`meeting_minutes_note`）が同じ `normalize_meeting_minutes` の結果を描画する形にした（優先度の表記も共通）。保存API・ダウンロードAPIは内部実装が共通で、APIは互換のため残す。話者特定3経路・議事録のVault出力2系統は用途が異なるため統合しない） | 保留：用途の異なる経路を一律統合しない |
 
 ## OBS：Obsidian連携（データ保全）
 
@@ -121,14 +123,14 @@ tags:
 
 | ID | 重要度 | 問題 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- |
-| DEV-01 | 低 | `runtime/` 直下に由来が分からないファイルと検証出力がある（[[20-Modules/feature-inventory]] の「Unknown」） | 削除しない。利用者に確認してから、`runtime/archive` へ移すなどで整理する。検証スクリプトの出力先は `runtime/logs` などに決める | 未対応 | 保留：由来不明。データ削除・移動の対象外 |
+| DEV-01 | 低 | `runtime/` 直下に由来が分からないファイルと検証出力がある（[[20-Modules/feature-inventory]] の「Unknown」） | 削除しない。利用者に確認してから、`runtime/archive` へ移すなどで整理する。検証スクリプトの出力先は `runtime/logs` などに決める | 保留（利用者の確認待ち。対象は利用者のPCの \`runtime/\` で、このリポジトリには含まれない。削除・移動は利用者の判断で行う） | 保留：由来不明。データ削除・移動の対象外 |
 
 ## UI：画面の収束（詳細は [[40-Design/ui-ux-issues]]）
 
 | ID | 重要度 | 問題 | 改善方法 | 状態 | 選別（2026-09-14） |
 | --- | --- | --- | --- | --- | --- |
-| UI-01 | 中 | Obsidian関連の入口が5か所に分かれている：新規作成のチェック、結果画面「Obsidianで仕上げ」、議事録パネル「Obsidianに保存」、分析「分析結果をObsidianに保存」、比較「比較結果を保存」 | 「保存・Obsidian」の操作を、会話ごとの1パネル（状態表示と操作）に集約する | 未対応 | 保留：異なる保存対象の一律集約案は不採用 |
-| UI-02 | 中 | 「保存」の意味が複数ある：編集内容の保存、話者管理の保存、分析設定の保存、分析の固定保存、Obsidianへの保存 | ボタン名を「編集を保存」「分析条件を保存」「結果を記録（固定）」のように対象で区別する | 未対応 | 統合 → UX-04 |
+| UI-01 | 中 | Obsidian関連の入口が5か所に分かれている：新規作成のチェック、結果画面「Obsidianで仕上げ」、議事録パネル「Obsidianに保存」、分析「分析結果をObsidianに保存」、比較「比較結果を保存」 | 「保存・Obsidian」の操作を、会話ごとの1パネル（状態表示と操作）に集約する | 対応しない（2026-09-25。改善案と選別のうち、選別を採用：保存先・保存物が異なる5つの入口を1パネルへ集約しない。各入口のボタン名で保存対象を区別した（UI-02）） | 保留：異なる保存対象の一律集約案は不採用 |
+| UI-02 | 中 | 「保存」の意味が複数ある：編集内容の保存、話者管理の保存、分析設定の保存、分析の固定保存、Obsidianへの保存 | ボタン名を「編集を保存」「分析条件を保存」「結果を記録（固定）」のように対象で区別する | 対応済み（2026-09-25。保存ボタンを対象で区別：「編集内容を保存」「話者情報を保存」「分析条件・コードを保存」「分析結果をObsidianに保存」「議事録をObsidianに保存」「モデルを保存」。CFG-02に合わせ、誤りになった「tokens.jsonへ保存」も直した） | 統合 → UX-04 |
 | UI-03 | 中 | 移動の導線が重複し、URLにも反映されない（UX-01〜03） | [[40-Design/ui-ux-issues]] の推奨順に従う | 対応済み（UX-01／UX-03、UI再設計 2026-09-16、未コミット。[[20-Modules/ui-screens]]） | 統合 → UX-01／UX-03 |
 
 ## 追加調査：プログラム全体（2026-09-14）

@@ -97,6 +97,18 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('data-conversation-mode="chat"', page)
         self.assertNotRegex(page, r'id="finish-in-obsidian"[^>]*checked')
 
+    def test_save_buttons_name_what_they_save(self):
+        # UI-02: no bare "保存"/"変更を保存"; each button names its target.
+        page = app.app.test_client().get("/").data.decode("utf-8")
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="save-button" class="primary-button small" type="button">編集内容を保存<', page)
+        self.assertIn('id="save-speakers-button" class="primary-button small" type="button" disabled>話者情報を保存<', page)
+        self.assertIn('id="meeting-obsidian-save" class="primary-button small" type="button">議事録をObsidianに保存<', page)
+        self.assertIn('id="save-ai-model-button" class="primary-button small" type="submit">モデルを保存<', page)
+        self.assertNotIn("tokens.jsonへ保存", page)
+        self.assertIn("'分析条件・コードを保存'", script)
+        self.assertNotIn("'設定とコードを保存'", script)
+
     def test_meeting_mode_has_visual_minutes_and_handoff_actions(self):
         response = app.app.test_client().get("/")
         self.assertEqual(response.status_code, 200)
