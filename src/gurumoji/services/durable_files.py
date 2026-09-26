@@ -22,6 +22,7 @@ import secrets
 import shutil
 import stat
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -170,6 +171,16 @@ def posix_move_no_replace(source: Path, destination: Path) -> None:
     )
 
 
+# Sync clients and virus scanners hold files briefly; a move that meets such a
+# lock is retried after these pauses before the error is raised (OBS-17).
+LOCKED_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8)
+
+
+def _held_by_another_process(error: OSError) -> bool:
+    # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+    return isinstance(error, PermissionError) or getattr(error, 'winerror', None) in {5, 32, 33}
+
+
 def durable_move(
     source: Path,
     destination: Path,
@@ -178,6 +189,18 @@ def durable_move(
 ) -> None:
     source = Path(source)
     destination = Path(destination)
+    for delay in (*LOCKED_RETRY_DELAYS, None):
+        try:
+            _move_once(source, destination, replace_existing=replace_existing)
+            break
+        except OSError as exc:
+            if delay is None or not _held_by_another_process(exc):
+                raise
+            time.sleep(delay)
+    sync_rename_metadata(source, destination, required=True)
+
+
+def _move_once(source: Path, destination: Path, *, replace_existing: bool) -> None:
     if os.name == 'nt' and os.replace is _ORIGINAL_OS_REPLACE:
         windows_move_file_write_through(
             source,
@@ -196,24 +219,43 @@ def durable_move(
         ):
             raise FileExistsError(str(destination))
         os.replace(source, destination)
-    sync_rename_metadata(source, destination, required=True)
+
+
+def write_durably(
+    target: Path,
+    data: bytes,
+    *,
+    create_only: bool = False,
+    temporary: Path | None = None,
+) -> Path:
+    """The one durable write (ARCH-04): complete temporary file, fsync, then move.
+
+    The move syncs the folder metadata and retries while another process holds
+    the file. ``create_only`` publishes with a hard link, so a file created
+    concurrently is never replaced. The default temporary name ends in ``.tmp``,
+    which data backups skip.
+    """
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = temporary or target.with_name(f'.{target.name}.{uuid.uuid4().hex}.tmp')
+    try:
+        with temporary.open('xb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if create_only:
+            os.link(temporary, target)
+            sync_directory_metadata(target.parent)
+        else:
+            durable_move(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
 
 
 def durable_write_json(target: Path, payload: dict[str, Any]) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f'.{target.name}.{uuid.uuid4().hex}.tmp')
-    try:
-        with temporary.open('w', encoding='utf-8', newline='\n') as stream:
-            json.dump(payload, stream, ensure_ascii=False, separators=(',', ':'))
-            stream.write('\n')
-            stream.flush()
-            os.fsync(stream.fileno())
-        durable_move(temporary, target)
-        with target.open('r+b') as stream:
-            os.fsync(stream.fileno())
-        sync_directory_metadata(target.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
+    text = json.dumps(payload, ensure_ascii=False, separators=(',', ':')) + '\n'
+    write_durably(target, text.encode('utf-8'))
 
 
 def file_matches_fingerprint(path: Path, expected_sha256: str, expected_size: int) -> bool:
@@ -297,32 +339,13 @@ def temporary_output_path(target: Path) -> Path:
 
 def atomic_write_text(target: Path, value: str, *, encoding: str = "utf-8") -> Path:
     """Replace one text output only after its complete temporary file is durable."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = temporary_output_path(target)
-    try:
-        with temporary.open('w', encoding=encoding) as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
-        durable_move(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
+    # Same bytes as the platform's text mode: "\n" becomes os.linesep.
+    return atomic_write_bytes(target, value.replace("\n", os.linesep).encode(encoding))
 
 
 def atomic_write_bytes(target: Path, value: bytes) -> Path:
     """Replace a binary file only after its sibling temporary file is complete."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = temporary_output_path(target)
-    try:
-        with temporary.open('wb') as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
-        durable_move(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
+    return write_durably(target, value, temporary=temporary_output_path(Path(target)))
 
 
 def atomic_copy_file(

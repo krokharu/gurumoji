@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
+from .services.durable_files import write_durably
 
 LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
@@ -97,20 +98,8 @@ def safe_path(root: Path, relative: str) -> Path:
 
 
 def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if create_only:
-            # Publish the complete file without replacing a concurrently created note.
-            os.link(temporary, path)
-        else:
-            os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # One implementation with the transcript outputs: folder sync and lock retries included (ARCH-04, OBS-17).
+    write_durably(path, data, create_only=create_only)
 
 
 def markdown(value) -> str:
