@@ -270,6 +270,16 @@ class ObsidianLayoutTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT note_path FROM analysis_runs').fetchone()[0], target)
         self.assertEqual(migrate(self.database), report)
 
+    def test_migration_removes_only_folders_it_emptied(self):
+        old, _ = self.seed_legacy()
+        own_empty = self.layout.vault / '99-個人' / '空のフォルダー'
+        own_empty.mkdir(parents=True)
+        report = migrate(self.database)
+        self.assertTrue(own_empty.is_dir())  # OBS-13: the user's empty folder survives
+        source_folder = (self.layout.vault / old).parent
+        if report['mapping'][old].rsplit('/', 1)[0] != old.rsplit('/', 1)[0]:
+            self.assertFalse(source_folder.exists())
+
     def test_interrupted_migration_resumes_from_same_backup(self):
         self.seed_legacy()
         from gurumoji import obsidian_migration

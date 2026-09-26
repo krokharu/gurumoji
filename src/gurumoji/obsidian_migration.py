@@ -180,6 +180,7 @@ def migrate(database_file: Path) -> dict:
         target = safe_path(layout.data / 'obsidian_workbench', old.relative_to(source_workbench).as_posix())
         write_atomic(target, json.dumps(migrated, ensure_ascii=False).encode())
     # Delete only unchanged originals inside the checked Vault, after backup and catalog update.
+    emptied: set[Path] = set()
     for old, new in mapping.items():
         if old == new: continue
         source = safe_path(layout.vault, old)
@@ -187,9 +188,16 @@ def migrate(database_file: Path) -> dict:
             expected = safe_path(backup / 'vault', old).read_bytes()
             if source.read_bytes() != expected: raise ValueError('移行元が編集されたため、そのファイルを保持しました。')
             source.unlink()
-    for path in sorted(layout.vault.rglob('*'), key=lambda p: len(p.parts), reverse=True):
-        if path.is_dir() and not path.is_symlink() and not any(path.iterdir()):
-            safe_path(layout.vault, path.relative_to(layout.vault).as_posix()).rmdir()
+            emptied.add(source.parent)
+    # Remove only the folders this migration emptied and their now-empty parents (OBS-13);
+    # empty folders the user made elsewhere in the Vault stay.
+    vault_root = layout.vault.resolve()
+    for folder in sorted(emptied, key=lambda p: len(p.parts), reverse=True):
+        current = folder.resolve()
+        while (vault_root in current.parents and current.is_dir() and not current.is_symlink()
+               and not any(current.iterdir())):
+            current.rmdir()
+            current = current.parent
     layout.publish_navigation()
     for path in (layout.data / 'obsidian_workbench').glob('*/state.json'):
         layout.sync_finishing(json.loads(path.read_text(encoding='utf-8')))
