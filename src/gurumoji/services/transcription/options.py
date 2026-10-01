@@ -11,6 +11,7 @@ from ...jev_review import JEV_DEFAULT_MODEL
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "committing"})
 MODEL_NAMES = {"tiny", "base", "small", "medium", "large-v3"}
+TRANSCRIPTION_BACKENDS = {"whisperx", "qwen3_nemotron"}
 LANGUAGES = {None, "ja", "en", "zh", "ko"}
 AIST_EMOTION_MODEL_CHOICES = {"kushinada", "izanami", "both"}
 CONVERSATION_MODES = {
@@ -64,3 +65,4 @@ class JobOptions:
     transcript_finishing_mode: str = "custom"
     write_word_cloud: bool = False
     generate_meeting_minutes: bool = False
+    transcription_backend: str = "whisperx"

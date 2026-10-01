@@ -33,7 +33,7 @@ Obsidianの保管庫管理で「保管庫としてフォルダーを開く」を
 
 全件データは `runtime/data/analysis_store`、実行・同期状態はSQLite、読むための見解・引用は研究Vaultに保存します。[実装済みの保存仕様と使い方](program-vault/30-Data/analysis-storage-v1.md)を参照してください。研究メモ・解釈・コード案の差分取り込みは後続の実装対象です。
 
-分析用のVaultはローカルの `runtime/data/` 配下にあるためGit管理対象外です。DB・メディア・`analysis_store`・各Vault・台帳は互いのIDとhashを記録しているので、画面の「バックアップを作成」または `python scripts/backup_data.py create` で同じ時点を1組でバックアップしてください（メディアは任意）。手順は[バックアップと復元の手順](program-vault/60-Operations/backup-restore.md)にあります。プログラム用Vaultの資料はGit管理でき、個人の `.obsidian` 設定は除外されます。
+分析用のVaultはローカルの `runtime/data/` 配下にあるためGit管理対象外です。画面の「バックアップを作成」または `python scripts/backup_data.py create` は、DB・固定成果物・各Vault・台帳を同じ時点で保存します（メディアは任意）。このデータバックアップにはゴミ箱と `runtime/output` は含まれません。削除済み会話も復元できる完全退避では、アプリを停止して `<data>` と `<output>` を一組でコピーしてください。手順は[バックアップと復元の手順](program-vault/60-Operations/backup-restore.md)にあります。プログラム用Vaultの資料はGit管理でき、個人の `.obsidian` 設定は除外されます。
 
 ## プログラム資料Vaultの更新
 

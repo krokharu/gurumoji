@@ -6,7 +6,7 @@ summary: Gurumojiの主要モジュール、データフロー、保存先、設
 status: current
 feature: architecture
 verified: 2026-09-14
-updated: 2026-09-25
+updated: 2026-09-26
 tags:
   - gurumoji/program
   - gurumoji/architecture
@@ -15,6 +15,7 @@ tags:
 # システム全体構造・データフロー・設定の所在
 
 - **確認元：** 2026-09-14の調査内容は、ブランチ`agent/expand-analysis-ai-workflows`のコミット`1b8fe41`に収録し、プッシュ済み。
+- **最新反映：** HEAD`2f13f98`（2026-09-26）。会話ゴミ箱・データバックアップ・生成ノートの共通書き込み方針・画面別テンプレートを現行コードに合わせて追記した。
 - **調査条件：** 行数は初回調査時点の概数。2026-09-15に収録版の表記を更新した。優先修正による保存・UIの動作変更は[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]を参照する。
 - **関連ノート：** 問題点は [[40-Design/known-issues]]、整理方針は [[40-Design/convergence-plan]] に分けて記録する。
 
@@ -31,10 +32,11 @@ tags:
 | UI | 画面・状態管理・API呼び出し | `templates/index.html`（外枠・ダイアログ、約270）と `templates/views/`（画面ごとの断片：`create`・`library`・`result`・`analysis`・`speakers`）、`static/app.js`（約7,200）、`static/analysis-content.js`（約900）、`static/analysis-storage.js`、`static/interview-comparison.js`、`static/ai-effort.js`、`static/style.css`（約1,600） |
 | API | Flaskのルート（84件、`tests/fixtures/route_map.json`）、要求の検証・セキュリティ | `web/*_routes.py`、`web/security.py`。`app.py`（約1,900行）は `create_app()` で登録し、依存を組み立てる（2026-09-25、[[70-Changes/app-py-phase5]]） |
 | Core／Service | ジョブ、文字起こしパイプライン、編集トランザクション、話者台帳、会話集計、議事録、出力、AI呼び出し | `handlers/`、`services/`、実行時状態は `runtime_state.py`。`app.py` には依存を渡す関数が残る |
+| データ保護・復旧 | 会話の削除・復元・保持期限、データのバックアップ・hash検証・復元 | `services/library_trash.py`、`services/data_backup.py`、`web/library_deletion.py`、`scripts/backup_data.py` |
 | 分析サービス | 日本語解析・統計・Excel、見解・KWIC、Transformer、手法登録、逐語録の準備 | `research_analysis.py`、`analysis_insights.py`、`transformer_analysis.py`、`analysis_method_registry.py`、`transcript_preparation.py` |
-| AIサービス | 分割・校正・アウトライン、エフォート、HTTP通信（別プロセス） | `ai_finishing.py`、`ai_effort.py`、`ai_http_worker.py` |
-| Data | 固定成果物と台帳 | `analysis_store.py`（共通関数 `safe_path`・`write_atomic`・`markdown` もここにある） |
-| External Integration（Obsidian） | ResearchVaultの構成・ナビ、仕上げ作業台、旧階層移行、4 Vault | `obsidian_layout.py`、`obsidian_finishing.py`、`obsidian_migration.py`、`vault_registry.py` |
+| AIサービス | 分割・校正・アウトライン、エフォート、HTTP通信（別プロセス）、拒否・途中終了の判定と一時障害の再試行 | `services/ai/transcript_finishing.py`、`services/ai/client.py`、`ai_finishing.py`、`ai_effort.py`、`ai_http_worker.py` |
+| Data | 固定成果物と台帳、生成ノートの共通書き込み・履歴方針 | `analysis_store.py`、`vault_note_policy.py`（共通関数 `safe_path`・`write_atomic`・`markdown` は `analysis_store.py`） |
+| External Integration（Obsidian） | ResearchVaultの構成・ナビ、仕上げ作業台、旧階層移行、4 Vault | `obsidian_layout.py`、`obsidian_finishing.py`、`obsidian_migration.py`、`vault_registry.py`、`vault_note_policy.py` |
 | 互換 | `import app` などの旧importを受ける | `src/app.py` ほか5件。`gurumoji.*` へ付け替えるだけ。テストが使用している |
 
 依存関係（実線は通常のimport、点線は関数内でのimport）：
@@ -144,9 +146,10 @@ flowchart LR
 | `<data>/media`, `thumbnails`, `kushinada_training`, `custom_vocabulary.json` | 元メディア、再生成物、学習データ、単語登録 | `app.py` の定数 |
 | `<data>/analysis_store` | 不変の入力スナップショット・結果・表CSV・manifest | `AnalysisStore.root` |
 | `<data>/obsidian/ResearchVault` | 研究者が読むノート・仕上げ作業台 | `ObsidianLayout`、`ObsidianWorkbench`、`AnalysisStore` の3か所で個別に算出 |
-| `<data>/obsidian/{InputVault,VisualizationVault,OrchestratorVault}` | IDでつなぐ台帳型のVault。2026-09-14時点では実データで未生成 | `obsidian_layout/vaults.json` |
+| `<data>/obsidian/{InputVault,VisualizationVault,OrchestratorVault}` | IDでつなぐ生成Vault。ルートと管理ノートのhashを記録 | `obsidian_layout/vaults.json` |
 | `<data>/obsidian_layout` | `interviews.json`（インタビューコード・管理ノートのhash）、`vaults.json`、移行記録・バックアップ | `ObsidianLayout.registry`、`VaultRegistry.catalog_file` |
 | `<data>/trash/<日時-ID>/` | 削除した会話のメディア・サムネイルと、削除した行を記録した `manifest.json`（DATA-01） | `app.trash_directory`（DBファイルの隣） |
+| `runtime/backups` または `MOJIOKOSI_BACKUP_DIR` | DATA-03のバックアップ一式と各ファイルのSHA-256 manifest。元メディアは任意 | `BACKUP_DIRECTORY`、`services/data_backup.py` |
 | `<data>/obsidian_workbench/<key>/` | 仕上げの `state.json`、過去の `state-*.json`、`source-*.json`、`result-*.json` | `ObsidianWorkbench.root` |
 | `runtime/output` | 文字起こしの出力。`MOJIOKOSI_OUTPUT_DIR` で変更できる | `DEFAULT_OUTPUT_DIRECTORY` |
 | `runtime/uploads`, `models`, `logs` | 一時アップロード・インスタンスロック、モデル、ログ | `app.py`、ランチャー |

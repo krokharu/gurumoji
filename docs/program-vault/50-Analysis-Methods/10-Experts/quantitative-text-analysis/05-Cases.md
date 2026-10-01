@@ -4,7 +4,7 @@ note_type: expert-cases
 expert_id: exp-quantitative-text-analysis
 title: 計量テキスト分析の専門家：適用例
 status: current
-updated: 2026-09-16
+updated: 2026-09-28
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -27,3 +27,11 @@ tags:
 
 - 上記の応用研究の原典は読んでいない。
 - フォーカスグループの逐語録に計量テキスト分析を適用した研究の本文は確認していない（樋口 2017は、グラウンデッド・セオリーと組み合わせたフォーカスグループの分析例を参考文献に挙げている）。
+
+## 自由回答を扱う方法・ツールの例
+
+| 文献 | 対象・条件 | 確認範囲 | 分かること |
+| --- | --- | --- | --- |
+| [[50-Analysis-Methods/20-Literature/LIT-ziegler-2022-open-ended-checks\|Ziegler 2022]] | 文章のプロンプト後に内容を言い換える実験上のマニピュレーションチェック | 本文の選択箇所 | プロンプトと回答の類似度、および小規模文書での文字3-gramの例。画像・動画プロンプトや自由回答一般への適用は示さない |
+| [[50-Analysis-Methods/20-Literature/LIT-knight-2024-freetxt\|Knight et al. 2024]] | ウェールズ語・英語の質問票や調査の自由記述 | 要旨と§2.2（PDF pp.3–4） | 単語・n-gram・品詞/意味タグ頻度、KWIC、語分布可視化を潜在的・提案段階の機能として記述。実装・評価済みとは断定しない |
+| [[50-Analysis-Methods/20-Literature/LIT-knight-2024-freetxt\|Knight et al. 2024]] | FreeTxtの感情分析と抽出型要約 | 本文§3.2、3.4、4 | 英語約95%はモデルページの報告、ウェールズ語約73%は手動注釈レビューを使った著者らの実験。パートナー評価では要約は調査回答より長文文書で有用と報告され、当時の現行版の短所に挙げられる |

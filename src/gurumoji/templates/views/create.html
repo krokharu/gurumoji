@@ -254,6 +254,14 @@
                 <p id="machine-recommendation" class="machine-recommendation"></p>
                 <div class="settings-grid basic-settings-grid">
                   <label class="field">
+                    <span>文字起こし方式</span>
+                    <select id="transcription-backend" name="transcription_backend">
+                      <option value="whisperx" selected>WhisperX&#65288;&#27161;&#28310;&#65289;</option>
+                      <option value="qwen3_nemotron">Qwen3-ASR + Qwen3 ForcedAligner + Nemotron 3 Diarization</option>
+                    </select>
+                    <small id="qwen-backend-note" hidden>Qwenの初回利用前に scripts\setup_qwen_stack.bat を実行してください。モデルは初回起動時にダウンロードされます。</small>
+                  </label>
+                  <label class="field">
                     <span>認識モデル</span>
                     <select id="model-name" name="model_name">
                       <option value="tiny">tiny — 最速</option>
@@ -366,6 +374,7 @@
                   <textarea id="custom-vocabulary" name="custom_vocabulary" rows="4" maxlength="8100" spellcheck="false" placeholder="例：グルモジ&#10;WhisperX"></textarea>
                 </label>
                 <p>Whisperへ渡せる量には上限があるため、先頭の語から優先します。音声が不明瞭な場合の認識を完全に保証するものではありません。</p>
+                <p id="qwen-vocabulary-note" hidden>単語登録はWhisperXのみで使用します。</p>
               </div>
             </details>
 

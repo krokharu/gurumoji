@@ -198,6 +198,7 @@ literature:
   - LIT-gronkjaer-2011-fg-interaction
   - LIT-onwuegbuzie-2009-fg-analysis
   - LIT-park-2022-diarization-review
+  - LIT-poliandri-2023-online-focus-groups
 common_notes:
   - 01-Evidence-and-Claims
   - 02-Source-Classification

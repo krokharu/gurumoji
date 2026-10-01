@@ -4,7 +4,7 @@ note_type: module-index
 title: 機能一覧と分類（Core／Supporting／Optional／Duplicate／Legacy／Experimental／Unknown）
 status: current
 verified: 2026-09-14
-updated: 2026-09-16
+updated: 2026-09-26
 tags:
   - gurumoji/program
   - gurumoji/features
@@ -12,7 +12,7 @@ tags:
 
 # 機能一覧と分類
 
-2026-09-14の調査を基に作成し、コミット`1b8fe41`へ収録・プッシュ済み。2026-09-15に収録版の表記を更新した。分類は機能の位置づけを表し、問題の対応済み／未対応は[[40-Design/convergence-plan#プッシュ済みの対応状況（2026-09-15）]]と課題一覧を参照する。
+2026-09-14の調査を基に作成し、コミット`1b8fe41`へ収録・プッシュ済み。2026-09-26に最新版`2f13f98`の追加機能と状態を反映した。分類は機能の位置づけを表し、問題の対応済み／未対応は[[40-Design/known-issues]]を参照する。
 
 **分類：** 役割による分類（Core／Supporting／Optional／Duplicate／Legacy／Experimental／Unknown）。1つの機能が複数に該当する場合は、主な分類を先に書く。
 
@@ -44,19 +44,20 @@ tags:
 | 機能 | 状態 | 入口 | 実装 | データ／ファイル | Obsidian |
 | --- | --- | --- | --- | --- | --- |
 | 起動・セットアップ・ライブラリ更新 | Implemented | `run.bat`、`setup_gui.bat` | `scripts/run_launcher.ps1`、`scripts/setup_gui.ps1`、`main`、`initialize_application` | `.venv`、`runtime/logs` | watcher起動、旧階層移行 |
+| データバックアップ・検証・復元 | Implemented | 接続と処理装置の「バックアップを作成」／`POST /api/system/backup`。CLI: `scripts/backup_data.py create|verify|restore` | `services/data_backup.py`: `create_backup`、`verify_backup`、`restore_backup` | `runtime/backups` または `MOJIOKOSI_BACKUP_DIR`。DB・分析成果物・Vault・台帳。元メディア・学習用音声は任意。ゴミ箱・出力ファイル・APIキーは含めない | 5 Vaultと各台帳を同じ時点で保存。復元CLIは空のデータフォルダーが対象（[[60-Operations/backup-restore]]） |
 | マシン診断・リソースモニター | Implemented | 上部バー「接続と処理装置」・新規作成「認識・話者分離」・処理状況／`GET /api/config`、`GET /api/system/activity` | `get_machine_profile`、`recommend_machine_settings`、`system_activity_snapshot` | なし | なし |
-| 音声前処理・小声対策・空白補完 | Implemented | 認識設定 | `run_audio_preprocess`、`run_audio_interval_preprocess`、`merge_supplemental_asr_segments` | 一時ファイル | なし |
+| 音声前処理・小声対策・空白補完 | Implemented | 認識設定 | `audio.py` は話者分離用の元音声で小さすぎる声だけを最大4倍に補強。詳細処理は3秒以上の空白だけを再確認し、補助ASR結果を統合 | 一時ファイル | なし |
 | 単語登録 | Implemented | 認識設定／`GET/PUT /api/custom-vocabulary` | `load_custom_vocabulary`、`save_custom_vocabulary` | `<data>/custom_vocabulary.json` | 語数とhashだけをInputVaultへ |
 | 話者台帳（話者管理）・CSV入出力 | Implemented | 話者管理／`GET/PUT /api/speakers`、`POST …/import`、`GET …/export.csv` | `save_speaker_registry_records`、`import_speaker_registry_csv` | `speaker_registry`、`application_metadata` | 変更で保存分析をstaleにする（DBトリガー） |
 | 会話プロファイル・会話話者連携 | Implemented | 作業画面「会話・話者」／`PUT /api/library/<id>`、`GET …/speakers.csv` | `normalize_session_profile`、`normalize_conversation_speaker_profiles` | `library_items` のJSON列 | InputVaultの会話種別 |
 | 出力ファイル（TXT／JSON／SRT／アウトライン／感情CSV／ワードクラウド） | Implemented | ダウンロードリンク／`GET /api/jobs/<id>/files/<name>`、`GET /api/library/<id>/files/<name>` | `write_outputs`、`write_word_cloud` | `runtime/output` | なし |
 | メディア保管・再生・サムネイル | Implemented | 作業画面「発話の確認・編集」、新規作成のファイル選択／`GET …/media`、`GET …/thumbnail`、`POST /api/source-thumbnail`、`POST /api/select-input` | `archive_media`、`stream_library_media`、`generate_video_thumbnail` | `<data>/media`、`thumbnails` | 相対パスとサイズをInputVaultへ |
-| データ削除 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>` | `_delete_library_item_locked`（隔離 → DB削除 → `services/library_trash` のゴミ箱へ移動。復元・完全削除・保持期間後の自動削除） | tombstone | `retire_input_vault`（台帳を `deleted` にする）。ResearchVaultは概要・一覧の状態だけ「アプリから削除済み」にし、ノートは残す |
+| データ削除・復元 | Implemented | 一覧・作業画面「ファイル・管理」／`DELETE /api/library/<id>`、`GET /api/library/trash`、`POST /api/library/trash/<entry_id>/restore`、`DELETE /api/library/trash/<entry_id>` | `web/library_deletion.py`、`services/library_trash.py` | `<data>/trash/<entry_id>/manifest.json` にDB行・メディアの復元情報。既定30日で期限切れを削除 | ResearchVaultの概要・一覧とInputVault台帳を削除済みにする。復元時に表示を戻す |
 | 出力JSONの自動取り込み | Implemented | 起動時 | `import_existing_outputs`、`repair_output_import_provenance` | `output_import_provenance`、`output_import_tombstones` | InputVault（`imported`） |
 | リクエストのセキュリティ | Implemented | 全API | `enforce_request_security`（Host、CSRFヘッダー、リモート認証、サイズ上限） | なし | なし |
-| AI接続・モデル選択 | Implemented | 上部バーのトークン表示と「接続と処理装置」／`GET /api/ai/models`、`PUT /api/ai/model`、`GET /api/ai/lmstudio-reasoning` | `available_ai_models`、`update_token_model`、`call_ai_json`、`ai_http_worker.py` | `config/tokens.json` | APIキーは書かない |
+| AI接続・モデル選択・応答判定 | Implemented | 上部バーのトークン表示と「接続と処理装置」／`GET /api/ai/models`、`PUT /api/ai/model`、`GET /api/ai/lmstudio-reasoning` | `services/ai/client.py`: 拒否・途中終了の理由表示、429・一時的な5xxを最大2回再試行（`Retry-After`は最大30秒）; `available_ai_models`、`update_token_model`、`ai_http_worker.py` | `config/tokens.json` | APIキーは書かない |
 | AIエフォート（思考モード） | Implemented | AI仕上げ欄 | `ai_effort.py`、`static/ai-effort.js` | `localStorage`、`state.json` | 操作ノートに引き継ぐ |
-| 逐語録の分析準備（版・確認状態） | Implemented（未コミット） | 分析 → 設定・手動分析／`PUT …/preparation`、`GET …/preparation/export.json` | `transcript_preparation.py` | `transcript_versions`、`transcript_preparations`、`transcript_preparation_events` | 件数・hashだけをInputVaultへ（[[30-Data/transcript-preparation-v1]]） |
+| 逐語録の分析準備（版・確認状態） | Implemented | 分析 → 設定・手動分析／`PUT …/preparation`、`GET …/preparation/export.json` | `transcript_preparation.py` | `transcript_versions`、`transcript_preparations`、`transcript_preparation_events` | 件数・hashだけをInputVaultへ（[[30-Data/transcript-preparation-v1]]） |
 
 ## Optional：なくてもアプリは成立する機能
 
@@ -73,11 +74,11 @@ tags:
 | AI見解 | Experimental | 分析内容／`GET/POST …/analysis/insights`、`POST …/cancel` | `run_analysis_insight_job`、`create_ai_insights` | `analysis_insight_requests` |
 | アウトライン（予定と結果） | Stable | 作業画面の見出し直下／`GET /api/library/<id>` の `session_outline` | `analysis_insights.build_session_outline`、`row_session_outline` | 質問ガイド・自動アウトライン・保存済みテーマの結合。再計算はしない |
 | Transformerテーマ分析・意味検索 | Experimental | 分析内容／`GET/POST …/analysis/transformer`（`mode`：自動・候補・手動）、`…/cancel`、`GET …/semantic-search` | `run_transformer_analysis_job`、`transformer_analysis.py` | モデルの取得が必要。手動テーマは `config.transformer_topics` に保存 |
-| グループインタビュー比較 | Experimental（未コミット） | 分析・可視化の下部の折りたたみ／`POST /api/library/interview-comparison`、`POST/GET …/runs` | `build_interview_comparison`、`archive_interview_comparison`、`static/interview-comparison.js` | ブラウザーからのPOSTが403になる疑い（BUG-01） |
+| グループインタビュー比較 | Experimental | 分析・可視化の下部の折りたたみ／`POST /api/library/interview-comparison`、`POST/GET …/runs` | `build_interview_comparison`、`archive_interview_comparison`、`static/interview-comparison.js` | 比較値は独立した固定保存runとして記録する。ブラウザーPOSTの既知課題は[[40-Design/known-issues#BUG：動作不良]] |
 | 事前アンケート分析 | Implemented | 話者管理 | `app.js`（クライアント側で集計） | 話者台帳の属性を使う |
 | くしなだ学習データ | Implemented | 一覧の学習状態／`GET /api/training`、`…/corrections.jsonl`、`…/manifest.csv` | `record_training_corrections`、`write_training_exports` | `training_events`、`<data>/kushinada_training` |
 | ResearchVaultのナビゲーション・グラフ・テーマ同期 | Implemented | Obsidian側 | `ObsidianLayout.publish_navigation`、`configure`、`sync_themes` | `.obsidian` は新規Vaultの初回だけ書く（OBS-03） |
-| 4 Vaultへの書き出し | Experimental（未コミット、実データでは未生成） | 自動 | `vault_registry.py`、`AnalysisStore.publish_vaults`、`publish_input_vault` | [[30-Data/four-vaults-v1]] |
+| 4 Vaultへの書き出し | Experimental（実運用での確認は未記録） | 自動 | `vault_registry.py`、`AnalysisStore.publish_vaults`、`publish_input_vault` | [[30-Data/four-vaults-v1]] |
 | Google Colab | Implemented | `notebooks/Gurumoji_Colab.ipynb` | `is_colab_runtime` | なし |
 | 保守スクリプト | Implemented | 手動 | `scripts/check_*.py`、`repair_qwen_download.py`、`bootstrap_s3prl.py`、`cleanup_env.bat`、`setup_emotion.bat` | 開発・診断用 |
 

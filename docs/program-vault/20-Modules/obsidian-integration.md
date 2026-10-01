@@ -2,10 +2,11 @@
 note_id: program-obsidian-integration
 note_type: module
 title: Obsidian連携の現状構造と安全性
-summary: ResearchVaultと生成4 Vaultの書き込み経路、所有情報、競合・移行の現行実装を示す。
+summary: ResearchVaultと生成4 Vaultの書き込み経路、削除後の表示、所有情報、競合・移行の現行実装を示す。
 status: current
 feature: obsidian-storage
-verified: 2026-09-14
+verified: 2026-09-26
+updated: 2026-09-26
 tags:
   - gurumoji/program
   - gurumoji/obsidian
@@ -14,7 +15,7 @@ tags:
 # Obsidian連携の現状構造と安全性
 
 - **確認元：** `src/gurumoji/obsidian_layout.py`、`obsidian_finishing.py`、`obsidian_migration.py`、`vault_registry.py`、`analysis_store.py`、`app.py`（`start_obsidian_watcher`、`run_obsidian_finishing`、`publish_input_vault`、`publish_meeting_minutes_to_obsidian`）、`web/library_deletion.py`（`_delete_library_item_locked`）。
-- **確認条件：** 作業ツリー（2026-09-14）。OBS-01/02/05/07の優先修正を反映済み。[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]。
+- **確認条件：** mainの統合版`2f13f98`（2026-09-26）。2026-09-25の会話ゴミ箱、復元、共通ノート履歴ポリシーをコードと照合。
 - **関連ノート：** 危険箇所の対応状況は [[40-Design/known-issues]] の `OBS-*` で管理する。改善方針は [[40-Design/convergence-plan]] と [[40-Design/decisions]] に書く。利用者向けの操作手順は `docs/OBSIDIAN_FINISHING.md` と `docs/OBSIDIAN_GRAPH.md` にある。
 
 ## 接続方法
@@ -193,14 +194,16 @@ tags:
 ## バックアップ
 
 - 自動バックアップは移行処理だけ。Vault、`obsidian_workbench`、`analysis_store`、`interviews.json`、SQLite（backup API）を `obsidian_layout/backup-<uuid>` にコピーする。
+- DATA-03の整合データバックアップは別経路で、実行中は書き込みロックを取って一時点のDB・固定成果物・5 Vault・台帳・作業状態をコピーする。アプリ画面の「バックアップを作成」または `POST /api/system/backup` から作成でき、詳細な除外対象と復元方法は [[60-Operations/backup-restore]] に記録する。ゴミ箱はこのバックアップに含まれない。
 - 通常の書き込みでは、生成ノートの最初の版と、上書きする研究者の編集版を履歴に写す。アプリ同士の更新（固定保存から作り直せる内容）は写さず、変更記録だけ残す。
 - 手動の手順は `docs/PROJECT_LAYOUT.md`（アプリを停止して `runtime/` 全体をコピー）と `docs/OBSIDIAN_VAULTS.md` にある。
 
 ## 削除方法
 
 - アプリは通常動作でVaultのノートを削除しない。
-- 会話を削除しても、ResearchVaultのノート、`interviews.json` の登録、`obsidian_workbench` はそのまま残る。概要ノートは「保存済み」の表示のまま（OBS-11）。InputVaultの台帳は `status: deleted` になる。
-- ゴミ箱（`.trash` やOSのごみ箱）への移動はない。
+- 会話削除はアプリ側の `<data>/trash/<entry_id>/` にDB行とメディアを隔離する。既定30日以内は復元でき、期限切れ後または利用者が完全削除した場合にアプリのゴミ箱から消える（DATA-01）。これはObsidianの `.trash` とは別の機能。
+- ResearchVaultのノートと `interviews.json` の登録は残し、`ObsidianLayout.mark_deleted` が概要・一覧の状態を「アプリから削除済み」にする。InputVault台帳も `status: deleted` とする。生成済み分析ノート、`analysis_store`、`obsidian_workbench` は削除しない。
+- 復元または同じIDでの再取り込みでは、削除状態を解除し、ResearchVaultとInputVaultの表示を更新する。
 - 移行処理だけは、バックアップ後に内容が変わっていない移行元ファイルを `unlink` し、Vault全体の空フォルダーを `rmdir` する（OBS-13）。
 
 ## テスト方法
@@ -211,6 +214,7 @@ tags:
   - `tests/test_analysis_storage.py`
   - `tests/test_four_vaults.py`
   - `tests/test_vault_coverage.py`
+  - `tests/test_vault_note_policy.py`
 - Obsidian実機での表示確認は `scripts/check_obsidian_graph.py`（CLIを有効にした環境）で行う。
 - 不足しているケースと、テスト用Vaultの設計は [[50-Tests/obsidian-safety-test-plan]] にまとめた。
 

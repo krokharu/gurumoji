@@ -5,8 +5,8 @@ expert_id: exp-thematic-analysis
 title: テーマ分析の専門家
 role: methodology
 status: current
-definition_version: 1
-knowledge_verified: 2026-09-15
+definition_version: 2
+knowledge_verified: 2026-09-28
 analysis_method_ids:
   - thematic
 registry_method_ids: []
@@ -24,7 +24,7 @@ tags:
 
 ## 理論的背景と採用する流派
 
-[文献] Braun & Clarke（2006）はTAを理論的な裏付けを持つ柔軟な方法として示し、分析前に判断すべき事項（テーマとみなすもの、帰納的か理論的か、意味的か潜在的か、認識論）を挙げる。著者らは後に自分たちのTAを再帰的TAと名付け、他の2つの形と区別する（岡ほか 2022）。[実装判断] 既定は再帰的TA。
+[文献] Braun & Clarke（2006）はTAを理論的な裏付けを持つ柔軟な方法として示す。Byrne（2022、本文確認）も、分析者はテーマの捉え方、帰納的か演繹的か、意味的か潜在的か、認識論だけでなく、経験的か批判的かを検討し、その選択を研究質問に結び付けると整理する。著者らは後に自分たちのTAを再帰的TAと名付け、他の2つの形と区別する（岡ほか 2022）。[実装判断] 既定は再帰的TA。
 
 ## 適した研究目的・問い・データ
 
@@ -32,7 +32,7 @@ tags:
 
 ## 必要な入力と前処理、分析単位
 
-研究質問、分析前の判断の記録、聞こえたとおりに書き起こした逐語録（[文献] 岡ほか 2022、p.149）。テーマは発話ごとに付く値ではなく、データセット全体を対象に、発話を根拠として参照する。
+研究質問、分析前の理論的判断の記録（本質主義―構築主義、経験的―批判的、帰納的―演繹的、意味的―潜在的）、聞こえたとおりに書き起こした逐語録（[文献] 岡ほか 2022、p.149；Byrne 2022、PDF pp.1394–1397）。テーマは発話ごとに付く値ではなく、データセット全体を対象に、発話を根拠として参照する。
 
 ## 手順の要約
 
@@ -56,18 +56,18 @@ tags:
 
 ## 参照ノートと主要文献
 
-主要文献：[[50-Analysis-Methods/20-Literature/LIT-braun-clarke-2006-thematic]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-oka-2022-reflexive-ta-ja]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-braun-clarke-2021-one-size]]、[[50-Analysis-Methods/20-Literature/LIT-byrne-2022-reflexive-ta]]（要旨確認）。事例：[[50-Analysis-Methods/10-Experts/thematic-analysis/05-Cases]]
+主要文献：[[50-Analysis-Methods/20-Literature/LIT-braun-clarke-2006-thematic]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-oka-2022-reflexive-ta-ja]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-braun-clarke-2021-one-size]]、[[50-Analysis-Methods/20-Literature/LIT-byrne-2022-reflexive-ta]]（本文§3.1–3.2.6確認）。事例：[[50-Analysis-Methods/10-Experts/thematic-analysis/05-Cases]]
 
 ## 知識の確認日と未解決事項
 
-知識の確認日：2026-09-15。未解決事項：[[50-Analysis-Methods/10-Experts/thematic-analysis/06-Open-Issues]]
+知識の確認日：2026-09-28。未解決事項：[[50-Analysis-Methods/10-Experts/thematic-analysis/06-Open-Issues]]
 
 ## 実行定義
 
 ```yaml
 expert_id: exp-thematic-analysis
-definition_version: 1
-knowledge_verified: 2026-09-15
+definition_version: 2
+knowledge_verified: 2026-09-28
 title: テーマ分析の専門家
 role: methodology
 analysis_method_ids:
@@ -85,6 +85,7 @@ school:
 scope:
   - 研究質問に関わる意味のパターン（テーマ）を研究者の解釈によって生成する
   - 意味的水準と潜在的水準のどちらでテーマを捉えるかを扱う
+  - 分析前の理論的前提（本質主義／構築主義、経験的／批判的、帰納的／演繹的、意味的／潜在的）を研究質問に合わせて記録する
   - 15の基準と5つの落とし穴に沿った品質確認を示す
 out_of_scope:
   - text: 埋め込みによる意味の近い発話の自動的なまとまり
@@ -98,7 +99,7 @@ out_of_scope:
 analysis_unit: データセット全体（テーマは発話ごとの値ではない）。根拠として発話IDを参照する
 required_inputs:
   - 研究質問
-  - 分析前の判断の記録（テーマとみなすもの、帰納的か理論的か、意味的か潜在的か、認識論）
+  - 分析前の判断の記録（本質主義か構築主義か、経験的か批判的か、帰納的か演繹的か、意味的か潜在的か）
   - 聞こえたとおりに書き起こした逐語録
 applicability_checks:
   - id: ta-a1
@@ -124,9 +125,10 @@ applicability_checks:
   - id: ta-a4
     check: human_review
     severity: warn
-    message: 分析前の判断（テーマとみなすもの、帰納的か理論的か、意味的か潜在的か、認識論）を記録したかを研究者が確認します。
+    message: 分析前の判断（本質主義か構築主義か、経験的か批判的か、帰納的か演繹的か、意味的か潜在的か）と、研究質問への適合を研究者が確認します。
     basis:
       - LIT-braun-clarke-2006-thematic
+      - LIT-byrne-2022-reflexive-ta
   - id: ta-a5
     check: human_review
     severity: warn
@@ -230,7 +232,7 @@ ai_assist:
     - ta-p2
     - ta-p3
   reason: ""
-  brief: テーマ分析（既定は再帰的テーマ分析）の補助として、研究質問に関わる初期コードの候補と、コードをまとめたテーマの候補を示してください。テーマは研究者の解釈によって生成・確定されるものなので、見解は候補として書き、「テーマが浮かび上がった」とは書きません。インタビューの質問項目をそのままテーマにしないでください。発話数や話者数をテーマの重要性として述べず、評定者間一致や飽和には触れません。テーマ間の重なりや、どのテーマにも合わない発話は、追加で確認する点に挙げてください。
+  brief: テーマ分析（既定は再帰的テーマ分析）の補助として、研究質問に関わる初期コードの候補と、コードをまとめたテーマの候補を示してください。テーマは研究者の解釈によって生成・確定されるものなので、見解は候補として書き、「テーマが浮かび上がった」とは書きません。インタビューの質問項目をそのままテーマにしないでください。分析前の理論的判断（本質主義／構築主義、経験的／批判的、帰納的／演繹的、意味的／潜在的）と研究質問との適合は人が決めます。発話数や話者数をテーマの重要性として述べず、評定者間一致や飽和には触れません。テーマ間の重なりや、どのテーマにも合わない発話は、追加で確認する点に挙げてください。
 literature:
   - LIT-braun-clarke-2006-thematic
   - LIT-oka-2022-reflexive-ta-ja

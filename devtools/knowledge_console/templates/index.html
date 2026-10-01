@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Knowledge Control Center | Standalone Dev</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="kc-shell">
+    <aside class="kc-sidebar">
+      <a class="kc-brand" href="/" aria-label="Knowledge Control Centerホーム">
+        <span class="kc-brand-mark" aria-hidden="true">K</span>
+        <span><b>KNOWLEDGE DEV</b><small>Standalone Control</small></span>
+      </a>
+      <nav class="kc-nav" aria-label="Knowledge Control Center">
+        <button class="kc-nav-item active" type="button" data-view="dashboard" aria-selected="true">
+          <span aria-hidden="true">◫</span>ダッシュボード
+        </button>
+        <button class="kc-nav-item" type="button" data-view="a100" aria-selected="false">
+          <span aria-hidden="true">▦</span>A100タスク
+        </button>
+        <button class="kc-nav-item" type="button" data-view="goals" aria-selected="false">
+          <span aria-hidden="true">◎</span>目標モード
+        </button>
+        <button class="kc-nav-item" type="button" data-view="trace" aria-selected="false">
+          <span aria-hidden="true">⌁</span>知識トレース
+        </button>
+      </nav>
+      <div class="kc-sidebar-foot">
+        <span id="kc-a100-foot-dot" class="kc-dot muted" aria-hidden="true"></span>
+        <div><b>A100 Drive Worker</b><small id="kc-a100-foot-label">接続を確認中</small></div>
+      </div>
+    </aside>
+
+    <main class="kc-main">
+      <header class="kc-topbar">
+        <div>
+          <p class="kc-eyebrow">OBSIDIAN KNOWLEDGE INFERENCE</p>
+          <h1>Knowledge Control Center</h1>
+        </div>
+        <div class="kc-top-actions">
+          <button id="kc-a100-status" class="kc-a100-status muted" type="button" aria-live="polite" title="A100の状態(クリックでA100タスク画面へ)">
+            <span class="kc-status-light" aria-hidden="true"></span>
+            <span class="kc-a100-status-text"><b id="kc-a100-status-label">A100 接続を確認中</b><small id="kc-a100-status-detail">—</small></span>
+          </button>
+          <span id="kc-last-updated" class="kc-muted">未読込</span>
+          <button class="kc-button kc-open-setup" type="button">接続設定</button>
+          <button id="kc-refresh" class="kc-button ghost" type="button">更新</button>
+        </div>
+      </header>
+
+      <div id="kc-alert" class="kc-alert" role="status" hidden></div>
+
+      <section id="kc-goals" class="kc-view kc-goal-view" aria-labelledby="kc-goals-title" hidden>
+        <div class="kc-section-title">
+          <div><h2 id="kc-goals-title">目標モード</h2><p>目標を決め、一時Obsidianの知識からLLMが次のタスクを考えます。</p></div>
+          <button id="kc-goal-reload" class="kc-button" type="button">再読込</button>
+        </div>
+        <div class="kc-goal-toolbar">
+          <label>保存した目標 <select id="kc-goal-select"><option value="">新しい目標</option></select></label>
+          <button id="kc-goal-new" class="kc-button" type="button">＋ 新しい目標</button>
+        </div>
+        <p id="kc-goal-message" role="status" aria-live="polite"></p>
+        <section id="kc-goal-overview" class="kc-goal-overview" aria-label="目標への進捗" hidden>
+          <div id="kc-goal-progress-summary" class="kc-goal-progress-summary"></div>
+          <div id="kc-goal-metrics" class="kc-goal-metrics"></div>
+          <div id="kc-goal-next-actions" class="kc-goal-next-actions" aria-label="次に取り組むこと"></div>
+          <section class="kc-goal-panel">
+            <div class="kc-goal-chart-toolbar">
+              <div><h3>目標までの推移</h3><p id="kc-goal-progress-status" class="kc-goal-help"></p></div>
+              <label>表示範囲 <select id="kc-goal-history-range"><option value="12">直近12記録</option><option value="0">最大200記録</option></select></label>
+            </div>
+            <div id="kc-goal-charts" class="kc-goal-charts"></div>
+            <details><summary>計測履歴を表で確認</summary><div id="kc-goal-history" class="kc-goal-history"></div></details>
+          </section>
+        </section>
+        <section id="kc-goal-quick" class="kc-goal-panel kc-goal-quick" hidden aria-labelledby="kc-goal-quick-title">
+          <div><h3 id="kc-goal-quick-title">かんたん目標タスク</h3><p class="kc-goal-help">現在値を測り、スライダーとの差が大きい順に内部LLMがタスクを作ります。各タスクは採点と改善を繰り返します。</p></div>
+          <div class="kc-goal-quick-actions">
+            <button id="kc-goal-measure-now" type="button" class="kc-button">現在のスコアを測定</button>
+            <button id="kc-goal-auto-start" type="button" class="kc-button primary">目標タスクを自動生成・実行</button>
+            <button id="kc-goal-auto-stop" type="button" class="kc-button" hidden>次の処理を停止</button>
+          </div>
+          <p id="kc-goal-auto-status" class="kc-goal-auto-status" role="status" aria-live="polite">停止中</p>
+        </section>
+        <div class="kc-goal-columns">
+          <form id="kc-goal-form" class="kc-goal-panel">
+            <h3>1. 目標を設定</h3>
+            <label class="kc-field"><span>目標名</span><input id="kc-goal-title" maxlength="120" required placeholder="例：会話分析の知識と品質を改善"></label>
+            <label class="kc-field"><span>何を実現したいか</span><textarea id="kc-goal-objective" maxlength="1200" rows="3" required placeholder="必要な成果物、対象、重視する品質を記入"></textarea></label>
+            <div class="kc-goal-sliders" aria-label="目標スコア">
+              <label class="kc-goal-slider"><span>知識を集める <small>対象ノート数</small></span><div><input id="kc-goal-knowledge" type="range" min="1" max="500" step="1" value="10" required><output id="kc-goal-knowledge-output" for="kc-goal-knowledge">10件</output></div><small data-current-axis="knowledge">現在 —</small></label>
+              <label class="kc-goal-slider"><span>整理する <small>重複・矛盾・出典を確認</small></span><div><input id="kc-goal-organization" type="range" min="0" max="100" step="5" value="80" required><output id="kc-goal-organization-output" for="kc-goal-organization">80%</output></div><small data-current-axis="organization">現在 —</small></label>
+              <label class="kc-goal-slider"><span>深める <small>説明 → 根拠 → 適用条件</small></span><div><input id="kc-goal-depth" type="range" min="1" max="3" step="1" value="2" required><output id="kc-goal-depth-output" for="kc-goal-depth">2 · 根拠と具体例</output></div><small data-current-axis="depth">現在 —</small></label>
+              <label class="kc-goal-slider"><span>見つけやすくする <small>検索到達率</small></span><div><input id="kc-goal-index" type="range" min="0" max="100" step="5" value="80" required><output id="kc-goal-index-output" for="kc-goal-index">80%</output></div><small data-current-axis="index">現在 —</small></label>
+              <label class="kc-goal-slider"><span>成果物の品質 <small>100点満点</small></span><div><input id="kc-goal-score" type="range" min="1" max="100" step="1" value="80" required><output id="kc-goal-score-output" for="kc-goal-score">80点</output></div><small data-current-axis="score">現在 —</small></label>
+            </div>
+            <details class="kc-goal-advanced"><summary>実行回数などの詳細設定</summary><div class="kc-form-grid">
+              <label class="kc-field"><span>タスクごとの最大反復回数</span><input id="kc-goal-iterations" type="number" min="1" max="10" step="1" value="5" required></label>
+              <label class="kc-field"><span>一度に生成するタスク数の上限</span><input id="kc-goal-task-limit" type="number" min="1" max="5" step="1" value="3" required></label>
+            </div></details>
+            <p class="kc-goal-help">目標に必要なノートだけを対象にします。ノート数は量の目安であり、分割やリンクの追加だけでは品質を加点しません。</p>
+            <details><summary>補助指標：トークン削減率</summary><label class="kc-field"><span>参考目標（%・達成判定には含めません）</span><input id="kc-goal-compression" type="number" min="0" max="99" step="0.1" value="50" required></label><p class="kc-goal-help">（1 − 削減後tokens ÷ 削減前tokens）×100。実測は未接続です。</p></details>
+            <button id="kc-goal-save" class="kc-button primary" type="submit">保存して一時Vaultを作成</button>
+          </form>
+          <div class="kc-goal-panel">
+            <h3>2. 一時Obsidianに知識を用意</h3>
+            <p class="kc-goal-help">ノートを追加するか、Obsidianで10-Knowledgeフォルダーを編集してください。一時Vaultは作業用として保持され、自動削除されません。</p>
+            <a id="kc-goal-open-vault" class="kc-button" hidden>Obsidianで開く ↗</a>
+            <p id="kc-goal-vault-path" class="kc-goal-path"></p>
+            <form id="kc-goal-note-form">
+              <label class="kc-field"><span>ノート名</span><input id="kc-goal-note-title" maxlength="120" required></label>
+              <label class="kc-field"><span>知識・参考情報・不足している点</span><textarea id="kc-goal-note-content" rows="7" required placeholder="タスクを考える根拠となる内容を入力"></textarea></label>
+              <button id="kc-goal-add-note" class="kc-button" type="submit" disabled>ノートを追加</button>
+            </form>
+          </div>
+        </div>
+        <div id="kc-goal-work" hidden>
+          <form id="kc-goal-assessment-form" class="kc-goal-panel">
+            <h3>対象の知識を確認する</h3>
+            <p class="kc-goal-help">目標に必要なノートを選択し、読んで確認した内容を記録します。整理は重複・矛盾・出典の3項目。深さは根拠や適用条件で判断し、文字数では測りません。ノートを編集すると、その確認記録は再確認が必要になります。</p>
+            <div id="kc-goal-reviews"></div>
+            <h4>想定質問と検索テスト</h4>
+            <p class="kc-goal-help">質問・検索語・到達したいノートを固定して比較します。対象ノートのタイトルと本文を検索語のAND条件で検索し、必要なノートがすべて上位5件に入れば成功です。これはこの画面の検索テストで、Obsidian本体の検索や意味検索の評価ではありません。</p>
+            <div id="kc-goal-cases"></div>
+            <button id="kc-goal-add-case" type="button" class="kc-button">＋ 質問を追加</button>
+            <button type="submit" class="kc-button primary">対象・確認記録を保存して計測</button>
+            <button id="kc-goal-measure" type="button" class="kc-button">保存済み条件で再計測</button>
+            <div id="kc-goal-retrieval-results"></div>
+          </form>
+          <section class="kc-goal-panel">
+            <h3>3. ノートからタスクを生成</h3>
+            <p class="kc-goal-help">参照するノートを1〜3件選択します。選択した抜粋をローカルLLMへ渡し、目標に向けたタスクを下書きとして追加します。A100で実行すると同じ抜粋がColabに渡ります。</p>
+            <div id="kc-goal-notes" class="kc-goal-notes"></div>
+            <button id="kc-goal-generate" class="kc-button primary" type="button">LLMでタスクを生成</button>
+            <button id="kc-goal-show-a100" class="kc-button" type="button">A100タスクで実行 →</button>
+          </section>
+          <section class="kc-goal-panel">
+            <h3>この目標から生成したタスク</h3>
+            <p class="kc-goal-help">各タスクは目標スコアまで改善・採点を繰り返します。タスクの採点と、最終成果物全体の総合評価は別です。</p>
+            <div id="kc-goal-tasks"></div>
+          </section>
+          <form id="kc-goal-artifact-form" class="kc-goal-panel">
+            <h3>成果物の総合評価</h3>
+            <p class="kc-goal-help">実際に生成に使ったプロンプトと成果物を入力してください。上の参照ノートから選択した1〜3件を根拠として、ローカルLLMが「目標の充足・根拠・一貫性・再利用性」を各25点で評価します。タスク採点とは別の評価です。</p>
+            <label class="kc-field"><span>生成に使ったプロンプト</span><textarea id="kc-goal-artifact-prompt" rows="4" maxlength="6000" required></textarea></label>
+            <label class="kc-field"><span>実際の成果物</span><textarea id="kc-goal-artifact-content" rows="6" maxlength="12000" required></textarea></label>
+            <button type="submit" class="kc-button primary">成果物を評価して記録</button>
+            <p id="kc-goal-artifact-result" class="kc-goal-help"></p>
+          </form>
+        </div>
+      </section>
+
+      <section id="kc-dashboard" class="kc-view active" aria-labelledby="kc-dashboard-title">
+        <div class="kc-section-title">
+          <div><h2 id="kc-dashboard-title">運用ダッシュボード</h2><p>既存JobStoreと管理用投影を安全に監視します。</p></div>
+          <div class="kc-section-actions">
+            <button class="kc-button kc-check-connection" type="button">接続確認</button>
+            <button id="kc-run-all" class="kc-button batch" type="button">A100を一括実行</button>
+            <button id="kc-open-task" class="kc-button primary" type="button">＋ タスクを追加</button>
+          </div>
+        </div>
+
+        <div class="kc-status-grid">
+          <article class="kc-card kc-runtime-card">
+            <div class="kc-card-head"><span>A100 Runtime</span><span id="kc-runtime-state" class="kc-badge warning">接続待ち</span></div>
+            <strong id="kc-runtime-gpu" class="kc-metric">A100</strong>
+            <dl class="kc-inline-data">
+              <div><dt>Session</dt><dd id="kc-runtime-session">00:00:00</dd></div>
+              <div><dt>Heartbeat</dt><dd id="kc-runtime-heartbeat">—</dd></div>
+              <div><dt>Automation</dt><dd>Drive transport</dd></div>
+            </dl>
+          </article>
+          <article class="kc-card">
+            <div class="kc-card-head"><span>Task Queue</span><span class="kc-badge cyan">LOCAL</span></div>
+            <strong id="kc-task-count" class="kc-metric">0</strong>
+            <p class="kc-muted">作成済みタスク · 全体進捗 <span id="kc-task-progress-label">0%</span></p>
+            <div class="kc-progress"><i id="kc-task-progress"></i></div>
+          </article>
+          <article class="kc-card">
+            <div class="kc-card-head"><span>Colab Budget</span><span id="kc-budget-state" class="kc-badge muted">UNKNOWN</span></div>
+            <strong class="kc-metric">安全側停止</strong>
+            <p id="kc-budget-message" class="kc-muted">利用量を確認しています。</p>
+          </article>
+          <article class="kc-card">
+            <div class="kc-card-head"><span>Knowledge Packs</span><span class="kc-badge violet">REVIEWED</span></div>
+            <strong id="kc-pack-count" class="kc-metric">0</strong>
+            <p class="kc-muted">受理済みPack</p>
+          </article>
+        </div>
+
+        <div class="kc-dashboard-grid">
+          <section class="kc-card kc-task-panel">
+            <div class="kc-card-head"><div><h3>タスク進捗</h3><p>初期タスク20件を用意しています。実行すると工程ごとの進捗を保存します。</p></div></div>
+            <div class="kc-connection-result" role="status" hidden>
+              <span class="kc-badge muted" data-connection-badge>未確認</span>
+              <div><b data-connection-title>Colab接続を確認していません</b><small data-connection-detail></small></div>
+            </div>
+            <div id="kc-task-list" class="kc-task-list"></div>
+            <div id="kc-task-empty" class="kc-empty">タスクはまだありません。「タスクを追加」から作成できます。</div>
+          </section>
+          <section class="kc-card kc-event-panel">
+            <div class="kc-card-head"><div><h3>監査イベント</h3><p>状態遷移と知識アクセスのみを記録します。</p></div></div>
+            <ol id="kc-event-list" class="kc-event-list"></ol>
+          </section>
+        </div>
+
+        <section class="kc-card kc-matrix-panel">
+          <div class="kc-card-head">
+            <div><h3>AI × 専門家ナレッジ</h3><p>数値はUI確認用サンプルです。実測値と混同しません。</p></div>
+            <span class="kc-badge warning">SAMPLE</span>
+          </div>
+          <div class="kc-table-wrap">
+            <table>
+              <thead><tr><th>専門家</th><th>知識量</th><th>Coverage</th><th>Score</th><th>推論</th><th>回数</th></tr></thead>
+              <tbody id="kc-expert-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="kc-a100" class="kc-view" aria-labelledby="kc-a100-title" hidden>
+        <div class="kc-section-title">
+          <div><h2 id="kc-a100-title">A100 タスク可視化</h2><p>A100担当タスクを保存順に投入し、Colab A100で最大4件ずつ並列処理します。接続は「接続設定」から行います。</p></div>
+          <div class="kc-section-actions">
+            <span class="kc-badge success">REAL MODEL</span>
+            <button class="kc-button kc-open-setup" type="button">接続設定</button>
+            <button class="kc-button kc-check-connection" type="button">接続確認</button>
+            <button id="kc-run-a100-batch" class="kc-button batch" type="button">A100を一括実行</button>
+          </div>
+        </div>
+
+        <p class="kc-muted">実行には根拠ノートが必要です。「目標モード」で資料を追加し、タスクを生成してください。応答受信は分析品質の確認完了を意味しません。</p>
+        <section class="kc-card kc-a100-overview" aria-labelledby="kc-activity-title">
+          <div class="kc-activity">
+            <div class="kc-card-head"><h3 id="kc-activity-title">A100 アクティビティ</h3><span id="kc-activity-state" class="kc-badge muted">未確認</span></div>
+            <p id="kc-activity-summary" class="kc-activity-summary" aria-live="polite">「接続確認」を押すと、A100が今していることを表示します。</p>
+            <ul id="kc-activity-jobs" class="kc-activity-jobs"></ul>
+            <p id="kc-activity-last" class="kc-muted"></p>
+            <p id="kc-activity-updated" class="kc-muted"></p>
+          </div>
+          <div class="kc-a100-kpis">
+            <dl class="kc-kpi-row" aria-label="このPCのA100タスク">
+              <div><dt>登録済み</dt><dd id="kc-a100-count">0</dd></div>
+              <div class="running"><dt>処理中</dt><dd id="kc-a100-running">0</dd></div>
+              <div class="done"><dt>応答受信</dt><dd id="kc-a100-completed">0</dd></div>
+            </dl>
+            <dl class="kc-kpi-row small" aria-label="Colab Workerのキュー">
+              <div><dt>Worker待ち</dt><dd id="kc-activity-pending">—</dd></div>
+              <div><dt>Worker完了</dt><dd id="kc-activity-completed">—</dd></div>
+              <div><dt>Worker失敗</dt><dd id="kc-activity-failed">—</dd></div>
+            </dl>
+            <div class="kc-gpu-meter">
+              <div><span>GPUメモリ</span><b id="kc-activity-gpu">—</b></div>
+              <div class="kc-progress" role="meter" aria-label="GPUメモリ使用率" aria-valuemin="0" aria-valuemax="100"><i id="kc-activity-gpu-bar"></i></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="kc-connection-result" role="status" hidden>
+          <span class="kc-badge muted" data-connection-badge>未確認</span>
+          <div><b data-connection-title>Colab接続を確認していません</b><small data-connection-detail></small></div>
+        </div>
+
+        <details class="kc-policy-details">
+          <summary>判断の分担(Program / Local LLM / A100)</summary>
+          <div class="kc-decision-policy" aria-label="判断分担">
+            <article><span class="kc-badge cyan">PROGRAM</span><div><b>固定する判断</b><small>A100抽出・保存順・接続・モデル経路・応答受信済み除外・並列数の上限</small></div></article>
+            <article><span class="kc-badge violet">LOCAL LLM</span><div><b>任せる判断</b><small>分析の焦点・知識の意味解釈・実行または保留の提案</small></div></article>
+            <article><span class="kc-badge warning">A100</span><div><b>実行担当</b><small>接続済みのColab A100実モデルへ送り、完了後に結果を保存</small></div></article>
+          </div>
+        </details>
+
+        <div class="kc-board-head"><h3>未完了のタスク <span id="kc-a100-pending-count" class="kc-muted">0件</span></h3><p class="kc-muted">実行中のタスクを先頭に表示します。</p></div>
+        <div id="kc-a100-task-board" class="kc-a100-task-board"></div>
+        <div id="kc-a100-empty" class="kc-card kc-empty">A100担当のタスクはありません。</div>
+        <details id="kc-a100-done" class="kc-a100-done" hidden>
+          <summary>応答受信済み <span id="kc-a100-done-count">0</span>件</summary>
+          <div id="kc-a100-done-board" class="kc-a100-task-board"></div>
+        </details>
+        <section class="kc-card" aria-labelledby="kc-error-history-title">
+          <div class="kc-card-head">
+            <div><h3 id="kc-error-history-title">保存されたエラー履歴</h3><p>再実行・成功・アプリ再起動後も残ります。古い記録は「以前のエラーを表示」で確認できます。</p></div>
+            <button id="kc-error-refresh" class="kc-button ghost" type="button">履歴を更新</button>
+          </div>
+          <p id="kc-error-history-status" class="kc-muted" role="status"></p>
+          <ol id="kc-error-history" class="kc-event-list"></ol>
+          <button id="kc-error-older" class="kc-button ghost" type="button" disabled>以前のエラーを表示</button>
+        </section>
+      </section>
+
+      <section id="kc-trace" class="kc-view" aria-labelledby="kc-trace-title" hidden>
+        <div class="kc-section-title">
+          <div><h2 id="kc-trace-title">知識フロー</h2><p>入力から出力まで、どの知識層へアクセスしているかを左から右へ再生します。</p></div>
+          <span class="kc-badge warning">SIMULATION</span>
+        </div>
+
+        <form id="kc-trace-form" class="kc-card kc-trace-form">
+          <label class="kc-field wide"><span>テスト質問</span><textarea id="kc-trace-question" rows="3" maxlength="1000" required>参加者間の発話量の偏りと、会話の主導権を分析してください。</textarea></label>
+          <label class="kc-field"><span>専門家</span><select id="kc-trace-expert"></select></label>
+          <label class="kc-field"><span>モデル</span><select id="kc-trace-model"></select></label>
+          <button class="kc-button primary" type="submit">分析を再生</button>
+        </form>
+
+        <div class="kc-trace-layout">
+          <section class="kc-card kc-knowledge-map">
+            <div class="kc-card-head"><div><h3>横方向の知識パイプライン</h3><p>点灯と移動粒子は記録済みイベントの再生です。Attention値や内部推論の表示ではありません。</p></div></div>
+            <div class="kc-pipeline-viewport" aria-label="知識処理パイプライン">
+              <div id="kc-knowledge-blocks" class="kc-pipeline">
+              {% for block in blocks %}
+              <article class="kc-pipeline-stage" data-block-id="{{ block.id }}">
+                <span class="kc-block-index">{{ "%02d"|format(loop.index) }}</span>
+                <small>{{ block.kind }}</small>
+                <b>{{ block.label }}</b>
+                <p>{{ block.description }}</p>
+              </article>
+              {% if not loop.last %}
+              <div class="kc-pipeline-link" data-link-index="{{ loop.index }}" aria-hidden="true">
+                <span class="kc-pipeline-pulse"></span>
+                <i></i>
+              </div>
+              {% endif %}
+              {% endfor %}
+              </div>
+            </div>
+            <div class="kc-player">
+              <button id="kc-trace-play" class="kc-button ghost" type="button" disabled>▶ 再生</button>
+              <div class="kc-progress"><i id="kc-trace-progress"></i></div>
+              <span id="kc-trace-step" class="kc-muted">0 / 0</span>
+            </div>
+          </section>
+
+          <aside class="kc-card kc-trace-detail">
+            <div class="kc-card-head"><div><h3>アクセスログ</h3><p id="kc-trace-id">Trace未作成</p></div></div>
+            <ol id="kc-trace-events" class="kc-event-list"></ol>
+            <div id="kc-trace-result" class="kc-result" hidden>
+              <h4>分析結果</h4><p></p><div id="kc-contribution"></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="kc-setup-dialog" class="kc-dialog kc-setup-dialog" aria-labelledby="kc-setup-title">
+    <div class="kc-setup">
+      <div class="kc-dialog-head">
+        <div>
+          <p class="kc-eyebrow">COLAB A100 CONNECTION</p>
+          <h2 id="kc-setup-title">接続設定</h2>
+          <p class="kc-muted">上から順に進めます。済んだ手順には✓が付き、次回からは4だけで接続できます。</p>
+          <p class="kc-setup-colab-link">Google Colaboratory: <a id="kc-setup-colab-link" href="{{ notebook_url }}" target="_blank" rel="noopener noreferrer">Workerノートブックを開く ↗</a> <span class="kc-muted">/</span> <a href="https://colab.research.google.com/" target="_blank" rel="noopener noreferrer">Colabトップ ↗</a></p>
+        </div>
+        <button id="kc-close-setup" class="kc-icon-button" type="button" aria-label="閉じる">×</button>
+      </div>
+            <ol class="kc-setup-steps">
+              <li data-setup-step="client">
+                <span class="kc-setup-mark" aria-hidden="true"></span>
+                <div>
+                  <b>1. OAuthクライアントJSON <span class="kc-muted">(初回のみ)</span></b>
+                  <small>Google Cloud ConsoleでDrive APIを有効にし、「デスクトップアプリ」のOAuthクライアントを作ってJSONをダウンロードします。</small>
+                  <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Cloud Consoleを開く ↗</a>
+                </div>
+                <label class="kc-button" for="kc-oauth-file">JSONを選択</label>
+                <input id="kc-oauth-file" class="kc-visually-hidden" type="file" accept="application/json,.json">
+              </li>
+              <li data-setup-step="auth">
+                <span class="kc-setup-mark" aria-hidden="true"></span>
+                <div>
+                  <b>2. Google Driveを認可 <span class="kc-muted">(初回のみ)</span></b>
+                  <small>ブラウザにGoogleの許可画面が開きます。Colabと同じアカウントを選んでください。</small>
+                </div>
+                <button id="kc-setup-authorize" class="kc-button" type="button">認可する</button>
+              </li>
+              <li data-setup-step="notebook">
+                <span class="kc-setup-mark" aria-hidden="true"></span>
+                <div>
+                  <b>3. Workerノートブックを反映 <span class="kc-muted">(更新時のみ)</span></b>
+                  <small>このPCの最新版WorkerをDrive上のノートブックへ上書きします。</small>
+                </div>
+                <button id="kc-setup-notebook" class="kc-button" type="button">Driveへ最新版を反映</button>
+              </li>
+              <li data-setup-step="worker">
+                <span class="kc-setup-mark" aria-hidden="true"></span>
+                <div>
+                  <b>4. ColabでWorkerを実行</b>
+                  <small id="kc-setup-worker-detail">ランタイムでA100を選び「すべて実行」。起動状況は5分ごとに自動確認し、「接続確認」ですぐに確認できます。</small>
+                </div>
+                <div class="kc-setup-actions"><button class="kc-button kc-check-connection" type="button">接続確認</button><a id="kc-setup-open-colab" class="kc-button primary" href="{{ notebook_url }}" target="_blank" rel="noopener noreferrer">Colabで開く ↗</a></div>
+              </li>
+            </ol>
+            <details class="kc-manual-config">
+              <summary>手動設定(同期フォルダ・固定Secretを使う場合)</summary>
+              <div class="kc-bridge-config">
+                <p>Drive Queue設定JSON(<code>drive_folder_id</code>または<code>drive_sync_dir</code>と<code>queue_secret</code>)を貼り付けます。適用するとこの起動中は自動検出より優先されます。Secretは保存しません。</p>
+                <textarea id="kc-bridge-json" rows="3" spellcheck="false" placeholder='{"drive_folder_id":"...","queue_secret":"..."}'></textarea>
+                <button id="kc-apply-bridge" class="kc-button" type="button">適用・検証</button>
+              </div>
+            </details>
+    </div>
+  </dialog>
+
+  <dialog id="kc-task-dialog" class="kc-dialog" aria-labelledby="kc-task-dialog-title">
+    <form id="kc-task-form" method="dialog">
+      <div class="kc-dialog-head"><div><p class="kc-eyebrow">NEW WORK ORDER</p><h2 id="kc-task-dialog-title">タスクを追加</h2></div><button id="kc-close-task" class="kc-icon-button" type="button" aria-label="閉じる">×</button></div>
+      <label class="kc-field"><span>タスク名</span><input id="kc-task-title" type="text" maxlength="160" value="テーマ分析の知識を再評価" required></label>
+      <div class="kc-form-grid">
+        <label class="kc-field"><span>専門家</span><select id="kc-task-expert"></select></label>
+        <label class="kc-field"><span>担当</span><select id="kc-task-actor"><option value="a100">A100</option><option value="local">Local LLM</option><option value="codex">Codex</option></select></label>
+        <label class="kc-field"><span>モデル</span><select id="kc-task-model"></select></label>
+        <label class="kc-field"><span>判断方法</span><select id="kc-task-decision"><option value="local_llm">Local LLM（意味判断）</option><option value="program">Program（固定ルール）</option></select></label>
+        <label class="kc-field"><span>目標スコア（空欄なら1回だけ実行）</span><input id="kc-task-target" type="number" min="1" max="100" step="1" placeholder="例: 80"></label>
+        <label class="kc-field"><span>最大回数</span><input id="kc-task-max-iterations" type="number" min="1" max="10" step="1" value="5"></label>
+      </div>
+      <p class="kc-muted">目標スコアを入れると、A100の結果をLocal LLM（未接続ならA100）が0〜100点で採点し、目標に届くまで改善点を添えて最大回数まで再実行します。</p>
+      <p class="kc-muted">A100担当タスクは、Drive Worker接続後にColabの実モデルへ送信されます。</p>
+      <div class="kc-dialog-actions"><button id="kc-cancel-task" class="kc-button ghost" type="button">キャンセル</button><button class="kc-button primary" type="submit">タスクを保存</button></div>
+    </form>
+  </dialog>
+
+  <script id="kc-bootstrap" type="application/json">{{ {"experts": experts, "models": models}|tojson }}</script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='goals.js') }}" defer></script>
+</body>
+</html>

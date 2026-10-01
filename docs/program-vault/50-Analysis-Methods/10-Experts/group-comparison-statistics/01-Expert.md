@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-実装：[[50-Analysis-Methods/03-Statistics/02-Group-Statistics]]。文献：[[50-Analysis-Methods/20-Literature/LIT-delacre-2017-welch]]（本文確認、訂正記事あり）、[[50-Analysis-Methods/20-Literature/LIT-aarts-2014-nested-data]]、[[50-Analysis-Methods/20-Literature/LIT-benjamini-hochberg-1995-fdr]]、[[50-Analysis-Methods/20-Literature/LIT-jaeger-2008-logit-mixed]]（要旨確認）、Cochran 1952・1954、Kruskal & Wallis 1952、Rasch et al. 2011、Holm 1979（書誌のみ）。事例：[[50-Analysis-Methods/10-Experts/group-comparison-statistics/05-Cases]]
+実装：[[50-Analysis-Methods/03-Statistics/02-Group-Statistics]]。文献：[[50-Analysis-Methods/20-Literature/LIT-delacre-2017-welch]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-delacre-2022-correction]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-aarts-2014-nested-data]]、[[50-Analysis-Methods/20-Literature/LIT-benjamini-hochberg-1995-fdr]]、[[50-Analysis-Methods/20-Literature/LIT-jaeger-2008-logit-mixed]]（要旨確認）、Cochran 1952・1954、Kruskal & Wallis 1952、Rasch et al. 2011、Holm 1979（書誌のみ）。事例：[[50-Analysis-Methods/10-Experts/group-comparison-statistics/05-Cases]]
 
 ## 知識の確認日と未解決事項
 
@@ -156,6 +156,7 @@ procedure:
     actor: researcher
     basis:
       - LIT-delacre-2017-welch
+      - LIT-delacre-2022-correction
       - implementation
   - id: grp-p4
     title: 入れ子と多重比較を踏まえて、結果を探索的に報告する
@@ -182,6 +183,7 @@ quality_checks:
     text: 群の大きさや分散が大きく異なる場合に注意を付けたか（前提の検定の結果で検定を切り替えていないか）
     basis:
       - LIT-delacre-2017-welch
+      - LIT-delacre-2022-correction
   - id: grp-q4
     check: human_review
     text: 多重比較の補正をしていないことを示したか
@@ -207,6 +209,7 @@ literature:
   - LIT-cochran-1954-chi-square
   - LIT-kruskal-wallis-1952
   - LIT-delacre-2017-welch
+  - LIT-delacre-2022-correction
   - LIT-rasch-2011-pretest
   - LIT-holm-1979-multiple-testing
   - LIT-benjamini-hochberg-1995-fdr
@@ -221,7 +224,7 @@ common_notes:
 open_issues:
   - カイ二乗検定の期待度数の基準の文献（Cochran 1952、1954）は書誌のみの確認で、20%の目安は実装上の判断
   - Welch型の検定、多重比較の補正、入れ子を考慮したモデルは未実装（計画：quantification-statistics-plan）
-  - Delacre et al. 2017の訂正記事の内容を読んでいない
+  - 訂正記事は確認済みだが、訂正後の追加ファイルとシミュレーションスクリプトは独立確認していない
 readiness:
   literature_checked: true
   procedure_documented: true

@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-主要文献：[[50-Analysis-Methods/20-Literature/LIT-otani-2011-scat]]（本文確認）、[[50-Analysis-Methods/20-Literature/RES-otani-scat-official]]（公式ページ）、[[50-Analysis-Methods/20-Literature/LIT-otani-2008-scat]]（書誌のみ）。事例：[[50-Analysis-Methods/10-Experts/scat/05-Cases]]
+主要文献：[[50-Analysis-Methods/20-Literature/LIT-otani-2011-scat]]（本文確認）、[[50-Analysis-Methods/20-Literature/RES-otani-scat-official]]（公式ページ）、[[50-Analysis-Methods/20-Literature/LIT-otani-2008-scat]]（書誌のみ）。適用例（方法の原典ではない）：[[50-Analysis-Methods/20-Literature/LIT-shimizu-2023-scat-application]]。事例一覧：[[50-Analysis-Methods/10-Experts/scat/05-Cases]]
 
 ## 知識の確認日と未解決事項
 

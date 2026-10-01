@@ -84,9 +84,11 @@ class VaultPublicationService:
 
 def whisper_settings(options: Any, language: str | None, *, diarization_model: str) -> dict[str, Any]:
     """Return non-secret transcription provenance suitable for an InputVault."""
-    vocabulary = list(options.custom_vocabulary)
+    transcription_backend = getattr(options, "transcription_backend", "whisperx")
+    vocabulary = list(options.custom_vocabulary) if transcription_backend == "whisperx" else []
     return {
-        "model": options.model_name,
+        "transcription_backend": transcription_backend,
+        "model": "Qwen/Qwen3-ASR-1.7B" if transcription_backend == "qwen3_nemotron" else options.model_name,
         "language": language,
         "device": options.device,
         "diarization_device": options.diarization_device,

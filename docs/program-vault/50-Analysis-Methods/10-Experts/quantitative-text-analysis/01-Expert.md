@@ -233,6 +233,7 @@ literature:
   - LIT-benjamini-hochberg-1995-fdr
   - RES-ginza-official
   - LIT-hsieh-shannon-2005-qca
+  - LIT-knight-2024-freetxt
 common_notes:
   - 01-Evidence-and-Claims
   - 02-Source-Classification

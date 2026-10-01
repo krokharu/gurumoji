@@ -1,4 +1,7 @@
 .venv/
+.venv-qwen/
+.venv-nemotron/
+.venv-knowledge-console/
 __pycache__/
 *.py[cod]
 .pytest_cache/

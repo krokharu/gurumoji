@@ -17,6 +17,25 @@ url: https://doi.org/10.1073/pnas.2305016120
 accessed: 2026-09-15
 access_scope: abstract
 access_detail: "Europe PMCの要旨（PMID 37463210）を読んだ。本文は読んでいない。"
+license_id: CC-BY-4.0
+license_url: https://creativecommons.org/licenses/by/4.0/
+llm_processing_permission: explicitly_permitted
+llm_allowed_routes:
+  - local
+  - colab
+  - export
+rights_review_status: approved
+rights_reviewed_by: "Codex primary agent (official PNAS rights metadata review)"
+rights_reviewed_at: 2026-09-26T23:10:52Z
+rights_review_basis: >-
+  The PNAS article page identifies the open-access article as distributed under CC BY 4.0.
+  The CC license allows sharing and adaptation for any purpose with appropriate credit,
+  a license link, and indication of changes. This project allowlist is limited to local
+  RTX 5070 processing, user-initiated Colab A100 processing, and export of paraphrased,
+  source-linked claims carrying author/title/DOI/license/change attribution. The
+  remote_llm route remains blocked by project policy. Third-party material or supplements
+  with separate rights are excluded. This review confirms rights metadata only; article
+  body access remains as recorded above.
 correction_status: none_found
 related_experts:
   - exp-qualitative-content-analysis

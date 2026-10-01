@@ -4,7 +4,8 @@ note_type: runbook
 title: バックアップと復元（1組で保存する単位）
 summary: 同じ会話の情報が分散する保存先を1組としてバックアップ・復元する手順。部分復元をしない理由を示す。
 status: current
-verified: 2026-09-25
+verified: 2026-09-26
+updated: 2026-09-26
 feature: storage
 tags:
   - gurumoji/program
@@ -13,9 +14,9 @@ tags:
 
 # バックアップと復元（1組で保存する単位）
 
-同じ会話の情報は、SQLite、メディア、固定成果物、5つのObsidian Vault、それらの台帳に分かれて保存されている（DATA-03）。各場所は互いのIDとhashを記録しているため、**一部だけを戻すと台帳とファイルが食い違う**。バックアップも復元も、次の一覧を1組として同じ時点で扱う。正本の分類は [[40-Design/storage-policy]]、Vaultの役割は [[30-Data/four-vaults-v1]] を参照する。
+同じ会話の情報は、SQLite、メディア、固定成果物、5つのObsidian Vault、それらの台帳に分かれて保存されている（DATA-03）。各場所は互いのIDとhashを記録しているため、**完全復旧では次の一覧を同じ時点の1組として戻す**。アプリ内バックアップは下記のとおり `<data>` の一部だけを保管し、ゴミ箱と `<output>` は対象外。正本の分類は [[40-Design/storage-policy]]、Vaultの役割は [[30-Data/four-vaults-v1]] を参照する。
 
-確認元：`src/gurumoji/app.py` の `DATA_DIRECTORY`・`DEFAULT_OUTPUT_DIRECTORY` ほかの定数、`analysis_store.AnalysisStore.root`、`vault_registry.VaultRegistry.catalog_file`、`obsidian_layout.ObsidianLayout.registry`（2026-09-25の作業ツリー）。
+確認元：`src/gurumoji/app.py` の `DATA_DIRECTORY`・`DEFAULT_OUTPUT_DIRECTORY`・`BACKUP_DIRECTORY`、`services/data_backup.py`、`scripts/backup_data.py`（最新版`2f13f98`、2026-09-26）。
 
 ## 1組として扱う場所
 
@@ -39,7 +40,21 @@ tags:
 
 `<data>/media/` などの `.delete-staging-*`、`<output>` の `.edit-staging-*`・`.edit-preparing-*`・`.edit-cleanup-*` は削除・編集の途中状態で、起動時の復旧が使う。見つけても消さずにそのまま含める。
 
-## バックアップ
+## DATA-03アプリ内バックアップ（dataフォルダー）
+
+アプリ画面の「接続と処理装置」→「バックアップを作成」は、保存PC上で一時的に書き込みを待機させ、整合した`<data>`バックアップを作る。ブラウザーから開始できるのは保存PC自身だけ。「メディアを含める」を選ぶと元メディアと学習用音声も対象になる。既定の保存先は`runtime/backups`で、`MOJIOKOSI_BACKUP_DIR`で変更できる。
+
+```powershell
+.venv\Scripts\python.exe scripts/backup_data.py create [--include-media]
+.venv\Scripts\python.exe scripts/backup_data.py verify "<バックアップフォルダー>"
+.venv\Scripts\python.exe scripts/backup_data.py restore "<バックアップフォルダー>" --data-dir "<空のデータフォルダー>"
+```
+
+CLIの`create`と`restore`はアプリ停止中に実行する。`verify`はmanifest内のSHA-256を照合し、`restore`も復元前に照合して空のデータフォルダーへ展開する。アプリ内バックアップに含まれるのはSQLite、固定分析成果物、5つのVaultと台帳、仕上げ作業状態、単語登録で、元メディアと学習用音声は任意。サムネイルと学習用の書き出しは再生成できるため含まれない。
+
+この機能は`<data>/trash/`と`<output>`を含まない。保持中の削除済み会話も復元できる形で保管する完全な退避には、次の手動フルバックアップを使う。`config/tokens.json`も秘密情報のため対象外で、復元後に設定し直す。
+
+## 手動のフルバックアップ（dataとoutput）
 
 1. アプリのコンソールウィンドウを閉じ、プロセスが終了したことを確認する。`<data>/.gurumoji.instance.lock` はOSのファイルロックで、終了後もファイルは残るため、その有無では判断しない。Obsidianも閉じる。
 2. `<data>` フォルダーと `<output>` フォルダーを、それぞれ丸ごと同じ日時のバックアップ先へコピーする。Windowsの例：

@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-主要文献：[[50-Analysis-Methods/20-Literature/LIT-gronkjaer-2011-fg-interaction]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-kitzinger-1994-focus-groups]]、[[50-Analysis-Methods/20-Literature/LIT-kidd-parshall-2000-fg-rigor]]、[[50-Analysis-Methods/20-Literature/LIT-onwuegbuzie-2009-fg-analysis]]、[[50-Analysis-Methods/20-Literature/LIT-hermann-2024-fg-interaction-coding]]（要旨確認）。事例：[[50-Analysis-Methods/10-Experts/focus-group-interaction/05-Cases]]
+主要文献：[[50-Analysis-Methods/20-Literature/LIT-gronkjaer-2011-fg-interaction]]（本文確認）、[[50-Analysis-Methods/20-Literature/LIT-kitzinger-1994-focus-groups]]、[[50-Analysis-Methods/20-Literature/LIT-kidd-parshall-2000-fg-rigor]]、[[50-Analysis-Methods/20-Literature/LIT-onwuegbuzie-2009-fg-analysis]]。枠組みの適用例：[[50-Analysis-Methods/20-Literature/LIT-hermann-2024-fg-interaction-coding]]（本文確認）。事例一覧：[[50-Analysis-Methods/10-Experts/focus-group-interaction/05-Cases]]
 
 ## 知識の確認日と未解決事項
 
@@ -79,7 +79,7 @@ school:
     label: 会話分析の道具（隣接ペア・選好構造・説明・修復）による相互作用の分析（Grønkjær et al. 2011）
   alternatives:
     - id: interaction-coding-scheme
-      label: 相互作用のコーディング枠組みをテーマ分析と並行させる（Hermann et al. 2024、要旨のみ確認）
+      label: 相互作用のコーディング枠組みをテーマ分析と並行させる（Hermann et al. 2024の本文で確認した一事例）
     - id: micro-interlocutor
       label: マイクロ・インターロキュター分析（Onwuegbuzie et al. 2009、要旨のみ確認）
 scope:
@@ -237,6 +237,7 @@ literature:
   - LIT-morgan-1996-focus-groups
   - LIT-sacks-1974-turn-taking
   - LIT-park-2022-diarization-review
+  - LIT-poliandri-2023-online-focus-groups
   - LIT-gilardi-2023-llm-annotation
 common_notes:
   - 01-Evidence-and-Claims
@@ -245,7 +246,7 @@ common_notes:
   - 04-AI-Assistance-Boundaries
 open_issues:
   - Kitzinger 1994の本文を読めていない（出版社サイトが403）
-  - Onwuegbuzie et al. 2009、Hermann et al. 2024の枠組みの項目を確認していない（要旨のみ）
+  - Onwuegbuzie et al. 2009の枠組みの項目を確認していない（要旨のみ）
   - 日本語のフォーカスグループの相互作用分析の文献を確認していない
   - 非言語の情報（表情、声色）はGurumojiの逐語録にない
   - 10%の目安は実装上の判断

@@ -30,6 +30,7 @@ tags:
 - [[08-Common-Knowledge/00-Index|全専門家に共通する知識]]
 - [[20-Literature/00-Index|文献ノート]] — 1文献1ノートで、査読状態、確認範囲、訂正の有無を記録
 - [[30-Research-Logs/00-Index|調査記録]]
+- [[40-Design/expert-knowledge-production-plan|配布用専門家の知識・プロンプト制作計画]] — Base版とローカル論文参照版、A100・ローカルLLM・Luna／Solの役割、評価・配布までの実装順（提案）
 
 ## 方法群
 

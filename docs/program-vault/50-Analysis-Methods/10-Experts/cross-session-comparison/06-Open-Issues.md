@@ -4,7 +4,7 @@ note_type: expert-open-issues
 expert_id: exp-cross-session-comparison
 title: 会話間比較の専門家：未解決事項
 status: current
-updated: 2026-09-16
+updated: 2026-09-28
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -17,8 +17,8 @@ tags:
 
 ## 知識が不足している点
 
-- 複数のフォーカスグループを比較する分析の方法論文献を確認していない。
-- 比較に必要な会話の数の基準を扱った文献を確認していない。
+- 複数のフォーカスグループを会話単位で比較する一般的な分析手順の方法論文献は、引き続き十分に確認していない。Poliandri et al.（2023）は13件の同期オンライン討議で共通プロトコルを用いた一事例であり、普遍的な比較方法を確立するものではない。
+- 比較に必要な会話の数の一般基準を扱った文献は未確認。Poliandri et al.（2023）の13件は単一研究の設計であり、必要数の目安にはできない。
 
 ## 実装上の課題
 

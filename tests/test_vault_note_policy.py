@@ -65,7 +65,7 @@ class WriteGeneratedNoteTests(unittest.TestCase):
 
     def test_note_written_before_this_policy_gets_its_first_copy_before_update(self):
         self.path.parent.mkdir(parents=True)
-        self.path.write_text("# 旧版\n", encoding="utf-8")
+        self.path.write_bytes("# 旧版\n".encode("utf-8"))
         import hashlib
         old = hashlib.sha256("# 旧版\n".encode()).hexdigest()
         result = self.write("# 新版\n", {old}, ever=True)

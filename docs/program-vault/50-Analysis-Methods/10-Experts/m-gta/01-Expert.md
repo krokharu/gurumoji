@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-主要文献：[[50-Analysis-Methods/20-Literature/LIT-kinoshita-2007-mgta]]（本文確認）、[[50-Analysis-Methods/20-Literature/RES-mgta-society-official]]（公式ページ）。事例：[[50-Analysis-Methods/10-Experts/m-gta/05-Cases]]
+主要文献：[[50-Analysis-Methods/20-Literature/LIT-kinoshita-2007-mgta]]（本文確認）、[[50-Analysis-Methods/20-Literature/RES-mgta-society-official]]（公式ページ）。応用例：[[50-Analysis-Methods/20-Literature/LIT-iseki-2023-mgta-process]]（MBC患者21人の事例。方法の一般的定義を支える主要文献ではない）。事例一覧：[[50-Analysis-Methods/10-Experts/m-gta/05-Cases]]
 
 ## 知識の確認日と未解決事項
 
@@ -233,6 +233,7 @@ ai_assist:
   brief: M-GTAの補助として、研究者が登録したコード（概念）に当てはまる具体例（ヴァリエーション）の候補と、反対例・類似例の候補を示してください。分析テーマ（研究質問）と分析焦点者の視点から読み、データを細かく切り分けて機械的にコード化しないでください。概念の生成、定義、カテゴリー、飽和化の判断は研究者が行うため、見解は候補として書きます。人数や頻度を結果として述べないでください。定義に合わない可能性がある発話は、追加で確認する点に挙げてください。
 literature:
   - LIT-kinoshita-2007-mgta
+  - LIT-iseki-2023-mgta-process
   - RES-mgta-society-official
   - LIT-gilardi-2023-llm-annotation
 common_notes:

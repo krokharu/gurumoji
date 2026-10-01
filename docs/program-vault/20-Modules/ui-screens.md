@@ -2,10 +2,11 @@
 note_id: program-ui-screens
 note_type: module
 title: Web UIの画面構成と既存機能の対応
-summary: 2026-09-16のUI再設計で決めた画面・URL・操作の流れと、旧画面の各機能の移動先を示す。
+summary: 現行UIの画面・URL・操作の流れ、画面別テンプレート、旧画面機能の移動先を示す。
 status: current
 feature: web-ui
 verified: 2026-09-21
+updated: 2026-09-26
 tags:
   - gurumoji/program
   - gurumoji/ui
@@ -13,7 +14,7 @@ tags:
 
 # Web UIの画面構成と既存機能の対応
 
-2026-09-16にWeb UIの構造を作り直した（作業ツリー、未コミット）。バックエンドのAPI・保存形式・分析処理は変えていない。判断の背景は [[40-Design/decisions#ADR-116 Web UIを画面単位のURLと3ステップの新規作成に作り直し、既存APIと要素IDを維持する]]、解消した問題は [[40-Design/ui-ux-issues]]。
+2026-09-16にWeb UIの画面構造を作り直し、最新版`2f13f98`に収録した。画面は同じAPI・保存形式を使う。2026-09-25にはHTMLを`templates/views/`の画面別テンプレートへ分けた。判断の背景は [[40-Design/decisions#ADR-116 Web UIを画面単位のURLと3ステップの新規作成に作り直し、既存APIと要素IDを維持する]]、解消した問題は [[40-Design/ui-ux-issues]]。
 
 2026-09-20の後続設計：多様な手法・実行結果を探す、比較する、追加分析へ渡すUI案を[[40-Design/core-handler-routing-reorganization-plan]]の図7に追加した。比較の保存履歴・成果物・Vault再試行（UX-33）は先行実装済みで、分析画面を「結果を見る／比較する／分析を組む／データ・出力」へ全面整理する部分は未実装（ADR-118）。以下は現行UIの説明として維持する。
 

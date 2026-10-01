@@ -3,7 +3,7 @@ note_id: tests-obsidian-safety-plan
 note_type: test-plan
 title: Obsidian連携の安全性テスト計画
 status: in-progress
-updated: 2026-09-15
+updated: 2026-09-26
 tags:
   - gurumoji/program
   - gurumoji/tests
@@ -12,7 +12,7 @@ tags:
 
 # Obsidian連携の安全性テスト計画
 
-Obsidian連携で、利用者のノートを壊さないことを確認するためのテスト計画。現状の構造は [[20-Modules/obsidian-integration]]、問題IDは [[40-Design/known-issues]] を参照する。2026-09-14にOBS-01/02/05/07、比較API、未保存確認・応答順序の回帰テストを追加した。実装と検証結果は[[40-Design/convergence-plan#優先修正の実装（2026-09-14）]]。
+Obsidian連携で、利用者のノートを壊さないことを確認するためのテスト計画。現状の構造は [[20-Modules/obsidian-integration]]、問題IDは [[40-Design/known-issues]] を参照する。2026-09-14のテーマ・仕上げ・比較・未保存保護に加え、最新版`2f13f98`では生成ノートの共通履歴ポリシーと会話削除・復元の回帰テストを追加した。
 
 ## 追加済みの検証（2026-09-14）
 
@@ -26,7 +26,7 @@ Obsidian連携で、利用者のノートを壊さないことを確認するた
 | UIからの保存と移動 | `test_browser_e2e.py:test_comparison_and_unsaved_navigation_regressions` | 実ブラウザーで比較の集計・保存、処理中の条件固定、未保存取消、逆順応答と画面移動後の応答無視 |
 | 準備の更新待ち伝播 | `test_vault_coverage.py:test_preparation_save_invalidates_single_and_comparison_runs_atomically` | 単独・比較履歴のstale、Vault状態への反映、トランザクション取消時の整合 |
 
-以下の対応表もコミット`1b8fe41`のテスト実装へ更新した。「あり」は記載範囲の検証があることを示し、機能全体の安全性の保証ではない。全393件成功は収録前の検証記録で、2026-09-15の資料更新では再実行していない。
+以下の対応表も最新版`2f13f98`へ更新した。「あり」は記載範囲の検証があることを示し、機能全体の安全性の保証ではない。過去の全393件成功はコミット`1b8fe41`収録前の記録。最新版の全テストは2026-09-26に655件を実行し3件失敗した。絞り込みで再現したのは分析結果の公開テストと、改行コード差を編集と判定するノート履歴テスト。ブラウザー分析画面のタイムアウトは全体実行でのみ発生し、単独実行では通過した。診断時には一時Vaultの`vaults.json`置換でWindows `WinError 5`も確認した。実Vaultは使用していない。
 
 ## 原則
 
@@ -62,6 +62,7 @@ obsidian-safety-vault/
 | 新規作成：Markdown生成・根拠リンク | `test_analysis_storage.py`: `test_full_package_catalog_notes_links_and_idempotency_without_ai`、`test_saved_analysis_builds_visible_type_result_and_outline_graph_nodes` | あり | なし |
 | 新規作成：frontmatter・日本語 | `test_obsidian_finishing.py`: `test_recording_is_one_note_and_arbitrary_text_round_trips`、`test_native_properties_blocks_and_legacy_notes_round_trip` | 一部 | 記号や空白を含むタイトル、YAMLで特別な意味を持つ値（`yes`、`null`、`:`） |
 | 新規作成：危険な文字列のエスケープ | `test_analysis_storage.py`: `test_raw_quotes_are_preserved_and_unsafe_markdown_is_escaped`、`test_path_traversal_request_validation_and_formula_safety` | あり | なし |
+| 生成ノートの初版・編集履歴・更新判定 | `test_vault_note_policy.py`: `test_new_note_keeps_its_first_version_in_the_interview_history`、`test_researcher_edit_is_kept_then_latest_version_is_written`、`test_note_written_before_this_policy_gets_its_first_copy_before_update` | 一部 | Windowsで旧ノートのCRLFとテストのLF hashが異なると、同内容でも`edit_saved`になる。履歴は保持されるが、改行正規化と分類を確認する |
 | 新規作成：添付 | 議事録のCSV／JSONについては未確認 | 不明 | 同じ名前の添付を上書きしないこと、日本語の添付名 |
 | 更新：人のノートを変更しない | `test_obsidian_layout.py`: `test_theme_sync_keeps_all_human_bytes_and_tracks_removed_links`、`test_finishing_sync_does_not_read_or_write_researcher_notes` | あり | 一般的な生成ノートと`.obsidian`の保護は別課題（OBS-03／04） |
 | 競合：外部で編集した生成ノートを上書きしない | `test_four_vaults.py`: `test_human_edits_and_deletions_are_preserved_not_overwritten`、`test_analysis_storage.py`: `test_human_notes_are_never_overwritten_and_retry_never_calls_ai` | あり | ナビゲーションノート（`managed_note`）の、何も通知しないスキップの記録 |

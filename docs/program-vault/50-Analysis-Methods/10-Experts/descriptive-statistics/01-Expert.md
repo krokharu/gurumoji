@@ -181,12 +181,13 @@ ai_assist:
 literature:
   - LIT-appelbaum-2018-jars-quant
   - LIT-aarts-2014-nested-data
+  - RES-scipy-describe
 common_notes:
   - 01-Evidence-and-Claims
   - 02-Source-Classification
   - 03-Group-Interview-Data
 open_issues:
-  - 記述統計そのものの方法論文献は置いておらず、実装の定義が一次資料になっている
+  - 記述統計そのものの方法論文献は置いておらず、公式API定義と実装が主な一次資料になっている
   - Appelbaum et al. 2018は要旨だけを確認し、訂正記事の内容を読んでいない
   - 90%の目安は実装上の判断
 readiness:

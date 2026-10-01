@@ -17,11 +17,33 @@ url: https://doi.org/10.5334/irsp.82
 accessed: 2026-09-16
 access_scope: full_text
 access_detail: "掲載誌の記事ページ（HTML、CC BY 4.0）を取得してタグを除いた本文で読んだ。記事ページに訂正記事の案内があり、訂正記事の書誌はCrossref APIで確認した。"
+license_id: CC-BY-4.0
+license_url: https://creativecommons.org/licenses/by/4.0/
+llm_processing_permission: explicitly_permitted
+llm_allowed_routes:
+  - local
+  - colab
+  - export
+rights_review_status: approved
+rights_reviewed_by: "Codex primary agent (official IRSP article license review)"
+rights_reviewed_at: 2026-09-27T04:24:59Z
+rights_review_basis: >-
+  The official International Review of Social Psychology article page identifies this
+  article as CC BY 4.0. The license legal code permits sharing and adaptation for any
+  purpose with attribution, a license link, and indication of changes. Project routes
+  are limited to local RTX 5070 processing, user-initiated Colab A100 processing with
+  our own model (not Colab generative AI), and export of paraphrased source-linked claims
+  carrying author, title, DOI, license, and change attribution. The remote_llm route is
+  blocked by project policy. Article-body and figure redistribution is excluded by
+  project scope. The publisher identifies a separate correction article (DOI 10.5334/irsp.661).
+  Its rights and content are recorded separately in
+  [[50-Analysis-Methods/20-Literature/LIT-delacre-2022-correction]] and must be considered
+  before any related Claim is approved.
 correction_status: correction_published
 related_experts:
   - exp-group-comparison-statistics
 status: current
-updated: 2026-09-16
+updated: 2026-09-27
 tags:
   - gurumoji/literature
   - gurumoji/statistics
@@ -51,7 +73,7 @@ tags:
 ## 適用上の注意と限界
 
 - 対象は2群のt検定であり、3群以上の分散分析を直接扱った論文ではない。
-- 訂正記事がある：Correction: Why Psychologists Should by Default Use Welch’s t-test Instead of Student’s t-test. International Review of Social Psychology, 35(1)（2022、DOI: 10.5334/irsp.661）。訂正の内容は読んでいない。
+- 訂正記事がある：[[50-Analysis-Methods/20-Literature/LIT-delacre-2022-correction|Delacre et al.（2022）]]。訂正の要点と未確認範囲を別ノートに記録した。
 
 ## 専門家の判断・手順に反映する内容
 
@@ -63,7 +85,7 @@ tags:
 
 ## 未確認事項
 
-訂正記事の内容、シミュレーションの条件の詳細。
+訂正後の追加ファイルとシミュレーション条件の独立確認。
 
 ## 関連ノート
 

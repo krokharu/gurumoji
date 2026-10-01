@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-実装：[[50-Analysis-Methods/04-Conversation/02-Conversation-Dynamics]]。文献：[[50-Analysis-Methods/20-Literature/LIT-stivers-2009-turn-taking]]、[[50-Analysis-Methods/20-Literature/LIT-levinson-torreira-2015-timing]]、[[50-Analysis-Methods/20-Literature/LIT-sacks-1974-turn-taking]]（要旨確認）、[[50-Analysis-Methods/20-Literature/LIT-heldner-edlund-2010-pauses]]（要旨の一部）、[[50-Analysis-Methods/20-Literature/LIT-park-2022-diarization-review]]（arXiv版の本文確認）。事例：[[50-Analysis-Methods/10-Experts/conversation-timing/05-Cases]]
+実装：[[50-Analysis-Methods/04-Conversation/02-Conversation-Dynamics]]。文献：[[50-Analysis-Methods/20-Literature/LIT-stivers-2009-turn-taking]]、[[50-Analysis-Methods/20-Literature/LIT-levinson-torreira-2015-timing]]（出版社PDF本文確認）、[[50-Analysis-Methods/20-Literature/LIT-sacks-1974-turn-taking]]（要旨確認）、[[50-Analysis-Methods/20-Literature/LIT-heldner-edlund-2010-pauses]]（要旨の一部）、[[50-Analysis-Methods/20-Literature/LIT-park-2022-diarization-review]]（arXiv版の本文確認）。事例：[[50-Analysis-Methods/10-Experts/conversation-timing/05-Cases]]
 
 ## 知識の確認日と未解決事項
 

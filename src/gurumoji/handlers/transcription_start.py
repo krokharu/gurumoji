@@ -32,7 +32,9 @@ from ..services.transcription.options import (
     JobOptions,
     LANGUAGES,
     MODEL_NAMES,
+    TRANSCRIPTION_BACKENDS,
 )
+from ..services.transcription.qwen_stack import qwen_stack_available, qwen_stack_setup_message
 from ..services.transcription.vocabulary import normalize_custom_vocabulary
 from .form_fields import (
     parse_audio_preprocess,
@@ -94,6 +96,11 @@ def make_transcription_start(
             model_name = form.get("model_name", "base")
             if model_name not in MODEL_NAMES:
                 raise ValueError("認識モデルが不正です。")
+            transcription_backend = form.get("transcription_backend", "whisperx").strip()
+            if transcription_backend not in TRANSCRIPTION_BACKENDS:
+                raise ValueError("文字起こしエンジンの指定が不正です。")
+            if transcription_backend == "qwen3_nemotron" and not qwen_stack_available():
+                raise ValueError(qwen_stack_setup_message())
             language_raw = form.get("language", "ja").strip()
             language = language_raw or None
             if language not in LANGUAGES:
@@ -121,9 +128,16 @@ def make_transcription_start(
             min_speakers = parse_optional_int("min_speakers", form=form)
             max_speakers = parse_optional_int("max_speakers", form=form)
             num_speakers = parse_optional_int("num_speakers", form=form)
+            if transcription_backend == "qwen3_nemotron" and any(
+                value is not None and value > 8
+                for value in (min_speakers, max_speakers, num_speakers)
+            ):
+                raise ValueError("Nemotron 3 Diarization は最大8話者です。話者数の上限を8以下にしてください。")
             if min_speakers and max_speakers and min_speakers > max_speakers:
                 raise ValueError("最少話者数は最多話者数以下にしてください。")
             triple_pass = parse_bool("triple_pass", form=form)
+            if transcription_backend == "qwen3_nemotron" and triple_pass:
+                raise ValueError("詳細処理はWhisperXでのみ利用できます。Qwen3方式ではオフにしてください。")
             boost_quiet_speech = parse_bool("boost_quiet_speech", default=True, form=form)
             if boost_quiet_speech or triple_pass:
                 vad_onset = parse_optional_float(
@@ -192,7 +206,7 @@ def make_transcription_start(
             if emotion_model not in AIST_EMOTION_MODEL_CHOICES:
                 raise ValueError("感情分析モデルの指定が不正です。")
             token_config = load_token_config()
-            if not token_config.huggingface_token:
+            if transcription_backend == "whisperx" and not token_config.huggingface_token:
                 raise ValueError("tokens.json に huggingface_token を設定してください。")
             recommended_cleanup = bool(
                 transcript_finishing_mode == "recommended"
@@ -286,6 +300,7 @@ def make_transcription_start(
                 transcript_finishing_mode=transcript_finishing_mode,
                 write_word_cloud=parse_bool("write_word_cloud", form=form),
                 generate_meeting_minutes=parse_bool("generate_meeting_minutes", form=form),
+                transcription_backend=transcription_backend,
             )
             job = JobRecord(
                 id=job_id,

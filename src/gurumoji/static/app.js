@@ -41,6 +41,7 @@ const emotionAnalysis = document.querySelector('#emotion-analysis');
 const emotionModel = document.querySelector('#emotion-model');
 const aiProvider = document.querySelector('#ai-provider');
 const modelName = document.querySelector('#model-name');
+const transcriptionBackend = document.querySelector('#transcription-backend');
 const languageSelect = document.querySelector('[name="language"]');
 const audioPreprocess = document.querySelector('[name="audio_preprocess"]');
 const minSpeakersInput = document.querySelector('[name="min_speakers"]');
@@ -57,6 +58,8 @@ const writeSrt = document.querySelector('[name="write_srt"]');
 const burnSubtitledVideo = document.querySelector('[name="burn_subtitled_video"]');
 const customVocabulary = document.querySelector('#custom-vocabulary');
 const customVocabularyStatus = document.querySelector('#custom-vocabulary-status');
+const qwenBackendNote = document.querySelector('#qwen-backend-note');
+const qwenVocabularyNote = document.querySelector('#qwen-vocabulary-note');
 const setupReadyState = document.querySelector('#setup-ready-state');
 const setupSummary = document.querySelector('#setup-summary');
 const createView = document.querySelector('#create-view');
@@ -778,6 +781,32 @@ function applyConversationMode(mode = selectedConversationMode()) {
   updateCreateSummary();
 }
 
+function syncTranscriptionBackend() {
+  const qwenSelected = transcriptionBackend?.value === 'qwen3_nemotron';
+  if (qwenSelected && isSpeakerCountFixed()) setSpeakerCountFixed(false);
+  if (modelName) modelName.disabled = qwenSelected;
+  if (triplePass) {
+    triplePass.disabled = qwenSelected;
+    if (qwenSelected) triplePass.checked = false;
+  }
+  [boostQuietSpeech, vadOnset, vadOffset].forEach(input => {
+    if (input) input.disabled = qwenSelected;
+  });
+  if (speakerCountFixButton) {
+    speakerCountFixButton.disabled = qwenSelected;
+    const speakerCountField = speakerCountFixButton.closest('.field');
+    if (speakerCountField) speakerCountField.hidden = qwenSelected;
+  }
+  [minSpeakersField, maxSpeakersField].forEach(field => {
+    if (field) field.hidden = qwenSelected || isSpeakerCountFixed();
+  });
+  [minSpeakersInput, maxSpeakersInput].forEach(input => {
+    if (input) input.disabled = qwenSelected;
+  });
+  if (qwenBackendNote) qwenBackendNote.hidden = !qwenSelected;
+  if (qwenVocabularyNote) qwenVocabularyNote.hidden = !qwenSelected;
+}
+
 function updateCreateSummary() {
   const hasSource = hasSelectedSource();
   if (fileDropZone) fileDropZone.classList.toggle('has-file', hasSource);
@@ -791,7 +820,10 @@ function updateCreateSummary() {
 
   const modePreset = conversationModePresets[selectedConversationMode()];
   const mode = modePreset ? modePreset.label : '会議モード';
-  const model = selectedOptionText(modelName).split(' — ')[0] || '自動';
+  const qwenSelected = transcriptionBackend?.value === 'qwen3_nemotron';
+  const model = qwenSelected
+    ? 'Qwen3-ASR + ForcedAligner + Nemotron 3'
+    : (selectedOptionText(modelName).split(' \u2014 ')[0] || '\u81ea\u52d5');
   const language = selectedOptionText(languageSelect) || '自動判定';
   const preprocess = selectedOptionText(audioPreprocess).split(' — ')[0] || 'おすすめ';
   const transcriptionDevice = document.querySelector('#transcription-device');
@@ -800,7 +832,7 @@ function updateCreateSummary() {
   const diarizationHardware = diarizationDevice && diarizationDevice.value === 'cuda' ? 'GPU (CUDA)' : 'CPU';
   const vocabularyTerms = vocabularyTermsFromInput();
   const recognitionExtras = [];
-  if (vocabularyTerms.length) recognitionExtras.push(`単語登録 ${vocabularyTerms.length}語`);
+  if (vocabularyTerms.length && !qwenSelected) recognitionExtras.push(`\u5358\u8a9e\u767b\u9332 ${vocabularyTerms.length}\u8a9e`);
   const fixedSpeakerLabel = isSpeakerCountFixed() ? `話者数 ${fixedSpeakerCountInput.value || '未入力'}人に固定` : '';
   if (fixedSpeakerLabel) recognitionExtras.push(fixedSpeakerLabel);
   const finishExtras = [];
@@ -834,8 +866,9 @@ function updateCreateSummary() {
   if (writeSrt && writeSrt.checked) { outputParts.push('SRT'); outputExtras.push('SRT'); }
   if (burnSubtitledVideo && burnSubtitledVideo.checked) { outputParts.push('字幕付き動画'); outputExtras.push('字幕付き動画'); }
   const extras = [...recognitionExtras, ...finishExtras, ...outputExtras];
-  const summaryText = `${mode} / ${model} / ${language} / 前処理: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
-  const launchText = `認識モデル ${model}・${transcriptionHardware} / 話者分離 ${diarizationHardware} / AI仕上げ ${finishingState}${finishInVault ? '（あとでObsidian）' : ''}`;
+  const engineLabel = qwenSelected ? model : `WhisperX / ${model}`;
+  const summaryText = `${mode} / ${engineLabel} / ${language} / \u524d\u51e6\u7406: ${preprocess}${extras.length ? ` / ${extras.join(' / ')}` : ''}`;
+  const launchText = `\u6587\u5b57\u8d77\u3053\u3057\u65b9\u5f0f ${engineLabel}\u30fb${transcriptionHardware} / \u8a71\u8005\u5206\u96e2 ${diarizationHardware} / AI\u4ed5\u4e0a\u3052 ${finishingState}${finishInVault ? '\uff08\u3042\u3068\u3067Obsidian\uff09' : ''}`;
   if (setupSummary) setupSummary.textContent = launchText;
   document.querySelectorAll('[data-setup-summary]').forEach(element => { element.textContent = summaryText; });
 
@@ -848,7 +881,7 @@ function updateCreateSummary() {
     document.querySelectorAll(selector).forEach(element => { element.textContent = value; });
   };
   setText('[data-choice-transcription-device]', transcriptionHardware);
-  setText('[data-choice-recognition-model]', `認識モデル ${model}`);
+  setText('[data-choice-recognition-model]', `\u6587\u5b57\u8d77\u3053\u3057\u65b9\u5f0f ${engineLabel}`);
   setText('[data-choice-recognition-detail]', `話者分離 ${diarizationHardware}${fixedSpeakerLabel ? ` / ${fixedSpeakerLabel}` : ''} / ${language} / 前処理 ${preprocess}`);
   setText('[data-settings-value="vocabulary"]', vocabularyTerms.length ? `${vocabularyTerms.length}語を登録` : '未登録');
   setText('[data-choice-finishing-state]', finishingState);
@@ -2688,6 +2721,10 @@ listen(form, 'change', event => {
   if (event.target.name === 'ai_effort_choice_cleanup') window.queueMicrotask(updateCreateSummary);
 });
 aiOptionInputs.forEach(input => listen(input, 'change', updateCreateSummary));
+listen(transcriptionBackend, 'change', () => {
+  syncTranscriptionBackend();
+  updateCreateSummary();
+});
 listen(jevCompare, 'change', () => {
   if (jevCompare.checked && cleanTranscript) cleanTranscript.checked = true;
   updateCreateSummary();
@@ -2695,6 +2732,7 @@ listen(jevCompare, 'change', () => {
 applyConversationMode();
 syncEmotionFields();
 syncAiFields();
+syncTranscriptionBackend();
 updateCreateSummary();
 
 listen(mobileStepBack, 'click', () => setMobileStep(currentMobileStep - 1));

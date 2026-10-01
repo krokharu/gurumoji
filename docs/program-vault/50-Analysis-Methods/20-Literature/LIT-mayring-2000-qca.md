@@ -14,13 +14,38 @@ doi: 10.17169/fqs-1.2.1089
 url: https://www.qualitative-research.net/index.php/fqs/article/view/1089
 accessed: 2026-09-15
 access_scope: full_text
-access_detail: "FQSが公開する英語版のPDFとHTMLを取得して読んだ。DOIの登録機関はDataCite。"
-correction_status: not_checked
+access_detail: "FQSが公開する英語版のPDFとHTMLを取得して読んだ。2026-09-27に公式PDF（10ページ）の原本hashを固定。DOIの登録機関はDataCite。"
+document_version: "fqs-english-pdf-retrieved-2026-09-27-sha256-675fc4ec"
+document_url: https://www.qualitative-research.net/index.php/fqs/article/download/1089/2386
+document_sha256: 675fc4ecc22015000728f36f6541fd974f903bb3250f7dc70bea1381a066271f
+license_id: CC-BY-4.0
+license_url: https://creativecommons.org/licenses/by/4.0/
+llm_processing_permission: explicitly_permitted
+llm_allowed_routes:
+  - local
+  - colab
+  - export
+rights_review_status: approved
+rights_reviewed_by: "Codex primary agent (official FQS article license review)"
+rights_reviewed_at: 2026-09-27T04:27:17Z
+rights_review_basis: >-
+  The official FQS article page identifies this work as licensed under CC BY 4.0.
+  The license legal code permits sharing and adaptation for any purpose with attribution,
+  a license link, and indication of changes. Project routes are limited to local RTX 5070
+  processing, user-initiated Colab A100 processing with our own model (not Colab
+  generative AI), and export of paraphrased source-linked claims carrying author, title,
+  DOI, license, and change attribution. The remote_llm route is blocked by project policy.
+  Third-party material is excluded. The source note records correction_status as
+  not_checked; this rights review does not verify correction history or scientific
+  claims, which must be checked separately before Claim approval.
+correction_status: none_found
+correction_checked_at: 2026-09-27
+correction_check_basis: "FQS公式記事ページに訂正記事の案内なし。DataCite DOI登録（10.17169/fqs-1.2.1089）のrelatedIdentifiersは空。公式ドメインで表題とcorrection/erratumを検索して該当する訂正記事を確認できなかった。後日の訂正がないことを保証するものではない。"
 related_experts:
   - exp-qualitative-content-analysis
   - exp-thematic-analysis
 status: current
-updated: 2026-09-15
+updated: 2026-09-27
 tags:
   - gurumoji/literature
   - gurumoji/qualitative

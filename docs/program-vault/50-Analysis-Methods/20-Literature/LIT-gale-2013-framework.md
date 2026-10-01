@@ -16,15 +16,44 @@ peer_review: confirmed
 peer_review_basis: "BMC Medical Research Methodologyの査読方針で、査読報告を公開する査読を確認（2026-09-15）。本文にも査読の記録（Pre-publication history）の節がある。"
 doi: 10.1186/1471-2288-13-117
 url: https://doi.org/10.1186/1471-2288-13-117
-accessed: 2026-09-16
+accessed: 2026-09-27
 access_scope: full_text
-access_detail: "Europe PMCの全文XML（PMC3848812、CC BY 2.0）を取得し、タグを除いたテキストで読んだ。位置は節見出しで示す。"
+access_detail: "2026-09-27にBMC/Springer公式配布PDF（VOR、8ページ）を取得し、題名・DOI・CC BY 2.0表記を確認。物理ページ番号を記録する。pypdfによる文字抽出のみで、図表・OCR・紙面レイアウトは未確認。旧Birmingham配布版とは原本hashが異なるため別版として記録。"
+document_version: "publisher-vor-bmc-springer-retrieved-2026-09-27-sha256-c7b29d81"
+document_url: https://link.springer.com/content/pdf/10.1186/1471-2288-13-117.pdf
+document_sha256: c7b29d818b4c1c2d53e198efdb4ab1f840c36f47d22a5c8eb3d9d17fecb21902
+previous_document_versions:
+  - version: "publisher-vor-birmingham-portal-16708327-retrieved-2026-09-27-sha256-aaab42c2"
+    sha256: aaab42c2ffa55ac7900dd50a11183f3ddf478cad799b825fbd4f3206a42bdcc3
+    status: superseded-different-distribution
+  - version: "publisher-vor-university-of-birmingham-portal-16708327-retrieved-2026-09-27"
+    sha256: a3112f820967aaee1ea6a1b731ae1b7502d774e0da751034215fec3e5a41ab15
+    status: not_retrieved_in_this_audit
+license_id: CC-BY-2.0
+license_url: https://creativecommons.org/licenses/by/2.0/
+llm_processing_permission: explicitly_permitted
+llm_allowed_routes:
+  - local
+  - colab
+  - export
+rights_review_status: approved
+rights_reviewed_by: "Codex GPT-6 Sol (read-only)"
+rights_reviewed_at: 2026-09-26T21:54:31Z
+rights_review_basis: >-
+  The publisher's Rights and permissions section identifies CC BY 2.0, which permits
+  reuse and redistribution with proper attribution. Project scope is limited to local
+  RTX 5070 inference, user-initiated Colab A100 inference using our own model (not
+  Colab's generative AI features), and export of paraphrased, source-linked claims with
+  author/title/DOI/license and change attribution. Do not export the article body, figures,
+  third-party content, or supplements whose rights are not separately confirmed. The
+  remote_llm route remains blocked by project policy, not by CC BY 2.0. Colab processing
+  is limited to this public CC BY article; no confidential or personal data is sent.
 correction_status: none_found
 related_experts:
   - exp-framework-method
   - exp-cross-session-comparison
 status: current
-updated: 2026-09-16
+updated: 2026-09-27
 tags:
   - gurumoji/literature
   - gurumoji/qualitative

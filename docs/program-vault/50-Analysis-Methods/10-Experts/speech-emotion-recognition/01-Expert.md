@@ -56,7 +56,7 @@ tags:
 
 ## 参照ノートと主要文献
 
-実装：[[50-Analysis-Methods/02-Semantic-and-Audio/02-Audio-Emotion]]。文献：[[50-Analysis-Methods/20-Literature/RES-kushinada-hubert-jtes-er-model-card]]（公式ページ）、[[50-Analysis-Methods/20-Literature/LIT-hsu-2021-hubert]]、[[50-Analysis-Methods/20-Literature/LIT-barrett-2019-emotional-expressions]]（要旨確認）、[[50-Analysis-Methods/20-Literature/LIT-park-2022-diarization-review]]（arXiv版の本文確認）、Baevski et al. 2020、Kosaka et al. 2024、Schuller 2018（書誌のみ）。事例：[[50-Analysis-Methods/10-Experts/speech-emotion-recognition/05-Cases]]
+実装：[[50-Analysis-Methods/02-Semantic-and-Audio/02-Audio-Emotion]]。文献：[[50-Analysis-Methods/20-Literature/RES-kushinada-hubert-jtes-er-model-card]]（公式ページ）、[[50-Analysis-Methods/20-Literature/LIT-hsu-2021-hubert]]、[[50-Analysis-Methods/20-Literature/LIT-barrett-2019-emotional-expressions]]（要旨確認）、[[50-Analysis-Methods/20-Literature/LIT-park-2022-diarization-review]]（arXiv版の本文確認）、[[50-Analysis-Methods/20-Literature/LIT-zhang-2021-cross-corpus-ser]]（コーパス間評価の総説）、Baevski et al. 2020、Kosaka et al. 2024、Schuller 2018（書誌のみ）。事例：[[50-Analysis-Methods/10-Experts/speech-emotion-recognition/05-Cases]]
 
 ## 知識の確認日と未解決事項
 

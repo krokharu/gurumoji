@@ -4,7 +4,7 @@ note_type: expert-limits
 expert_id: exp-thematic-analysis
 title: テーマ分析の専門家：適用条件と限界
 status: current
-updated: 2026-09-16
+updated: 2026-09-28
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -34,5 +34,5 @@ tags:
 ## グループインタビューでの注意
 
 - [文献] フォーカスグループの結果を1人ずつの引用で報告すると、個人の見解を相互作用から切り離せるかのような印象を与えうる（[[50-Analysis-Methods/20-Literature/LIT-gronkjaer-2011-fg-interaction|Grønkjær et al. 2011]]、p.16）。テーマの抜粋を示すときは、前後の応答の文脈を確認する。
-- [文献] 相互作用のコード化をテーマ分析の過程に組み込む方法が提案されている（[[50-Analysis-Methods/20-Literature/LIT-hermann-2024-fg-interaction-coding|Hermann et al. 2024]]、要旨）。組み込む場合は相互作用分析の専門家の定義と並べて使う。
+- [文献] 相互作用のコード化をSystematic Text Condensationと並行して行う一例が報告されている（[[50-Analysis-Methods/20-Literature/LIT-hermann-2024-fg-interaction-coding|Hermann et al. 2024]]、本文）。同論文のコード枠組みは特定のデータで開発・試行されたものなので、組み込む場合は相互作用分析の専門家の定義と並べて適合を確認する。
 - [実装判断] 司会者の質問の言い回しがテーマの名前に入り込んでいないかを確認する。

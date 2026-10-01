@@ -183,6 +183,7 @@ literature:
   - LIT-holm-1979-multiple-testing
   - LIT-benjamini-hochberg-1995-fdr
   - LIT-appelbaum-2018-jars-quant
+  - RES-scipy-pearsonr
 common_notes:
   - 01-Evidence-and-Claims
   - 02-Source-Classification

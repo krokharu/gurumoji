@@ -133,403 +133,460 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
         check_cancelled()
         set_stage("environment", "処理環境の確認", 100)
         progress(8)
-        try:
+        if options.transcription_backend == "qwen3_nemotron":
+            import numpy as np
             import torch
-
-            configure_huggingface_hub_compatibility()
+            import wave
             import whisperx
 
-            configure_speechbrain_lazy_import_compatibility()
-            from whisperx.diarize import DiarizationPipeline
-        except ImportError as exc:
-            raise RuntimeError("必要な Python パッケージがありません。run.bat でセットアップしてください。") from exc
+            from .qwen_stack import run_qwen_stack
 
-        device = options.device
-        diarization_device = options.diarization_device
-        needs_cuda = device == "cuda" or diarization_device == "cuda"
-        if needs_cuda and not torch.cuda.is_available():
-            raise RuntimeError("CUDA を利用できません。CPU を選ぶか NVIDIA ドライバーを確認してください。")
-        capability: tuple[int, int] | None = None
-        vram_gib = 0.0
-        gpu_name = ""
-        if needs_cuda:
-            gpu_name = torch.cuda.get_device_name(0)
-            capability = torch.cuda.get_device_capability(0)
-            vram_gib = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        compute_type = "float16" if capability and capability[0] >= 7 else "float32"
-        use_openai_whisper = device == "cpu" or (capability is not None and capability[0] < 7)
-        if device == "cuda":
-            assert capability is not None
-            status(
-                f"GPU: {gpu_name} / VRAM {vram_gib:.1f} GB / "
-                f"Compute Capability {capability[0]}.{capability[1]}"
-            )
-            if capability[0] < 7 and options.model_name not in {"tiny", "base"}:
-                raise RuntimeError("旧世代 4 GB GPU では tiny / base だけを選べます。")
-        else:
-            status("文字起こしは CPU を使用します。")
+            device = options.device
+            diarization_device = options.diarization_device
+            if (device == "cuda" or diarization_device == "cuda") and not torch.cuda.is_available():
+                raise RuntimeError("CUDA is unavailable. Select CPU or install a CUDA-enabled PyTorch runtime.")
+            set_stage("transcription", "Qwen3-ASR / ForcedAligner", 10)
+            status("Running Qwen3-ASR with Qwen3 ForcedAligner.")
+            qwen_audio = whisperx.load_audio(str(processing_input_path))
+            qwen_audio_path = internal_work_dir / "qwen-asr-input.wav"
+            pcm_audio = (np.clip(np.asarray(qwen_audio), -1.0, 1.0) * 32767).astype("<i2")
+            with wave.open(str(qwen_audio_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(WHISPER_SAMPLE_RATE)
+                wav_file.writeframes(pcm_audio.tobytes())
+            del qwen_audio, pcm_audio
 
-        backend = "OpenAI Whisper" if use_openai_whisper else "WhisperX (faster-whisper)"
-        vocabulary_prompt = whisper_vocabulary_prompt(options.custom_vocabulary)
-        if vocabulary_prompt:
-            status(
-                f"単語登録をWhisperの認識ヒントに使用します"
-                f"（{len(options.custom_vocabulary)}語登録・先頭から順に使用）。"
-            )
-
-        def decoding_settings_text(
-            vad_onset: float, vad_offset: float, no_speech_threshold: float
-        ) -> str:
-            # OpenAI Whisper has no VAD stage, so only the no-speech threshold
-            # reaches the decoder there; never report VAD values it ignores.
-            if use_openai_whisper:
-                return (
-                    f"VADなし・無音判定しきい値 no_speech_threshold={no_speech_threshold:.2f}"
+            if processing_input_path != options.input_path:
+                qwen_diarization_path = run_diarization_audio_preprocess(
+                    options.input_path,
+                    internal_work_dir / "nemotron-input.wav",
+                    check_cancelled,
                 )
-            return f"VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}"
-
-        if options.triple_pass:
-            status(
-                f"詳細処理を使います。通常結果の{TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白だけを、"
-                "軽め・強めの順で切り出して補完します。"
-            )
-        elif options.boost_quiet_speech:
-            status(
-                "小さい声を拾いやすくする設定を使います（"
-                + decoding_settings_text(
-                    options.vad_onset, options.vad_offset, options.no_speech_threshold
-                )
-                + "）…"
-            )
-
-        def release_asr_model() -> None:
-            nonlocal model
-            if model is not None:
-                del model
-                model = None
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        def load_asr_model(
-            language_hint: str | None,
-            vad_onset: float,
-            vad_offset: float,
-            no_speech_threshold: float,
-        ) -> None:
-            nonlocal model
-            if use_openai_whisper:
-                import whisper
-
-                model = whisper.load_model(options.model_name, device=device)
             else:
-                asr_options: dict[str, Any] = {
-                    "no_speech_threshold": no_speech_threshold,
-                }
-                if vocabulary_prompt:
-                    # WhisperX stores faster-whisper decoding options on the
-                    # pipeline when the model is loaded; its transcribe()
-                    # method does not accept initial_prompt.
-                    asr_options["initial_prompt"] = vocabulary_prompt
-                model = whisperx.load_model(
-                    options.model_name,
-                    device,
-                    device_index=0,
-                    compute_type=compute_type,
-                    language=language_hint,
-                    asr_options=asr_options,
-                    vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
-                )
+                qwen_diarization_path = qwen_audio_path
 
-        def transcribe_pass(
-            pass_label: str,
-            audio_path: Path,
-            language_hint: str | None,
-            vad_onset: float,
-            vad_offset: float,
-            no_speech_threshold: float,
-            progress_value: int,
-        ) -> tuple[dict[str, Any], Any]:
-            set_stage("transcription", f"{pass_label}の文字起こし", 10)
-            status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            # The model is held only by the enclosing ``model`` binding so that
-            # release_asr_model() can actually return its memory.
-            load_asr_model(
-                language_hint,
-                vad_onset,
-                vad_offset,
-                no_speech_threshold,
+            qwen_result = run_qwen_stack(
+                asr_audio_path=qwen_audio_path,
+                diarization_audio_path=qwen_diarization_path,
+                work_dir=internal_work_dir,
+                language=options.language,
+                asr_device=device,
+                diarization_device=diarization_device,
+                status=status,
+                check_cancelled=check_cancelled,
             )
-            check_cancelled()
-            set_stage("transcription", f"{pass_label}の文字起こし", 35)
-
-            status(
-                f"{pass_label}: 音声を読み込み、文字起こししています（"
-                + decoding_settings_text(vad_onset, vad_offset, no_speech_threshold)
-                + "）…"
-            )
-            pass_audio = whisperx.load_audio(str(audio_path))
-            if use_openai_whisper:
-                transcribe_kwargs: dict[str, Any] = {
-                    "language": language_hint,
-                    "fp16": False,
-                    "verbose": False,
-                    "condition_on_previous_text": False,
-                    "no_speech_threshold": no_speech_threshold,
-                    "word_timestamps": True,
-                }
-            else:
-                transcribe_kwargs = {"batch_size": 1}
-            if vocabulary_prompt and use_openai_whisper:
-                transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-            pass_result = model.transcribe(pass_audio, **transcribe_kwargs)
-            set_stage("transcription", f"{pass_label}の文字起こし", 90)
-            release_asr_model()
-            check_cancelled()
-            set_stage("transcription", f"{pass_label}の文字起こし", 100)
-            progress(progress_value)
-            return pass_result, pass_audio
-
-        def transcribe_gap_pass(
-            pass_label: str,
-            preset: str,
-            gaps: list[tuple[float, float]],
-            audio_duration: float,
-            language_hint: str | None,
-            vad_onset: float,
-            vad_offset: float,
-            no_speech_threshold: float,
-            progress_value: int,
-        ) -> dict[str, Any]:
-            if not gaps:
-                set_stage("transcription", f"{pass_label}の文字起こし", 100)
-                status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白はありません。")
-                progress(progress_value)
-                return {"segments": [], "language": language_hint}
-
-            total_gap_seconds = sum(end - start for start, end in gaps)
-            set_stage("transcription", f"{pass_label}の文字起こし", 10)
-            status(
-                f"{pass_label}: {len(gaps)}か所、計{total_gap_seconds:.1f}秒の空白だけを再確認します。"
-            )
-            status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
-            # The model is held only by the enclosing ``model`` binding so that
-            # release_asr_model() can actually return its memory.
-            load_asr_model(
-                language_hint,
-                vad_onset,
-                vad_offset,
-                no_speech_threshold,
-            )
-            detected_language = language_hint
-            collected: list[dict[str, Any]] = []
-            try:
-                for index, (gap_start, gap_end) in enumerate(gaps, 1):
-                    check_cancelled()
-                    set_stage(
-                        "transcription",
-                        f"{pass_label}の文字起こし",
-                        15 + round(75 * (index - 1) / max(1, len(gaps))),
-                    )
-                    clip_start = max(0.0, gap_start - TRIPLE_PASS_GAP_CONTEXT_SECONDS)
-                    clip_end = min(audio_duration, gap_end + TRIPLE_PASS_GAP_CONTEXT_SECONDS)
-                    status(
-                        f"{pass_label}: 空白 {index}/{len(gaps)} "
-                        f"（{display_time(gap_start)}–{display_time(gap_end)}）を切り出して再文字起こししています…"
-                    )
-                    clip_path = internal_work_dir / f"gap_{preset}_{index:04d}.wav"
-                    try:
-                        run_audio_interval_preprocess(
-                            options.input_path,
-                            clip_path,
-                            clip_start,
-                            clip_end,
-                            preset,
-                            check_cancelled,
-                        )
-                        clip_audio = whisperx.load_audio(str(clip_path))
-                        if use_openai_whisper:
-                            transcribe_kwargs = {
-                                "language": detected_language,
-                                "fp16": False,
-                                "verbose": False,
-                                "condition_on_previous_text": False,
-                                "no_speech_threshold": no_speech_threshold,
-                                "word_timestamps": True,
-                            }
-                        else:
-                            transcribe_kwargs = {"batch_size": 1}
-                        if vocabulary_prompt and use_openai_whisper:
-                            transcribe_kwargs["initial_prompt"] = vocabulary_prompt
-                        clip_result = model.transcribe(clip_audio, **transcribe_kwargs)
-                        if not detected_language:
-                            detected_language = clip_result.get("language")
-                        collected.extend(
-                            offset_asr_segments_to_gap(
-                                clip_result.get("segments", []),
-                                clip_start,
-                                gap_start,
-                                gap_end,
-                            )
-                        )
-                    finally:
-                        clip_path.unlink(missing_ok=True)
-            finally:
-                release_asr_model()
-            check_cancelled()
-            set_stage("transcription", f"{pass_label}の文字起こし", 100)
-            progress(progress_value)
-            return {"segments": collected, "language": detected_language}
-
-        if options.triple_pass:
-            primary_vad_onset = NORMAL_VAD_ONSET
-            primary_vad_offset = NORMAL_VAD_OFFSET
-            primary_no_speech_threshold = NORMAL_NO_SPEECH_THRESHOLD
-            primary_progress = 26
-        else:
-            primary_vad_onset = options.vad_onset
-            primary_vad_offset = options.vad_offset
-            primary_no_speech_threshold = options.no_speech_threshold
-            primary_progress = 52
-
-        result, audio = transcribe_pass(
-            "通常モード",
-            processing_input_path,
-            options.language,
-            primary_vad_onset,
-            primary_vad_offset,
-            primary_no_speech_threshold,
-            primary_progress,
-        )
-        language_code = options.language or result.get("language")
-
-        if options.triple_pass:
-            audio_duration = len(audio) / WHISPER_SAMPLE_RATE
-            original_segments = result.get("segments", [])
-            original_count = len(normalize_asr_segments(original_segments))
-
-            light_gaps = find_long_asr_gaps(original_segments, audio_duration)
-            light_result = transcribe_gap_pass(
-                "2回目（軽め）",
-                "light",
-                light_gaps,
-                audio_duration,
-                language_code,
-                options.vad_onset,
-                options.vad_offset,
-                options.no_speech_threshold,
-                38,
-            )
-            if not language_code:
-                language_code = light_result.get("language")
-            after_light, light_counts = merge_supplemental_asr_segments(
-                original_segments,
-                [("長い空白・軽め", light_result.get("segments", []))],
-            )
-
-            strong_gaps = find_long_asr_gaps(after_light, audio_duration)
-            strong_result = transcribe_gap_pass(
-                "3回目（強め）",
-                "strong",
-                strong_gaps,
-                audio_duration,
-                language_code,
-                options.vad_onset,
-                options.vad_offset,
-                options.no_speech_threshold,
-                50,
-            )
-            if not language_code:
-                language_code = strong_result.get("language")
-            merged_segments, strong_counts = merge_supplemental_asr_segments(
-                after_light,
-                [("長い空白・強め", strong_result.get("segments", []))],
-            )
-            result = dict(result)
-            result["segments"] = merged_segments
-            if language_code:
-                result["language"] = language_code
-            status(
-                "詳細処理の統合完了: "
-                f"通常 {original_count} 区間、"
-                f"2回目 {len(light_gaps)} 空白から +{light_counts.get('長い空白・軽め', 0)}、"
-                f"3回目 {len(strong_gaps)} 空白から +{strong_counts.get('長い空白・強め', 0)} を追加しました。"
-            )
-        check_cancelled()
-        progress(52)
-
-        if language_code:
-            try:
-                set_stage("alignment", "発話時刻の補正", 10)
-                status("発話時刻を整えています…")
-                model_a, metadata = whisperx.load_align_model(language_code=language_code, device=device)
-                result = whisperx.align(
-                    result["segments"], model_a, metadata, audio, device, return_char_alignments=False
-                )
-            except InterruptedError:
-                raise
-            except Exception as exc:
-                status(f"時刻補正を省略しました: {exc}")
-            finally:
-                if model_a is not None:
-                    del model_a
-                    model_a = None
-                gc.collect()
-                if device == "cuda":
-                    torch.cuda.empty_cache()
-        check_cancelled()
-        set_stage("alignment", "発話時刻の補正", 100)
-        progress(64)
-
-        set_stage("diarization", "話者の分離", 10)
-        if processing_input_path != options.input_path:
-            # The transcription presets denoise, band-limit and normalize, which
-            # reshapes the voice characteristics speaker embeddings compare.
-            # Diarize the original recording instead, with only too-quiet speech
-            # lifted so soft speakers still reach the segmentation model.
-            # Both filters preserve timing, so every stage shares one clock.
-            status("話者分離用に、元音声の小さすぎる声だけを持ち上げています…")
-            diarization_path = run_diarization_audio_preprocess(
-                options.input_path,
-                internal_work_dir / "diarization.wav",
-                check_cancelled,
-            )
+            language_code = options.language or qwen_result.get("language")
+            result = {"language": language_code, "segments": qwen_result["segments"]}
             audio = None
-            gc.collect()
-            audio = whisperx.load_audio(str(diarization_path))
-            diarization_path.unlink(missing_ok=True)
-            check_cancelled()
-        status(f"話者を分離しています（{diarization_device.upper()}）…")
-        try:
-            diarize_model = create_diarization_pipeline(
-                DiarizationPipeline, options.hf_token, diarization_device
-            )
-        except Exception as exc:
-            if is_diarization_access_error(exc):
-                raise RuntimeError(diarization_access_error_message(DIARIZATION_MODEL)) from exc
-            raise
-        diarize_kwargs: dict[str, int] = {}
-        if options.num_speakers is not None:
-            diarize_kwargs["num_speakers"] = options.num_speakers
-        elif options.min_speakers is not None:
-            diarize_kwargs["min_speakers"] = options.min_speakers
-        if options.num_speakers is None and options.max_speakers is not None:
-            diarize_kwargs["max_speakers"] = options.max_speakers
-        diarize_segments = diarize_model(audio, **diarize_kwargs)
-        check_cancelled()
-        set_stage("diarization", "話者の分離", 100)
-        progress(80)
+            set_stage("transcription", "Qwen3-ASR / ForcedAligner", 100)
+            progress(64)
+            set_stage("alignment", "Qwen3 ForcedAligner", 100)
+            progress(72)
+            set_stage("diarization", "Nemotron 3 Diarization", 100)
+            progress(80)
+            set_stage("speaker_assignment", "Speaker assignment", 100)
+            segments = ensure_segment_ids(job.id, make_display_segments(result["segments"]))
+            if not segments:
+                raise RuntimeError("Qwen3-ASR / ForcedAligner returned no transcript segments.")
+        else:
+            try:
+                import torch
 
-        set_stage("speaker_assignment", "話者ラベルの割り当て", 15)
-        status("話者ラベルを文字起こしに対応付けています…")
-        result = whisperx.assign_word_speakers(
-            diarize_segments,
-            result,
-            fill_nearest=True,
-        )
-        segments = ensure_segment_ids(job.id, make_display_segments(result.get("segments", [])))
-        if not segments:
-            raise RuntimeError("文字起こし結果が空でした。音声が含まれているか確認してください。")
+                configure_huggingface_hub_compatibility()
+                import whisperx
+
+                configure_speechbrain_lazy_import_compatibility()
+                from whisperx.diarize import DiarizationPipeline
+            except ImportError as exc:
+                raise RuntimeError("必要な Python パッケージがありません。run.bat でセットアップしてください。") from exc
+
+            device = options.device
+            diarization_device = options.diarization_device
+            needs_cuda = device == "cuda" or diarization_device == "cuda"
+            if needs_cuda and not torch.cuda.is_available():
+                raise RuntimeError("CUDA を利用できません。CPU を選ぶか NVIDIA ドライバーを確認してください。")
+            capability: tuple[int, int] | None = None
+            vram_gib = 0.0
+            gpu_name = ""
+            if needs_cuda:
+                gpu_name = torch.cuda.get_device_name(0)
+                capability = torch.cuda.get_device_capability(0)
+                vram_gib = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            compute_type = "float16" if capability and capability[0] >= 7 else "float32"
+            use_openai_whisper = device == "cpu" or (capability is not None and capability[0] < 7)
+            if device == "cuda":
+                assert capability is not None
+                status(
+                    f"GPU: {gpu_name} / VRAM {vram_gib:.1f} GB / "
+                    f"Compute Capability {capability[0]}.{capability[1]}"
+                )
+                if capability[0] < 7 and options.model_name not in {"tiny", "base"}:
+                    raise RuntimeError("旧世代 4 GB GPU では tiny / base だけを選べます。")
+            else:
+                status("文字起こしは CPU を使用します。")
+
+            backend = "OpenAI Whisper" if use_openai_whisper else "WhisperX (faster-whisper)"
+            vocabulary_prompt = whisper_vocabulary_prompt(options.custom_vocabulary)
+            if vocabulary_prompt:
+                status(
+                    f"単語登録をWhisperの認識ヒントに使用します"
+                    f"（{len(options.custom_vocabulary)}語登録・先頭から順に使用）。"
+                )
+
+            def decoding_settings_text(
+                vad_onset: float, vad_offset: float, no_speech_threshold: float
+            ) -> str:
+                # OpenAI Whisper has no VAD stage, so only the no-speech threshold
+                # reaches the decoder there; never report VAD values it ignores.
+                if use_openai_whisper:
+                    return (
+                        f"VADなし・無音判定しきい値 no_speech_threshold={no_speech_threshold:.2f}"
+                    )
+                return f"VAD onset={vad_onset:.2f}, offset={vad_offset:.2f}"
+
+            if options.triple_pass:
+                status(
+                    f"詳細処理を使います。通常結果の{TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白だけを、"
+                    "軽め・強めの順で切り出して補完します。"
+                )
+            elif options.boost_quiet_speech:
+                status(
+                    "小さい声を拾いやすくする設定を使います（"
+                    + decoding_settings_text(
+                        options.vad_onset, options.vad_offset, options.no_speech_threshold
+                    )
+                    + "）…"
+                )
+
+            def release_asr_model() -> None:
+                nonlocal model
+                if model is not None:
+                    del model
+                    model = None
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            def load_asr_model(
+                language_hint: str | None,
+                vad_onset: float,
+                vad_offset: float,
+                no_speech_threshold: float,
+            ) -> None:
+                nonlocal model
+                if use_openai_whisper:
+                    import whisper
+
+                    model = whisper.load_model(options.model_name, device=device)
+                else:
+                    asr_options: dict[str, Any] = {
+                        "no_speech_threshold": no_speech_threshold,
+                    }
+                    if vocabulary_prompt:
+                        # WhisperX stores faster-whisper decoding options on the
+                        # pipeline when the model is loaded; its transcribe()
+                        # method does not accept initial_prompt.
+                        asr_options["initial_prompt"] = vocabulary_prompt
+                    model = whisperx.load_model(
+                        options.model_name,
+                        device,
+                        device_index=0,
+                        compute_type=compute_type,
+                        language=language_hint,
+                        asr_options=asr_options,
+                        vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
+                    )
+
+            def transcribe_pass(
+                pass_label: str,
+                audio_path: Path,
+                language_hint: str | None,
+                vad_onset: float,
+                vad_offset: float,
+                no_speech_threshold: float,
+                progress_value: int,
+            ) -> tuple[dict[str, Any], Any]:
+                set_stage("transcription", f"{pass_label}の文字起こし", 10)
+                status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
+                # The model is held only by the enclosing ``model`` binding so that
+                # release_asr_model() can actually return its memory.
+                load_asr_model(
+                    language_hint,
+                    vad_onset,
+                    vad_offset,
+                    no_speech_threshold,
+                )
+                check_cancelled()
+                set_stage("transcription", f"{pass_label}の文字起こし", 35)
+
+                status(
+                    f"{pass_label}: 音声を読み込み、文字起こししています（"
+                    + decoding_settings_text(vad_onset, vad_offset, no_speech_threshold)
+                    + "）…"
+                )
+                pass_audio = whisperx.load_audio(str(audio_path))
+                if use_openai_whisper:
+                    transcribe_kwargs: dict[str, Any] = {
+                        "language": language_hint,
+                        "fp16": False,
+                        "verbose": False,
+                        "condition_on_previous_text": False,
+                        "no_speech_threshold": no_speech_threshold,
+                        "word_timestamps": True,
+                    }
+                else:
+                    transcribe_kwargs = {"batch_size": 1}
+                if vocabulary_prompt and use_openai_whisper:
+                    transcribe_kwargs["initial_prompt"] = vocabulary_prompt
+                pass_result = model.transcribe(pass_audio, **transcribe_kwargs)
+                set_stage("transcription", f"{pass_label}の文字起こし", 90)
+                release_asr_model()
+                check_cancelled()
+                set_stage("transcription", f"{pass_label}の文字起こし", 100)
+                progress(progress_value)
+                return pass_result, pass_audio
+
+            def transcribe_gap_pass(
+                pass_label: str,
+                preset: str,
+                gaps: list[tuple[float, float]],
+                audio_duration: float,
+                language_hint: str | None,
+                vad_onset: float,
+                vad_offset: float,
+                no_speech_threshold: float,
+                progress_value: int,
+            ) -> dict[str, Any]:
+                if not gaps:
+                    set_stage("transcription", f"{pass_label}の文字起こし", 100)
+                    status(f"{pass_label}: {TRIPLE_PASS_MIN_GAP_SECONDS:g}秒以上の空白はありません。")
+                    progress(progress_value)
+                    return {"segments": [], "language": language_hint}
+
+                total_gap_seconds = sum(end - start for start, end in gaps)
+                set_stage("transcription", f"{pass_label}の文字起こし", 10)
+                status(
+                    f"{pass_label}: {len(gaps)}か所、計{total_gap_seconds:.1f}秒の空白だけを再確認します。"
+                )
+                status(f"{pass_label}: 音声認識モデルを読み込んでいます（{options.model_name} / {backend}）…")
+                # The model is held only by the enclosing ``model`` binding so that
+                # release_asr_model() can actually return its memory.
+                load_asr_model(
+                    language_hint,
+                    vad_onset,
+                    vad_offset,
+                    no_speech_threshold,
+                )
+                detected_language = language_hint
+                collected: list[dict[str, Any]] = []
+                try:
+                    for index, (gap_start, gap_end) in enumerate(gaps, 1):
+                        check_cancelled()
+                        set_stage(
+                            "transcription",
+                            f"{pass_label}の文字起こし",
+                            15 + round(75 * (index - 1) / max(1, len(gaps))),
+                        )
+                        clip_start = max(0.0, gap_start - TRIPLE_PASS_GAP_CONTEXT_SECONDS)
+                        clip_end = min(audio_duration, gap_end + TRIPLE_PASS_GAP_CONTEXT_SECONDS)
+                        status(
+                            f"{pass_label}: 空白 {index}/{len(gaps)} "
+                            f"（{display_time(gap_start)}–{display_time(gap_end)}）を切り出して再文字起こししています…"
+                        )
+                        clip_path = internal_work_dir / f"gap_{preset}_{index:04d}.wav"
+                        try:
+                            run_audio_interval_preprocess(
+                                options.input_path,
+                                clip_path,
+                                clip_start,
+                                clip_end,
+                                preset,
+                                check_cancelled,
+                            )
+                            clip_audio = whisperx.load_audio(str(clip_path))
+                            if use_openai_whisper:
+                                transcribe_kwargs = {
+                                    "language": detected_language,
+                                    "fp16": False,
+                                    "verbose": False,
+                                    "condition_on_previous_text": False,
+                                    "no_speech_threshold": no_speech_threshold,
+                                    "word_timestamps": True,
+                                }
+                            else:
+                                transcribe_kwargs = {"batch_size": 1}
+                            if vocabulary_prompt and use_openai_whisper:
+                                transcribe_kwargs["initial_prompt"] = vocabulary_prompt
+                            clip_result = model.transcribe(clip_audio, **transcribe_kwargs)
+                            if not detected_language:
+                                detected_language = clip_result.get("language")
+                            collected.extend(
+                                offset_asr_segments_to_gap(
+                                    clip_result.get("segments", []),
+                                    clip_start,
+                                    gap_start,
+                                    gap_end,
+                                )
+                            )
+                        finally:
+                            clip_path.unlink(missing_ok=True)
+                finally:
+                    release_asr_model()
+                check_cancelled()
+                set_stage("transcription", f"{pass_label}の文字起こし", 100)
+                progress(progress_value)
+                return {"segments": collected, "language": detected_language}
+
+            if options.triple_pass:
+                primary_vad_onset = NORMAL_VAD_ONSET
+                primary_vad_offset = NORMAL_VAD_OFFSET
+                primary_no_speech_threshold = NORMAL_NO_SPEECH_THRESHOLD
+                primary_progress = 26
+            else:
+                primary_vad_onset = options.vad_onset
+                primary_vad_offset = options.vad_offset
+                primary_no_speech_threshold = options.no_speech_threshold
+                primary_progress = 52
+
+            result, audio = transcribe_pass(
+                "通常モード",
+                processing_input_path,
+                options.language,
+                primary_vad_onset,
+                primary_vad_offset,
+                primary_no_speech_threshold,
+                primary_progress,
+            )
+            language_code = options.language or result.get("language")
+
+            if options.triple_pass:
+                audio_duration = len(audio) / WHISPER_SAMPLE_RATE
+                original_segments = result.get("segments", [])
+                original_count = len(normalize_asr_segments(original_segments))
+
+                light_gaps = find_long_asr_gaps(original_segments, audio_duration)
+                light_result = transcribe_gap_pass(
+                    "2回目（軽め）",
+                    "light",
+                    light_gaps,
+                    audio_duration,
+                    language_code,
+                    options.vad_onset,
+                    options.vad_offset,
+                    options.no_speech_threshold,
+                    38,
+                )
+                if not language_code:
+                    language_code = light_result.get("language")
+                after_light, light_counts = merge_supplemental_asr_segments(
+                    original_segments,
+                    [("長い空白・軽め", light_result.get("segments", []))],
+                )
+
+                strong_gaps = find_long_asr_gaps(after_light, audio_duration)
+                strong_result = transcribe_gap_pass(
+                    "3回目（強め）",
+                    "strong",
+                    strong_gaps,
+                    audio_duration,
+                    language_code,
+                    options.vad_onset,
+                    options.vad_offset,
+                    options.no_speech_threshold,
+                    50,
+                )
+                if not language_code:
+                    language_code = strong_result.get("language")
+                merged_segments, strong_counts = merge_supplemental_asr_segments(
+                    after_light,
+                    [("長い空白・強め", strong_result.get("segments", []))],
+                )
+                result = dict(result)
+                result["segments"] = merged_segments
+                if language_code:
+                    result["language"] = language_code
+                status(
+                    "詳細処理の統合完了: "
+                    f"通常 {original_count} 区間、"
+                    f"2回目 {len(light_gaps)} 空白から +{light_counts.get('長い空白・軽め', 0)}、"
+                    f"3回目 {len(strong_gaps)} 空白から +{strong_counts.get('長い空白・強め', 0)} を追加しました。"
+                )
+            check_cancelled()
+            progress(52)
+
+            if language_code:
+                try:
+                    set_stage("alignment", "発話時刻の補正", 10)
+                    status("発話時刻を整えています…")
+                    model_a, metadata = whisperx.load_align_model(language_code=language_code, device=device)
+                    result = whisperx.align(
+                        result["segments"], model_a, metadata, audio, device, return_char_alignments=False
+                    )
+                except InterruptedError:
+                    raise
+                except Exception as exc:
+                    status(f"時刻補正を省略しました: {exc}")
+                finally:
+                    if model_a is not None:
+                        del model_a
+                        model_a = None
+                    gc.collect()
+                    if device == "cuda":
+                        torch.cuda.empty_cache()
+            check_cancelled()
+            set_stage("alignment", "発話時刻の補正", 100)
+            progress(64)
+
+            set_stage("diarization", "話者の分離", 10)
+            if processing_input_path != options.input_path:
+                # The transcription presets denoise, band-limit and normalize, which
+                # reshapes the voice characteristics speaker embeddings compare.
+                # Diarize the original recording instead, with only too-quiet speech
+                # lifted so soft speakers still reach the segmentation model.
+                # Both filters preserve timing, so every stage shares one clock.
+                status("話者分離用に、元音声の小さすぎる声だけを持ち上げています…")
+                diarization_path = run_diarization_audio_preprocess(
+                    options.input_path,
+                    internal_work_dir / "diarization.wav",
+                    check_cancelled,
+                )
+                audio = None
+                gc.collect()
+                audio = whisperx.load_audio(str(diarization_path))
+                diarization_path.unlink(missing_ok=True)
+                check_cancelled()
+            status(f"話者を分離しています（{diarization_device.upper()}）…")
+            try:
+                diarize_model = create_diarization_pipeline(
+                    DiarizationPipeline, options.hf_token, diarization_device
+                )
+            except Exception as exc:
+                if is_diarization_access_error(exc):
+                    raise RuntimeError(diarization_access_error_message(DIARIZATION_MODEL)) from exc
+                raise
+            diarize_kwargs: dict[str, int] = {}
+            if options.num_speakers is not None:
+                diarize_kwargs["num_speakers"] = options.num_speakers
+            elif options.min_speakers is not None:
+                diarize_kwargs["min_speakers"] = options.min_speakers
+            if options.num_speakers is None and options.max_speakers is not None:
+                diarize_kwargs["max_speakers"] = options.max_speakers
+            diarize_segments = diarize_model(audio, **diarize_kwargs)
+            check_cancelled()
+            set_stage("diarization", "話者の分離", 100)
+            progress(80)
+
+            set_stage("speaker_assignment", "話者ラベルの割り当て", 15)
+            status("話者ラベルを文字起こしに対応付けています…")
+            result = whisperx.assign_word_speakers(
+                diarize_segments,
+                result,
+                fill_nearest=True,
+            )
+            segments = ensure_segment_ids(job.id, make_display_segments(result.get("segments", [])))
+            if not segments:
+                raise RuntimeError("文字起こし結果が空でした。音声が含まれているか確認してください。")
         # Speaker identification uses the unedited transcript as a dedicated
         # source so text cleanup cannot remove or rewrite a self-introduction.
         speaker_identity_segments = [dict(item) for item in segments]

@@ -231,6 +231,7 @@ literature:
   - LIT-chang-2009-reading-tea-leaves
   - LIT-grimmer-stewart-2013-text-as-data
   - LIT-park-2022-diarization-review
+  - RES-bertopic-official
 common_notes:
   - 01-Evidence-and-Claims
   - 02-Source-Classification

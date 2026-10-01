@@ -4,7 +4,7 @@ note_type: expert-cases
 expert_id: exp-japanese-text-preprocessing
 title: 日本語テキストの前処理の専門家：適用例
 status: current
-updated: 2026-09-16
+updated: 2026-09-28
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -15,7 +15,7 @@ tags:
 
 | 文献 | 領域・データ | 確認範囲 | 分かること |
 | --- | --- | --- | --- |
-| [[50-Analysis-Methods/20-Literature/RES-ginza-official\|GiNZAの公式ページ]] | UD_Japanese-BCCWJ r2.8での評価 | 公式ページ | モデルごとのLAS、UAS、UPOS、ENEの比較 |
+| [[50-Analysis-Methods/20-Literature/RES-ginza-official\|GiNZAの公式ページ v5.2.0]] | UD Japanese BCCWJ r2.8 | 公式README | v5係り受けモデルの学習データの一部と、評価セットでのモデル別指標 |
 
 ## 確認できていないこと
 

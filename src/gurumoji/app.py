@@ -1200,7 +1200,12 @@ def retire_input_vault(item_id: str) -> None:
 
 
 def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[str, Any]:
-    return whisper_settings(options, language, diarization_model=DIARIZATION_MODEL)
+    diarization_model = (
+        "nvidia/Nemotron-3-Diarization"
+        if getattr(options, "transcription_backend", "whisperx") == "qwen3_nemotron"
+        else DIARIZATION_MODEL
+    )
+    return whisper_settings(options, language, diarization_model=diarization_model)
 
 
 _update_library_from_payload_locked = make_library_update(
