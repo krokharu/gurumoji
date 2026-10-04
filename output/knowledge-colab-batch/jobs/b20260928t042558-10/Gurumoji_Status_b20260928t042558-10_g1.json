@@ -1,0 +1,1 @@
+{"gpu": "NVIDIA A100-SXM4-80GB", "job_id": "b20260928t042558-10", "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8", "result_sha256": "bed84a1721148e78924679b650d531537604efd8ed284d1f5b2075263a7a2205", "result_size_bytes": 6093, "schema_version": 1, "status": "candidate_ready", "updated_at": "2026-09-28T04:39:23+00:00"}

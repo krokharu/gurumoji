@@ -1,0 +1,267 @@
+{
+  "batch_id": "b20260928t034933",
+  "created_at": "2026-09-28T03:49:34.655943+00:00",
+  "jobs": [
+    {
+      "anchor_id": "abstract",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-01/Gurumoji_Job_b20260928t034933-01_g1.zip",
+      "bundle_sha256": "01550df862b2dd7232a1238454a9576da9811087a7b6b035db0a031f603af979",
+      "bundle_size_bytes": 39527,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "e54593c78f521c1fc014946981ec1eaeec2033e6a88e06899e5f01199cd794f8",
+        "result_size_bytes": 5650,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:53:35+00:00"
+      },
+      "deadline": "2026-09-28T04:44:33Z",
+      "execution_attempts": [
+        {
+          "colab_status": {
+            "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+            "error_type": "RuntimeError",
+            "job_id": "b20260928t034933-01",
+            "schema_version": 1,
+            "status": "failed",
+            "updated_at": "2026-09-28T03:50:35+00:00"
+          },
+          "error": "RuntimeError",
+          "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-focus-group-interaction",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t034933/LIT-hermann-2024-fg-interaction-coding/excerpt.json",
+      "job_id": "b20260928t034933-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "ce3cff891c58d0d236131d7b9848e92c485441f441359c43633286a7d8260318",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-01/Gurumoji_Result_b20260928t034933-01_g1.zip",
+      "result_sha256": "e54593c78f521c1fc014946981ec1eaeec2033e6a88e06899e5f01199cd794f8",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:54:22.546805+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The abstract explicitly describes developing and testing a coding scheme for focus-group interactions within thematic analysis.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      },
+      "commit_sha256": "3d8390ac3a4356726310c3617127859501b3e88b7e1aa60942f3e20ac1d58b0a"
+    },
+    {
+      "anchor_id": "study-context",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-02/Gurumoji_Job_b20260928t034933-02_g1.zip",
+      "bundle_sha256": "0206d310e619baee7f7e924f1d5c23c675958d45c06f2b93f1ff8471ef3d72ef",
+      "bundle_size_bytes": 41994,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "15223a0140722dfa23d51efcd04fbd4822d3a0cfb310273c333a5637f9a03b53",
+        "result_size_bytes": 8238,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:54:42+00:00"
+      },
+      "deadline": "2026-09-28T04:44:34Z",
+      "execution_attempts": [
+        {
+          "colab_status": {
+            "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+            "error_type": "RuntimeError",
+            "job_id": "b20260928t034933-02",
+            "schema_version": 1,
+            "status": "failed",
+            "updated_at": "2026-09-28T03:50:47+00:00"
+          },
+          "error": "RuntimeError",
+          "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-participation-balance",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t025516/LIT-poliandri-2023-online-focus-groups/excerpt-study-context.json",
+      "job_id": "b20260928t034933-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "93c6044c19b1042ce6f55fbd0f301e2862470422387855607f9a5e5533db6f3b",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-02/Gurumoji_Result_b20260928t034933-02_g1.zip",
+      "result_sha256": "15223a0140722dfa23d51efcd04fbd4822d3a0cfb310273c333a5637f9a03b53",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:54:43.276885+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The cited project reports positive participant experiences; it does not establish online focus groups generally improve discussion quality.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      }
+    },
+    {
+      "anchor_id": "pipeline-overview",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-03_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-03/Gurumoji_Job_b20260928t034933-03_g1.zip",
+      "bundle_sha256": "029cbc05c6cd2e6446777f8c95a6650b2e82ea2ae75b33ef5b46e08c977ef77a",
+      "bundle_size_bytes": 40748,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-03",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "8a4388f42abb2935b52b32f6799c3824f1d6bf383db821236d1f8b719eac1b5d",
+        "result_size_bytes": 6942,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:54:59+00:00"
+      },
+      "deadline": "2026-09-28T04:44:34Z",
+      "expert_id": "exp-embedding-topic-exploration",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t025516/RES-bertopic-official/excerpt-pipeline-overview.json",
+      "job_id": "b20260928t034933-03",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-03_g1.local-approved-sources.json",
+      "local_registry_sha256": "eabc4fb19a2ce955c7d99d03c2e1f49d4dc1db0f6da5f9fccfde4be036abd955",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-03/Gurumoji_Result_b20260928t034933-03_g1.zip",
+      "result_sha256": "8a4388f42abb2935b52b32f6799c3824f1d6bf383db821236d1f8b719eac1b5d",
+      "source_id": "RES-bertopic-official",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:55:10.654311+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The documentation says the pipeline steps are somewhat independent; the candidate strengthens this to mutual independence.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      }
+    },
+    {
+      "anchor_id": "class-tfidf",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-04_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-04/Gurumoji_Job_b20260928t034933-04_g1.zip",
+      "bundle_sha256": "f52f6e0f82856c62d557cfd904b2a4b021273d6a9e448ec4afd53e5f24f9de34",
+      "bundle_size_bytes": 40198,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-04",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "2bdf6924f99a78da155b05313f748d5836377913f7cb11de147fbcf1085d992f",
+        "result_size_bytes": 6321,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:55:24+00:00"
+      },
+      "deadline": "2026-09-28T04:44:34Z",
+      "expert_id": "exp-embedding-topic-exploration",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t025516/RES-bertopic-official/excerpt-class-tfidf.json",
+      "job_id": "b20260928t034933-04",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-04_g1.local-approved-sources.json",
+      "local_registry_sha256": "eabc4fb19a2ce955c7d99d03c2e1f49d4dc1db0f6da5f9fccfde4be036abd955",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-04/Gurumoji_Result_b20260928t034933-04_g1.zip",
+      "result_sha256": "2bdf6924f99a78da155b05313f748d5836377913f7cb11de147fbcf1085d992f",
+      "source_id": "RES-bertopic-official",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:55:59.284237+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The method is class-based TF-IDF, a modified version; the candidate omits the class-based distinction.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      }
+    },
+    {
+      "anchor_id": "describe-api",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-05_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-05/Gurumoji_Job_b20260928t034933-05_g1.zip",
+      "bundle_sha256": "8ce755a9fb74a4dc2e0c3e20af83a5d593fc3629cadc6d869f60fab38c0a3947",
+      "bundle_size_bytes": 39909,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-05",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "f9c9f265c44926af5746fea1175eb5497ee323d1200c8e3eb804ae3f65fa47b9",
+        "result_size_bytes": 6058,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:56:15+00:00"
+      },
+      "deadline": "2026-09-28T04:44:34Z",
+      "expert_id": "exp-descriptive-statistics",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t025516/RES-scipy-describe/excerpt-describe-api.json",
+      "job_id": "b20260928t034933-05",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-05_g1.local-approved-sources.json",
+      "local_registry_sha256": "6290aa8a633dd589e02f98299369e1608b1ec3eaa86f7c33a1293be6a4c6637f",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-05/Gurumoji_Result_b20260928t034933-05_g1.zip",
+      "result_sha256": "f9c9f265c44926af5746fea1175eb5497ee323d1200c8e3eb804ae3f65fa47b9",
+      "source_id": "RES-scipy-describe",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:56:17.114010+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The listed unbiased variance matches stats.describe default ddof=1. Candidate remains unapproved; consider naming the default because ddof is configurable.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      },
+      "commit_sha256": "1b05130f4934f10ea6171a241180b7fe51c4660009eb4c1abfbd76745cb6573d"
+    },
+    {
+      "anchor_id": "gap-distribution",
+      "bundle_file_name": "Gurumoji_Job_b20260928t034933-06_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t034933-06/Gurumoji_Job_b20260928t034933-06_g1.zip",
+      "bundle_sha256": "ad5ac1960b6ef82ca6cf3331c5ea68bcae7ca2f5bb14f3fa6c91c6cad56ae3b4",
+      "bundle_size_bytes": 41512,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t034933-06",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "a6adbde8e2c9acb99bda55134461a67ba42f98144a8501f5f807f912c4697186",
+        "result_size_bytes": 7864,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:56:47+00:00"
+      },
+      "deadline": "2026-09-28T04:44:34Z",
+      "expert_id": "exp-conversation-timing",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t025516/LIT-levinson-torreira-2015-timing/excerpt-gap-distribution.json",
+      "job_id": "b20260928t034933-06",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t034933-06_g1.local-approved-sources.json",
+      "local_registry_sha256": "8e2a7c9bfa3d3bb688b4010b5fad91af482d5da99288e515f431638fbbfedd8f",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t034933-06/Gurumoji_Result_b20260928t034933-06_g1.zip",
+      "result_sha256": "a6adbde8e2c9acb99bda55134461a67ba42f98144a8501f5f807f912c4697186",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:56:48.260839+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "Conflates average FTO with the modal interval around 200 ms and generalizes corpus-specific 60/40 figures.",
+        "reviewed_at": "2026-09-28T03:58:26+00:00"
+      }
+    }
+  ],
+  "runtime_repair": {
+    "action": "restarted Colab kernel after package installation",
+    "at": "2026-09-28T03:51:30.215355+00:00",
+    "reason": "the kernel retained an older imported Tokenizers extension although version 0.21.4 was installed"
+  },
+  "scope": "Focus-group interaction, participation balance, embedding topic exploration, descriptive statistics, and conversation timing.",
+  "review_summary": {
+    "reviewed_jobs": 6,
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 4,
+    "reviewed_at": "2026-09-28T03:58:26+00:00"
+  },
+  "updated_at": "2026-09-28T03:58:26+00:00"
+}

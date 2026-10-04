@@ -1,0 +1,133 @@
+{
+  "batch_id": "b20260928t113300",
+  "created_at": "2026-09-28T11:34:26.200566+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t113300-RES-scipy-describe-selected-evidence.txt",
+    "scope": "curated paraphrase; not a verbatim transcription",
+    "sha256": "9b9b1508df40e349a1a015e74692500010938b4662cdd3ab905bc481efc9c26e"
+  },
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "jobs": [
+    {
+      "anchor_id": "describe-axis-default-and-whole-array-scope",
+      "batch_id": "b20260928t113300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t113300-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t113300-01/Gurumoji_Job_b20260928t113300-01_g1.zip",
+      "bundle_sha256": "ae24fb74bd8e4306a2da580eaf31a0db831027bc4194069657d06b2c916ed7b8",
+      "bundle_size_bytes": 39527,
+      "claim_id": "colab:4e6967fa4db16398f72230d074e13abb76fab22196b976d8f939a319aaf07b08",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t113300-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "d131cdae54970fa86f184c2bd0e5a21b91c15e6e15e63f99154b798b7f8e4f21",
+        "result_size_bytes": 5488,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T11:40:37+00:00"
+      },
+      "commit_sha256": "258add30cfab3825e63a61970044dc2781750e871825794c08204a04b752576a",
+      "deadline": "2026-09-28T12:29:26Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t113300-RES-scipy-describe-selected-evidence.txt",
+      "evidence_snapshot_sha256": "9b9b1508df40e349a1a015e74692500010938b4662cdd3ab905bc481efc9c26e",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t113300/jobs/b20260928t113300-01/excerpt.json",
+      "excerpt_sha256": "a6e9f968f69d80bb50a3f5ea090680c8c8299a9773754e7ba1585d4c6f80cf5d",
+      "expert_id": "exp-descriptive-statistics",
+      "generated_claim": "SciPy v1.18.0のstats.describeでは、axisパラメータが0をデフォルトとしており、axisがNoneの場合は入力配列全体に対して計算が行われる。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 19.446,
+        "input_tokens": 720,
+        "output_tokens": 89
+      },
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t113300-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t113300-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "acd3968530a59ad286575eb257aad1d8b5255531b72509e0532b209112f266c9",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t113300-01/Gurumoji_Result_b20260928t113300-01_g1.zip",
+      "result_sha256": "d131cdae54970fa86f184c2bd0e5a21b91c15e6e15e63f99154b798b7f8e4f21",
+      "review": "Claim checked against the SciPy v1.18.0 official API documentation and accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-describe",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t113300-RES-scipy-describe-source.json",
+      "source_sha256": "66566c9dfdc18383000a0badfd29d550f8073edfd85c2686f8162d299e84960a",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T11:40:37.028548+00:00"
+    },
+    {
+      "anchor_id": "describe-bias-option-skewness-kurtosis",
+      "batch_id": "b20260928t113300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t113300-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t113300-02/Gurumoji_Job_b20260928t113300-02_g1.zip",
+      "bundle_sha256": "7938ceccfeb74ff3d3bd285608894fc209754af113dd5a3fa5fe3a6abf9143c7",
+      "bundle_size_bytes": 39572,
+      "claim_id": "colab:0af077ab51ef630bf3b1898939a5a49f22908dfab571e0d92dbd60533138cd3a",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t113300-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "8d6d185799ffc13359f56b1096fd1eb34b1c6666e6cec611d1f6ca9ac8fc5fd6",
+        "result_size_bytes": 5581,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T11:41:01+00:00"
+      },
+      "commit_sha256": "5e487b0af2a1289d5c2adbf3eabea8fb2fdd58348a747eac104235ff47066e22",
+      "deadline": "2026-09-28T12:29:26Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t113300-RES-scipy-describe-selected-evidence.txt",
+      "evidence_snapshot_sha256": "9b9b1508df40e349a1a015e74692500010938b4662cdd3ab905bc481efc9c26e",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t113300/jobs/b20260928t113300-02/excerpt.json",
+      "excerpt_sha256": "df397297b6641baeb03b9c8ccba5bed10942fc69dcb30bb761631d8096586512",
+      "expert_id": "exp-descriptive-statistics",
+      "generated_claim": "SciPy v1.18.0のstats.describeでは、biasパラメータがデフォルトでTrueに設定されており、これにより歪度と尖度の計算に統計的バイアスの補正が適用されない。bias=Falseに設定すると、歪度と尖度の計算に統計的バイアスの補正が行われる。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 21.256,
+        "input_tokens": 743,
+        "output_tokens": 126
+      },
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t113300-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t113300-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "acd3968530a59ad286575eb257aad1d8b5255531b72509e0532b209112f266c9",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t113300-02/Gurumoji_Result_b20260928t113300-02_g1.zip",
+      "result_sha256": "8d6d185799ffc13359f56b1096fd1eb34b1c6666e6cec611d1f6ca9ac8fc5fd6",
+      "review": "Claim checked against the SciPy v1.18.0 official API documentation and accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-describe",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t113300-RES-scipy-describe-source.json",
+      "source_sha256": "66566c9dfdc18383000a0badfd29d550f8073edfd85c2686f8162d299e84960a",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T11:41:01.353611+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 87.33,
+    "compute_units_balance_delta": 0.22,
+    "compute_units_before": 87.55,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "The axis scope and bias-correction behavior are separate parameters and have separate evidence anchors.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3"
+  },
+  "session_name": "gurumoji-a100-deepknowledge-20260928-113300",
+  "source_document_sha256": "66566c9dfdc18383000a0badfd29d550f8073edfd85c2686f8162d299e84960a",
+  "source_id": "RES-scipy-describe",
+  "source_license": "BSD-3-Clause",
+  "source_url": "https://docs.scipy.org/doc/scipy-1.18.0/reference/generated/scipy.stats.describe.html",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T11:42:23.944961+00:00"
+}

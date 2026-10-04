@@ -1,0 +1,14 @@
+{
+  "accepted_unapproved_candidate_commit": true,
+  "bundle_sha256": "dcdb72692a2d4a1a8a3453502d54f50cbbf44ff6189291f585a4ccbfd95048a4",
+  "commit_sha256": "e652844d67124b6dc983883d76cd84d320000a1fd36c85a0753d406613a6c897",
+  "deadline": "2026-09-28T08:36:40Z",
+  "excerpt_sha256": "a6ac5984913f5770622a8211ac2851da0dd842c3186cadb7cf3cf715cafaee5e",
+  "generation": 2,
+  "job_id": "b20260928t070100-06",
+  "result_sha256": "5d5ff6b06470a638595d07c47f95c09999f0d5f85e7098f57eabc5f0954a5f24",
+  "retry_count": 1,
+  "session_name": "gurumoji-a100-deepknowledge-20260928-082100",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "status": "candidate_ready"
+}

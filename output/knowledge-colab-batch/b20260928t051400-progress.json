@@ -1,0 +1,58 @@
+{
+  "batch_id": "b20260928t051400",
+  "candidate_ready": 6,
+  "failed": 0,
+  "finished_jobs": 6,
+  "jobs": [
+    {
+      "accepted_commit_sha256": "82b2be81358e74750aba0719f69212cdd613ea17d0fbcd1d5b25a6f80d4a243a",
+      "anchor_id": "overlap-measures-and-context",
+      "expert_id": "exp-conversation-timing",
+      "job_id": "b20260928t051400-01",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "accepted_commit_sha256": "cfbb41defdf852be386b912faf3aa2ba302b3b78000a7aea5798fe4583c69ed9",
+      "anchor_id": "coding-scheme-categories",
+      "expert_id": "exp-focus-group-interaction",
+      "job_id": "b20260928t051400-02",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "accepted_commit_sha256": "6a637c0a4ece3be15be3e4e773e8a6db5801c158176322965f958057cc972670",
+      "anchor_id": "transcript-quality-applicability",
+      "expert_id": "exp-focus-group-interaction",
+      "job_id": "b20260928t051400-03",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "accepted_commit_sha256": "a58571454f52a33b247029c88f695072975f8e895d67962dc31d28db7b8fbde9",
+      "anchor_id": "mgta-characteristics",
+      "expert_id": "exp-m-gta",
+      "job_id": "b20260928t051400-04",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "accepted_commit_sha256": "aa06a5bacaf4258d8fbf502f27be2639abf43a78bdbc083868a34f53c8d688f0",
+      "anchor_id": "mgta-analysis-workflow",
+      "expert_id": "exp-m-gta",
+      "job_id": "b20260928t051400-05",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "accepted_commit_sha256": "3ceed0f64eaf9539e91e1f0e488a6e82a0539e049b7eeb8a855d73a0d3f793b3",
+      "anchor_id": "mgta-analysis-review",
+      "expert_id": "exp-m-gta",
+      "job_id": "b20260928t051400-06",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "total_jobs": 6,
+  "updated_at": "2026-09-28T05:48:02.833333+00:00"
+}

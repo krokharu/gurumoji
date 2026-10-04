@@ -1,0 +1,74 @@
+{
+  "batch_id": "b20260928t084900",
+  "candidate_ready": 4,
+  "failed": 0,
+  "finished_jobs": 4,
+  "held": 1,
+  "imported_unapproved": 3,
+  "inference_metrics": {
+    "elapsed_seconds": 91.701,
+    "excludes": "runtime setup and file transfers",
+    "input_tokens": 5026,
+    "output_tokens": 518
+  },
+  "jobs": [
+    {
+      "anchor_id": "gap-distribution",
+      "commit_sha256": null,
+      "error": null,
+      "expert_id": "exp-conversation-timing",
+      "job_id": "b20260928t084900-01",
+      "result_sha256": "e0be06776b4628aaa65493a4a1140129ea8726cbe402f4a30e258b972b9b96f4",
+      "review_reason": "Held: generated Claim calls the cited approximately 200 ms mode an average silent interval/FTO; the excerpt distinguishes a mode from average FTOs and includes both gaps and overlaps.",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "held"
+    },
+    {
+      "anchor_id": "participation-group-size-range",
+      "commit_sha256": "31055c25b49dd5ee2282ec2830c2b8959a10f11a1f210946e7775974cf10e25",
+      "error": null,
+      "expert_id": "exp-participation-balance",
+      "job_id": "b20260928t084900-02",
+      "result_sha256": "2138bfa8f85d272d4e09d35c5102525bfb364ab38818499c0a4867394dd2c523",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "text-prompt-applicability-limit",
+      "commit_sha256": "7d50e6ce91c92fd9d00893e5e7c874b936d88a71bd082353294544f8d1428f38",
+      "error": null,
+      "expert_id": "exp-quantitative-text-analysis",
+      "job_id": "b20260928t084900-03",
+      "result_sha256": "00d96253677c8036986f131979e19b7cbf6760081e5718a161761b97be44064b",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-ziegler-2022-open-ended-checks",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "ofg-validity-criteria",
+      "commit_sha256": "1fe8ec909bfea2fa1cde3d78d00cd4de3868059794b7df96a0d5c12de8f2418a",
+      "error": null,
+      "expert_id": "exp-focus-group-interaction",
+      "job_id": "b20260928t084900-04",
+      "result_sha256": "105ef22f42b2345b2668d26efe5b3071e4230234858a7fd351b582498dda8214",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "candidate_ready"
+    }
+  ],
+  "session_attempts": [
+    {
+      "outcome": "503_service_unavailable_no_assignment",
+      "session_name": "gurumoji-a100-deepknowledge-20260928-084900"
+    },
+    {
+      "outcome": "a100_high_ram_completed_and_stopped",
+      "session_name": "gurumoji-a100-deepknowledge-20260928-085000"
+    }
+  ],
+  "session_name": "gurumoji-a100-deepknowledge-20260928-085000",
+  "status": "reviewed_with_hold",
+  "total_jobs": 4,
+  "updated_at": "2026-09-28T09:03:55+00:00"
+}

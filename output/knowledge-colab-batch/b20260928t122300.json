@@ -1,0 +1,149 @@
+{
+  "batch_id": "b20260928t122300",
+  "created_at": "2026-09-28T12:24:09.033433+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t122300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+    "scope": "curated paraphrase; not a verbatim transcription",
+    "sha256": "d8b3f3f084d41ca2e1de900f9df9a874cac702a83fca94bc7703b2d2511581ea"
+  },
+  "gpu": "NVIDIA A100",
+  "inference_metrics": {
+    "elapsed_seconds": 39.735,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 1691,
+    "output_tokens": 211
+  },
+  "jobs": [
+    {
+      "anchor_id": "participation-mean-and-standard-deviation-by-group",
+      "batch_id": "b20260928t122300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t122300-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t122300-01/Gurumoji_Job_b20260928t122300-01_g1.zip",
+      "bundle_sha256": "42341db432ecd2299d6f5257558225dfe407f273b5b2e3fdce6a7adb8c02f1e9",
+      "bundle_size_bytes": 40122,
+      "claim_id": "colab:2892aaf46980fa58648893ecfb448289c981a70a397b55ca4badd7b9e8688f22",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t122300-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "79ceb3f0c7aaad9e564019a4cb591111c135c8161122c2a4e4541a7cfb90ddb9",
+        "result_size_bytes": 6125,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T12:31:54+00:00"
+      },
+      "commit_sha256": "5befad60479c9c6a82462a1a4c0040bac8f54f70ed422e7c796af8f778b16db9",
+      "deadline": "2026-09-28T13:19:08Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t122300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+      "evidence_snapshot_sha256": "d8b3f3f084d41ca2e1de900f9df9a874cac702a83fca94bc7703b2d2511581ea",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t122300/jobs/b20260928t122300-01/excerpt.json",
+      "excerpt_sha256": "d242d7f5a5d69a6f1ee1251ec40e310f43b0cb282fbdb6110bad15c14c0be7b5",
+      "expert_id": "exp-participation-balance",
+      "generated_claim": "ノース・エミリア・ロマーニャの教師グループでは、参加者あたりの平均発話数が5.57で、標準偏差が3.59である。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 21.753,
+        "input_tokens": 857,
+        "output_tokens": 102
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t122300-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t122300-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "efe2a28df596474f5e055150fb81e604bf66856e3ba42654ed6fe4a7f8b0b333",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t122300-01/Gurumoji_Result_b20260928t122300-01_g1.zip",
+      "result_sha256": "79ceb3f0c7aaad9e564019a4cb591111c135c8161122c2a4e4541a7cfb90ddb9",
+      "review": "Checked against the Frontiers publisher Table 2, p. 13: the North-Emilia-Romagna teacher group is listed with mean speeches per participant 5.57 and standard deviation 3.59. This is a case-specific descriptive measure, not a universal participation-balance threshold. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t122300-LIT-poliandri-2023-online-focus-groups-source.json",
+      "source_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T12:32:01.760362+00:00"
+    },
+    {
+      "anchor_id": "moderator-listening-and-synthesis-participant-report",
+      "batch_id": "b20260928t122300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t122300-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t122300-02/Gurumoji_Job_b20260928t122300-02_g1.zip",
+      "bundle_sha256": "3d48774fc31a3442bec09219c843e2f0cce27cc263f0f43d7f730adf103d3c10",
+      "bundle_size_bytes": 40097,
+      "claim_id": "colab:1b24355d6f8a73c817235b08029ff292b8946f900c6097cb5583264106388eb4",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t122300-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "0d258d48f8b29d372d614c84239717a3bef353617f96a5750ccf0858bdb3991a",
+        "result_size_bytes": 6146,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T12:32:22+00:00"
+      },
+      "commit_sha256": "1306a20e824be44d4473b2db5c3d95dec48b4db0f11bf43f24c82851279c659a",
+      "deadline": "2026-09-28T13:19:09Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t122300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+      "evidence_snapshot_sha256": "d8b3f3f084d41ca2e1de900f9df9a874cac702a83fca94bc7703b2d2511581ea",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t122300/jobs/b20260928t122300-02/excerpt.json",
+      "excerpt_sha256": "1e30b7883d74cf90244fd2a6e44e553adda800199489d0a8668ee53de54cff55",
+      "expert_id": "exp-focus-group-interaction",
+      "generated_claim": "ポリアンドリらのオンラインフォーカスグループにおけるイタリアの学校長および教師の参加者たちは、司会者の真の傾聴と効果的な要約の役割を認識した。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 17.982,
+        "input_tokens": 834,
+        "output_tokens": 109
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t122300-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t122300-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "efe2a28df596474f5e055150fb81e604bf66856e3ba42654ed6fe4a7f8b0b333",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t122300-02/Gurumoji_Result_b20260928t122300-02_g1.zip",
+      "result_sha256": "0d258d48f8b29d372d614c84239717a3bef353617f96a5750ccf0858bdb3991a",
+      "review": "Checked against the Frontiers publisher article, §4.2.1, p. 14: participants recognized the moderator's role of true listening and effective synthesis. The claim is limited to participants' report in this study. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t122300-LIT-poliandri-2023-online-focus-groups-source.json",
+      "source_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T12:32:34.913708+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 86.21,
+    "compute_units_balance_delta": 0.07,
+    "compute_units_before": 86.28,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "Both claims add distinct, study-scoped evidence for participation-balance and focus-group-interaction expertise.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3"
+  },
+  "session_creation_history": [
+    {
+      "detail": "The initial create call returned late. Session, status, and log checks found no assignment or remote output, so the same session name was retried; exactly one A100 assignment was then created.",
+      "status": "creation_response_delayed_no_assignment_found"
+    },
+    {
+      "detail": "Both hash-bound jobs ran sequentially, result ZIP hashes matched remote Status files, and the A100 session was stopped after inference.",
+      "status": "completed_and_stopped"
+    }
+  ],
+  "session_name": "gurumoji-a100-deepknowledge-20260928-122300",
+  "source_document_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+  "source_id": "LIT-poliandri-2023-online-focus-groups",
+  "source_license": "CC-BY-4.0",
+  "source_url": "https://www.frontiersin.org/journals/sociology/articles/10.3389/fsoc.2023.1145264/full",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T12:37:01.863018+00:00"
+}

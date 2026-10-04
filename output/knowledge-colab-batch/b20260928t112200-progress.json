@@ -1,0 +1,48 @@
+{
+  "batch_id": "b20260928t112200",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "jobs": [
+    {
+      "anchor_id": "nxt-switchboard-between-overlap-share-of-floor-transfers-section-5-2-2",
+      "commit_sha256": "f6e966d7d971179a9c02d6c91b5c5a1f0c7a465fc5c377b82046dba4583d0550",
+      "expert_id": "exp-conversation-timing",
+      "generation_metrics": {
+        "elapsed_seconds": 26.998,
+        "input_tokens": 782,
+        "output_tokens": 137
+      },
+      "job_id": "b20260928t112200-01",
+      "result_sha256": "224a0fe911a36691965b1ab51d0d2e0c476ed932e9c628f0ef4b1702c5f8a98d",
+      "review": "Numerator, denominator, sample scope, and evidence anchor checked against publisher full text; accepted as an unapproved candidate.",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "nxt-switchboard-single-speaker-share-of-speech-signal-section-5-2-2",
+      "commit_sha256": "8d9970f0dd06e8d8cbcacc905f79a5402f2ebbd8b6c0c08dd8a269473a8c44a6",
+      "expert_id": "exp-conversation-timing",
+      "generation_metrics": {
+        "elapsed_seconds": 18.846,
+        "input_tokens": 766,
+        "output_tokens": 114
+      },
+      "job_id": "b20260928t112200-02",
+      "result_sha256": "e83b465cf470604b81a2302c9de4c2d87891b8f7a67bbc1f84c6b14240a2e7d3",
+      "review": "Numerator, denominator, sample scope, and evidence anchor checked against publisher full text; accepted as an unapproved candidate.",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 87.55,
+    "compute_units_balance_delta": 0.33,
+    "compute_units_before": 87.88,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T11:29:35.099490+00:00"
+}

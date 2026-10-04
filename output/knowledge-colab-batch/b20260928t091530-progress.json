@@ -1,0 +1,125 @@
+{
+  "batch_id": "b20260928t091530",
+  "candidate_ready": 4,
+  "failed": 0,
+  "finished_jobs": 4,
+  "imported_unapproved": 4,
+  "inference_metrics": {
+    "elapsed_seconds": 76.185,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 3262,
+    "output_tokens": 436
+  },
+  "jobs": [
+    {
+      "anchor_id": "heldner-edlund-fto-mode",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "dbeadde12d416c94b5cd9ebc535930e30879dec5306f162ffc0890e8dffa1969",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:22:14+00:00"
+        }
+      ],
+      "commit_sha256": "52d364fd434706bfebda6e243770d140baa0f767010c12ebc860a0a040113f70",
+      "error": null,
+      "expert_id": "exp-conversation-timing",
+      "job_id": "b20260928t091530-01",
+      "result_sha256": "dbeadde12d416c94b5cd9ebc535930e30879dec5306f162ffc0890e8dffa1969",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "caqdas-storage-not-analysis",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "24e986342bee9eaac6695dc070dedce9e1a5e15473d077286be2540a5c176fee",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:22:46+00:00"
+        }
+      ],
+      "commit_sha256": "2b3ded773a4ef201bac0d790e37f566ddb3fa1cdecb5b2b00181f91735d3a6be",
+      "error": null,
+      "expert_id": "exp-framework-method",
+      "job_id": "b20260928t091530-02",
+      "result_sha256": "24e986342bee9eaac6695dc070dedce9e1a5e15473d077286be2540a5c176fee",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "fg-coding-scheme-development-sample",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "35c78b458a788ade09a732bf6dffeffb58a56b4ef3a5bf1a3396d9a3fd813365",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:23:36+00:00"
+        }
+      ],
+      "commit_sha256": "92ad5e35e250f59f2b3cd88ce1a9bf5c0edb9709f3facb6e3a46ea25cd74231d",
+      "error": null,
+      "expert_id": "exp-focus-group-interaction",
+      "job_id": "b20260928t091530-03",
+      "result_sha256": "35c78b458a788ade09a732bf6dffeffb58a56b4ef3a5bf1a3396d9a3fd813365",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "mgta-study-output-scope",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "35426e6ba5a4de8c5b38fa386e068e6654fd1bbe5d818e77aace90cfb4bfe6dc",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:24:01+00:00"
+        }
+      ],
+      "commit_sha256": "53f2771d321ab6ff1e486fa520b331782ff506c5300cccceedeafe9949af8fd5",
+      "error": null,
+      "expert_id": "exp-m-gta",
+      "job_id": "b20260928t091530-04",
+      "result_sha256": "35426e6ba5a4de8c5b38fa386e068e6654fd1bbe5d818e77aace90cfb4bfe6dc",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "status": "candidate_ready"
+    }
+  ],
+  "total_jobs": 4,
+  "updated_at": "2026-09-28T09:27:14.946145+00:00"
+}

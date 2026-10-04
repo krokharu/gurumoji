@@ -1,0 +1,45 @@
+{
+  "batch_id": "b20260928t162000",
+  "created_at": "2026-09-28T16:25:01.576684+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t162000-osa-kj-card-context.txt",
+    "scope": "short study-specific paraphrase of publisher article section 2.4; no article body exported",
+    "sha256": "460fcf80904d79f3a50f1d50bcad33899fb19c6749a374620509abae37664699"
+  },
+  "expert_id": "exp-kj-method",
+  "gpu": "NVIDIA A100-SXM4-80GB High-RAM",
+  "jobs": [
+    {
+      "anchor_id": "osa-kj-card-context-preservation",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t162000/jobs/b20260928t162000-01/approved_sources.json",
+      "batch_id": "b20260928t162000",
+      "bundle_file_name": "Gurumoji_Job_b20260928t162000-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t162000-01/Gurumoji_Job_b20260928t162000-01_g1.zip",
+      "bundle_sha256": "67a895dfa71b4eec7740eaeaca043e8efb0649ed84449f4c9133841318c2e8fe",
+      "bundle_size_bytes": 39819,
+      "deadline": "2026-09-28T17:20:01Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t162000/jobs/b20260928t162000-01/excerpt.json",
+      "excerpt_sha256": "94381e58eabe8b1eb7499c293291990667e1d4bfd5f2e7ede3cb5d55a5573bab",
+      "expert_id": "exp-kj-method",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB High-RAM",
+      "job_id": "b20260928t162000-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t162000-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "4286fa303bc4f7960b60f3e7bbe143013ba7bc25daa1b31a0d5b5d99d8339473",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-niu-2025-osa-kj",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t162000/jobs/b20260928t162000-01/source.json",
+      "source_sha256": "72b0eee4e2b4f11586d6893156b8e0c76d5df91c20fc15050b693ce190fe086b",
+      "status": "ready_for_user_started_colab"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "session_name": "gurumoji-a100-kj-osa-20260928-162000",
+  "source_document_sha256": "72b0eee4e2b4f11586d6893156b8e0c76d5df91c20fc15050b693ce190fe086b",
+  "source_id": "LIT-niu-2025-osa-kj",
+  "source_license": "CC-BY-4.0",
+  "source_snapshot_path": "output/knowledge-colab-batch/source-cache/b20260928t162000-frontiers-osa-kj.html",
+  "source_url": "https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2025.1582173/full",
+  "status": "ready_for_user_started_colab",
+  "total_jobs": 1
+}

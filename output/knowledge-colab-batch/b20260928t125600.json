@@ -1,0 +1,151 @@
+{
+  "batch_id": "b20260928t125600",
+  "created_at": "2026-09-28T12:58:36.176615+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t125600-LIT-shimizu-2023-scat-application-selected-evidence.txt",
+    "scope": "curated paraphrase; not a verbatim transcription",
+    "sha256": "6055a83011fe4215c275f61a2832f18d56a30cfd22c0decd2f85a5a9731f723f"
+  },
+  "gpu": "NVIDIA A100",
+  "inference_metrics": {
+    "elapsed_seconds": 56.365,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "input_tokens": 1743,
+    "output_tokens": 316
+  },
+  "jobs": [
+    {
+      "anchor_id": "scat-six-step-study-implementation",
+      "batch_id": "b20260928t125600",
+      "bundle_file_name": "Gurumoji_Job_b20260928t125600-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t125600-01/Gurumoji_Job_b20260928t125600-01_g1.zip",
+      "bundle_sha256": "44bae2047cdbca9ecad376faa5edc85ddc01d385d11e6c94e225e26ea156468e",
+      "bundle_size_bytes": 40365,
+      "claim_id": "colab:9f0844a89f3d4427e59a228be29f2c68a9cd6cd0224afb31e5bfef0ab4a332a1",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t125600-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "ac7078f78dee69df0a7293e948ded84e7ee118343cfe8fcf082702e885f113cf",
+        "result_size_bytes": 6658,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T13:10:45+00:00"
+      },
+      "commit_sha256": "b1ef9d2746ce557a4650ce93ea8d593651f43d85f02eaeaa3749acf87749bb36",
+      "deadline": "2026-09-28T13:53:35Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t125600-LIT-shimizu-2023-scat-application-selected-evidence.txt",
+      "evidence_snapshot_sha256": "6055a83011fe4215c275f61a2832f18d56a30cfd22c0decd2f85a5a9731f723f",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t125600/jobs/b20260928t125600-01/excerpt.json",
+      "excerpt_sha256": "3655b09ef62167b35300e48792b6d9af328393a2967f48e556bb9558bf98ab9d",
+      "expert_id": "exp-scat",
+      "generated_claim": "Shimizuら（2023）は、この研究において一般的な4段階のSCATコーディング記述とは別に、6段階の実装プロセスを区別している。このプロセスは、（1）データをSCATフォームに入力し、（2）個別データをストリップに切り取り、類似したストリップを一緒に分類し、（3）各データグループに他の用語を割り当てて要約し、（4）グループ間の関係から潜在的なテーマを概念化し、（5）すべてのデータを組み込んだストーリーラインを書き、（6）概念化に基づいて理論を書くというステップを含む。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 39.74,
+        "input_tokens": 905,
+        "output_tokens": 218
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t125600-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t125600-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "20e517abeaf5a4c0d03f3e063757d52499c2644b0e03281ad907671c63638057",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t125600-01/Gurumoji_Result_b20260928t125600-01_g1.zip",
+      "result_sha256": "ac7078f78dee69df0a7293e948ded84e7ee118343cfe8fcf082702e885f113cf",
+      "review": "Checked against the MDPI publisher article, Methods §2.5, pp. 14–15: it distinguishes the general four-step SCAT coding description from the six-step workflow used in this study. Step 3 assigns other terms to summarize each data group. This is limited to the study's reported implementation and does not replace the general SCAT definition. Accepted as an unapproved candidate; it supersedes the held draft in b20260928t124700-01.",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t125600-LIT-shimizu-2023-scat-application-source.json",
+      "source_sha256": "b7d8fe5964a2de5d8a6c5c858d41468baff10bd8e0d40ce5245add6656266612",
+      "status": "accepted_unapproved_candidate_commit",
+      "supersedes_job_id": "b20260928t124700-01",
+      "updated_at": "2026-09-28T13:10:47.141072+00:00"
+    },
+    {
+      "anchor_id": "scat-analysis-supervision-by-experienced-researcher",
+      "batch_id": "b20260928t125600",
+      "bundle_file_name": "Gurumoji_Job_b20260928t125600-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t125600-02/Gurumoji_Job_b20260928t125600-02_g1.zip",
+      "bundle_sha256": "3282079ed9f7b90294ca9af8e78b4da06fc4f0481717beed8219ea5d632ec08e",
+      "bundle_size_bytes": 40196,
+      "claim_id": "colab:d03637277bf583129c4e14050957494efade18c962b48ed3a4cd0a19e6edbed2",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t125600-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "7a21160cc3c7c7d6137be3ca8a4ab1e39adadf7c02e378f84719fea9108c09d6",
+        "result_size_bytes": 6116,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T13:11:06+00:00"
+      },
+      "commit_sha256": "3c8f81961feca6d4b1338d1be636162565c05ec2b8b06ef7dee501a34a010957",
+      "deadline": "2026-09-28T13:53:36Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t125600-LIT-shimizu-2023-scat-application-selected-evidence.txt",
+      "evidence_snapshot_sha256": "6055a83011fe4215c275f61a2832f18d56a30cfd22c0decd2f85a5a9731f723f",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t125600/jobs/b20260928t125600-02/excerpt.json",
+      "excerpt_sha256": "e589ccebbe8ce43a6464eb94266d6d2ad0b8d2e4b9b5b31e46e0520578ea9e6e",
+      "expert_id": "exp-scat",
+      "generated_claim": "Shimizuらの2023年の単一研究において、研究者はSCATの分析を経験豊富な研究者に監督してもらった。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 16.625,
+        "input_tokens": 838,
+        "output_tokens": 98
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t125600-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t125600-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "20e517abeaf5a4c0d03f3e063757d52499c2644b0e03281ad907671c63638057",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t125600-02/Gurumoji_Result_b20260928t125600-02_g1.zip",
+      "result_sha256": "7a21160cc3c7c7d6137be3ca8a4ab1e39adadf7c02e378f84719fea9108c09d6",
+      "review": "Checked against the MDPI publisher article, Methods §2.5, p. 15: the authors report that the analysis in their study was supervised by a researcher well-versed in SCAT. The wording is scoped to this single study. Accepted as an unapproved candidate; it supersedes the held draft in b20260928t124700-02.",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t125600-LIT-shimizu-2023-scat-application-source.json",
+      "source_sha256": "b7d8fe5964a2de5d8a6c5c858d41468baff10bd8e0d40ce5245add6656266612",
+      "status": "accepted_unapproved_candidate_commit",
+      "supersedes_job_id": "b20260928t124700-02",
+      "updated_at": "2026-09-28T13:11:07.415122+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 85.07,
+    "compute_units_balance_delta": 0.42,
+    "compute_units_before": 85.49,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "Both revised claims correct the initial drafts' terminology or scope and are grounded in distinct passages of the same approved article.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3"
+  },
+  "session_creation_history": [
+    {
+      "detail": "The first two create requests returned Service Unavailable. After each, sessions/status/log showed no assignment or execution; no duplicate was present.",
+      "status": "service_unavailable_no_assignment"
+    },
+    {
+      "detail": "A third request using the same session name created exactly one A100 Standard assignment. Both Jobs then completed sequentially.",
+      "status": "created_on_third_request"
+    }
+  ],
+  "session_name": "gurumoji-a100-deepknowledge-20260928-125600",
+  "source_document_sha256": "b7d8fe5964a2de5d8a6c5c858d41468baff10bd8e0d40ce5245add6656266612",
+  "source_id": "LIT-shimizu-2023-scat-application",
+  "source_license": "CC-BY-4.0",
+  "source_url": "https://www.mdpi.com/2673-9259/3/1/2",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T13:13:13.773678+00:00"
+}

@@ -1,0 +1,85 @@
+{
+  "batch_id": "b20260928t103300",
+  "colab_resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 88.41,
+    "compute_units_before": 88.7,
+    "estimated_batch_delta": 0.29,
+    "session_stopped": true,
+    "usage_rate_after_per_hour": 0.0
+  },
+  "created_at": "2026-09-28T10:34:51.521956+00:00",
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "inference_metrics": {
+    "elapsed_seconds": 24.079,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 869,
+    "output_tokens": 119
+  },
+  "jobs": [
+    {
+      "accepted_at": "2026-09-28T10:42:42.259666+00:00",
+      "anchor_id": "freetxt-proposed-core-functions-section-2-2",
+      "batch_id": "b20260928t103300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t103300-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t103300-01/Gurumoji_Job_b20260928t103300-01_g1.zip",
+      "bundle_sha256": "1e4a928e9c3708c717b9735e9b8906d5c28a840e510e0b7f2a66279ba9645cff",
+      "bundle_size_bytes": 39875,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t103300-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "631138a2f5fd067ab40668e56a857fd0b57e307017f043c114227cf26d97c83a",
+        "result_size_bytes": 5931,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T10:39:13+00:00"
+      },
+      "commit_sha256": "3a477e60dc7e63a9d420e2f99bef1f342da777cb3a9c15fc5fa562e80cb6bdee",
+      "deadline": "2026-09-28T11:29:51Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t103300/jobs/b20260928t103300-01/excerpt.json",
+      "excerpt_sha256": "5d429c212571c650c19ba0b366e66d2fc71ce1e6c343153b75b9728f6de5d7dd",
+      "expert_id": "exp-quantitative-text-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t103300-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t103300-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "96c29bbc83c01022ee99a4ab4975b4ac012fc7c3b0be0cbdec671f1cd2a42d83",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t103300-01/Gurumoji_Result_b20260928t103300-01_g1.zip",
+      "result_sha256": "631138a2f5fd067ab40668e56a857fd0b57e307017f043c114227cf26d97c83a",
+      "review_note": "The Japanese Claim accurately paraphrases Section 2.2's proposed core functions (word/n-gram/POS/semantic-tag counts, KWIC with co-text, and word-distribution visualization) and retains that these are proposed/potential features, not confirmed implementation or evaluation.",
+      "review_status": "imported_unapproved_candidate_commit",
+      "reviewed_at": "2026-09-28T10:42:42.259666+00:00",
+      "source_id": "LIT-knight-2024-freetxt",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t103300/jobs/b20260928t103300-01/source.json",
+      "source_sha256": "555a0024ceb223a47c97fdc4f52d6971e906419dc0c8b6ed79c990c3f3fa9009",
+      "source_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t103300-01-freetxt-section-2-2-text-extract.txt",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T10:39:13.284972+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3",
+    "verified_modules_and_distributions": true
+  },
+  "session_name": "gurumoji-a100-deepknowledge-20260928-103300",
+  "source_acquisition": {
+    "hash_scope": "source_sha256 identifies a selected-section evidence-text snapshot derived from browser-rendered PDF text, not the original PDF bytes.",
+    "retrieval": "The repository's public Version-of-Record PDF text was inspected through browser retrieval. Direct local downloads from Cardiff ORCA and Swansea Cronfa returned 403.",
+    "source_url": "https://cronfa.swan.ac.uk/Record/cronfa70086/Download/70086__34939__f82a24c8c3ea49aaad5c813e2a7643c7.pdf"
+  },
+  "source_snapshot": {
+    "note": "SHA-256 pins a selected-section evidence-text snapshot derived from browser-rendered PDF text, not original PDF bytes.",
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t103300-01-freetxt-section-2-2-text-extract.txt",
+    "sha256": "555a0024ceb223a47c97fdc4f52d6971e906419dc0c8b6ed79c990c3f3fa9009"
+  },
+  "status": "reviewed_imported_unapproved",
+  "total_jobs": 1,
+  "updated_at": "2026-09-28T10:42:42.259666+00:00"
+}

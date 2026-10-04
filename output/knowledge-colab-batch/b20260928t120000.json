@@ -1,0 +1,152 @@
+{
+  "batch_id": "b20260928t120000",
+  "created_at": "2026-09-28T11:55:29.008078+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t120000-LIT-zhang-2021-cross-corpus-ser-selected-evidence.txt",
+    "scope": "curated paraphrase; not a verbatim transcription",
+    "sha256": "eea0b5e63bb544624308d84d5a9a06a95f4fefd3be586607752cb0e7e9760527"
+  },
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "inference_metrics": {
+    "elapsed_seconds": 39.497,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 1556,
+    "output_tokens": 203
+  },
+  "jobs": [
+    {
+      "anchor_id": "ser-cross-corpus-mismatch-generalization",
+      "batch_id": "b20260928t120000",
+      "bundle_file_name": "Gurumoji_Job_b20260928t120000-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t120000-01/Gurumoji_Job_b20260928t120000-01_g1.zip",
+      "bundle_sha256": "b48a6c879c7cfa97c6a1da3b5c25f235a73a949dee9df1a7194d7018286f2e37",
+      "bundle_size_bytes": 39797,
+      "claim_id": "colab:1e0ee645458fcd0e9877c03508cdde95bca08ff577f3b24fb60f437eccc73bf8",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t120000-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "392fc73b3263f265ca387fb24c8f562bcc0d25d6c0c3588084b4360226a3daea",
+        "result_size_bytes": 5905,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T11:59:44+00:00"
+      },
+      "commit_sha256": "2f4ffc9bf6b4c61945c2cebd317e83c22404f2ce2e693aeae9098b056aba1079",
+      "deadline": "2026-09-28T12:50:28Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t120000-LIT-zhang-2021-cross-corpus-ser-selected-evidence.txt",
+      "evidence_snapshot_sha256": "eea0b5e63bb544624308d84d5a9a06a95f4fefd3be586607752cb0e7e9760527",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t120000/jobs/b20260928t120000-01/excerpt.json",
+      "excerpt_sha256": "a58a0858e4dca8771583ee37b6788767f297a4f83562ecc3dd52e3db0fd6d4c0",
+      "expert_id": "exp-speech-emotion-recognition",
+      "generated_claim": "クロスコーパス音声感情認識において、学習とテストに用いられる音声コーパスは言語、文化、配布モード、データスケールにおいて異なる可能性があり、そのような違いは現在のSER技術の一般化を妨げる特異的な変動を生じる。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 24.159,
+        "input_tokens": 795,
+        "output_tokens": 122
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t120000-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t120000-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "cd28b33138bb17b0bd6bce20796d82d2188c15d9870ab7e1e22e6bd067faa09a",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t120000-01/Gurumoji_Result_b20260928t120000-01_g1.zip",
+      "result_sha256": "392fc73b3263f265ca387fb24c8f562bcc0d25d6c0c3588084b4360226a3daea",
+      "review": "Checked against the Frontiers publisher article, page 2, lines 251–252: the listed corpus differences and their effect on generalization are supported. This extends the existing single-corpus/single-language observation with a distinct cross-corpus challenge. Accepted as an unapproved candidate.",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t120000-LIT-zhang-2021-cross-corpus-ser-source.json",
+      "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T11:59:44.333197+00:00"
+    },
+    {
+      "anchor_id": "ser-basic-cross-corpus-system-components",
+      "attempt_history": [
+        {
+          "detail": "The CLI logged the second Job ZIP upload but did not return within several minutes; the Colab session remained IDLE and showed no Job 02 output. The local batch driver was stopped before any second inference began.",
+          "status": "bundle_upload_stalled"
+        },
+        {
+          "detail": "A direct execution attempt returned RuntimeError: Connection was lost; remote status remained IDLE and no Job 02 status or result existed.",
+          "status": "connection_lost_before_inference"
+        },
+        {
+          "detail": "Restarted the kernel, reran GPU and dependency preflight, then executed the already-uploaded Job 02 once. The returned result hash matched the downloaded result and status files.",
+          "status": "recovered_and_candidate_ready"
+        }
+      ],
+      "batch_id": "b20260928t120000",
+      "bundle_file_name": "Gurumoji_Job_b20260928t120000-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t120000-02/Gurumoji_Job_b20260928t120000-02_g1.zip",
+      "bundle_sha256": "1d5b47814ad578cb5022af66d32aa526ccccba617e35e397953127cc5b374ac7",
+      "bundle_size_bytes": 39721,
+      "claim_id": "colab:f4a10f2f959c4be7a774437d73e63c65459ad148a496de03fa8359cbc38b27ad",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t120000-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "2cd68d9bcd625ad1ebbf2f03d1a501a0664b963226a0b5f32db369d631bc347c",
+        "result_size_bytes": 5720,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T12:07:26+00:00"
+      },
+      "commit_sha256": "7bd05f3dbcf6850052011af4abf8a612984957f9041937efb3842bbede309bc9",
+      "deadline": "2026-09-28T12:50:28Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t120000-LIT-zhang-2021-cross-corpus-ser-selected-evidence.txt",
+      "evidence_snapshot_sha256": "eea0b5e63bb544624308d84d5a9a06a95f4fefd3be586607752cb0e7e9760527",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t120000/jobs/b20260928t120000-02/excerpt.json",
+      "excerpt_sha256": "1cc7dc2760db41eaf88545a9dd2a437facc8b37666aac6558e642f7b6c3b4300",
+      "expert_id": "exp-speech-emotion-recognition",
+      "generated_claim": "基本的なクロスコーパス音声感情認識システムには、感情分類器とドメイン不変特徴抽出の2つの重要なステップが含まれる。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 15.338,
+        "input_tokens": 761,
+        "output_tokens": 81
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t120000-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t120000-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "cd28b33138bb17b0bd6bce20796d82d2188c15d9870ab7e1e22e6bd067faa09a",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t120000-02/Gurumoji_Result_b20260928t120000-02_g1.zip",
+      "result_sha256": "2cd68d9bcd625ad1ebbf2f03d1a501a0664b963226a0b5f32db369d631bc347c",
+      "review": "Checked against the Frontiers publisher article, page 2, line 252: the review identifies an emotion classifier and domain-invariant feature extraction as two crucial steps in a basic cross-corpus SER system. The claim retains the basic-system scope. Accepted as an unapproved candidate.",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t120000-LIT-zhang-2021-cross-corpus-ser-source.json",
+      "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 86.28,
+    "compute_units_balance_delta": 1.05,
+    "compute_units_before": 87.33,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "Both claims add distinct cross-corpus knowledge. The first separates corpus-mismatch factors from the existing single-corpus evaluation observation; the second records the two components of a basic cross-corpus system.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3"
+  },
+  "session_name": "gurumoji-a100-deepknowledge-20260928-120000",
+  "source_document_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_license": "CC-BY-4.0",
+  "source_url": "https://doi.org/10.3389/fnbot.2021.784514",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T12:12:15.897853+00:00"
+}

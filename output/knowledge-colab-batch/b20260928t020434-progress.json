@@ -1,0 +1,45 @@
+{
+  "batch_id": "b20260928t020434",
+  "jobs": {
+    "b20260928t020434-01": {
+      "commit_sha256": "aa153ca3d4621c0134edb2fbe5cb805e222c86eda9ee4330ffa1dbe005dc539d",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-01",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t020434-01/Gurumoji_Result_b20260928t020434-01_g1.zip",
+      "result_zip_sha256": "40f7ac089da38ac1abe614af403cb439b8666cc6fb8ec847bf58b7ef649b310d",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260928t020434-02": {
+      "commit_sha256": "ca9f7fe336365ba3e0b79c071a5eb701826b8a34f750c703c5f1ae9e5c2d2fc6",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-02",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t020434-02/Gurumoji_Result_b20260928t020434-02_g1.zip",
+      "result_zip_sha256": "496b8c46a28ad465734f5f45bdf493700b2dfdbd87b71e32cdd972f178f42c0e",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260928t020434-03": {
+      "commit_sha256": "47d646f0c5aed683f739a403887f1178922cbc49739834b8ed41a19fbc11b589",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-03",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t020434-03/Gurumoji_Result_b20260928t020434-03_g1.zip",
+      "result_zip_sha256": "817d9bbc00fde0f5b7ecd72816f08d35ab3149e017ac4abe329bed66fbb642de",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260928t020434-04": {
+      "commit_sha256": "916da1b49661484e2ea854755454a5527e08cd4975e9e371479da1ac37219336",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-04",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t020434-04/Gurumoji_Result_b20260928t020434-04_g1.zip",
+      "result_zip_sha256": "2c898a36e09b449ee77053c519c5b39f3a71ef3ec541455d212846e60fbb6b28",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  }
+}

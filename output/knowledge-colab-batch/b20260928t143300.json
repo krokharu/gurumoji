@@ -1,0 +1,160 @@
+{
+  "batch_id": "b20260928t143300",
+  "created_at": "2026-09-28T14:35:06.337507+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t143300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+    "scope": "selected study-design paraphrases; not verbatim article text",
+    "sha256": "8acd48a0c4814e608f1d9edbb005677a6bab0a4679c24f4e1dda098d8b0b71b5"
+  },
+  "expert_id": "exp-cross-session-comparison",
+  "gpu": "NVIDIA A100",
+  "inference_metrics": {
+    "elapsed_seconds_with_result_metadata": 40.233,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "inference_attempts": 2,
+    "input_tokens_with_result_metadata": 1568,
+    "output_tokens_with_result_metadata": 214,
+    "successful_candidate_outputs": 2
+  },
+  "jobs": [
+    {
+      "anchor_id": "cross-session-study-group-composition",
+      "batch_id": "b20260928t143300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t143300-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t143300-01/Gurumoji_Job_b20260928t143300-01_g1.zip",
+      "bundle_sha256": "da9ea5823f224fd76dafc1dbb8b8af7c54c1b888502e840c7252829ee086db44",
+      "bundle_size_bytes": 39960,
+      "claim_id": "colab:ce654042ca1a50290a6c66cd7bb6e63d2ae0b87c888ef0e8b064ef63bbdc3bc1",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t143300-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "cf94d7ba328a25f2b6a4564788a1109b30c2eccff96ee1ae584155c834912b56",
+        "result_size_bytes": 5973,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T14:41:24+00:00"
+      },
+      "commit_sha256": "bc6c0782cec7c68416c6e43b787f33e9ad2ac488693b247c7f00e113de629a22",
+      "deadline": "2026-09-28T15:30:06Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t143300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+      "evidence_snapshot_sha256": "8acd48a0c4814e608f1d9edbb005677a6bab0a4679c24f4e1dda098d8b0b71b5",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t143300/jobs/b20260928t143300-01/excerpt.json",
+      "excerpt_sha256": "da46693dd7c79d033810fc0fa120886947791fb1eacce0a4fb17d4a756843009",
+      "expert_id": "exp-cross-session-comparison",
+      "generated_claim": "このイタリアのオンライン同期焦点グループ研究では、2020年3月後半から5月にかけて13回のグループが実施され、4回は学校長を対象とし、9回は教師を対象とした。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 21.458,
+        "input_tokens": 788,
+        "output_tokens": 102
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t143300-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t143300-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "14793a02bd524fa6f92f2b93b8c1942cb5f52fb62a224e1a4e8109d974ff1277",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t143300-01/Gurumoji_Result_b20260928t143300-01_g1.zip",
+      "result_sha256": "cf94d7ba328a25f2b6a4564788a1109b30c2eccff96ee1ae584155c834912b56",
+      "review": "Checked against Poliandri et al. (2023), Frontiers official article, section 4.2.2: the single Italian study reports 13 synchronous online focus groups, four with school principals and nine with teachers. This is a study-specific design example, not a recommended universal group count. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t143300-LIT-poliandri-2023-online-focus-groups-source.json",
+      "source_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T14:41:35.950490+00:00"
+    },
+    {
+      "anchor_id": "cross-session-uniform-protocol",
+      "batch_id": "b20260928t143300",
+      "bundle_file_name": "Gurumoji_Job_b20260928t143300-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t143300-02/Gurumoji_Job_b20260928t143300-02_g1.zip",
+      "bundle_sha256": "fce21ecd813ec7f342f35f6aeeb837da7004ccf8c0e65768acebc64628147618",
+      "bundle_size_bytes": 39958,
+      "claim_id": "colab:13d5c6e144a39aefa59631b909c4a3e1eb03116b8f226b70d7af1277cf25e179",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t143300-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "8eff3062f01d2403dc64b414848dd5429d8c720e7655596f92e393e4e5c3370c",
+        "result_size_bytes": 6069,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T14:41:57+00:00"
+      },
+      "commit_sha256": "01899da9ff77d6d79fa174e6635dadd06c3ee5a25b352200d5fc64774910f51a",
+      "deadline": "2026-09-28T15:30:06Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t143300-LIT-poliandri-2023-online-focus-groups-selected-evidence.txt",
+      "evidence_snapshot_sha256": "8acd48a0c4814e608f1d9edbb005677a6bab0a4679c24f4e1dda098d8b0b71b5",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t143300/jobs/b20260928t143300-02/excerpt.json",
+      "excerpt_sha256": "c5457b55b618a1d27e46ca145dbaacc9427a2f226d5485fd4a7ce86f4c6d1f5b",
+      "expert_id": "exp-cross-session-comparison",
+      "generated_claim": "この研究では、異なる日と異なる参加者による焦点グループをより一貫性のあるものにするために、管理プロトコルが使用された。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 18.775,
+        "input_tokens": 780,
+        "output_tokens": 112
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t143300-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t143300-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "14793a02bd524fa6f92f2b93b8c1942cb5f52fb62a224e1a4e8109d974ff1277",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t143300-02/Gurumoji_Result_b20260928t143300-02_g1.zip",
+      "result_sha256": "8eff3062f01d2403dc64b414848dd5429d8c720e7655596f92e393e4e5c3370c",
+      "review": "Checked against Poliandri et al. (2023), Frontiers official article, section 4.2.2: the study used a management protocol to support uniformity across sessions on different days and with different participants. The claim remains a study-specific procedure, not a general comparison standard. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t143300-LIT-poliandri-2023-online-focus-groups-source.json",
+      "source_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T14:41:58.063133+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 82.75,
+    "compute_units_balance_delta": 0.38,
+    "compute_units_before": 83.13,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "Both Claims describe one CC BY 4.0 study's multi-group design and common protocol; neither is a universal rule.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "kernel_restarted_after_package_install": true,
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3",
+    "versions_verified_after_restart": true
+  },
+  "session_creation_history": [
+    {
+      "attempt": 1,
+      "server_assignments_after_check": 0,
+      "status": "service_unavailable"
+    },
+    {
+      "attempt": 2,
+      "server_assignments_after_check": 0,
+      "status": "service_unavailable"
+    },
+    {
+      "attempt": 3,
+      "status": "created_single_a100_standard_assignment"
+    }
+  ],
+  "session_name": "gurumoji-a100-crosssession-20260928-143300",
+  "source_document_sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+  "source_id": "LIT-poliandri-2023-online-focus-groups",
+  "source_license": "CC-BY-4.0",
+  "source_url": "https://www.frontiersin.org/journals/sociology/articles/10.3389/fsoc.2023.1145264/full",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T14:45:24.569986+00:00"
+}

@@ -1,0 +1,100 @@
+{
+  "batch_id": "b20260928t070100",
+  "candidate_ready": 6,
+  "failed": 0,
+  "finished_jobs": 6,
+  "inference_metrics": {
+    "elapsed_seconds": 108.846,
+    "excludes": "runtime setup and file transfers",
+    "input_tokens": 4984,
+    "output_tokens": 598
+  },
+  "jobs": [
+    {
+      "anchor_id": "describe-omit-counts-by-slice",
+      "error": null,
+      "expert_id": "exp-descriptive-statistics",
+      "job_id": "b20260928t070100-01",
+      "result_sha256": "d1405523c47e249a1755fe41185dc41e458ad8e49568967e0a4fab3724f830f1",
+      "source_id": "RES-scipy-describe",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "bertopic-class-tfidf-normalization",
+      "error": null,
+      "expert_id": "exp-embedding-topic-exploration",
+      "job_id": "b20260928t070100-02",
+      "result_sha256": "e4d723ee56646d4f8ec77ba6bfde89abf135aa2bb4c8d9c4e5b26c4d7aba2c0a",
+      "source_id": "RES-bertopic-official",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "ginza-v5-ner-training-data-and-labels",
+      "error": null,
+      "expert_id": "exp-japanese-text-preprocessing",
+      "job_id": "b20260928t070100-03",
+      "result_sha256": "218b03449d691e19a02b5bb07babc5ba62fcdbadfa18ba6572406e06f0cc7277",
+      "source_id": "RES-ginza-official",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "kj-twin-fathers-study-specific-card-process",
+      "error": null,
+      "expert_id": "exp-kj-method",
+      "job_id": "b20260928t070100-04",
+      "result_sha256": "28e094432f27b1c78ccae9aadefb74e771cfb6a48cfc165bbf14efe210e17678",
+      "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "scat-application-comparison-and-supervision",
+      "error": null,
+      "expert_id": "exp-scat",
+      "job_id": "b20260928t070100-05",
+      "result_sha256": "3ed72d46439be7667e843e83544091ec686e38a50fd43f9c9bfbf44de0e9a0f5",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "status": "candidate_ready"
+    },
+    {
+      "anchor_id": "ser-cross-corpus-variation-factors",
+      "attempt_history": [
+        {
+          "deadline": "2026-09-28T08:01:08Z",
+          "detail": "Local Colab exec subprocess timed out after 3600 seconds; session status was IDLE with job05 as last execution, and no job06 status/result file existed.",
+          "generation": 1,
+          "session_name": "gurumoji-a100-deepknowledge-20260928-070100",
+          "status": "execution_timeout_no_remote_artifact"
+        },
+        {
+          "detail": "Tokenizers module reported 0.23.1 while distribution metadata reported 0.21.4; uninstalled/reinstalled tokenizers==0.21.4 and restarted kernel.",
+          "generation": 2,
+          "session_name": "gurumoji-a100-deepknowledge-20260928-082100",
+          "status": "dependency_check_failed_before_inference"
+        },
+        {
+          "commit_sha256": "e652844d67124b6dc983883d76cd84d320000a1fd36c85a0753d406613a6c897",
+          "deadline": "2026-09-28T08:36:40Z",
+          "generation": 2,
+          "result_sha256": "5d5ff6b06470a638595d07c47f95c09999f0d5f85e7098f57eabc5f0954a5f24",
+          "session_name": "gurumoji-a100-deepknowledge-20260928-082100",
+          "status": "candidate_ready"
+        }
+      ],
+      "commit_sha256": "e652844d67124b6dc983883d76cd84d320000a1fd36c85a0753d406613a6c897",
+      "error": null,
+      "expert_id": "exp-speech-emotion-recognition",
+      "generation": 2,
+      "job_id": "b20260928t070100-06",
+      "result_sha256": "5d5ff6b06470a638595d07c47f95c09999f0d5f85e7098f57eabc5f0954a5f24",
+      "retry_count": 1,
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "candidate_ready"
+    }
+  ],
+  "session_names_used": [
+    "gurumoji-a100-deepknowledge-20260928-070100",
+    "gurumoji-a100-deepknowledge-20260928-082100"
+  ],
+  "total_jobs": 6,
+  "updated_at": "2026-09-28T08:32:32+00:00"
+}

@@ -1,0 +1,56 @@
+{
+  "batch_id": "b20260928t120000",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "inference_metrics": {
+    "elapsed_seconds": 39.497,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 1556,
+    "output_tokens": 203
+  },
+  "jobs": [
+    {
+      "anchor_id": "ser-cross-corpus-mismatch-generalization",
+      "claim_id": "colab:1e0ee645458fcd0e9877c03508cdde95bca08ff577f3b24fb60f437eccc73bf8",
+      "commit_sha256": "2f4ffc9bf6b4c61945c2cebd317e83c22404f2ce2e693aeae9098b056aba1079",
+      "expert_id": "exp-speech-emotion-recognition",
+      "generation_metrics": {
+        "elapsed_seconds": 24.159,
+        "input_tokens": 795,
+        "output_tokens": 122
+      },
+      "job_id": "b20260928t120000-01",
+      "result_sha256": "392fc73b3263f265ca387fb24c8f562bcc0d25d6c0c3588084b4360226a3daea",
+      "review": "Checked against the Frontiers publisher article, page 2, lines 251–252: the listed corpus differences and their effect on generalization are supported. This extends the existing single-corpus/single-language observation with a distinct cross-corpus challenge. Accepted as an unapproved candidate.",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "ser-basic-cross-corpus-system-components",
+      "claim_id": "colab:f4a10f2f959c4be7a774437d73e63c65459ad148a496de03fa8359cbc38b27ad",
+      "commit_sha256": "7bd05f3dbcf6850052011af4abf8a612984957f9041937efb3842bbede309bc9",
+      "expert_id": "exp-speech-emotion-recognition",
+      "generation_metrics": {
+        "elapsed_seconds": 15.338,
+        "input_tokens": 761,
+        "output_tokens": 81
+      },
+      "job_id": "b20260928t120000-02",
+      "result_sha256": "2cd68d9bcd625ad1ebbf2f03d1a501a0664b963226a0b5f32db369d631bc347c",
+      "review": "Checked against the Frontiers publisher article, page 2, line 252: the review identifies an emotion classifier and domain-invariant feature extraction as two crucial steps in a basic cross-corpus SER system. The claim retains the basic-system scope. Accepted as an unapproved candidate.",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 86.28,
+    "compute_units_balance_delta": 1.05,
+    "compute_units_before": 87.33,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T12:12:15.897853+00:00"
+}

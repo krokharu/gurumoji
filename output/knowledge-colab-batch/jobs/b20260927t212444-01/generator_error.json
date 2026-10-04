@@ -1,0 +1,1 @@
+{"cause": "ImportError(\"cannot import name 'PytorchGELUTanh' from 'transformers.activations' (/usr/local/lib/python3.13/dist-packages/transformers/activations.py)\")", "error": "pinned Qwen3 checkpoint failed to load on the assigned A100", "error_type": "ColabModelError"}

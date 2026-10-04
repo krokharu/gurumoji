@@ -1,0 +1,56 @@
+{
+  "batch_id": "b20260928t122300",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "inference_metrics": {
+    "elapsed_seconds": 39.735,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 1691,
+    "output_tokens": 211
+  },
+  "jobs": [
+    {
+      "anchor_id": "participation-mean-and-standard-deviation-by-group",
+      "claim_id": "colab:2892aaf46980fa58648893ecfb448289c981a70a397b55ca4badd7b9e8688f22",
+      "commit_sha256": "5befad60479c9c6a82462a1a4c0040bac8f54f70ed422e7c796af8f778b16db9",
+      "expert_id": "exp-participation-balance",
+      "generation_metrics": {
+        "elapsed_seconds": 21.753,
+        "input_tokens": 857,
+        "output_tokens": 102
+      },
+      "job_id": "b20260928t122300-01",
+      "result_sha256": "79ceb3f0c7aaad9e564019a4cb591111c135c8161122c2a4e4541a7cfb90ddb9",
+      "review": "Checked against the Frontiers publisher Table 2, p. 13: the North-Emilia-Romagna teacher group is listed with mean speeches per participant 5.57 and standard deviation 3.59. This is a case-specific descriptive measure, not a universal participation-balance threshold. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "moderator-listening-and-synthesis-participant-report",
+      "claim_id": "colab:1b24355d6f8a73c817235b08029ff292b8946f900c6097cb5583264106388eb4",
+      "commit_sha256": "1306a20e824be44d4473b2db5c3d95dec48b4db0f11bf43f24c82851279c659a",
+      "expert_id": "exp-focus-group-interaction",
+      "generation_metrics": {
+        "elapsed_seconds": 17.982,
+        "input_tokens": 834,
+        "output_tokens": 109
+      },
+      "job_id": "b20260928t122300-02",
+      "result_sha256": "0d258d48f8b29d372d614c84239717a3bef353617f96a5750ccf0858bdb3991a",
+      "review": "Checked against the Frontiers publisher article, §4.2.1, p. 14: participants recognized the moderator's role of true listening and effective synthesis. The claim is limited to participants' report in this study. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 86.21,
+    "compute_units_balance_delta": 0.07,
+    "compute_units_before": 86.28,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T12:37:01.863018+00:00"
+}

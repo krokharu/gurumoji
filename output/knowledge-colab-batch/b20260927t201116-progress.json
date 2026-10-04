@@ -1,0 +1,94 @@
+{
+  "batch_id": "b20260927t201116",
+  "jobs": {
+    "b20260927t201116-01": {
+      "detail": {
+        "error": "invalid Colab worker request",
+        "error_type": "TransportError",
+        "job_id": "b20260927t201116-01",
+        "schema_version": 1,
+        "status": "failed",
+        "updated_at": "2026-09-27T20:15:16+00:00"
+      },
+      "expert_id": "exp-thematic-analysis",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "failed"
+    },
+    "b20260927t201116-02": {
+      "commit_sha256": "aac207d7e952b5bbf090e43e53b8be275c1f3c0a58880c703baa7d5fd5a03072",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t201116-02",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t201116-02/Gurumoji_Result_b20260927t201116-02_g1.zip",
+      "result_zip_sha256": "94be5456e0f6fc6becc5fd1b11661ab566e2d88793e49cf794472a3aad970e59",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t201116-03": {
+      "detail": {
+        "error": "invalid Colab worker request",
+        "error_type": "TransportError",
+        "job_id": "b20260927t201116-03",
+        "schema_version": 1,
+        "status": "failed",
+        "updated_at": "2026-09-27T20:16:31+00:00"
+      },
+      "expert_id": "exp-thematic-analysis",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "failed"
+    },
+    "b20260927t201116-04": {
+      "commit_sha256": "20a88266a96f8070b088b6a8595b3b73a6d436fe3a5f6a386847a86f97167886",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t201116-04",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t201116-04/Gurumoji_Result_b20260927t201116-04_g1.zip",
+      "result_zip_sha256": "a91222a1060fd2b349a797da62cfaf784806c32f56f810863733f3dbb2ae870f",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t201116-05": {
+      "detail": {
+        "error": "invalid Colab worker request",
+        "error_type": "TransportError",
+        "job_id": "b20260927t201116-05",
+        "schema_version": 1,
+        "status": "failed",
+        "updated_at": "2026-09-27T20:17:36+00:00"
+      },
+      "expert_id": "exp-scat",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "failed"
+    },
+    "b20260927t201116-06": {
+      "commit_sha256": "9a63aebbc5bd49af569f0abf87a4c294dda33f224b84abfe32ba11e4046abe29",
+      "expert_id": "exp-m-gta",
+      "generation": 1,
+      "job_id": "b20260927t201116-06",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t201116-06/Gurumoji_Result_b20260927t201116-06_g1.zip",
+      "result_zip_sha256": "e1b19e98a696ab6590c577150c101aed03908e0ff56b43d7f231ec64cb1193b8",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t201116-07": {
+      "commit_sha256": "1bec28734c81db7636e655c04b366e3cc4e86fe3fabbabba4b38d483a2d0863d",
+      "expert_id": "exp-focus-group-interaction",
+      "generation": 1,
+      "job_id": "b20260927t201116-07",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t201116-07/Gurumoji_Result_b20260927t201116-07_g1.zip",
+      "result_zip_sha256": "b27ebed00ca73d3ac69a5e99605c504aa6552f714ed1c123f90046fabeb5b026",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t201116-08": {
+      "commit_sha256": "9c7770f99a4bdd420ad132f95fbb85ecdbfaed01f43893e291c02a1947b2e501",
+      "expert_id": "exp-thematic-analysis",
+      "generation": 1,
+      "job_id": "b20260927t201116-08",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t201116-08/Gurumoji_Result_b20260927t201116-08_g1.zip",
+      "result_zip_sha256": "e35b02b7d285365eca2897502cf318825d635c75afd92f11f061b961be41ed72",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  }
+}

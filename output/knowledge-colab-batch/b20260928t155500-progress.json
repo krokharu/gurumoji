@@ -1,0 +1,21 @@
+{
+  "accepted_unapproved_candidate_commit": 1,
+  "batch_id": "b20260928t155500",
+  "candidate_ready": 1,
+  "failed": 0,
+  "finished_jobs": 1,
+  "jobs": [
+    {
+      "anchor_id": "ginza-framework-components",
+      "commit_sha256": "1e707a1ccee0b6b597fab866db44743118476a0d36dcca453861ab9e498a1459",
+      "expert_id": "exp-japanese-text-preprocessing",
+      "job_id": "b20260928t155500-01",
+      "result_sha256": "d127e638be38c1f2cd19c426f8b3b4677839b19ec6a522323f55fb1ed939adb5",
+      "review_note": "Accepted as an unapproved candidate. The claim distinguishes SudachiPy's tokenization and POS role from Hugging Face Transformers as the pretrained-model framework for ja_ginza_electra; no performance claim is made.",
+      "source_id": "RES-ginza-official",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "total_jobs": 1,
+  "updated_at": "2026-09-28T16:06:07.093409+00:00"
+}

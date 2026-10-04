@@ -1,0 +1,504 @@
+{
+  "batch_id": "b20260928t032746",
+  "created_at": "2026-09-28T03:27:48.017287+00:00",
+  "jobs": [
+    {
+      "anchor_id": "principles",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-01/Gurumoji_Job_b20260928t032746-01_g1.zip",
+      "bundle_sha256": "0930366198ad454cf53c445744e29866516fa51f5381bf923978bce585dd5d33",
+      "bundle_size_bytes": 40060,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "6411e0a24beb03421897307fd167cfebb6b6c104216aa44d21505956f0308259",
+        "result_size_bytes": 6285,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:35:12+00:00"
+      },
+      "deadline": "2026-09-28T04:22:46Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        },
+        {
+          "colab_status": {
+            "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+            "error_type": "RuntimeError",
+            "job_id": "b20260928t032746-01",
+            "schema_version": 1,
+            "status": "failed",
+            "updated_at": "2026-09-28T03:31:39+00:00"
+          },
+          "error": "RuntimeError",
+          "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-mayring-2000-qca/excerpt-principles.json",
+      "job_id": "b20260928t032746-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "63c1ea9431e497b742be2d69d21edf4fea1d67b5b409a3293e5017c405c67a10",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-01/Gurumoji_Result_b20260928t032746-01_g1.zip",
+      "result_sha256": "6411e0a24beb03421897307fd167cfebb6b6c104216aa44d21505956f0308259",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:35:15.472607+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The excerpt supports the procedural aims of intersubjective comprehensibility, triangulation, and reliability checks.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "bdc17e4084ae88458d2ecac98ea3c831e76d3e2db31ec24c3dcd94b538ec34b6"
+    },
+    {
+      "anchor_id": "inductive",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-02/Gurumoji_Job_b20260928t032746-02_g1.zip",
+      "bundle_sha256": "99c556361ef795cb12234293f93dcd7c7010f6c053f2463566326bd9401aec33",
+      "bundle_size_bytes": 39741,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "07c7400e0bab0dbc91eac86229b54f25430c391e112e53c096f487bc54854308",
+        "result_size_bytes": 5957,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:35:52+00:00"
+      },
+      "deadline": "2026-09-28T04:22:46Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        },
+        {
+          "colab_status": {
+            "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+            "error_type": "RuntimeError",
+            "job_id": "b20260928t032746-02",
+            "schema_version": 1,
+            "status": "failed",
+            "updated_at": "2026-09-28T03:31:54+00:00"
+          },
+          "error": "RuntimeError",
+          "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-mayring-2000-qca/excerpt-inductive.json",
+      "job_id": "b20260928t032746-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "63c1ea9431e497b742be2d69d21edf4fea1d67b5b409a3293e5017c405c67a10",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-02/Gurumoji_Result_b20260928t032746-02_g1.zip",
+      "result_sha256": "07c7400e0bab0dbc91eac86229b54f25430c391e112e53c096f487bc54854308",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:35:54.764356+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The claim retains the source criterion: derive definitions from theory and research question, then develop categories step by step.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "e6581d58dad2f34f25ab228f5ed94fad92fc7d62664194d7f26de6db88d174f3"
+    },
+    {
+      "anchor_id": "deductive",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-03_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-03/Gurumoji_Job_b20260928t032746-03_g1.zip",
+      "bundle_sha256": "cc48bd73065d12990d77be71c8b527f23636f05405b5f55525f3e1aec1111511",
+      "bundle_size_bytes": 39540,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-03",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "fa4e79e52005d617592ccc0989840809cb637ecce490e7bded3fa0114f0f0819",
+        "result_size_bytes": 5728,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:36:14+00:00"
+      },
+      "deadline": "2026-09-28T04:22:46Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        },
+        {
+          "colab_status": {
+            "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+            "error_type": "RuntimeError",
+            "job_id": "b20260928t032746-03",
+            "schema_version": 1,
+            "status": "failed",
+            "updated_at": "2026-09-28T03:32:10+00:00"
+          },
+          "error": "RuntimeError",
+          "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-mayring-2000-qca/excerpt-deductive.json",
+      "job_id": "b20260928t032746-03",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-03_g1.local-approved-sources.json",
+      "local_registry_sha256": "63c1ea9431e497b742be2d69d21edf4fea1d67b5b409a3293e5017c405c67a10",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-03/Gurumoji_Result_b20260928t032746-03_g1.zip",
+      "result_sha256": "fa4e79e52005d617592ccc0989840809cb637ecce490e7bded3fa0114f0f0819",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:36:16.909826+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The excerpt explicitly calls for definitions, examples, and coding rules for deductive categories.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "6a796f8fd25ac653f90a89dd15d079b632e5eac6cadee36fa6fb1b5e5e42de58"
+    },
+    {
+      "anchor_id": "integration",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-04_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-04/Gurumoji_Job_b20260928t032746-04_g1.zip",
+      "bundle_sha256": "0e6f6b1f5c7890fee90e178b69e459bcf0ddc72a1a2f41a62dc6eeaf25e3ae2f",
+      "bundle_size_bytes": 39675,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-04",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "e6ff5e04cab6887aff201cd79574fb457335bd17752b505a7c4891da984ad286",
+        "result_size_bytes": 5915,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:36:38+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-mayring-2000-qca/excerpt-integration.json",
+      "job_id": "b20260928t032746-04",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-04_g1.local-approved-sources.json",
+      "local_registry_sha256": "63c1ea9431e497b742be2d69d21edf4fea1d67b5b409a3293e5017c405c67a10",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-04/Gurumoji_Result_b20260928t032746-04_g1.zip",
+      "result_sha256": "e6ff5e04cab6887aff201cd79574fb457335bd17752b505a7c4891da984ad286",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:37:00.884015+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The excerpt allows quantitative analysis when it is meaningful to the analyst.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "06f2b5e76a224706b69af345b0b2a9a84bd372de8ed3c46bedbec13183f2ee95"
+    },
+    {
+      "anchor_id": "limits",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-05_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-05/Gurumoji_Job_b20260928t032746-05_g1.zip",
+      "bundle_sha256": "504b0cd626ea4b2ca305f26ff6219e1e735a13883076a5c95a13a9ea1e5c248c",
+      "bundle_size_bytes": 39792,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-05",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "0a16fe43ec656e2865476b35696c17f83ababe6dcab72a7cf7706ca7204bbdac",
+        "result_size_bytes": 6029,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:37:23+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-mayring-2000-qca/excerpt-limits.json",
+      "job_id": "b20260928t032746-05",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-05_g1.local-approved-sources.json",
+      "local_registry_sha256": "63c1ea9431e497b742be2d69d21edf4fea1d67b5b409a3293e5017c405c67a10",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-05/Gurumoji_Result_b20260928t032746-05_g1.zip",
+      "result_sha256": "0a16fe43ec656e2865476b35696c17f83ababe6dcab72a7cf7706ca7204bbdac",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:37:36.716526+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The source says the method is less suitable for highly open-ended exploratory questions when categories constrain analysis, or for holistic non-stepwise analysis.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "a37f6e53a4936c84540ba286c82227bae031b146f2cbee0972ce0806ca17bacb"
+    },
+    {
+      "anchor_id": "abstract",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-06_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-06/Gurumoji_Job_b20260928t032746-06_g1.zip",
+      "bundle_sha256": "689fff48a42ef4395ecb7dd256ccc814a0aed32000a89bae58a9a6fb65bdc442",
+      "bundle_size_bytes": 39498,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-06",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "ab9af187fdcd6c64447601bf7bc94e6fb26f7c6ba7512d4e13f67c0e7f970e6e",
+        "result_size_bytes": 5774,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:38:09+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "execution_attempts": [
+        {
+          "error": "status_download_failed",
+          "error_detail": "        \u001b[0;32mreturn\u001b[0m \u001b[0mio\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mopen\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mbuffering\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    538\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    539\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mread_text\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mencoding\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0merrors\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mnewline\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mNone\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '/content/gurumoji_pilot_job_r3.zip'\n",
+          "status": "failed"
+        }
+      ],
+      "expert_id": "exp-thematic-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-byrne-2022-reflexive-ta/excerpt.json",
+      "job_id": "b20260928t032746-06",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-06_g1.local-approved-sources.json",
+      "local_registry_sha256": "dbd8ef794eb77ea9c99f98ba42c72725714adc33b19eadd3c185dba89ebf915e",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-06/Gurumoji_Result_b20260928t032746-06_g1.zip",
+      "result_sha256": "ab9af187fdcd6c64447601bf7bc94e6fb26f7c6ba7512d4e13f67c0e7f970e6e",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:38:23.058623+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The core summary is supported, but the applicability field adds an interpretation condition not stated in the abstract excerpt.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      }
+    },
+    {
+      "anchor_id": "abstract",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-07_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-07/Gurumoji_Job_b20260928t032746-07_g1.zip",
+      "bundle_sha256": "0a941f1ca1cd85427317588ae3f3c1a3cd8fb2f125b8c0bbe629ee990c6b2656",
+      "bundle_size_bytes": 39412,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-07",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "58be0b4de9089adb9558fc29399ccef9d63d6bbc9a47c85c98b7582bd95af3d4",
+        "result_size_bytes": 5597,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:38:47+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-gilardi-2023-llm-annotation/excerpt.json",
+      "job_id": "b20260928t032746-07",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-07_g1.local-approved-sources.json",
+      "local_registry_sha256": "54922edb81f4d26c51eeacaad4df686c4c372ac6e4564a3a79bd425655354443",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-07/Gurumoji_Result_b20260928t032746-07_g1.zip",
+      "result_sha256": "58be0b4de9089adb9558fc29399ccef9d63d6bbc9a47c85c98b7582bd95af3d4",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:38:49.570460+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The source reports four tweet/news datasets and named tasks; the candidate generalizes to text annotation tasks broadly.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      }
+    },
+    {
+      "anchor_id": "stage-1",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-08_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-08/Gurumoji_Job_b20260928t032746-08_g1.zip",
+      "bundle_sha256": "67c167cba66fff8ee2f99e7a69e7292b3d968f8d766a1c1eb1931e223ced926f",
+      "bundle_size_bytes": 40241,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-08",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "8300e5cc6ebda900766b0c6fe0b4a2c6ce5577bc07fd7c2bbbb11ff155d9f1bd",
+        "result_size_bytes": 6552,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:39:37+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-gale-2013-framework/excerpt-stage-1.json",
+      "job_id": "b20260928t032746-08",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-08_g1.local-approved-sources.json",
+      "local_registry_sha256": "17a22d89d90c4f417d19a3d790b8de55090b74ef7bd81428763dc1e0cc1df1fa",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-08/Gurumoji_Result_b20260928t032746-08_g1.zip",
+      "result_sha256": "8300e5cc6ebda900766b0c6fe0b4a2c6ce5577bc07fd7c2bbbb11ff155d9f1bd",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:39:50.300451+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The source says a verbatim transcript is ideal; the candidate states it is required.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      }
+    },
+    {
+      "anchor_id": "stage-5",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-09_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-09/Gurumoji_Job_b20260928t032746-09_g1.zip",
+      "bundle_sha256": "2ac4d25b8eb9557a18a1d28e5d55c3556027bb4a7b5fc4fe94f014cadd23eec3",
+      "bundle_size_bytes": 40282,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-09",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "89d8ca79ab60e0837d321068179a9cd78367c96820a206bda63bf64d061a65f9",
+        "result_size_bytes": 6380,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:40:07+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-gale-2013-framework/excerpt-stage-5.json",
+      "job_id": "b20260928t032746-09",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-09_g1.local-approved-sources.json",
+      "local_registry_sha256": "17a22d89d90c4f417d19a3d790b8de55090b74ef7bd81428763dc1e0cc1df1fa",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-09/Gurumoji_Result_b20260928t032746-09_g1.zip",
+      "result_sha256": "89d8ca79ab60e0837d321068179a9cd78367c96820a206bda63bf64d061a65f9",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:40:09.801131+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The excerpt explicitly says the analytical framework is applied to subsequent transcripts using existing categories and codes.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "7d08341e76da8e80af54bb7aac4e098d0814753f7e3d4d3f50d6c0deb6352bf1"
+    },
+    {
+      "anchor_id": "stage-7",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-10_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-10/Gurumoji_Job_b20260928t032746-10_g1.zip",
+      "bundle_sha256": "ef6c75c4c992d917bc163f929935bac7eb07c0795b3d43b30ffbd3e0ecec1d21",
+      "bundle_size_bytes": 40525,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-10",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "5502ef803794d0126f19bf320a7c7815e475b0641e8bfed2532a5c054df492b9",
+        "result_size_bytes": 6834,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:40:40+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-gale-2013-framework/excerpt-stage-7.json",
+      "job_id": "b20260928t032746-10",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-10_g1.local-approved-sources.json",
+      "local_registry_sha256": "17a22d89d90c4f417d19a3d790b8de55090b74ef7bd81428763dc1e0cc1df1fa",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-10/Gurumoji_Result_b20260928t032746-10_g1.zip",
+      "result_sha256": "5502ef803794d0126f19bf320a7c7815e475b0641e8bfed2532a5c054df492b9",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T03:40:48.037636+00:00",
+      "review": {
+        "status": "hold_for_revision",
+        "note": "The claim is supported, but the applicability field refers to matrix procedures absent from this stage-seven excerpt.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      }
+    },
+    {
+      "anchor_id": "summary",
+      "bundle_file_name": "Gurumoji_Job_b20260928t032746-11_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t032746-11/Gurumoji_Job_b20260928t032746-11_g1.zip",
+      "bundle_sha256": "5c8b9a6ae51f7486a816ce24d0b89652ea99f1a28d613a9b8a64b329840509f1",
+      "bundle_size_bytes": 40019,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t032746-11",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "e6e6379d88d79af0673c54a60e636fa2abd5e7d0a54c2b0361b3f4af116f7ba0",
+        "result_size_bytes": 6216,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T03:41:08+00:00"
+      },
+      "deadline": "2026-09-28T04:22:47Z",
+      "expert_id": "exp-cross-session-comparison",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "input_excerpt_path": "output/knowledge-colab-batch/inputs/LIT-gale-2013-framework/excerpt-summary.json",
+      "job_id": "b20260928t032746-11",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t032746-11_g1.local-approved-sources.json",
+      "local_registry_sha256": "17a22d89d90c4f417d19a3d790b8de55090b74ef7bd81428763dc1e0cc1df1fa",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t032746-11/Gurumoji_Result_b20260928t032746-11_g1.zip",
+      "result_sha256": "e6e6379d88d79af0673c54a60e636fa2abd5e7d0a54c2b0361b3f4af116f7ba0",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T03:41:11.396010+00:00",
+      "review": {
+        "status": "accepted_unapproved_candidate",
+        "note": "The source summary directly supports interview analysis when within-case and between-case theme comparisons are desirable.",
+        "reviewed_at": "2026-09-28T03:44:00+00:00"
+      },
+      "commit_sha256": "dff724098a5299ab5ee3433247d43f5ccaa13d61f9033663d00119d0e0ef9f60"
+    }
+  ],
+  "runner_repaired_from": "output/knowledge-colab-batch/jobs/b20260928t025516-01/colab_run_job.py with per-job bundle, status, digest, and ID binding",
+  "runtime_repair": {
+    "action": "restarted Colab kernel after package installation",
+    "at": "2026-09-28T03:33:22.824370+00:00",
+    "reason": "Tokenizers 0.21.4 was installed but the live kernel still exposed an older imported extension"
+  },
+  "scope": "Qualitative content analysis, reflexive thematic analysis, Framework Method, and cross-session comparison.",
+  "review_summary": {
+    "reviewed_jobs": 11,
+    "accepted_unapproved_candidates": 7,
+    "held_for_revision": 4,
+    "reviewed_at": "2026-09-28T03:44:00+00:00"
+  },
+  "updated_at": "2026-09-28T03:44:00+00:00"
+}

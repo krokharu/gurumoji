@@ -1,0 +1,58 @@
+{
+  "batch_id": "b20260928t140200",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "inference_metrics": {
+    "elapsed_seconds_with_result_metadata": 35.817,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "inference_attempts": 2,
+    "input_tokens_with_result_metadata": 1609,
+    "output_tokens_with_result_metadata": 186,
+    "successful_candidate_outputs": 2
+  },
+  "jobs": [
+    {
+      "anchor_id": "f-oneway-welch-anova-equal-var",
+      "claim_id": "colab:08b6510f7e58052b139f67f062f4d1acdd99a4efdecf911279152cec86c945e7",
+      "commit_sha256": "de08b63b6dd338d4bc0a850f572e44315d65402f4abdd800a77cf581b232f957",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation_metrics": {
+        "elapsed_seconds": 19.665,
+        "input_tokens": 812,
+        "output_tokens": 90
+      },
+      "job_id": "b20260928t140200-01",
+      "result_sha256": "785c13380468ad8996cbe0f4b7b6156283eb2e0af2ae7d43c6774ad7f604520e",
+      "review": "Checked against the SciPy v1.18.0 official f_oneway API reference, equal_var parameter: True is the default standard one-way ANOVA with equal population variances; False selects Welch's ANOVA. The Claim states only API behavior, not that Gurumoji currently implements Welch ANOVA. Accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-f-oneway",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "f-oneway-nan-policy-axis-slices",
+      "claim_id": "colab:8bdd5b7aba24f1ed893969698ac1e37098933b799993f4c12f980f2d63c33abe",
+      "commit_sha256": "89159aa2aa11960902bf64c53760fd29173e653dc8a99dfc293a7487ba83b012",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation_metrics": {
+        "elapsed_seconds": 16.152,
+        "input_tokens": 797,
+        "output_tokens": 96
+      },
+      "job_id": "b20260928t140200-02",
+      "result_sha256": "d00811bf9de722e8e343adc7600d26501bf9d049b30abc2ff03bbdcaca544f8a",
+      "review": "Checked against the SciPy v1.18.0 official f_oneway API reference, nan_policy parameter: propagate, omit, and raise are supported, with propagate as the default. The Claim states API behavior; Gurumoji filters non-finite values before its current call. Accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-f-oneway",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 83.13,
+    "compute_units_balance_delta": 0.18,
+    "compute_units_before": 83.31,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T14:23:43.881021+00:00"
+}

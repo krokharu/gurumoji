@@ -1,0 +1,58 @@
+{
+  "batch_id": "b20260928t143300",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "inference_metrics": {
+    "elapsed_seconds_with_result_metadata": 40.233,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "inference_attempts": 2,
+    "input_tokens_with_result_metadata": 1568,
+    "output_tokens_with_result_metadata": 214,
+    "successful_candidate_outputs": 2
+  },
+  "jobs": [
+    {
+      "anchor_id": "cross-session-study-group-composition",
+      "claim_id": "colab:ce654042ca1a50290a6c66cd7bb6e63d2ae0b87c888ef0e8b064ef63bbdc3bc1",
+      "commit_sha256": "bc6c0782cec7c68416c6e43b787f33e9ad2ac488693b247c7f00e113de629a22",
+      "expert_id": "exp-cross-session-comparison",
+      "generation_metrics": {
+        "elapsed_seconds": 21.458,
+        "input_tokens": 788,
+        "output_tokens": 102
+      },
+      "job_id": "b20260928t143300-01",
+      "result_sha256": "cf94d7ba328a25f2b6a4564788a1109b30c2eccff96ee1ae584155c834912b56",
+      "review": "Checked against Poliandri et al. (2023), Frontiers official article, section 4.2.2: the single Italian study reports 13 synchronous online focus groups, four with school principals and nine with teachers. This is a study-specific design example, not a recommended universal group count. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "cross-session-uniform-protocol",
+      "claim_id": "colab:13d5c6e144a39aefa59631b909c4a3e1eb03116b8f226b70d7af1277cf25e179",
+      "commit_sha256": "01899da9ff77d6d79fa174e6635dadd06c3ee5a25b352200d5fc64774910f51a",
+      "expert_id": "exp-cross-session-comparison",
+      "generation_metrics": {
+        "elapsed_seconds": 18.775,
+        "input_tokens": 780,
+        "output_tokens": 112
+      },
+      "job_id": "b20260928t143300-02",
+      "result_sha256": "8eff3062f01d2403dc64b414848dd5429d8c720e7655596f92e393e4e5c3370c",
+      "review": "Checked against Poliandri et al. (2023), Frontiers official article, section 4.2.2: the study used a management protocol to support uniformity across sessions on different days and with different participants. The claim remains a study-specific procedure, not a general comparison standard. Accepted as an unapproved candidate.",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 82.75,
+    "compute_units_balance_delta": 0.38,
+    "compute_units_before": 83.13,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T14:45:24.569986+00:00"
+}

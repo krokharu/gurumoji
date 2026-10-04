@@ -1,0 +1,255 @@
+{
+  "batch_id": "b20260928t091530",
+  "colab_final_state": {
+    "active_sessions": 0,
+    "balance_compute_units": 89.64,
+    "compute_units_used_vs_pre_batch": 0.67,
+    "usage_rate_cu_per_hour": 0.0
+  },
+  "created_at": "2026-09-28T09:16:42.585606+00:00",
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "imported_unapproved": 4,
+  "inference_metrics": {
+    "elapsed_seconds": 76.185,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 3262,
+    "output_tokens": 436
+  },
+  "jobs": [
+    {
+      "accepted_at": "2026-09-28T09:27:14.643175+00:00",
+      "anchor_id": "heldner-edlund-fto-mode",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "dbeadde12d416c94b5cd9ebc535930e30879dec5306f162ffc0890e8dffa1969",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:22:14+00:00"
+        }
+      ],
+      "bundle_file_name": "Gurumoji_Job_b20260928t091530-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t091530-01/Gurumoji_Job_b20260928t091530-01_g1.zip",
+      "bundle_sha256": "b2cb063a9be64fb63ea4d3214243bbddfd5d7ca8dd0e3a6e0e87ea7a908e57d2",
+      "bundle_size_bytes": 39180,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t091530-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "dbeadde12d416c94b5cd9ebc535930e30879dec5306f162ffc0890e8dffa1969",
+        "result_size_bytes": 5119,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T09:22:14+00:00"
+      },
+      "commit_sha256": "52d364fd434706bfebda6e243770d140baa0f767010c12ebc860a0a040113f70",
+      "deadline": "2026-09-28T10:11:42Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-01/excerpt.json",
+      "excerpt_sha256": "afabacd76b9d69e1cb382e9c5a198dc45ccac275ac0eb8794430e856e15a4c44",
+      "expert_id": "exp-conversation-timing",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t091530-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t091530-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "df3f71a843824a02c79f6abc849a50963b5d098b91430d2afd42ead50d3862f2",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t091530-01/Gurumoji_Result_b20260928t091530-01_g1.zip",
+      "result_sha256": "dbeadde12d416c94b5cd9ebc535930e30879dec5306f162ffc0890e8dffa1969",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-01/source.json",
+      "source_sha256": "bda17c1efd9ad7914fca32e9b444141b2a7c6fc5f55ffc37678b08627205dd96",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T09:22:17.303019+00:00"
+    },
+    {
+      "accepted_at": "2026-09-28T09:27:14.742007+00:00",
+      "anchor_id": "caqdas-storage-not-analysis",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "24e986342bee9eaac6695dc070dedce9e1a5e15473d077286be2540a5c176fee",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:22:46+00:00"
+        }
+      ],
+      "bundle_file_name": "Gurumoji_Job_b20260928t091530-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t091530-02/Gurumoji_Job_b20260928t091530-02_g1.zip",
+      "bundle_sha256": "f88f503cff4cfa57908c486629503ae3fbc0d193d88347160ad5c42fd6da3852",
+      "bundle_size_bytes": 39453,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t091530-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "24e986342bee9eaac6695dc070dedce9e1a5e15473d077286be2540a5c176fee",
+        "result_size_bytes": 5462,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T09:22:46+00:00"
+      },
+      "commit_sha256": "2b3ded773a4ef201bac0d790e37f566ddb3fa1cdecb5b2b00181f91735d3a6be",
+      "deadline": "2026-09-28T10:11:42Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-02/excerpt.json",
+      "excerpt_sha256": "621e7f2ee2dff3a6036d7ab7a4587363c6a97c572a5a78fa9f8bc14689177b85",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t091530-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t091530-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "9df76cd5cc656249921780643e42c329fc6be0c6cbb0f0f746302dfbd5413543",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t091530-02/Gurumoji_Result_b20260928t091530-02_g1.zip",
+      "result_sha256": "24e986342bee9eaac6695dc070dedce9e1a5e15473d077286be2540a5c176fee",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-gale-2013-framework",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-02/source.json",
+      "source_sha256": "c7b29d818b4c1c2d53e198efdb4ab1f840c36f47d22a5c8eb3d9d17fecb21902",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T09:22:47.710961+00:00"
+    },
+    {
+      "accepted_at": "2026-09-28T09:27:14.841488+00:00",
+      "anchor_id": "fg-coding-scheme-development-sample",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "35c78b458a788ade09a732bf6dffeffb58a56b4ef3a5bf1a3396d9a3fd813365",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:23:36+00:00"
+        }
+      ],
+      "bundle_file_name": "Gurumoji_Job_b20260928t091530-03_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t091530-03/Gurumoji_Job_b20260928t091530-03_g1.zip",
+      "bundle_sha256": "36c0f7ab7af2004a490699a9e180c92e5b7b125b2ecb58b8b886ce9bf78fbd60",
+      "bundle_size_bytes": 39469,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t091530-03",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "35c78b458a788ade09a732bf6dffeffb58a56b4ef3a5bf1a3396d9a3fd813365",
+        "result_size_bytes": 5510,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T09:23:36+00:00"
+      },
+      "commit_sha256": "92ad5e35e250f59f2b3cd88ce1a9bf5c0edb9709f3facb6e3a46ea25cd74231d",
+      "deadline": "2026-09-28T10:11:42Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-03/excerpt.json",
+      "excerpt_sha256": "7f760200a7561435db35dec83f7b69bdf6b2fe362821e73388601dc7fcfc2240",
+      "expert_id": "exp-focus-group-interaction",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t091530-03",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t091530-03_g1.local-approved-sources.json",
+      "local_registry_sha256": "c014ce5531c6f5b7061cdcc5834f0f9695eef7cc565ce37ca3c101ba88eff060",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t091530-03/Gurumoji_Result_b20260928t091530-03_g1.zip",
+      "result_sha256": "35c78b458a788ade09a732bf6dffeffb58a56b4ef3a5bf1a3396d9a3fd813365",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-03/source.json",
+      "source_sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T09:23:37.110305+00:00"
+    },
+    {
+      "accepted_at": "2026-09-28T09:27:14.945585+00:00",
+      "anchor_id": "mgta-study-output-scope",
+      "attempt_history": [
+        {
+          "attempt": 1,
+          "error": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+          "error_type": "RuntimeError",
+          "generation": 1,
+          "status": "failed"
+        },
+        {
+          "attempt": 2,
+          "generation": 1,
+          "result_sha256": "35426e6ba5a4de8c5b38fa386e068e6654fd1bbe5d818e77aace90cfb4bfe6dc",
+          "status": "candidate_ready",
+          "updated_at": "2026-09-28T09:24:01+00:00"
+        }
+      ],
+      "bundle_file_name": "Gurumoji_Job_b20260928t091530-04_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t091530-04/Gurumoji_Job_b20260928t091530-04_g1.zip",
+      "bundle_sha256": "ef45a80d1d0044620f5f032dd89bf8d8200d62e334d089d9e792e4e399091544",
+      "bundle_size_bytes": 39425,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t091530-04",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "35426e6ba5a4de8c5b38fa386e068e6654fd1bbe5d818e77aace90cfb4bfe6dc",
+        "result_size_bytes": 5426,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T09:24:01+00:00"
+      },
+      "commit_sha256": "53f2771d321ab6ff1e486fa520b331782ff506c5300cccceedeafe9949af8fd5",
+      "deadline": "2026-09-28T10:11:42Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-04/excerpt.json",
+      "excerpt_sha256": "7ef53e849d42b03626402f39229d3beb49b26e239ae5b8398f01c2851f301bd0",
+      "expert_id": "exp-m-gta",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t091530-04",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t091530-04_g1.local-approved-sources.json",
+      "local_registry_sha256": "2d8bfb7e16244880b6df70f097607c5d39c61f6fddf7b0ac4b68b1db15345d87",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t091530-04/Gurumoji_Result_b20260928t091530-04_g1.zip",
+      "result_sha256": "35426e6ba5a4de8c5b38fa386e068e6654fd1bbe5d818e77aace90cfb4bfe6dc",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t091530/jobs/b20260928t091530-04/source.json",
+      "source_sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T09:24:02.549402+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "runtime_preflight": {
+    "fix": "Installed pinned package versions and restarted the kernel before rerun.",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3"
+  },
+  "session_attempts": [
+    {
+      "attempt": 1,
+      "detail": "Runtime image exposed Tokenizers 0.23.1; worker requires 0.21.4.",
+      "outcome": "failed_all_jobs_dependency_mismatch"
+    },
+    {
+      "attempt": 2,
+      "outcome": "all_four_candidates_ready_after_pinned_runtime_preflight"
+    }
+  ],
+  "session_name": "gurumoji-a100-deepknowledge-20260928-091530",
+  "status": "imported_unapproved_candidates_pending_pack_review",
+  "total_jobs": 4
+}

@@ -1,0 +1,105 @@
+{
+  "batch_id": "b20260927t204359",
+  "jobs": {
+    "b20260927t204359-01": {
+      "commit_sha256": "59addaf4c856cd5e1f2c31025e3a982a7b26dec13593ecbca2ee6d6b091dfa69",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-01",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-01/Gurumoji_Result_b20260927t204359-01_g1.zip",
+      "result_zip_sha256": "825f1a21411acd1a0749c28d1c681fc2acc53299d0b2b4d615cc0b232f55c364",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-02": {
+      "commit_sha256": "a8d12b69eda7d55b24bf4ade9b0e20fd84779c447d0d07fb9f37410a07196cf2",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-02",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-02/Gurumoji_Result_b20260927t204359-02_g1.zip",
+      "result_zip_sha256": "7a7055f44209c5eb1871d918e95dc490b6922736bd065aff3f0ecf4cea1c0f33",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-03": {
+      "commit_sha256": "ffeb7c36d99f06d514268065de9bff686d90dd37b1eea60f0c94aeb97559e817",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-03",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-03/Gurumoji_Result_b20260927t204359-03_g1.zip",
+      "result_zip_sha256": "4b1dd1012d4100e2882903e7a8ae5163b606ffa6ec140106977a7d5592fe340e",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-04": {
+      "commit_sha256": "7662a3ddcfd51ec03ae3c4b72167ae73ae923fdc4e26c265c11782b61afaa0da",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-04",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-04/Gurumoji_Result_b20260927t204359-04_g1.zip",
+      "result_zip_sha256": "36b9c08f8fe961f14d5df52cc82ddbabd5e862ba52946b6aa621c683d6d67504",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-05": {
+      "commit_sha256": "3bda88d2b1c7e986517b34965c259e85710c8ee6ad4b24da2d2f70b7acef7ab3",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-05",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-05/Gurumoji_Result_b20260927t204359-05_g1.zip",
+      "result_zip_sha256": "60667479b28b5ac885d9d9d98fc17f7942d2a4cbf829bbb679f0f3569c0dcebd",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-06": {
+      "commit_sha256": "3da66ffa04432fbfa61cef99d39c0001f8a91aeba00dfc71e7df63b330323e8f",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-06",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-06/Gurumoji_Result_b20260927t204359-06_g1.zip",
+      "result_zip_sha256": "025c74b8cf6e13b41daee14788e2a91bbd4a0511aa8814828a1687b4408ad60c",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-07": {
+      "commit_sha256": "e27c0f3181de59a4deb3c5910e061834436a76a6ad72921e8b42db7627916d28",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-07",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-07/Gurumoji_Result_b20260927t204359-07_g1.zip",
+      "result_zip_sha256": "ed1e6c7945f96910db89f77d646721b4ca1d4b061cab82034d67abdbd726174b",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-08": {
+      "commit_sha256": "597648609394ee2bd94b603e7445581d0c1f4839f615120074b66db93a255749",
+      "expert_id": "exp-framework-method",
+      "generation": 1,
+      "job_id": "b20260927t204359-08",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-08/Gurumoji_Result_b20260927t204359-08_g1.zip",
+      "result_zip_sha256": "5dc7e5c43eab5399d2f3e6b761a5abac5802a5e104d57d463230a0062caad1e9",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-09": {
+      "commit_sha256": "738ff55ba080f9d50624b1b70081be685e848471b3a25860afe66c08b619754b",
+      "expert_id": "exp-cross-session-comparison",
+      "generation": 1,
+      "job_id": "b20260927t204359-09",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-09/Gurumoji_Result_b20260927t204359-09_g1.zip",
+      "result_zip_sha256": "893e55c84c08fc6194f378ec510de36a6b8424c18524b70eae34037cfa948406",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t204359-10": {
+      "commit_sha256": "3d2395038f809b6b5f96bbc32b2bbf4a8a03137283d0db8006de5b49bf3e6d94",
+      "expert_id": "exp-cross-session-comparison",
+      "generation": 1,
+      "job_id": "b20260927t204359-10",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t204359-10/Gurumoji_Result_b20260927t204359-10_g1.zip",
+      "result_zip_sha256": "dbc0cf25b62d843a9c3ce48511dd1699ea2723fad4314d89636947cd64ce689a",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  }
+}

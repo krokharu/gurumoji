@@ -1,0 +1,70 @@
+{
+  "batch_id": "b20260928t020434",
+  "created_at": "2026-09-28T02:04:35.323770+00:00",
+  "jobs": [
+    {
+      "anchor_id": "main-message",
+      "bundle_file_name": "Gurumoji_Job_b20260928t020434-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t020434-01/Gurumoji_Job_b20260928t020434-01_g1.zip",
+      "bundle_sha256": "254cb5486ee98ddb3a109b3863d14804763799df1aff2205837b5135a3f6d902",
+      "bundle_size_bytes": 39841,
+      "deadline": "2026-09-28T02:59:34Z",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t020434-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "ccd2d3b0eccf898946126e9634ac8786da55ed7ae90a317dba24565e0489e093",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "ready_for_user_started_colab"
+    },
+    {
+      "anchor_id": "ratio-definitions",
+      "bundle_file_name": "Gurumoji_Job_b20260928t020434-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t020434-02/Gurumoji_Job_b20260928t020434-02_g1.zip",
+      "bundle_sha256": "70693ed49c79aed9c7ff7a047cb766e9d4a82b4a2d066a88ac9429e4f868875e",
+      "bundle_size_bytes": 39707,
+      "deadline": "2026-09-28T02:59:35Z",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t020434-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "ccd2d3b0eccf898946126e9634ac8786da55ed7ae90a317dba24565e0489e093",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "ready_for_user_started_colab"
+    },
+    {
+      "anchor_id": "equality-condition",
+      "bundle_file_name": "Gurumoji_Job_b20260928t020434-03_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t020434-03/Gurumoji_Job_b20260928t020434-03_g1.zip",
+      "bundle_sha256": "2d300b24f390522251942972712abfeff23573fca82269b85c4ea8317999b501",
+      "bundle_size_bytes": 39819,
+      "deadline": "2026-09-28T02:59:35Z",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-03",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t020434-03_g1.local-approved-sources.json",
+      "local_registry_sha256": "ccd2d3b0eccf898946126e9634ac8786da55ed7ae90a317dba24565e0489e093",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "ready_for_user_started_colab"
+    },
+    {
+      "anchor_id": "simulation-limitations",
+      "bundle_file_name": "Gurumoji_Job_b20260928t020434-04_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t020434-04/Gurumoji_Job_b20260928t020434-04_g1.zip",
+      "bundle_sha256": "534a01aa28aa592723bc2fad569702e7722e565f72de100000a01ea78c26e5c4",
+      "bundle_size_bytes": 39892,
+      "deadline": "2026-09-28T02:59:35Z",
+      "expert_id": "exp-group-comparison-statistics",
+      "generation": 1,
+      "job_id": "b20260928t020434-04",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t020434-04_g1.local-approved-sources.json",
+      "local_registry_sha256": "ccd2d3b0eccf898946126e9634ac8786da55ed7ae90a317dba24565e0489e093",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-delacre-2022-correction",
+      "status": "ready_for_user_started_colab"
+    }
+  ]
+}

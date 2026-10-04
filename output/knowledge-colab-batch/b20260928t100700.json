@@ -1,0 +1,80 @@
+{
+  "batch_id": "b20260928t100700",
+  "colab_resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 88.7,
+    "compute_units_before": 88.92,
+    "estimated_batch_delta": 0.22,
+    "session_stopped": true,
+    "usage_rate_after_per_hour": 0.0
+  },
+  "created_at": "2026-09-28T10:10:37Z",
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "inference_metrics": {
+    "elapsed_seconds": 22.413,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 858,
+    "output_tokens": 106
+  },
+  "jobs": [
+    {
+      "accepted_at": "2026-09-28T10:15:04.828550+00:00",
+      "anchor_id": "freetxt-tool-function-and-language-scope",
+      "bundle_file_name": "Gurumoji_Job_b20260928t100700-01_g2.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t100700-01/Gurumoji_Job_b20260928t100700-01_g2.zip",
+      "bundle_sha256": "1cab10fc7b0a8071cd2be282b6a659adb71a2d382e8263139d6d6d50cc706d19",
+      "bundle_size_bytes": 39631,
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t100700-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "3715cb6c782c72c88360c4589d8f1a7c0adce6277bc9d370a37f8cbb20cd524b",
+        "result_size_bytes": 5652,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T10:13:44+00:00"
+      },
+      "commit_sha256": "c84bcf999f354dce68248199476ff4f8b706fba2d5cfd146d17d3575f3f6e1b6",
+      "deadline": "2026-09-28T11:05:37Z",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t100700/jobs/b20260928t100700-01/excerpt.json",
+      "excerpt_sha256": "795bd04860694300e7887eb8964b7d6165911afb5a80605647432a11e60519ca",
+      "expert_id": "exp-quantitative-text-analysis",
+      "generation": 2,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t100700-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t100700-01_g2.local-approved-sources.json",
+      "local_registry_sha256": "735b51cb30985eb1de609948864de794e8fa306d46fe9a717c673be4eef3f743",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t100700-01/Gurumoji_Result_b20260928t100700-01_g2.zip",
+      "result_sha256": "3715cb6c782c72c88360c4589d8f1a7c0adce6277bc9d370a37f8cbb20cd524b",
+      "review_note": "The publisher abstract supports the stated English/Welsh tool scope and end-user-led small and larger dataset analyses. The candidate does not claim demonstrated performance for Japanese text.",
+      "review_status": "imported_unapproved_candidate_commit",
+      "reviewed_at": "2026-09-28T10:15:04.828550+00:00",
+      "revises_job": "b20260928t042558-08",
+      "source_id": "LIT-knight-2024-freetxt",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t100700/jobs/b20260928t100700-01/source.json",
+      "source_sha256": "bfd7f51c4235cd07ea24a209c8985f2ca6e3dbcc897f47b6c86edee2e38c7e69",
+      "status": "candidate_ready",
+      "updated_at": "2026-09-28T10:13:46.351494+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "retry_history": [
+    {
+      "generation": 1,
+      "reason": "The first local package attempt collided with the generated registry output path; no bundle was uploaded and no A100 inference ran. Generation 2 was built through JobStore begin_generation.",
+      "status": "superseded_before_colab"
+    }
+  ],
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3",
+    "verified_modules_and_distributions": true
+  },
+  "session_name": "gurumoji-a100-deepknowledge-20260928-100700",
+  "status": "reviewed_imported_unapproved",
+  "total_jobs": 1
+}

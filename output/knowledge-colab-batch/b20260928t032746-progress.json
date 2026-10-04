@@ -1,0 +1,134 @@
+{
+  "batch_id": "b20260928t032746",
+  "candidate_ready": 11,
+  "failed": 0,
+  "finished_jobs": 11,
+  "jobs": [
+    {
+      "anchor_id": "principles",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-01",
+      "result_sha256": "6411e0a24beb03421897307fd167cfebb6b6c104216aa44d21505956f0308259",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The excerpt supports the procedural aims of intersubjective comprehensibility, triangulation, and reliability checks."
+    },
+    {
+      "anchor_id": "inductive",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-02",
+      "result_sha256": "07c7400e0bab0dbc91eac86229b54f25430c391e112e53c096f487bc54854308",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The claim retains the source criterion: derive definitions from theory and research question, then develop categories step by step."
+    },
+    {
+      "anchor_id": "deductive",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-03",
+      "result_sha256": "fa4e79e52005d617592ccc0989840809cb637ecce490e7bded3fa0114f0f0819",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The excerpt explicitly calls for definitions, examples, and coding rules for deductive categories."
+    },
+    {
+      "anchor_id": "integration",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-04",
+      "result_sha256": "e6ff5e04cab6887aff201cd79574fb457335bd17752b505a7c4891da984ad286",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The excerpt allows quantitative analysis when it is meaningful to the analyst."
+    },
+    {
+      "anchor_id": "limits",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-05",
+      "result_sha256": "0a16fe43ec656e2865476b35696c17f83ababe6dcab72a7cf7706ca7204bbdac",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The source says the method is less suitable for highly open-ended exploratory questions when categories constrain analysis, or for holistic non-stepwise analysis."
+    },
+    {
+      "anchor_id": "abstract",
+      "error": null,
+      "expert_id": "exp-thematic-analysis",
+      "job_id": "b20260928t032746-06",
+      "result_sha256": "ab9af187fdcd6c64447601bf7bc94e6fb26f7c6ba7512d4e13f67c0e7f970e6e",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The core summary is supported, but the applicability field adds an interpretation condition not stated in the abstract excerpt."
+    },
+    {
+      "anchor_id": "abstract",
+      "error": null,
+      "expert_id": "exp-qualitative-content-analysis",
+      "job_id": "b20260928t032746-07",
+      "result_sha256": "58be0b4de9089adb9558fc29399ccef9d63d6bbc9a47c85c98b7582bd95af3d4",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The source reports four tweet/news datasets and named tasks; the candidate generalizes to text annotation tasks broadly."
+    },
+    {
+      "anchor_id": "stage-1",
+      "error": null,
+      "expert_id": "exp-framework-method",
+      "job_id": "b20260928t032746-08",
+      "result_sha256": "8300e5cc6ebda900766b0c6fe0b4a2c6ce5577bc07fd7c2bbbb11ff155d9f1bd",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The source says a verbatim transcript is ideal; the candidate states it is required."
+    },
+    {
+      "anchor_id": "stage-5",
+      "error": null,
+      "expert_id": "exp-framework-method",
+      "job_id": "b20260928t032746-09",
+      "result_sha256": "89d8ca79ab60e0837d321068179a9cd78367c96820a206bda63bf64d061a65f9",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The excerpt explicitly says the analytical framework is applied to subsequent transcripts using existing categories and codes."
+    },
+    {
+      "anchor_id": "stage-7",
+      "error": null,
+      "expert_id": "exp-framework-method",
+      "job_id": "b20260928t032746-10",
+      "result_sha256": "5502ef803794d0126f19bf320a7c7815e475b0641e8bfed2532a5c054df492b9",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The claim is supported, but the applicability field refers to matrix procedures absent from this stage-seven excerpt."
+    },
+    {
+      "anchor_id": "summary",
+      "error": null,
+      "expert_id": "exp-cross-session-comparison",
+      "job_id": "b20260928t032746-11",
+      "result_sha256": "e6e6379d88d79af0673c54a60e636fa2abd5e7d0a54c2b0361b3f4af116f7ba0",
+      "source_id": "LIT-gale-2013-framework",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The source summary directly supports interview analysis when within-case and between-case theme comparisons are desirable."
+    }
+  ],
+  "total_jobs": 11,
+  "updated_at": "2026-09-28T03:44:00+00:00",
+  "reviewed_jobs": 11,
+  "accepted_unapproved_candidates": 7,
+  "held_for_revision": 4
+}

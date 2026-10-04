@@ -1,0 +1,66 @@
+{
+  "batch_id": "b20260928t110000",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 3,
+  "held_for_revision": 1,
+  "jobs": [
+    {
+      "anchor_id": "freetxt-sentiment-accuracy-english-welsh-section-3-2",
+      "commit_sha256": "533663e8c194532ee44dacdd161feac4465c288d5fa2a329b0066c234a007edf",
+      "error": null,
+      "expert_id": "exp-quantitative-text-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 30.866,
+        "input_tokens": 873,
+        "output_tokens": 158
+      },
+      "job_id": "b20260928t110000-01",
+      "result_sha256": "0bd65f23dcec04483cc6d7d44a193e7b838fe1ff0bc62e3253db5e6b63e9a6cf",
+      "review": "Evidence-matched candidate accepted into the local JobStore; not approved for release.",
+      "source_id": "LIT-knight-2024-freetxt",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "freetxt-summariser-long-form-limitation-sections-3-4-4",
+      "commit_sha256": null,
+      "error": null,
+      "expert_id": "exp-quantitative-text-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 16.795,
+        "input_tokens": 853,
+        "output_tokens": 98
+      },
+      "job_id": "b20260928t110000-02",
+      "result_sha256": "a97cb3cf15696bff5be512e459dbf3c479c5e8b94f89f996afcf65a5f977d86d",
+      "review": "Not imported: the generated Claim reverses the source's comparison direction (survey/feedback was incorrectly stated as more useful than long-form documents).",
+      "source_id": "LIT-knight-2024-freetxt",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "freetxt-summariser-comparison-direction-section-4",
+      "commit_sha256": "5b7864050cf8b7aab6e0b4112b8ef8f6b55e592151f7533f5a826f0270bf633b",
+      "error": null,
+      "expert_id": "exp-quantitative-text-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 16.64,
+        "input_tokens": 882,
+        "output_tokens": 98
+      },
+      "job_id": "b20260928t110000-03",
+      "result_sha256": "a7387805d62cc3a64216392ac7d4d6eaebfb000d4e448f67d231b21634612f2c",
+      "review": "Evidence-matched candidate accepted into the local JobStore; not approved for release.",
+      "source_id": "LIT-knight-2024-freetxt",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 87.88,
+    "compute_units_balance_delta": 0.53,
+    "compute_units_before": 88.41,
+    "session_stopped": true
+  },
+  "total_jobs": 3,
+  "updated_at": "2026-09-28T11:14:32.902726+00:00"
+}

@@ -1,0 +1,160 @@
+{
+  "batch_id": "b20260928t140200",
+  "created_at": "2026-09-28T14:05:11.105624+00:00",
+  "evidence_snapshot": {
+    "path": "output/knowledge-colab-batch/sources-20260928/b20260928t140200-RES-scipy-f-oneway-selected-evidence.txt",
+    "scope": "curated paraphrases; not verbatim documentation text",
+    "sha256": "bc89e5d6e0719e3c5cf227e1907bc85f5af41dc5b2c20e39dd1a7502f6c9b068"
+  },
+  "expert_id": "exp-group-comparison-statistics",
+  "gpu": "NVIDIA A100",
+  "inference_metrics": {
+    "elapsed_seconds_with_result_metadata": 35.817,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "inference_attempts": 2,
+    "input_tokens_with_result_metadata": 1609,
+    "output_tokens_with_result_metadata": 186,
+    "successful_candidate_outputs": 2
+  },
+  "jobs": [
+    {
+      "anchor_id": "f-oneway-welch-anova-equal-var",
+      "batch_id": "b20260928t140200",
+      "bundle_file_name": "Gurumoji_Job_b20260928t140200-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t140200-01/Gurumoji_Job_b20260928t140200-01_g1.zip",
+      "bundle_sha256": "f978ef0ea00abf384261e41557347678c4d3090b4d9cd5dd59333d1b08507e0d",
+      "bundle_size_bytes": 39422,
+      "claim_id": "colab:08b6510f7e58052b139f67f062f4d1acdd99a4efdecf911279152cec86c945e7",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t140200-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "785c13380468ad8996cbe0f4b7b6156283eb2e0af2ae7d43c6774ad7f604520e",
+        "result_size_bytes": 5375,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T14:14:24+00:00"
+      },
+      "commit_sha256": "de08b63b6dd338d4bc0a850f572e44315d65402f4abdd800a77cf581b232f957",
+      "deadline": "2026-09-28T15:00:10Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t140200-RES-scipy-f-oneway-selected-evidence.txt",
+      "evidence_snapshot_sha256": "bc89e5d6e0719e3c5cf227e1907bc85f5af41dc5b2c20e39dd1a7502f6c9b068",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t140200/jobs/b20260928t140200-01/excerpt.json",
+      "excerpt_sha256": "d7364b2f6bfa92ea7649a55d28e22e1c3ce3808166aa7621b2a42e4a960adb9b",
+      "expert_id": "exp-group-comparison-statistics",
+      "generated_claim": "SciPy v1.18.0のf_oneway APIにおいて、equal_var=Trueはデフォルトであり、等分散性を仮定した標準的な一元配置分散分析を選択する。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 19.665,
+        "input_tokens": 812,
+        "output_tokens": 90
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t140200-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t140200-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "2ba184544b61c523c992cc0beeeacc2d702cb64fb74cc9267979b91c6fb8c1dd",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t140200-01/Gurumoji_Result_b20260928t140200-01_g1.zip",
+      "result_sha256": "785c13380468ad8996cbe0f4b7b6156283eb2e0af2ae7d43c6774ad7f604520e",
+      "review": "Checked against the SciPy v1.18.0 official f_oneway API reference, equal_var parameter: True is the default standard one-way ANOVA with equal population variances; False selects Welch's ANOVA. The Claim states only API behavior, not that Gurumoji currently implements Welch ANOVA. Accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-f-oneway",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t140200-RES-scipy-f-oneway-source.json",
+      "source_sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T14:14:25.827053+00:00"
+    },
+    {
+      "anchor_id": "f-oneway-nan-policy-axis-slices",
+      "batch_id": "b20260928t140200",
+      "bundle_file_name": "Gurumoji_Job_b20260928t140200-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t140200-02/Gurumoji_Job_b20260928t140200-02_g1.zip",
+      "bundle_sha256": "f44ed517f601b192a27ad48ea60ff0ea31ac1c776f0335f8aa7b5383e85c2033",
+      "bundle_size_bytes": 39421,
+      "claim_id": "colab:8bdd5b7aba24f1ed893969698ac1e37098933b799993f4c12f980f2d63c33abe",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-40GB",
+        "job_id": "b20260928t140200-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "d00811bf9de722e8e343adc7600d26501bf9d049b30abc2ff03bbdcaca544f8a",
+        "result_size_bytes": 5373,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T14:14:44+00:00"
+      },
+      "commit_sha256": "89159aa2aa11960902bf64c53760fd29173e653dc8a99dfc293a7487ba83b012",
+      "deadline": "2026-09-28T15:00:11Z",
+      "evidence_snapshot_path": "output/knowledge-colab-batch/sources-20260928/b20260928t140200-RES-scipy-f-oneway-selected-evidence.txt",
+      "evidence_snapshot_sha256": "bc89e5d6e0719e3c5cf227e1907bc85f5af41dc5b2c20e39dd1a7502f6c9b068",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t140200/jobs/b20260928t140200-02/excerpt.json",
+      "excerpt_sha256": "ddc2e4ba9456141d2ba339741849a79909f56b907ace2d86a4e9eec903f28007",
+      "expert_id": "exp-group-comparison-statistics",
+      "generated_claim": "SciPy v1.18.0のf_oneway関数は、欠損値の取り扱いにpropagate、omit、raiseの3つのポリシーをサポートしており、デフォルトはpropagateである。",
+      "generation": 1,
+      "generation_metrics": {
+        "elapsed_seconds": 16.152,
+        "input_tokens": 797,
+        "output_tokens": 96
+      },
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "job_id": "b20260928t140200-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260928t140200-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "2ba184544b61c523c992cc0beeeacc2d702cb64fb74cc9267979b91c6fb8c1dd",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t140200-02/Gurumoji_Result_b20260928t140200-02_g1.zip",
+      "result_sha256": "d00811bf9de722e8e343adc7600d26501bf9d049b30abc2ff03bbdcaca544f8a",
+      "review": "Checked against the SciPy v1.18.0 official f_oneway API reference, nan_policy parameter: propagate, omit, and raise are supported, with propagate as the default. The Claim states API behavior; Gurumoji filters non-finite values before its current call. Accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-f-oneway",
+      "source_record_path": "output/knowledge-colab-batch/sources-20260928/b20260928t140200-RES-scipy-f-oneway-source.json",
+      "source_sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T14:14:45.669208+00:00"
+    }
+  ],
+  "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 83.13,
+    "compute_units_balance_delta": 0.18,
+    "compute_units_before": 83.31,
+    "session_stopped": true
+  },
+  "review_summary": {
+    "accepted_unapproved_candidates": 2,
+    "held_for_revision": 0,
+    "note": "Both Claims were checked against the SciPy v1.18.0 API page and accepted as unapproved candidates.",
+    "packs_approved_or_published": 0
+  },
+  "runtime_preflight": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_available": true,
+    "huggingface_hub": "0.30.2",
+    "kernel_restarted_after_package_install": true,
+    "tokenizers": "0.21.4",
+    "transformers": "4.51.3",
+    "versions_verified_after_restart": true
+  },
+  "session_creation_history": [
+    {
+      "attempt": 1,
+      "server_assignments_after_check": 0,
+      "status": "service_unavailable"
+    },
+    {
+      "attempt": 2,
+      "server_assignments_after_check": 0,
+      "status": "service_unavailable"
+    },
+    {
+      "attempt": 3,
+      "status": "created_single_a100_standard_assignment"
+    }
+  ],
+  "session_name": "gurumoji-a100-groupstats-20260928-140200",
+  "source_document_sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+  "source_id": "RES-scipy-f-oneway",
+  "source_license": "BSD-3-Clause",
+  "source_url": "https://docs.scipy.org/doc/scipy-1.18.0/reference/generated/scipy.stats.f_oneway.html",
+  "status": "completed_unapproved_candidates",
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T14:23:43.881021+00:00"
+}

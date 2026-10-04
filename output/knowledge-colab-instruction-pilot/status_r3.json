@@ -1,0 +1,1 @@
+{"gpu": "NVIDIA A100-SXM4-80GB", "job_id": "pilot-hermann-20260927-r3", "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8", "result_sha256": "8c61eb05a17f0d9f6637022f1910d3d5abda3d9835b08a106de2a69a59776907", "result_size_bytes": 5552, "schema_version": 1, "status": "candidate_ready", "updated_at": "2026-09-27T19:43:05+00:00"}

@@ -1,0 +1,51 @@
+{
+  "batch_id": "b20260927t202729",
+  "created_at": "2026-09-27T20:27:29.411938+00:00",
+  "jobs": [
+    {
+      "bundle_file_name": "Gurumoji_Job_b20260927t202729-01_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260927t202729-01/Gurumoji_Job_b20260927t202729-01_g1.zip",
+      "bundle_sha256": "f0e8cd2247221dc8324a4ac6ad6c117c73ac6a4c801b7c98a31652eb3f477c8a",
+      "bundle_size_bytes": 39495,
+      "deadline": "2026-09-27T21:22:29Z",
+      "expert_id": "exp-thematic-analysis",
+      "generation": 1,
+      "job_id": "b20260927t202729-01",
+      "local_registry_file_name": "Gurumoji_Job_b20260927t202729-01_g1.local-approved-sources.json",
+      "local_registry_sha256": "dbd8ef794eb77ea9c99f98ba42c72725714adc33b19eadd3c185dba89ebf915e",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "ready_for_user_started_colab"
+    },
+    {
+      "bundle_file_name": "Gurumoji_Job_b20260927t202729-02_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260927t202729-02/Gurumoji_Job_b20260927t202729-02_g1.zip",
+      "bundle_sha256": "b1084f368c999e3eb5fb55f22484513c4a303cbc29c9645826d3da7e59858eca",
+      "bundle_size_bytes": 39453,
+      "deadline": "2026-09-27T21:22:29Z",
+      "expert_id": "exp-thematic-analysis",
+      "generation": 1,
+      "job_id": "b20260927t202729-02",
+      "local_registry_file_name": "Gurumoji_Job_b20260927t202729-02_g1.local-approved-sources.json",
+      "local_registry_sha256": "54922edb81f4d26c51eeacaad4df686c4c372ac6e4564a3a79bd425655354443",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "ready_for_user_started_colab"
+    },
+    {
+      "bundle_file_name": "Gurumoji_Job_b20260927t202729-03_g1.zip",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260927t202729-03/Gurumoji_Job_b20260927t202729-03_g1.zip",
+      "bundle_sha256": "79161f1eeaec794ac14f8ed71adb8fac3383e72bd5b55a0120cfa479346bd620",
+      "bundle_size_bytes": 39322,
+      "deadline": "2026-09-27T21:22:29Z",
+      "expert_id": "exp-scat",
+      "generation": 1,
+      "job_id": "b20260927t202729-03",
+      "local_registry_file_name": "Gurumoji_Job_b20260927t202729-03_g1.local-approved-sources.json",
+      "local_registry_sha256": "54922edb81f4d26c51eeacaad4df686c4c372ac6e4564a3a79bd425655354443",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "source_id": "LIT-gilardi-2023-llm-annotation",
+      "status": "ready_for_user_started_colab"
+    }
+  ]
+}

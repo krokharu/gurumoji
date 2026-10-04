@@ -1,0 +1,65 @@
+{
+  "batch_id": "b20260927t212444",
+  "jobs": {
+    "b20260927t212444-01": {
+      "commit_sha256": "b72e734c95fd51e22f85a5ba014b43eb275b09e3e3da821b5712a7904670a495",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-01",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-01/Gurumoji_Result_b20260927t212444-01_g1.zip",
+      "result_zip_sha256": "933acf9dc0c462c08522e6dde18e1c181ede95389a625b5a08a62abedcafa8eb",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t212444-02": {
+      "commit_sha256": "11c9232d82e1cd8785bd49aa8941962567fab07a37215d88a03fe7d0d7d30f8f",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-02",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-02/Gurumoji_Result_b20260927t212444-02_g1.zip",
+      "result_zip_sha256": "56b3f52bf17fd7d4abd720150754c1ca820106361d26b2d60561a240142c1d1d",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t212444-03": {
+      "commit_sha256": "0085ecb71356b04cb774334940f5200f298cde150feb2ab529192f4482685b3b",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-03",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-03/Gurumoji_Result_b20260927t212444-03_g1.zip",
+      "result_zip_sha256": "79c1f8f645e9040e6afce38495676938ea38ea4d634d0eb155145268f7a45b12",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t212444-04": {
+      "commit_sha256": "9fd16b2fa478d37d2f010868efbd963cca6a7f33e3c35bdf54d291863a0de357",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-04",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-04/Gurumoji_Result_b20260927t212444-04_g1.zip",
+      "result_zip_sha256": "52b70d5ca4afdc7ecc55610d5c1ea915096a551f99f9ad16805f551e43b65c63",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t212444-05": {
+      "commit_sha256": "fdd889fb61ffaf14a84594e9051305aa02b529e67412f4f7e4e3e491809e2d24",
+      "expert_id": "exp-qualitative-content-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-05",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-05/Gurumoji_Result_b20260927t212444-05_g1.zip",
+      "result_zip_sha256": "b1356c1e4840657e44ce1c575a5f925460ee5ddc7dd8932ebe2039dd0bf0552f",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    "b20260927t212444-06": {
+      "commit_sha256": "d93959170b820585ca3559552eaa268d84fa01877e516d0c26ffe683479e89f6",
+      "expert_id": "exp-thematic-analysis",
+      "generation": 1,
+      "job_id": "b20260927t212444-06",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260927t212444-06/Gurumoji_Result_b20260927t212444-06_g1.zip",
+      "result_zip_sha256": "dc403a525d5d8cb33057f73d8c3cbeeffc19b16d52b34b7f294e3c777b34d18d",
+      "source_id": "LIT-mayring-2000-qca",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  }
+}

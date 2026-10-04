@@ -1,0 +1,35 @@
+{
+  "batch_id": "b20260928t100700",
+  "candidate_ready": 1,
+  "failed": 0,
+  "finished_jobs": 1,
+  "held": 0,
+  "imported_unapproved": 1,
+  "inference_metrics": {
+    "elapsed_seconds": 22.413,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 858,
+    "output_tokens": 106
+  },
+  "jobs": [
+    {
+      "anchor_id": "freetxt-tool-function-and-language-scope",
+      "commit_sha256": "c84bcf999f354dce68248199476ff4f8b706fba2d5cfd146d17d3575f3f6e1b6",
+      "expert_id": "exp-quantitative-text-analysis",
+      "job_id": "b20260928t100700-01",
+      "result_sha256": "3715cb6c782c72c88360c4589d8f1a7c0adce6277bc9d370a37f8cbb20cd524b",
+      "review_status": "imported_unapproved_candidate_commit",
+      "source_id": "LIT-knight-2024-freetxt",
+      "status": "candidate_ready"
+    }
+  ],
+  "retry_history": [
+    {
+      "generation": 1,
+      "reason": "The first local package attempt collided with the generated registry output path; no bundle was uploaded and no A100 inference ran. Generation 2 was built through JobStore begin_generation.",
+      "status": "superseded_before_colab"
+    }
+  ],
+  "total_jobs": 1,
+  "updated_at": "2026-09-28T10:15:04.828550+00:00"
+}

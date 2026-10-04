@@ -1,0 +1,106 @@
+{
+  "batch_id": "b20260928t150300",
+  "candidate_ready": 3,
+  "failed": 0,
+  "finished_jobs": 5,
+  "held_for_revision": 2,
+  "inference_metrics": {
+    "elapsed_seconds_with_result_metadata": 114.134,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "inference_attempts": 5,
+    "input_tokens_with_result_metadata": 4755,
+    "output_tokens_with_result_metadata": 646,
+    "successful_candidate_outputs": 5
+  },
+  "jobs": [
+    {
+      "anchor_id": "ta-byrne-study-context-and-assumptions",
+      "claim_id": "colab:43a0370a60015da3e5175b4f5858c15f9a96702341fc4dd6041b9c7cbc844f71",
+      "commit_sha256": null,
+      "expert_id": "exp-thematic-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 29.775,
+        "input_tokens": 986,
+        "output_tokens": 149
+      },
+      "job_id": "b20260928t150300-01",
+      "result_sha256": "b11b7748ca8489e9f22120d64d9119da156fef3bc271e65f82830856e3b84977",
+      "review": "Hold: the candidate misrenders author Byrne as ブライアン. The study details are supported, but attribution must be corrected before adoption.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "ta-byrne-six-phases-and-familiarisation",
+      "claim_id": "colab:d67974d1c265e12492b8100b917808fc3d5b925b592b4a2543815ec2ee1ac654",
+      "commit_sha256": "54aed7837bee0d14b19e0c9d38c06e5236f44cf6a06b44c9701edbb9917b76cd",
+      "expert_id": "exp-thematic-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 17.297,
+        "input_tokens": 962,
+        "output_tokens": 99
+      },
+      "job_id": "b20260928t150300-02",
+      "result_sha256": "a80fc9454b38ba9bce89cb581568a369a7251e5f0a848997854e16c96c0bde0b",
+      "review": "The source supports a recursive, iterative process and movement among phases as interpretations change. Accepted as an unapproved candidate; broader methodology use still requires the expert-level evaluation gate.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "ta-byrne-code-iteration-tracking",
+      "claim_id": "colab:513e4692258e04c6a47df312509c7588bddfa68e4e9dcb4d9dda3c139b69469a",
+      "commit_sha256": null,
+      "expert_id": "exp-thematic-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 21.748,
+        "input_tokens": 936,
+        "output_tokens": 128
+      },
+      "job_id": "b20260928t150300-03",
+      "result_sha256": "ff927026fb166b98fbd8e19881c57b7f5b3403dddf4b2b4945a22255b410c800",
+      "review": "Hold: the candidate says 熟練度の向上, which overstates the source's point about growing familiarity with the data.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "ta-byrne-theme-generation-and-review",
+      "claim_id": "colab:6b306ffc030eee9edce8add81665433717ca8d50ff3776675533daa68e569512",
+      "commit_sha256": "50c6936b4e3a9278ad94e439ba8a9227776a810551cf159342e9675adb5e9fdd",
+      "expert_id": "exp-thematic-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 23.796,
+        "input_tokens": 934,
+        "output_tokens": 143
+      },
+      "job_id": "b20260928t150300-04",
+      "result_sha256": "5cde3ac716cb4df15703998427dabfe5062ce3044f6da8f8960ad6ebca0017ba",
+      "review": "The source supports interpreted shared meaning and rejects code/data-item counts as the basis for theme salience. The exception field is retained as a misuse warning for later review. Accepted as an unapproved candidate.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "ta-byrne-theme-definition-and-reporting",
+      "claim_id": "colab:ad82540c4f8debacf2f6c8af650e53e854d996b614f57e1b981220232021bed0",
+      "commit_sha256": "5dbb39015e82670b0cbf32481b0d62da1e28cb50f65ad358d75e007ff124043e",
+      "expert_id": "exp-thematic-analysis",
+      "generation_metrics": {
+        "elapsed_seconds": 21.518,
+        "input_tokens": 937,
+        "output_tokens": 127
+      },
+      "job_id": "b20260928t150300-05",
+      "result_sha256": "81483dcb119f028a680c4710bbac42114d51d9aa439bf33991395b221653e547",
+      "review": "The source supports relating themes to the dataset and research question and giving them coherent, distinct contributions. Accepted as an unapproved candidate; reporting details remain available in the source excerpt for later evaluation.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 81.93,
+    "compute_units_balance_delta": 0.82,
+    "compute_units_before": 82.75,
+    "session_stopped": true
+  },
+  "total_jobs": 5,
+  "updated_at": "2026-09-28T15:18:58.517352+00:00"
+}

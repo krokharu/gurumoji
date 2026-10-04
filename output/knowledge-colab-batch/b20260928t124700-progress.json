@@ -1,0 +1,52 @@
+{
+  "batch_id": "b20260928t124700",
+  "candidate_ready": 0,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 2,
+  "inference_metrics": {
+    "elapsed_seconds": 46.672,
+    "excludes": "runtime setup, package installation, and file transfers",
+    "input_tokens": 1687,
+    "output_tokens": 255
+  },
+  "jobs": [
+    {
+      "anchor_id": "scat-six-step-study-implementation",
+      "claim_id": "colab:270be6566f8e22c111766d49916c3caa1dedc286fdc9b8e8c3c8a781ea5263d6",
+      "expert_id": "exp-scat",
+      "generation_metrics": {
+        "elapsed_seconds": 32.17,
+        "input_tokens": 867,
+        "output_tokens": 170
+      },
+      "job_id": "b20260928t124700-01",
+      "result_sha256": "46eea2a95fe6e5036cd1b36194755fded1d0f6eecfa7cb5016a62aa0bd8ead5c",
+      "review": "Held for revision: the candidate translates the study's step of rewording each data group as reconstruction, which can change the method described in the source.",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "scat-analysis-supervision-by-experienced-researcher",
+      "claim_id": "colab:fea6537375351fd31a8fc82b3e79f944c2da20214fd924c6dd7237399dc1e939",
+      "expert_id": "exp-scat",
+      "generation_metrics": {
+        "elapsed_seconds": 14.502,
+        "input_tokens": 820,
+        "output_tokens": 85
+      },
+      "job_id": "b20260928t124700-02",
+      "result_sha256": "dc19be62c0e22bfa916f736454572933f876301c245f5c99e2080e4e2f6302f7",
+      "review": "Held for revision: the wording can be read as covering multiple Shimizu studies, while the cited supervision statement describes one study. The claim needs to name that single study explicitly.",
+      "status": "hold_for_revision"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 85.49,
+    "compute_units_balance_delta": 0.28,
+    "compute_units_before": 85.77,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T12:59:20.208587+00:00"
+}

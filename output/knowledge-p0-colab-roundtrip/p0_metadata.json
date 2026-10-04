@@ -1,0 +1,65 @@
+{
+  "accepted_generation_before_colab": 0,
+  "approved_sources_sha256": "fd2140e2cc4366821e6dee7c07066b408ec571310014a26bd94b4dc4b080f6a3",
+  "bundle_sha256": "ad4041cee5600623ac5e9ca5a6855b3b9653266266e6de429d8626773c7c0415",
+  "bundle_size_bytes": 27358,
+  "deadline": "2026-10-04T02:08:12Z",
+  "drive_content_hash_verified": true,
+  "drive_folder_id": "1wd69nc_9Xaw80Id54Nt7WW_9x3ztm9j5",
+  "drive_notebook_content_hash_verified": true,
+  "drive_notebook_content_readback_sha256": "8c60210dae43d0cd812ff64a31338f5c74fe186edff0df7ac6610ecdb06b9c0c",
+  "drive_uploads": [
+    {
+      "created_at": "2026-09-27T02:09:04.515Z",
+      "id": "1WkhBlBxrIKZVMEwQk_Gcm7vTVS0upHWw",
+      "name": "Gurumoji_P0_Colab_Roundtrip_Bundle.zip",
+      "sha256": "ad4041cee5600623ac5e9ca5a6855b3b9653266266e6de429d8626773c7c0415",
+      "size_bytes": 27358,
+      "url": "https://drive.google.com/file/d/1WkhBlBxrIKZVMEwQk_Gcm7vTVS0upHWw/view?usp=drivesdk"
+    },
+    {
+      "colab_run_verified": false,
+      "created_at": "2026-09-27T02:09:07.538Z",
+      "drive_content_bytes_readback_verified": true,
+      "drive_content_readback_sha256": "0fb5fc36801633cb97e9434b6a793ed890657da7143accaf4ab7bb2004304684",
+      "drive_content_readback_verified_at": "2026-09-27T04:07:28Z",
+      "drive_metadata_modified_at": "2026-09-27T04:06:06.643Z",
+      "drive_metadata_verified": true,
+      "id": "1sN8Qwgt9uZ6liRB_tIc-aWEBydY1x16S",
+      "modified_at": "2026-09-27T04:06:06.643Z",
+      "name": "Gurumoji_P0_A100_Roundtrip.ipynb",
+      "scheduler_update_pending_drive_sync": true,
+      "sha256": "5ef9b866381f1859035e148c81f0e2e6a6904cc1680c8c9b1319d935a1bb1ecb",
+      "size_bytes": 65711,
+      "url": "https://drive.google.com/file/d/1sN8Qwgt9uZ6liRB_tIc-aWEBydY1x16S/view?usp=drivesdk"
+    }
+  ],
+  "generation": 1,
+  "input_manifest_sha256": "6618592e7d47ad0a8e2dbad5db4f5db71d599c411e456a00d0dc5d0d79b16d25",
+  "job_id": "p0-colab-roundtrip-c11a7321bee8",
+  "notebook_sha256": "5ef9b866381f1859035e148c81f0e2e6a6904cc1680c8c9b1319d935a1bb1ecb",
+  "notebook_size_bytes": 65711,
+  "request_zip_sha256": "2b3cdf651d090bceebb28266845ea54784d47c8ab495c109dd6f5bd26ff86fd7",
+  "result_zip_path": "result.zip",
+  "runtime_schedule": {
+    "drive_integrity_check_minutes": 80,
+    "hourly_gpu_work_when_queue_empty": "256x256_fp16_a100_health_probe_when_assigned",
+    "hourly_operation_when_queue_empty": "runtime_queue_check_plus_a100_health_probe_if_assigned",
+    "maximum_monitor_hours": 24,
+    "production_job_adapter": "not_implemented",
+    "resume_monitor_history": true,
+    "status_check_minutes": 60
+  },
+  "schema_version": 1,
+  "state_directory": "local-state",
+  "status": "uploaded_waiting_for_colab",
+  "worker_source_file_hashes": {
+    "src/gurumoji/__init__.py": "c197dc438075823b991333b9def580baf5ee812213a801bb08663deff4736892",
+    "src/gurumoji/knowledge_builder/__init__.py": "e5dd402e3517bc39ed51174247df99d66781ef0bd28dee883cc796cf504c00a0",
+    "src/gurumoji/knowledge_builder/colab_worker.py": "75b38c66c86109ee69e8705f42e64a2ae5c628770007984ad56b048c15e95476",
+    "src/gurumoji/knowledge_builder/contracts.py": "43e0bdb430da016a5f5d62e79005ff28b869d6e95f317c31991ae47b147c03e9",
+    "src/gurumoji/knowledge_builder/job_store.py": "98baaeceea5ce64cab65fddeb90319b5fda68c15f5a10db002250fbb2691cdfb",
+    "src/gurumoji/knowledge_builder/transport.py": "e9b7d5a89f6a8e5d3732b5247ca6d435bb4dc89377fe4b513c27cea03b05234f"
+  },
+  "worker_sources_sha256": "640c579b50df6fbc770b2b097993d185ed929d863614a3514d9bf5bf4fba2fef"
+}

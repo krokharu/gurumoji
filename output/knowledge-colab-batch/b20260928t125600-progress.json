@@ -1,0 +1,58 @@
+{
+  "batch_id": "b20260928t125600",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "inference_metrics": {
+    "elapsed_seconds": 56.365,
+    "excludes": "runtime setup, package installation, model loading, and file transfers",
+    "input_tokens": 1743,
+    "output_tokens": 316
+  },
+  "jobs": [
+    {
+      "anchor_id": "scat-six-step-study-implementation",
+      "claim_id": "colab:9f0844a89f3d4427e59a228be29f2c68a9cd6cd0224afb31e5bfef0ab4a332a1",
+      "commit_sha256": "b1ef9d2746ce557a4650ce93ea8d593651f43d85f02eaeaa3749acf87749bb36",
+      "expert_id": "exp-scat",
+      "generation_metrics": {
+        "elapsed_seconds": 39.74,
+        "input_tokens": 905,
+        "output_tokens": 218
+      },
+      "job_id": "b20260928t125600-01",
+      "result_sha256": "ac7078f78dee69df0a7293e948ded84e7ee118343cfe8fcf082702e885f113cf",
+      "review": "Checked against the MDPI publisher article, Methods §2.5, pp. 14–15: it distinguishes the general four-step SCAT coding description from the six-step workflow used in this study. Step 3 assigns other terms to summarize each data group. This is limited to the study's reported implementation and does not replace the general SCAT definition. Accepted as an unapproved candidate; it supersedes the held draft in b20260928t124700-01.",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "status": "accepted_unapproved_candidate_commit",
+      "supersedes_job_id": "b20260928t124700-01"
+    },
+    {
+      "anchor_id": "scat-analysis-supervision-by-experienced-researcher",
+      "claim_id": "colab:d03637277bf583129c4e14050957494efade18c962b48ed3a4cd0a19e6edbed2",
+      "commit_sha256": "3c8f81961feca6d4b1338d1be636162565c05ec2b8b06ef7dee501a34a010957",
+      "expert_id": "exp-scat",
+      "generation_metrics": {
+        "elapsed_seconds": 16.625,
+        "input_tokens": 838,
+        "output_tokens": 98
+      },
+      "job_id": "b20260928t125600-02",
+      "result_sha256": "7a21160cc3c7c7d6137be3ca8a4ab1e39adadf7c02e378f84719fea9108c09d6",
+      "review": "Checked against the MDPI publisher article, Methods §2.5, p. 15: the authors report that the analysis in their study was supervised by a researcher well-versed in SCAT. The wording is scoped to this single study. Accepted as an unapproved candidate; it supersedes the held draft in b20260928t124700-02.",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "status": "accepted_unapproved_candidate_commit",
+      "supersedes_job_id": "b20260928t124700-02"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 85.07,
+    "compute_units_balance_delta": 0.42,
+    "compute_units_before": 85.49,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T13:13:13.773678+00:00"
+}

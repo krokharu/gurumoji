@@ -1,0 +1,97 @@
+{
+  "batch_id": "b20260928t061000",
+  "candidate_ready": 5,
+  "failed": 0,
+  "finished_jobs": 8,
+  "jobs": [
+    {
+      "anchor_id": "describe-variance-and-missing-data",
+      "error": null,
+      "expert_id": "exp-descriptive-statistics",
+      "job_id": "b20260928t061000-01",
+      "result_sha256": "3d2ce61b1a0bb4f79a0978c6f3d7c64d183887ea1d39478b1f267bfa8f524dd1",
+      "review_reason": null,
+      "source_id": "RES-scipy-describe",
+      "status": "accepted_unapproved_candidate_commit",
+      "accepted_commit_sha256": "874cef2fde6d4da25fe4b3dc48faaeb91e04552150a9f0bae1e886539ef23003"
+    },
+    {
+      "anchor_id": "bertopic-class-based-tfidf-detail",
+      "error": null,
+      "expert_id": "exp-embedding-topic-exploration",
+      "job_id": "b20260928t061000-02",
+      "result_sha256": "dce0bedde1d07b37e6f8e8be9a724016ba1bc07e3e7cdb5be9528a3f73ef31b3",
+      "review_reason": null,
+      "source_id": "RES-bertopic-official",
+      "status": "accepted_unapproved_candidate_commit",
+      "accepted_commit_sha256": "5eb34aa09e507cc62607b41773f080d302f0b3455af65c27e06f512f8fbe0ab5"
+    },
+    {
+      "anchor_id": "ginza-v5-model-training-corpora",
+      "error": null,
+      "expert_id": "exp-japanese-text-preprocessing",
+      "job_id": "b20260928t061000-03",
+      "result_sha256": "98ff0e683e7a294aaf06e3ffa6fe4ee2e518d87f118e071e7d90f5ebbfa60fb6",
+      "review_reason": null,
+      "source_id": "RES-ginza-official",
+      "status": "accepted_unapproved_candidate_commit",
+      "accepted_commit_sha256": "22e4538e147c16106303ba20612b42f1a16b2f16411e261f41e825310f0055f6"
+    },
+    {
+      "anchor_id": "kj-case-card-grouping-detail",
+      "error": null,
+      "expert_id": "exp-kj-method",
+      "job_id": "b20260928t061000-04",
+      "result_sha256": "27caf194b08b369906a8b1071141a3d63d051f91efed54f20a1aafbf938bc771",
+      "review_reason": "Candidate omits that the grouping rule and workflow are specific to this cited study.",
+      "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "scat-application-and-procedure",
+      "error": null,
+      "expert_id": "exp-scat",
+      "job_id": "b20260928t061000-05",
+      "result_sha256": "c2a9c4f58708bc6577380c2463161bf7ae70baf274797a4de8701007911d0137",
+      "review_reason": null,
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "status": "accepted_unapproved_candidate_commit",
+      "accepted_commit_sha256": "d98aa82857ba1cbfbb11c0e64ce2eea854bba3ccc7e45c341b5611ee7f10eaa6"
+    },
+    {
+      "anchor_id": "ser-cross-corpus-domain-shift-limit",
+      "error": null,
+      "expert_id": "exp-speech-emotion-recognition",
+      "job_id": "b20260928t061000-06",
+      "result_sha256": "3fe5bb83250f2d691d8e39a4348a9aeb110fe82919ca3b09c0a25692590994fb",
+      "review_reason": "Candidate drops the source qualifier that this applies to the majority of systems.",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "kj-card-grouping-case-scope-v2",
+      "error": null,
+      "expert_id": "exp-kj-method",
+      "job_id": "b20260928t061000-07",
+      "result_sha256": "b0e667e4acb903939b45617342f9c6d77b7d16ff6309ab7c11ed8bd6327fe3fb",
+      "review_reason": "Revised candidate still states this KJ procedure without identifying it as the cited study-specific application.",
+      "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+      "status": "hold_for_revision"
+    },
+    {
+      "anchor_id": "ser-majority-single-corpus-qualifier",
+      "error": null,
+      "expert_id": "exp-speech-emotion-recognition",
+      "job_id": "b20260928t061000-08",
+      "result_sha256": "964d9b99861e2f8dcbdffec27624f5d65700f66e904472de0fb5134b6b78d4d2",
+      "review_reason": null,
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "accepted_unapproved_candidate_commit",
+      "accepted_commit_sha256": "e8bf7714f1b780fcc836130bd3032c2ce4814dbf8bc3be120720827b4cc236a4"
+    }
+  ],
+  "total_jobs": 8,
+  "updated_at": "2026-09-28T06:44:00+00:00",
+  "accepted_unapproved_candidate_commits": 5,
+  "held_candidates": 3
+}

@@ -1,0 +1,43 @@
+{
+  "accepted_unapproved_candidate_commit": 4,
+  "batch_id": "b20260928t044903",
+  "candidate_ready": 4,
+  "failed": 0,
+  "finished_jobs": 4,
+  "jobs": [
+    {
+      "anchor_id": "domain-invariant-method-taxonomy",
+      "expert_id": "exp-speech-emotion-recognition",
+      "job_id": "b20260928t044903-01",
+      "result_sha256": "507b7737699f6b73c148c6b49a998930de655272588a3bf0b0742fc2c3e2bdde",
+      "source_id": "LIT-zhang-2021-cross-corpus-ser",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "open-ended-similarity-measure",
+      "expert_id": "exp-quantitative-text-analysis",
+      "job_id": "b20260928t044903-02",
+      "result_sha256": "ecf180b5f02c814d5a86e1c2919b31c17fc4d6177bf94ec17113687b15e8eeec",
+      "source_id": "LIT-ziegler-2022-open-ended-checks",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "character-trigram-similarity",
+      "expert_id": "exp-quantitative-text-analysis",
+      "job_id": "b20260928t044903-03",
+      "result_sha256": "76036e3475563aa9442ec2b53655901a268f5018090686d0e1e88c091b81fd31",
+      "source_id": "LIT-ziegler-2022-open-ended-checks",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "kj-case-workflow",
+      "expert_id": "exp-kj-method",
+      "job_id": "b20260928t044903-04",
+      "result_sha256": "67496d1b4bafa896f09f7582dfc6757194ca647d2889158501b26c7b25d762db",
+      "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "total_jobs": 4,
+  "updated_at": "2026-09-28T04:58:03.968920+00:00"
+}

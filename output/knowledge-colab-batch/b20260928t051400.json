@@ -1,0 +1,291 @@
+{
+  "accepted_candidates": 6,
+  "batch_id": "b20260928t051400",
+  "created_at": "2026-09-28T05:28:45.999791+00:00",
+  "jobs": [
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-01\\\\Gurumoji_Job_b20260928t051400-01_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "82b2be81358e74750aba0719f69212cdd613ea17d0fbcd1d5b25a6f80d4a243a",
+      "anchor_id": "overlap-measures-and-context",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-01/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-01/Gurumoji_Job_b20260928t051400-01_g1.zip",
+      "bundle_sha256": "2f91acad9089b8d372b69cee879c7b02e56b5052f8f3c9c0787a915a34a330a9",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-01",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "ee120435d0155d9564456957331790324f2e0d787d619ad285406d0cc51680cb",
+        "result_size_bytes": 5692,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:37:26+00:00"
+      },
+      "error": "RuntimeError",
+      "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-01/excerpt.json",
+      "excerpt_sha256": "8c0ededeba3d183d10dcdd99e483f318695c689d965e4cec6712935dd3ff626e",
+      "expert_id": "exp-conversation-timing",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-01",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-01\\Gurumoji_Job_b20260928t051400-01_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-01/Gurumoji_Result_b20260928t051400-01_g1.zip",
+      "result_sha256": "ee120435d0155d9564456957331790324f2e0d787d619ad285406d0cc51680cb",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-01/colab_run_job.py",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-levinson-torreira-2015-timing/source.json",
+      "source_sha256": "2bee897da2f719cc1ef4ed45346744a78dcacc4db5f73063da755269de3fd43d",
+      "source_version": "Frontiers-publisher-fulltext-html-2026-09-28-sha256-2bee897da2f719cc",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:37:48.956379+00:00"
+    },
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-02\\\\Gurumoji_Job_b20260928t051400-02_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "cfbb41defdf852be386b912faf3aa2ba302b3b78000a7aea5798fe4583c69ed9",
+      "anchor_id": "coding-scheme-categories",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-02/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-02/Gurumoji_Job_b20260928t051400-02_g1.zip",
+      "bundle_sha256": "28e55c8a1fd193ac1b89332615526ed9ce0d5d060deb58fab368045dfee1c02a",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-02",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "2baee1555b8a796dd7324497ddaf5f30fc1f8830fe5e5cedf25ece04a9cccbf1",
+        "result_size_bytes": 6130,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:38:11+00:00"
+      },
+      "error": "RuntimeError",
+      "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-02/excerpt.json",
+      "excerpt_sha256": "a797ec7555571231ebd604b339c9fb1c7f5956d4c025c6793212a9c14960de13",
+      "expert_id": "exp-focus-group-interaction",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-02",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-02\\Gurumoji_Job_b20260928t051400-02_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-02/Gurumoji_Result_b20260928t051400-02_g1.zip",
+      "result_sha256": "2baee1555b8a796dd7324497ddaf5f30fc1f8830fe5e5cedf25ece04a9cccbf1",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-02/colab_run_job.py",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-hermann-2024-fg-interaction-coding/source.json",
+      "source_sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+      "source_version": "official-university-repository-pdf-2026-09-28-sha256-a80d7ec05530f1d6",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:38:11.935520+00:00"
+    },
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-03\\\\Gurumoji_Job_b20260928t051400-03_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "6a637c0a4ece3be15be3e4e773e8a6db5801c158176322965f958057cc972670",
+      "anchor_id": "transcript-quality-applicability",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-03/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-03/Gurumoji_Job_b20260928t051400-03_g1.zip",
+      "bundle_sha256": "a6fdb79ed3e58f17c7848529feed738c1f6a54644f54e6b34e8e8050414cd3d3",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-03",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "381df9bd2f8cb344fce910013ca4d54586dbc52c12712811c3f3d06ba34cbaef",
+        "result_size_bytes": 6320,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:38:42+00:00"
+      },
+      "error": "RuntimeError",
+      "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-03/excerpt.json",
+      "excerpt_sha256": "40ebf3ab12dea8e2e376507db8592361138e7e4fec7f87ae7bb9d5ae04d28d30",
+      "expert_id": "exp-focus-group-interaction",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-03",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-03\\Gurumoji_Job_b20260928t051400-03_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-03/Gurumoji_Result_b20260928t051400-03_g1.zip",
+      "result_sha256": "381df9bd2f8cb344fce910013ca4d54586dbc52c12712811c3f3d06ba34cbaef",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-03/colab_run_job.py",
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-hermann-2024-fg-interaction-coding/source.json",
+      "source_sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+      "source_version": "official-university-repository-pdf-2026-09-28-sha256-a80d7ec05530f1d6",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:38:43.010502+00:00"
+    },
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-04\\\\Gurumoji_Job_b20260928t051400-04_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "a58571454f52a33b247029c88f695072975f8e895d67962dc31d28db7b8fbde9",
+      "anchor_id": "mgta-characteristics",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-04/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-04/Gurumoji_Job_b20260928t051400-04_g1.zip",
+      "bundle_sha256": "5e1cd29927d6efcd68b9f82d91fcd694d6ac826c1afa6c9ab227b82276ec41e3",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-04",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "69750fbddf0a8b82ed1004157bb3d68cccf47876a6320c1be5c9a0700f67fbab",
+        "result_size_bytes": 5942,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:44:32+00:00"
+      },
+      "error": "RuntimeError",
+      "error_detail": "AutoAWQ worker requires pinned Tokenizers 0.21.4",
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-04/excerpt.json",
+      "excerpt_sha256": "b186924cbca94f51dcc5aed49e9a65a343837b4b17be8d10e9fd75fb2a3aa036",
+      "expert_id": "exp-m-gta",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-04",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-04\\Gurumoji_Job_b20260928t051400-04_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-04/Gurumoji_Result_b20260928t051400-04_g1.zip",
+      "result_sha256": "69750fbddf0a8b82ed1004157bb3d68cccf47876a6320c1be5c9a0700f67fbab",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-04/colab_run_job.py",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-iseki-2023-mgta-process/source.json",
+      "source_sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "source_version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:44:55.668449+00:00"
+    },
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-05\\\\Gurumoji_Job_b20260928t051400-05_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "aa06a5bacaf4258d8fbf502f27be2639abf43a78bdbc083868a34f53c8d688f0",
+      "anchor_id": "mgta-analysis-workflow",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-05/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-05/Gurumoji_Job_b20260928t051400-05_g1.zip",
+      "bundle_sha256": "ffca6ec0e354b3007055f345ddd8bb4fc4e8e12c548eecf7b5c7d16fc073fac4",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-05",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "3b1e956654f15c78dabb455198ee6767e31edd16c1fdd55c244fa887689e7a0c",
+        "result_size_bytes": 6050,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:45:15+00:00"
+      },
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-05/excerpt.json",
+      "excerpt_sha256": "4595e10cb860f98bdcc1831803f4212acf3acb4137f8c34849a8a41dd4e9c803",
+      "expert_id": "exp-m-gta",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-05",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-05\\Gurumoji_Job_b20260928t051400-05_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-05/Gurumoji_Result_b20260928t051400-05_g1.zip",
+      "result_sha256": "3b1e956654f15c78dabb455198ee6767e31edd16c1fdd55c244fa887689e7a0c",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-05/colab_run_job.py",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-iseki-2023-mgta-process/source.json",
+      "source_sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "source_version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:45:15.986917+00:00"
+    },
+    {
+      "acceptance_error": {
+        "reason": "[WinError 2] 指定されたファイルが見つかりません。: 'C:\\\\Users\\\\kurok\\\\Downloads\\\\mojiokosi\\\\mojiokosi\\\\output\\\\knowledge-colab-batch\\\\jobs\\\\b20260928t051400-06\\\\Gurumoji_Job_b20260928t051400-06_g1.zip.local-approved-sources.json'",
+        "status": "rejected"
+      },
+      "accepted_commit_sha256": "3ceed0f64eaf9539e91e1f0e488a6e82a0539e049b7eeb8a855d73a0d3f793b3",
+      "anchor_id": "mgta-analysis-review",
+      "approved_sources_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-06/approved_sources.json",
+      "bundle_path": "output/knowledge-colab-batch/jobs/b20260928t051400-06/Gurumoji_Job_b20260928t051400-06_g1.zip",
+      "bundle_sha256": "2451921c968cbcc0f7296ee6f0f67ab1e3b3ad9d2abe4af75fd2bd27c4ac170d",
+      "colab_status": {
+        "gpu": "NVIDIA A100-SXM4-80GB",
+        "job_id": "b20260928t051400-06",
+        "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+        "result_sha256": "962723d3a90739da47937e6caca9e4ff41f76f29a8e88b8616007cfa95531653",
+        "result_size_bytes": 6031,
+        "schema_version": 1,
+        "status": "candidate_ready",
+        "updated_at": "2026-09-28T05:45:42+00:00"
+      },
+      "excerpt_path": "output/knowledge-colab-batch/inputs/b20260928t051400/jobs/b20260928t051400-06/excerpt.json",
+      "excerpt_sha256": "3e0d4298ff567f9ee2ef50ce28e58cf1da1edb642880e28e25e5b46644ed1b13",
+      "expert_id": "exp-m-gta",
+      "generation": 1,
+      "gpu": "NVIDIA A100-SXM4-80GB",
+      "job_id": "b20260928t051400-06",
+      "local_registry_path": "C:\\Users\\kurok\\Downloads\\mojiokosi\\mojiokosi\\output\\knowledge-colab-batch\\jobs\\b20260928t051400-06\\Gurumoji_Job_b20260928t051400-06_g1.local-approved-sources.json",
+      "model_reference": "Qwen/Qwen3-32B-AWQ@0499c3ac83fdef8810b907a23894ba91e95eddd8",
+      "result_path": "output/knowledge-colab-batch/jobs/b20260928t051400-06/Gurumoji_Result_b20260928t051400-06_g1.zip",
+      "result_sha256": "962723d3a90739da47937e6caca9e4ff41f76f29a8e88b8616007cfa95531653",
+      "runner_path": "output/knowledge-colab-batch/jobs/b20260928t051400-06/colab_run_job.py",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_record_path": "output/knowledge-colab-batch/inputs/b20260928t051400/LIT-iseki-2023-mgta-process/source.json",
+      "source_sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "source_version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c",
+      "status": "accepted_unapproved_candidate_commit",
+      "updated_at": "2026-09-28T05:45:43.593905+00:00"
+    }
+  ],
+  "source_snapshots": [
+    {
+      "license": "CC-BY-4.0",
+      "local_path": "output/knowledge-colab-batch/sources/b20260928t051400/focus-hermann-2024.pdf",
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "source_id": "LIT-hermann-2024-fg-interaction-coding",
+      "source_sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+      "source_version": "official-university-repository-pdf-2026-09-28-sha256-a80d7ec05530f1d6"
+    },
+    {
+      "license": "CC-BY-4.0",
+      "local_path": "output/knowledge-colab-batch/sources/b20260928t051400/mgta-iseki-2023.html",
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "source_version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c"
+    },
+    {
+      "license": "CC-BY-4.0",
+      "local_path": "output/knowledge-colab-batch/sources/b20260928t051400/timing-levinson-torreira-2015.html",
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "source_sha256": "2bee897da2f719cc1ef4ed45346744a78dcacc4db5f73063da755269de3fd43d",
+      "source_version": "Frontiers-publisher-fulltext-html-2026-09-28-sha256-2bee897da2f719cc"
+    }
+  ],
+  "status": "candidates_imported_unapproved"
+}

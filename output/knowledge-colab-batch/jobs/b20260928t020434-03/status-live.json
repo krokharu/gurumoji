@@ -1,0 +1,1 @@
+{"error": "cannot import name 'is_flax_available' from 'transformers.utils' (/usr/local/lib/python3.13/dist-packages/transformers/utils/__init__.py)", "error_type": "ImportError", "job_id": "b20260928t020434-03", "schema_version": 1, "status": "failed", "updated_at": "2026-09-28T02:07:09+00:00"}

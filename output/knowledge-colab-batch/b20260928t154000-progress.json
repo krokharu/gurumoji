@@ -1,0 +1,31 @@
+{
+  "accepted_unapproved_candidate_commit": 2,
+  "batch_id": "b20260928t154000",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "jobs": [
+    {
+      "anchor_id": "ta-byrne-study-context-and-assumptions",
+      "commit_sha256": "11cbbb2b3e1edd64a4f70e0f8fe454f4aa704685877079f9027cd9f7e0ceecc7",
+      "expert_id": "exp-thematic-analysis",
+      "job_id": "b20260928t154000-01",
+      "result_sha256": "858ffc7c2efdc09f9a261262ad2474d1a8443a9d936403b0e7ac3544e1832162",
+      "review_note": "Accepted as an unapproved candidate. The revised output does not repeat the earlier incorrect author name; it accurately records the study's theoretical positioning and four continua.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "ta-byrne-code-iteration-tracking",
+      "commit_sha256": "0324d1fbf58fa55e6886b604c36baade8709578bad9b5009807c35c63a83a7c9",
+      "expert_id": "exp-thematic-analysis",
+      "job_id": "b20260928t154000-02",
+      "result_sha256": "1d9bb1ce37a7a3dc98b66f3b4556cbec4deca1b7618c96dbc04bc8547236492b",
+      "review_note": "Accepted as an unapproved candidate. The revised output removes the unsupported proficiency-improvement wording and retains iterative engagement with data and transparent recording of coding iterations.",
+      "source_id": "LIT-byrne-2022-reflexive-ta",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T15:50:51.942055+00:00"
+}

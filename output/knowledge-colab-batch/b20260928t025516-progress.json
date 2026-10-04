@@ -1,0 +1,145 @@
+{
+  "batch_id": "b20260928t025516",
+  "candidate_ready": 12,
+  "failed": 0,
+  "finished_jobs": 12,
+  "jobs": [
+    {
+      "anchor_id": "abstract",
+      "error": null,
+      "expert_id": "exp-conversation-timing",
+      "job_id": "b20260928t025516-01",
+      "result_sha256": "d9972a2d32f7494ad5be00a95cfef697740ffcd5b47b635db5d9186d3304e312",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "Source-grounded general statement about systematic turn-taking; overlaps existing timing knowledge."
+    },
+    {
+      "anchor_id": "gap-distribution",
+      "error": null,
+      "expert_id": "exp-conversation-timing",
+      "job_id": "b20260928t025516-02",
+      "result_sha256": "35733d821047c564706ca5a5ca8332fe86d960fe9214d8b5da034bb15a26b4e6",
+      "source_id": "LIT-levinson-torreira-2015-timing",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "Conflates mean FTO with the modal interval around 200 ms; 60/40 gap/overlap figures need attribution to reviewed corpora, not generalization."
+    },
+    {
+      "anchor_id": "participation-measures",
+      "error": null,
+      "expert_id": "exp-participation-balance",
+      "job_id": "b20260928t025516-03",
+      "result_sha256": "327a8f9642d015cc99c8b22798d299cf0b8f96ee7368f13f4e5d885e4dad45aa",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The article reports participation measures and discusses semantic validity separately; the candidate overstates that those measures themselves evaluate semantic validity."
+    },
+    {
+      "anchor_id": "study-context",
+      "error": null,
+      "expert_id": "exp-participation-balance",
+      "job_id": "b20260928t025516-04",
+      "result_sha256": "c375e9413dc0ab4466113200e913dfbe73806359ee1013ef75a0d0db3367bfb6",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "A single project case does not support the broad claim that online focus groups improve discussion quality."
+    },
+    {
+      "anchor_id": "license-and-dependencies",
+      "error": null,
+      "expert_id": "exp-japanese-text-preprocessing",
+      "job_id": "b20260928t025516-05",
+      "result_sha256": "5b403158d526a4f6c47a296d020e8b0cc03604218faaa5eb2adc1bfb90e75d78",
+      "source_id": "RES-ginza-official",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The pinned GiNZA library and Japanese UD model licenses are both MIT."
+    },
+    {
+      "anchor_id": "training-data-description",
+      "error": null,
+      "expert_id": "exp-japanese-text-preprocessing",
+      "job_id": "b20260928t025516-06",
+      "result_sha256": "58647ae03f0259d1e243175143db75b0e1f6aeef7de72c04609709d20bc60b69",
+      "source_id": "RES-ginza-official",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The source says the model was trained on part of UD Japanese BCCWJ r2.8; the candidate omits ?part.?"
+    },
+    {
+      "anchor_id": "pipeline-overview",
+      "error": null,
+      "expert_id": "exp-embedding-topic-exploration",
+      "job_id": "b20260928t025516-07",
+      "result_sha256": "6ec071870155ca5874bd99d92dcb666856c36f51490d93f2bcaf4468c8fb9b1b",
+      "source_id": "RES-bertopic-official",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The source says the steps are somewhat independent; the candidate says they are mutually independent."
+    },
+    {
+      "anchor_id": "class-tfidf",
+      "error": null,
+      "expert_id": "exp-embedding-topic-exploration",
+      "job_id": "b20260928t025516-08",
+      "result_sha256": "0015fe8503740a073d3919ff0521512eac98ad9cf9c9eabf7d54f593a97c6d9f",
+      "source_id": "RES-bertopic-official",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "The source specifies class-based TF-IDF and distinguishes it from classical TF-IDF; the candidate loses that distinction."
+    },
+    {
+      "anchor_id": "linear-correlation",
+      "error": null,
+      "expert_id": "exp-correlation",
+      "job_id": "b20260928t025516-09",
+      "result_sha256": "7e7fe9d7c917c524e06df09b1f37f6ac3738e37e56048ad7f430c68653d57309",
+      "source_id": "RES-scipy-pearsonr",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "?Zero means no correlation? is too broad without specifying zero linear correlation."
+    },
+    {
+      "anchor_id": "zero-correlation-limit",
+      "error": null,
+      "expert_id": "exp-correlation",
+      "job_id": "b20260928t025516-10",
+      "result_sha256": "ff30a76e8118a17033b7ec7a6c9d47486d8ed84531a4373df7cd821f51d7979b",
+      "source_id": "RES-scipy-pearsonr",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The source explicitly notes zero correlation need not imply independence; the absolute-value example is supported."
+    },
+    {
+      "anchor_id": "test-assumptions",
+      "error": null,
+      "expert_id": "exp-correlation",
+      "job_id": "b20260928t025516-11",
+      "result_sha256": "65863160a5942127e2abbb881f12ba31333e126112498b07de6144d7625fc8b9",
+      "source_id": "RES-scipy-pearsonr",
+      "status": "accepted_unapproved_candidate_commit",
+      "review_status": "accepted_unapproved_candidate",
+      "review_note": "The candidate accurately summarizes the null hypothesis described in the pinned SciPy API page."
+    },
+    {
+      "anchor_id": "describe-api",
+      "error": null,
+      "expert_id": "exp-descriptive-statistics",
+      "job_id": "b20260928t025516-12",
+      "result_sha256": "6bdaa8ebe9e23069e79e581b296356ab58ff228c79e9331b574210f639542cd0",
+      "source_id": "RES-scipy-describe",
+      "status": "candidate_ready",
+      "review_status": "hold_for_revision",
+      "review_note": "Unbiased variance is the default with ddof=1; the API allows ddof to be changed, so the condition must be stated."
+    }
+  ],
+  "total_jobs": 12,
+  "updated_at": "2026-09-28T03:19:17+00:00",
+  "accepted_unapproved_candidates": 4,
+  "held_for_revision": 8,
+  "reviewed_jobs": 12
+}

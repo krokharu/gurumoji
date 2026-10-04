@@ -1,0 +1,48 @@
+{
+  "batch_id": "b20260928t113300",
+  "candidate_ready": 2,
+  "failed": 0,
+  "finished_jobs": 2,
+  "held_for_revision": 0,
+  "jobs": [
+    {
+      "anchor_id": "describe-axis-default-and-whole-array-scope",
+      "commit_sha256": "258add30cfab3825e63a61970044dc2781750e871825794c08204a04b752576a",
+      "expert_id": "exp-descriptive-statistics",
+      "generation_metrics": {
+        "elapsed_seconds": 19.446,
+        "input_tokens": 720,
+        "output_tokens": 89
+      },
+      "job_id": "b20260928t113300-01",
+      "result_sha256": "d131cdae54970fa86f184c2bd0e5a21b91c15e6e15e63f99154b798b7f8e4f21",
+      "review": "Claim checked against the SciPy v1.18.0 official API documentation and accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-describe",
+      "status": "accepted_unapproved_candidate_commit"
+    },
+    {
+      "anchor_id": "describe-bias-option-skewness-kurtosis",
+      "commit_sha256": "5e487b0af2a1289d5c2adbf3eabea8fb2fdd58348a747eac104235ff47066e22",
+      "expert_id": "exp-descriptive-statistics",
+      "generation_metrics": {
+        "elapsed_seconds": 21.256,
+        "input_tokens": 743,
+        "output_tokens": 126
+      },
+      "job_id": "b20260928t113300-02",
+      "result_sha256": "8d6d185799ffc13359f56b1096fd1eb34b1c6666e6cec611d1f6ca9ac8fc5fd6",
+      "review": "Claim checked against the SciPy v1.18.0 official API documentation and accepted as an unapproved candidate.",
+      "source_id": "RES-scipy-describe",
+      "status": "accepted_unapproved_candidate_commit"
+    }
+  ],
+  "resource_usage": {
+    "active_sessions_after_stop": 0,
+    "compute_units_after": 87.33,
+    "compute_units_balance_delta": 0.22,
+    "compute_units_before": 87.55,
+    "session_stopped": true
+  },
+  "total_jobs": 2,
+  "updated_at": "2026-09-28T11:42:23.944961+00:00"
+}
