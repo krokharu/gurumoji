@@ -15,6 +15,20 @@ config/tokens.json
 # User uploads, generated outputs, models, and local application state
 runtime/
 
+# Local Colab source downloads and caches
+/output/knowledge-colab-batch/source-cache/
+/output/knowledge-colab-batch/sources/
+/output/knowledge-colab-batch/sources-*/
+/output/knowledge-colab-batch/*.pdf
+/output/knowledge-colab-instruction-pilot/*.pdf
+/output/**/staging/**/sources/
+
+# Local experiment databases and process locks
+/output/**/*.sqlite3
+/output/**/*.sqlite3-wal
+/output/**/*.sqlite3-shm
+/output/**/*.lock
+
 # Local logs and OS/editor artifacts
 *.log
 .DS_Store
