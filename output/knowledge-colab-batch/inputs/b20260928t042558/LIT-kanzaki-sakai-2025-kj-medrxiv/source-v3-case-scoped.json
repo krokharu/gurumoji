@@ -1,0 +1,44 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Verbatim excerpt from the public medRxiv v1 methods section, including the authors? statement that the listed KJ steps are the procedure adopted in this study. Retained snapshot contains only the selected passage, not the full PDF.",
+  "anchors": [
+    {
+      "anchor_id": "kj-case-workflow",
+      "end": "KJ method illustration and relational mapping",
+      "extracted_text_sha256": "b84bade53bedd5acf74175f707549f0ef9ec7c9d7338e4f19041ce49574dcc9f",
+      "kind": "paragraph",
+      "start": "Data analysis: reason for adopting KJ and the specific steps used in this study"
+    }
+  ],
+  "authors": [
+    "Maki Kanzaki",
+    "Hiroko Sakai"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC BY 4.0; attribution and change indication required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1101/2025.10.05.25337379"
+  },
+  "publication_year": 2025,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "dcb02b3a21ba56a8f208c1fedeb02ac8bfd8d80eca27d35f1baef35efe2fd3fe",
+  "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+  "source_type": "paper",
+  "title": "Perceptions of parenting twins as experienced by fathers: A qualitative study",
+  "version": "medrxiv-v1-case-scoped-verbatim-excerpt-snapshot-2026-09-28-v3"
+}

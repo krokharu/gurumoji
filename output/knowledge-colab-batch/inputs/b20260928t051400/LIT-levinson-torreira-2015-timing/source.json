@@ -1,0 +1,44 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Official Frontiers full-text HTML; selected Methods and Findings passages; navigation and citations excluded, whitespace normalized. CC BY confirmed on publisher page.",
+  "anchors": [
+    {
+      "anchor_id": "overlap-measures-and-context",
+      "end": "5.2.2 Findings",
+      "extracted_text_sha256": "8c0ededeba3d183d10dcdd99e483f318695c689d965e4cec6712935dd3ff626e",
+      "kind": "section",
+      "start": "5.2.1 Method and 5.2.2 Findings"
+    }
+  ],
+  "authors": [
+    "Stephen C. Levinson",
+    "Francisco Torreira"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.3389/fpsyg.2015.00731"
+  },
+  "publication_year": 2015,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "2bee897da2f719cc1ef4ed45346744a78dcacc4db5f73063da755269de3fd43d",
+  "source_id": "LIT-levinson-torreira-2015-timing",
+  "source_type": "paper",
+  "title": "Timing in turn-taking and its implications for processing models of language",
+  "version": "Frontiers-publisher-fulltext-html-2026-09-28-sha256-2bee897da2f719cc"
+}

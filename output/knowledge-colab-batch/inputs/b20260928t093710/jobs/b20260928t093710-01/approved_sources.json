@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Paraphrased, study-scoped summary of the selected medRxiv v1 Methods passage; it is not a general KJ-method instruction.",
+      "anchors": [
+        {
+          "anchor_id": "kj-case-diagram-relations",
+          "end": "How the authors represented logical connections among the study's six themes",
+          "extracted_text_sha256": "30eb80552c8fb8c6f4af6afec2388209e373a570e122dc56bf7cf0cb1f52b400",
+          "kind": "paragraph",
+          "start": "Final arrangement of themes in the twin-fathers study"
+        }
+      ],
+      "authors": [
+        "Maki Kanzaki",
+        "Hiroko Sakai"
+      ],
+      "license": {
+        "license_id": "CC-BY-4.0",
+        "terms": "CC BY 4.0; attribution and change indication required"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.1101/2025.10.05.25337379"
+      },
+      "publication_year": 2025,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "dcb02b3a21ba56a8f208c1fedeb02ac8bfd8d80eca27d35f1baef35efe2fd3fe",
+      "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+      "source_type": "paper",
+      "title": "Perceptions of parenting twins as experienced by fathers: A qualitative study",
+      "version": "medrxiv-v1-case-scoped-verbatim-excerpt-snapshot-2026-09-28-v3"
+    }
+  ]
+}

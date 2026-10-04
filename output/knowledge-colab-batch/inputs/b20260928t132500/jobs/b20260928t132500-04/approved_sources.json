@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "official_page",
+      "adaptation_notice": "Selected findings paraphrased from the official SciPy v1.18.0 API documentation. No user data or verbatim documentation passages are included.",
+      "anchors": [
+        {
+          "anchor_id": "linear-correlation",
+          "end": "pearsonr description",
+          "extracted_text_sha256": "6c1602151aeb49b7bcee327397f55f7ef7af53c25f8225684e87543893ce5bba",
+          "kind": "section",
+          "start": "pearsonr description"
+        },
+        {
+          "anchor_id": "zero-correlation-limit",
+          "end": "pearsonr Notes: non-correlation",
+          "extracted_text_sha256": "122abe963ddc0b62524d569ba7830080eca436129caa50c741946cce894e15e5",
+          "kind": "section",
+          "start": "pearsonr Notes: non-correlation"
+        },
+        {
+          "anchor_id": "test-assumptions",
+          "end": "pearsonr null hypothesis",
+          "extracted_text_sha256": "b3dd8dff466b4b24ddd197a4bfcff2ef17db3d33ca93b9da8b079c12ce1b68f6",
+          "kind": "section",
+          "start": "pearsonr null hypothesis"
+        },
+        {
+          "anchor_id": "pearsonr-resampling-pvalue-methods",
+          "end": "ResamplingMethod version and selected p-value test",
+          "extracted_text_sha256": "8ced952d4f7621f813a8c8b599921bd1026bf1e66fa24b3f92e9ecd254c38dfb",
+          "kind": "section",
+          "start": "pearsonr method parameter"
+        },
+        {
+          "anchor_id": "pearsonr-confidence-interval-methods",
+          "end": "Fisher transformation, bootstrap, and degenerate resamples",
+          "extracted_text_sha256": "fe2c13d3c99fea9aa7ee5b98bf90e237c6edbff5a1bf970c5262df31c12fc9f4",
+          "kind": "section",
+          "start": "PearsonRResult confidence_interval method"
+        },
+        {
+          "anchor_id": "pearsonr-confidence-interval-methods-paraphrase",
+          "end": "Default interval, bootstrap option, and small-sample degeneracy",
+          "extracted_text_sha256": "7890ff562c5561ffdee022933d5ccc319a32bd9cee0e06313d91d237b4d09987",
+          "kind": "section",
+          "start": "PearsonRResult confidence interval methods"
+        }
+      ],
+      "authors": [
+        "SciPy community"
+      ],
+      "license": {
+        "license_id": "BSD-3-Clause",
+        "terms": "BSD 3-Clause License; preserve notices and conditions"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://opensource.org/license/bsd-3-clause/"
+      },
+      "locator": {
+        "kind": "url",
+        "value": "https://docs.scipy.org/doc/scipy-1.18.0/reference/generated/scipy.stats.pearsonr.html"
+      },
+      "publication_year": 2026,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+      "source_id": "RES-scipy-pearsonr",
+      "source_type": "web",
+      "title": "SciPy v1.18.0 stats.pearsonr API reference",
+      "version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28"
+    }
+  ]
+}

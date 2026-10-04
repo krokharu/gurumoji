@@ -1,0 +1,8 @@
+{
+  "anchor_id": "freetxt-proposed-core-functions-section-2-2",
+  "extracted_text_sha256": "5d429c212571c650c19ba0b366e66d2fc71ce1e6c343153b75b9728f6de5d7dd",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_sha256": "555a0024ceb223a47c97fdc4f52d6971e906419dc0c8b6ed79c990c3f3fa9009",
+  "source_version": "repository-vor-section-2.2-text-extract-2026-09-28-sha256-555a0024ceb223a4",
+  "text": "Knight et al. describe FreeTxt's proposed core functionalities as potential features, not as confirmed implementation or validation: basic dataset counts of words, n-grams, part-of-speech tags and semantic tags; KWIC searches listing a search term's occurrences with nearby co-text; and visual displays of word distributions. This scope is from the article's Section 2.2 design description."
+}

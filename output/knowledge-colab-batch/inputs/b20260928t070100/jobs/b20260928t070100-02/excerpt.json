@@ -1,0 +1,8 @@
+{
+  "anchor_id": "bertopic-class-tfidf-normalization",
+  "extracted_text_sha256": "983e78cd64791114adea902ef68ba780ab1ad672052d55a6b7d0b5178f8f4f5b",
+  "source_id": "RES-bertopic-official",
+  "source_sha256": "952f766df6f0030ecc5db2effdf136778372825bd1e675973d78701715df35dc",
+  "source_version": "github-v0.17.4-algorithm-retrieved-2026-09-28-sha256-952f766df6f0030e",
+  "text": "BERTopic forms a class-based term-frequency representation from the words in each cluster and L1-normalizes it to account for differences in topic size. Its modified inverse-frequency representation uses the average number of words per class and the frequency of each word across classes. ClassTfidfTransformer also offers optional BM25 weighting."
+}

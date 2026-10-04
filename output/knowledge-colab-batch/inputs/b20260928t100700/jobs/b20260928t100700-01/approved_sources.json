@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Paraphrased, selected abstract passage from the version-of-record; it reports FreeTxt scope and languages without treating the cited tool as evidence of Japanese-language performance.",
+      "anchors": [
+        {
+          "anchor_id": "freetxt-tool-function-and-language-scope",
+          "end": "FreeTxt scope, languages, and user-led analysis",
+          "extracted_text_sha256": "795bd04860694300e7887eb8964b7d6165911afb5a80605647432a11e60519ca",
+          "kind": "section",
+          "start": "Abstract"
+        }
+      ],
+      "authors": [
+        "Dawn Knight",
+        "Nouran Khallaf",
+        "Paul Rayson",
+        "Mahmoud El-Haj",
+        "Ignatius Ezeani",
+        "Steve Morris"
+      ],
+      "license": {
+        "license_id": "CC-BY-4.0",
+        "terms": "CC BY 4.0; attribution and change indication required"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.1016/j.acorp.2024.100103"
+      },
+      "publication_year": 2024,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "bfd7f51c4235cd07ea24a209c8985f2ca6e3dbcc897f47b6c86edee2e38c7e69",
+      "source_id": "LIT-knight-2024-freetxt",
+      "source_type": "paper",
+      "title": "FreeTxt: A corpus-based bilingual free-text survey and questionnaire data analysis toolkit",
+      "version": "publisher-abstract-verbatim-snapshot-2026-09-28"
+    }
+  ]
+}

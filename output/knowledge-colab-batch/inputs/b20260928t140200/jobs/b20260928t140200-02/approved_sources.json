@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "official_page",
+      "adaptation_notice": "Pinned official SciPy API documentation page only; selected facts are paraphrased. No user or research data is included.",
+      "anchors": [
+        {
+          "anchor_id": "f-oneway-welch-anova-equal-var",
+          "end": "Standard and Welch one-way ANOVA selection",
+          "extracted_text_sha256": "d7364b2f6bfa92ea7649a55d28e22e1c3ce3808166aa7621b2a42e4a960adb9b",
+          "kind": "section",
+          "start": "f_oneway equal_var parameter"
+        },
+        {
+          "anchor_id": "f-oneway-nan-policy-axis-slices",
+          "end": "NaN policies and omission within each axis slice",
+          "extracted_text_sha256": "ddc2e4ba9456141d2ba339741849a79909f56b907ace2d86a4e9eec903f28007",
+          "kind": "section",
+          "start": "f_oneway nan_policy parameter"
+        }
+      ],
+      "authors": [
+        "SciPy community"
+      ],
+      "license": {
+        "license_id": "BSD-3-Clause",
+        "terms": "BSD 3-Clause License; preserve notices and conditions"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://opensource.org/license/bsd-3-clause/"
+      },
+      "locator": {
+        "kind": "url",
+        "value": "https://docs.scipy.org/doc/scipy-1.18.0/reference/generated/scipy.stats.f_oneway.html"
+      },
+      "publication_year": 2026,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+      "source_id": "RES-scipy-f-oneway",
+      "source_type": "web",
+      "title": "SciPy v1.18.0 stats.f_oneway API reference",
+      "version": "scipy-v1.18.0-manual-f_oneway-retrieved-2026-09-28"
+    }
+  ]
+}

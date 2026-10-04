@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-confidence-interval-methods",
+  "extracted_text_sha256": "fe2c13d3c99fea9aa7ee5b98bf90e237c6edbff5a1bf970c5262df31c12fc9f4",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "SciPy v1.18.0 stats.pearsonrの公式API資料によると、結果のconfidence_intervalでmethodを省略した場合はFisher変換を用い、BootstrapMethodを渡した場合はscipy.stats.bootstrapを用いる。退化した再標本化では信頼限界がNaNになりうること、これは非常に小さい標本（約6観測）で典型的とされることも含める。約6を一般的な最小標本数や実装閾値に言い換えない。"
+}

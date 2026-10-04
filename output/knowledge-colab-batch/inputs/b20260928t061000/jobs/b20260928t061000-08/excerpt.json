@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ser-majority-single-corpus-qualifier",
+  "extracted_text_sha256": "dac9c03df591d4303013ab5752444a28a733bb6bd459f93533da934eda23f9c3",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "The authors note that the majority of existing speech emotion recognition systems are trained and evaluated on a single corpus and in a single-language setting. They then explain that in practical applications training and testing corpora can differ in language, culture, distribution mode, data scale, and other respects. These cross-corpus differences can result in idiosyncratic variations that impede generalization of current speech emotion recognition techniques."
+}

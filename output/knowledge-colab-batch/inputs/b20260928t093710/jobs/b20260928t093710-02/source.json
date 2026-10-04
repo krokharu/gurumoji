@@ -1,0 +1,43 @@
+{
+  "access_scope": "official_page",
+  "adaptation_notice": "Paraphrased, version-pinned summary of the official SciPy v1.18.0 pearsonr API page; software behavior is version-specific.",
+  "anchors": [
+    {
+      "anchor_id": "pearsonr-constant-input-warnings",
+      "end": "Undefined coefficient and numerical-precision warnings",
+      "extracted_text_sha256": "a7601b99e492d1b8771c6325b69c51375f7b2858575982f3239013f02bc11bb9",
+      "kind": "section",
+      "start": "SciPy v1.18.0 pearsonr constant and near-constant input behavior"
+    }
+  ],
+  "authors": [
+    "SciPy community"
+  ],
+  "license": {
+    "license_id": "BSD-3-Clause",
+    "terms": "BSD 3-Clause License; preserve notices and conditions"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://opensource.org/license/bsd-3-clause/"
+  },
+  "locator": {
+    "kind": "url",
+    "value": "https://docs.scipy.org/doc/scipy-1.18.0/reference/generated/scipy.stats.pearsonr.html"
+  },
+  "publication_year": 2026,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_id": "RES-scipy-pearsonr",
+  "source_type": "web",
+  "title": "SciPy v1.18.0 stats.pearsonr API reference",
+  "version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28"
+}

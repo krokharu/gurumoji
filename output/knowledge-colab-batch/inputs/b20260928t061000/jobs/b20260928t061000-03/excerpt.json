@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ginza-v5-model-training-corpora",
+  "extracted_text_sha256": "4b762a729427c6c354875d95be2279c0e7c486df0ad4546d0bad82d040a7f5c5",
+  "source_id": "RES-ginza-official",
+  "source_sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+  "source_version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7",
+  "text": "According to the GiNZA v5 official README, its parsing model was trained on part of UD Japanese BCCWJ r2.8. Its named-entity-recognition model was trained on part of the GSK2014-A (2019) BCCWJ edition, using both Sekine's Extended Named Entity Hierarchy and an extended OntoNotes 5 label system. The ja_ginza_electra model uses a transformer pretrained on more than 200 million Japanese sentences extracted from mC4. These are descriptions of different GiNZA v5 models and their stated training sources."
+}

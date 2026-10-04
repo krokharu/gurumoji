@@ -1,0 +1,47 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Paraphrased, study-scoped summary of the full-text paper's participants and coding scheme testing sections; no participant-level data are included.",
+  "anchors": [
+    {
+      "anchor_id": "fg-coding-scheme-development-sample",
+      "end": "Development and testing context of the interaction coding scheme",
+      "extracted_text_sha256": "7f760200a7561435db35dec83f7b69bdf6b2fe362821e73388601dc7fcfc2240",
+      "kind": "section",
+      "start": "Study participants and focus-group sessions"
+    }
+  ],
+  "authors": [
+    "Veronica Hermann",
+    "Fatumo Osman",
+    "Natalie Durbeej",
+    "Ann-Christin Karlsson",
+    "Anna Sarkadi"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1177/16094069241286848"
+  },
+  "publication_year": 2024,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+  "source_id": "LIT-hermann-2024-fg-interaction-coding",
+  "source_type": "paper",
+  "title": "How to Analyze Focus Group Interactions ? Development of a Coding Scheme",
+  "version": "official-university-repository-pdf-2026-09-28-sha256-a80d7ec05530f1d6"
+}

@@ -1,0 +1,71 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Two short, source-linked paraphrase excerpts from the verified full article are used for corrected draft Claim generation. The paraphrases clarify author attribution and the meaning of familiarity with data; model outputs must remain source-scoped. No standalone article text is exported.",
+  "anchors": [
+    {
+      "anchor_id": "ta-byrne-study-context-and-assumptions",
+      "end": "One worked example: study context and theoretical positioning",
+      "extracted_text_sha256": "09d76fdb43f1d018ca3200a72d92e815d4875d8a8fc4c0eb3367682b25155358",
+      "kind": "page",
+      "start": "Byrne 2022, publisher PDF pp. 1394–1397"
+    },
+    {
+      "anchor_id": "ta-byrne-six-phases-and-familiarisation",
+      "end": "Six phases are iterative; familiarisation and initial coding",
+      "extracted_text_sha256": "2cb22ff5006487f54afe1a4b2a8d06a59a455b90c2da58d77691c4484ad15df9",
+      "kind": "page",
+      "start": "Byrne 2022, publisher PDF pp. 1398–1399"
+    },
+    {
+      "anchor_id": "ta-byrne-code-iteration-tracking",
+      "end": "Tracking code revisions and revisiting the transcripts",
+      "extracted_text_sha256": "5eb48b7c72d22696cd22acf5d1c9db1d4bf22627211e21ad0998dcb88e12302b",
+      "kind": "page",
+      "start": "Byrne 2022, publisher PDF pp. 1400–1402"
+    },
+    {
+      "anchor_id": "ta-byrne-theme-generation-and-review",
+      "end": "Building candidate themes and reviewing them at two levels",
+      "extracted_text_sha256": "6fb14274aa47d871f65cb715f50215f248ee120dcb793b49306f233da6ffbfac",
+      "kind": "page",
+      "start": "Byrne 2022, publisher PDF pp. 1403–1406"
+    },
+    {
+      "anchor_id": "ta-byrne-theme-definition-and-reporting",
+      "end": "Defining themes, interpreting extracts, and recursive reporting",
+      "extracted_text_sha256": "1c2c985c25342399e684518be0fb46062692b1ee4ce5f68f2a9e7bbf97f6dab0",
+      "kind": "page",
+      "start": "Byrne 2022, publisher PDF pp. 1407–1410"
+    }
+  ],
+  "authors": [
+    "David Byrne"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/); attribution required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1007/s11135-021-01182-y"
+  },
+  "publication_year": 2022,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "fbe98aa82d7caea73f1bad2785eabe70c88c58a6f4b4037d8cb1d331f3abab3c",
+  "source_id": "LIT-byrne-2022-reflexive-ta",
+  "source_type": "paper",
+  "title": "A worked example of Braun and Clarke’s approach to reflexive thematic analysis",
+  "version": "publisher-pdf-fulltext-sha256-fbe98aa82d7caea7"
+}

@@ -1,0 +1,54 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Full article PDF from Uppsala University DiVA repository (CC BY 4.0, confirmed on SAGE article page); pypdf extraction, line-wrap hyphens removed and whitespace normalized; selected pages only.",
+  "anchors": [
+    {
+      "anchor_id": "coding-scheme-categories",
+      "end": "4",
+      "extracted_text_sha256": "a797ec7555571231ebd604b339c9fb1c7f5956d4c025c6793212a9c14960de13",
+      "kind": "page",
+      "start": "4"
+    },
+    {
+      "anchor_id": "transcript-quality-applicability",
+      "end": "11",
+      "extracted_text_sha256": "40ebf3ab12dea8e2e376507db8592361138e7e4fec7f87ae7bb9d5ae04d28d30",
+      "kind": "page",
+      "start": "11"
+    }
+  ],
+  "authors": [
+    "Veronica Hermann",
+    "Fatumo Osman",
+    "Natalie Durbeej",
+    "Ann-Christin Karlsson",
+    "Anna Sarkadi"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1177/16094069241286848"
+  },
+  "publication_year": 2024,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "a80d7ec05530f1d6e34bdad1d6a3840cd498dd8fc5764533c032280434b8f32b",
+  "source_id": "LIT-hermann-2024-fg-interaction-coding",
+  "source_type": "paper",
+  "title": "How to Analyze Focus Group Interactions ? Development of a Coding Scheme",
+  "version": "official-university-repository-pdf-2026-09-28-sha256-a80d7ec05530f1d6"
+}

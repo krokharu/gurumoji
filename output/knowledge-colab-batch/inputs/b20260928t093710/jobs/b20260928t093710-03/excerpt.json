@@ -1,0 +1,8 @@
+{
+  "anchor_id": "bertopic-main-pipeline-components",
+  "extracted_text_sha256": "d494418837a07618d7d374368b4aeae93d4278de719cb6549dd7b8f5ada6b3f6",
+  "source_id": "RES-bertopic-official",
+  "source_sha256": "952f766df6f0030ecc5db2effdf136778372825bd1e675973d78701715df35dc",
+  "source_version": "github-v0.17.4-algorithm-retrieved-2026-09-28-sha256-952f766df6f0030e",
+  "text": "The BERTopic v0.17.4 official Code Overview presents a six-part topic pipeline: extract document embeddings, reduce dimensionality, cluster the reduced embeddings, tokenize topics, calculate class-based TF-IDF topic representations, and optionally fine-tune those representations. Its example uses Sentence Transformers, UMAP, HDBSCAN, CountVectorizer, and ClassTfidfTransformer for the first five stages."
+}

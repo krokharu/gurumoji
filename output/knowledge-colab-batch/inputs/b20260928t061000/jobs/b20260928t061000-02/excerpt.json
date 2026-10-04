@@ -1,0 +1,8 @@
+{
+  "anchor_id": "bertopic-class-based-tfidf-detail",
+  "extracted_text_sha256": "0b79ad616034f1c559d30b52fa66b21da876a53e98ec3686927d04ac55988bd2",
+  "source_id": "RES-bertopic-official",
+  "source_sha256": "952f766df6f0030ecc5db2effdf136778372825bd1e675973d78701715df35dc",
+  "source_version": "github-v0.17.4-algorithm-retrieved-2026-09-28-sha256-952f766df6f0030e",
+  "text": "To describe what makes one cluster different from other clusters, BERTopic modifies TF-IDF to use topics (clusters) rather than documents. It treats all documents in a cluster as one document. The frequency of word x in class c gives the class-based term-frequency representation, and this representation is L1-normalized to account for differences in topic sizes. For the class-based inverse-document-frequency representation, BERTopic uses the logarithm of one plus the average number of words per class divided by the frequency of word x across all classes. The modified TF-IDF scores are used to represent each topic. ClassTfidfTransformer also has an option for additional BM25 weighting."
+}

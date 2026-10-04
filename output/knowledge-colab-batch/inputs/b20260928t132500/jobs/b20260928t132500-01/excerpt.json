@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-resampling-pvalue-methods",
+  "extracted_text_sha256": "8ced952d4f7621f813a8c8b599921bd1026bf1e66fa24b3f92e9ecd254c38dfb",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "SciPy v1.18.0 stats.pearsonrの公式API資料では、methodにPermutationMethodまたはMonteCarloMethodのインスタンスを渡すと、それぞれ設定に応じてscipy.stats.permutation_testまたはscipy.stats.monte_carlo_testでp値を計算する。このAPI上の選択肢だけを記述する。会話の発話データ一般で置換可能性や独立性が成立すると推論せず、デザイン上の妥当性を保証しない。"
+}

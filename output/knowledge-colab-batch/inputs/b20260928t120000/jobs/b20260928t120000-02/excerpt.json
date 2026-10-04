@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ser-basic-cross-corpus-system-components",
+  "extracted_text_sha256": "1cc7dc2760db41eaf88545a9dd2a437facc8b37666aac6558e642f7b6c3b4300",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "The review describes two crucial steps in a basic cross-corpus speech emotion recognition system: an emotion classifier and domain-invariant feature extraction."
+}

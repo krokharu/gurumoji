@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-constant-input-warnings",
+  "extracted_text_sha256": "a7601b99e492d1b8771c6325b69c51375f7b2858575982f3239013f02bc11bb9",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "The SciPy v1.18.0 pearsonr documentation states that a constant input makes the Pearson coefficient undefined, returns NaN, and raises ConstantInputWarning. A near-constant input raises NearConstantInputWarning because numerical cancellation can make the calculated coefficient inaccurate."
+}

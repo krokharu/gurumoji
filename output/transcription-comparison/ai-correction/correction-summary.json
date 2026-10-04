@@ -1,0 +1,60 @@
+{
+  "created_at": "2026-09-27T06:10:12+09:00",
+  "model": "openai/gpt-oss-20b",
+  "provider": "LM Studio local",
+  "audio_replayed_to_corrector": false,
+  "speaker_context": "UNKNOWN for both systems",
+  "prompt_version": "sparse-conservative-correction-v1",
+  "qwen_input": "time-ordered ForcedAligner words reconstructed from transcript-differences.csv",
+  "qwen_unaligned_words_included": false,
+  "same_prompt_context_and_batch_limits": true,
+  "batch_limits": {
+    "max_chars": 6000,
+    "max_items": 64
+  },
+  "model_calls": {
+    "WhisperX": 6,
+    "Qwen3 stack": 31
+  },
+  "emitted_change_candidates": {
+    "WhisperX": 18,
+    "Qwen3 stack": 3
+  },
+  "invalid_candidates_ignored": {
+    "WhisperX": 2,
+    "Qwen3 stack": 0
+  },
+  "single_item_batches_kept_original": {
+    "WhisperX": 0,
+    "Qwen3 stack": 5
+  },
+  "metrics": {
+    "WhisperX": {
+      "segments": 323,
+      "segments_changed": 7,
+      "segments_changed_pct": 2.1671826625387,
+      "input_chars": 12074,
+      "output_chars": 12064,
+      "net_char_delta": -10,
+      "raw_edit_distance": 25,
+      "raw_change_pct": 0.20705648500911047,
+      "input_content_chars": 11066,
+      "content_edit_distance": 17,
+      "content_change_pct": 0.15362371227182361
+    },
+    "Qwen3 stack": {
+      "segments": 568,
+      "segments_changed": 3,
+      "segments_changed_pct": 0.528169014084507,
+      "input_chars": 14968,
+      "output_chars": 14974,
+      "net_char_delta": 6,
+      "raw_edit_distance": 19,
+      "raw_change_pct": 0.12693746659540353,
+      "input_content_chars": 14966,
+      "content_edit_distance": 17,
+      "content_change_pct": 0.11359080582654016
+    }
+  },
+  "interpretation": "Correction volume only; not ground-truth accuracy. Sparse output lists changes only; omitted IDs are unchanged by design."
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "nxt-switchboard-between-overlap-share-of-floor-transfers-section-5-2-2",
+  "extracted_text_sha256": "21c2c6b28a97e628930a2432bdb09710e9fe942e9ce3751eb7371bf8b454ef35",
+  "source_id": "LIT-levinson-torreira-2015-timing",
+  "source_sha256": "bda17c1efd9ad7914fca32e9b444141b2a7c6fc5f55ffc37678b08627205dd96",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-bda17c1efd9ad791",
+  "text": "Levinson and Torreira (2015) analyzed 348 NXT-Switchboard conversations with no timing errors (about 38 hours). In Section 5.2.2, negative floor-transfer offsets, called between-overlaps, represented 30.1% of all floor transfers. The denominator is all floor transfers, not speech-signal time."
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "freetxt-summariser-long-form-limitation-sections-3-4-4",
+  "extracted_text_sha256": "82dde2eb36df3ce6d8216708bf3b7bba04375becf8dca3cac4db9dcdf16d5f56",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_sha256": "dffb0133c0c217516e64126f639a3c13db8501ea9f5c333dc4bdf2f4fbd15d3f",
+  "source_version": "repository-vor-sections-3.2-3.4-4-evidence-snapshot-2026-09-28-sha256-dffb0133c0c21751",
+  "text": "Knight et al. report that FreeTxt's partners found its extractive summariser more useful for long-form documents than for survey or feedback data, and list this as a shortcoming of the current version. This is the authors' report about their partners and the described release."
+}

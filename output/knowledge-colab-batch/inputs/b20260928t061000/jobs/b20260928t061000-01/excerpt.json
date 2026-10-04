@@ -1,0 +1,8 @@
+{
+  "anchor_id": "describe-variance-and-missing-data",
+  "extracted_text_sha256": "0ae4e21cd5a175c1139362dc39e3efc9d59c83879ffc633f085712d0aadaa1bc",
+  "source_id": "RES-scipy-describe",
+  "source_sha256": "66566c9dfdc18383000a0badfd29d550f8073edfd85c2686f8162d299e84960a",
+  "source_version": "scipy-v1.18.0-manual-describe-retrieved-2026-09-28",
+  "text": "For scipy.stats.describe(a, axis=0, ddof=1, bias=True, nan_policy='propagate'): ddof changes only the variance calculation and defaults to 1. If bias=False, skewness and kurtosis are corrected for statistical bias. nan_policy defaults to 'propagate'; 'propagate' returns nan, 'raise' raises an error, and 'omit' ignores nan values. With nan_policy='omit', the number of observations is counted separately for each axis slice. The returned variance is unbiased, with denominator n minus one; skewness uses a denominator equal to n and no degrees-of-freedom correction; kurtosis uses no degrees of freedom."
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "cross-corpus-transfer-limit",
+  "extracted_text_sha256": "a799edc661a4dd034c73660e9e8011b7d94e9c6d84907a345fc99ad960560484",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "Note that the majority of existing SER systems are trained and evaluated on a single corpus and a single language setting. However, in many practical applicati ons, there are great diﬀerences between training corpus and testin g corpus. For example, the training and testing corpora come from two (or more) diﬀerent languages, cultures, distribution mo des, data scales, and so on. These diﬀerences across corpora result in signiﬁcant idiosyncratic variations impeding the generaliz ation of current SER techniques, thereby yielding an active resea rch subject called cross-corpus SER in the ﬁeld of SER."
+}

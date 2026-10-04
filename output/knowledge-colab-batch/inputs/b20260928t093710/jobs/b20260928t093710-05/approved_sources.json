@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Paraphrased, selected summary of Gale et al. (2013), publisher PDF p. 5, stage 6; the article is licensed CC BY 2.0.",
+      "anchors": [
+        {
+          "anchor_id": "framework-matrix-quotation-traceability",
+          "end": "5",
+          "extracted_text_sha256": "acbba189e10d3cddb3767d29ebe6be30f797520b53ee636e1edcdc9dd72b3573",
+          "kind": "page",
+          "start": "5"
+        }
+      ],
+      "authors": [
+        "Nicola K. Gale",
+        "Gemma Heath",
+        "Elaine Cameron",
+        "Sabina Rashid",
+        "Sabi Redwood"
+      ],
+      "license": {
+        "license_id": "CC-BY-2.0",
+        "terms": "CC-BY-2.0 (https://creativecommons.org/licenses/by/2.0/); attribution required"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/2.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.1186/1471-2288-13-117"
+      },
+      "publication_year": 2013,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "c7b29d818b4c1c2d53e198efdb4ab1f840c36f47d22a5c8eb3d9d17fecb21902",
+      "source_id": "LIT-gale-2013-framework",
+      "source_type": "paper",
+      "title": "Using the framework method for the analysis of qualitative data in multi-disciplinary health research",
+      "version": "publisher-vor-bmc-springer-retrieved-2026-09-27-sha256-c7b29d81"
+    }
+  ]
+}

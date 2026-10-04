@@ -1,0 +1,58 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Paraphrased, narrowly selected summaries of publisher PDF pp. 6–7, Sections 5.2.1–5.2.2. The excerpts preserve the distinction between the floor-transfer denominator and speech-signal denominator.",
+  "anchors": [
+    {
+      "anchor_id": "heldner-edlund-fto-mode",
+      "end": "6",
+      "extracted_text_sha256": "afabacd76b9d69e1cb382e9c5a198dc45ccac275ac0eb8794430e856e15a4c44",
+      "kind": "page",
+      "start": "6"
+    },
+    {
+      "anchor_id": "nxt-switchboard-between-overlap-share-of-floor-transfers-section-5-2-2",
+      "end": "30.1% of all floor transfers in the analyzed sample",
+      "extracted_text_sha256": "21c2c6b28a97e628930a2432bdb09710e9fe942e9ce3751eb7371bf8b454ef35",
+      "kind": "section",
+      "start": "Section 5.2.2, findings on between-overlap floor transfer offsets"
+    },
+    {
+      "anchor_id": "nxt-switchboard-single-speaker-share-of-speech-signal-section-5-2-2",
+      "end": "95.3% of the speech signal after excluding silent parts",
+      "extracted_text_sha256": "150e86f57631fd65b3ad92e9c2fa0d5cf360a76a8be7214b39d043c1e50d2b9b",
+      "kind": "section",
+      "start": "Section 5.2.1–5.2.2, single-speaker speech after silent-part exclusion"
+    }
+  ],
+  "authors": [
+    "Stephen C. Levinson",
+    "Francisco Torreira"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC BY 4.0; attribution and change indication required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.3389/fpsyg.2015.00731"
+  },
+  "publication_year": 2015,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "bda17c1efd9ad7914fca32e9b444141b2a7c6fc5f55ffc37678b08627205dd96",
+  "source_id": "LIT-levinson-torreira-2015-timing",
+  "source_type": "paper",
+  "title": "Timing in turn-taking and its implications for processing models of language",
+  "version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-bda17c1efd9ad791"
+}

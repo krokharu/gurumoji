@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-resampling-pvalue-methods-paraphrase",
+  "extracted_text_sha256": "0e2db99f52325bfbf0f96cd381eb6d5848293d4dd339a491989ed657960a8507",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "In the v1.18.0 API, the pearsonr method option accepts an object from either the PermutationMethod or MonteCarloMethod class. That choice selects the corresponding resampling family for obtaining the reported significance value, with the object's settings controlling the procedure. This describes two available API paths only; it does not establish that observations from any particular study are independent or exchangeable, or that either path suits every research design."
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ginza-v5-ner-training-data-and-labels",
+  "extracted_text_sha256": "6650eb558a76b00b2f00e2c68126861107137af1234b241b920e09aab697050c",
+  "source_id": "RES-ginza-official",
+  "source_sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+  "source_version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7",
+  "text": "The GiNZA v5 official README states that its named-entity-recognition model was trained on part of the 2019 BCCWJ edition of GSK2014-A. It uses Sekine's Extended Named Entity Hierarchy together with an extended OntoNotes 5 label system. These are the README's statements about the NER model; its parsing-model and ja_ginza_electra training data are described separately."
+}

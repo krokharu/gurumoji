@@ -1,0 +1,62 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "The retained Source version is a curated evidence-text snapshot paraphrasing selected browser-rendered Version-of-Record PDF sections; it is not a verbatim transcription or the PDF binary. Its SHA-256 pins this local snapshot only. The Colab excerpts are paraphrases with attribution to Knight et al. (2024).",
+  "anchors": [
+    {
+      "anchor_id": "freetxt-sentiment-accuracy-english-welsh-section-3-2",
+      "end": "English model-page estimate and manually annotated Welsh-review experiment",
+      "extracted_text_sha256": "a2d7bc30b74a4d6b3a65620f66e3d12cec11671f4ddd12027a2bf7447c0e5fa2",
+      "kind": "section",
+      "start": "Section 3.2, sentiment-analysis pipeline"
+    },
+    {
+      "anchor_id": "freetxt-summariser-long-form-limitation-sections-3-4-4",
+      "end": "Section 4, current-release shortcoming from partner feedback",
+      "extracted_text_sha256": "82dde2eb36df3ce6d8216708bf3b7bba04375becf8dca3cac4db9dcdf16d5f56",
+      "kind": "section",
+      "start": "Section 3.4, extractive summarisation"
+    },
+    {
+      "anchor_id": "freetxt-summariser-comparison-direction-section-4",
+      "end": "Section 4, direction of partner feedback on current-release shortcoming",
+      "extracted_text_sha256": "e52b7312c05159d4242beb410b3aa4138eb3fffa729c2368c1cb19403ab486bf",
+      "kind": "section",
+      "start": "Section 3.4, extractive summarisation"
+    }
+  ],
+  "authors": [
+    "Dawn Knight",
+    "Nouran Khallaf",
+    "Paul Rayson",
+    "Mahmoud El-Haj",
+    "Ignatius Ezeani",
+    "Steve Morris"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC BY 4.0; attribution and change indication required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "url",
+    "value": "https://cronfa.swan.ac.uk/Record/cronfa70086/Download/70086__34939__f82a24c8c3ea49aaad5c813e2a7643c7.pdf"
+  },
+  "publication_year": 2024,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "dffb0133c0c217516e64126f639a3c13db8501ea9f5c333dc4bdf2f4fbd15d3f",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_type": "paper",
+  "title": "FreeTxt: A corpus-based bilingual free-text survey and questionnaire data analysis toolkit",
+  "version": "repository-vor-sections-3.2-3.4-4-evidence-snapshot-2026-09-28-sha256-dffb0133c0c21751"
+}

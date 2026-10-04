@@ -1,0 +1,90 @@
+{
+  "created_at_local": "2026-09-26T05:14:25+09:00",
+  "input": {
+    "file": "GMT20260709-041850_Recording_640x360.mp4",
+    "duration_seconds": 4262.805,
+    "sha256": "7647e6fbe93e98650095c313f2bdb72c926d93c0da1e5522c4c1f82f5a332b9f",
+    "language": "ja"
+  },
+  "ground_truth": {
+    "available": false,
+    "human_transcript": null,
+    "speaker_labels": null
+  },
+  "accuracy_metrics": {
+    "WER": null,
+    "CER": null,
+    "DER": null,
+    "reason": "No human-corrected reference transcript or speaker labels were available; output-to-output agreement is not ground-truth accuracy."
+  },
+  "systems": {
+    "baseline": {
+      "name": "Existing WhisperX output",
+      "source_status": "initial_import",
+      "revision_count": 0,
+      "language": "ja",
+      "segment_count": 323,
+      "speaker_count": 5,
+      "raw_text_characters": 12074,
+      "normalized_text_characters": 11066,
+      "model_version_recorded": false
+    },
+    "candidate": {
+      "asr": "Qwen/Qwen3-ASR-1.7B-hf",
+      "aligner": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+      "diarization": "nvidia/Nemotron-3-Diarization",
+      "transformers_source_commit": "27166ea03f12c940f23176a904ab1d2ff1a3dcbb",
+      "asr_chunk_count": 153,
+      "asr_raw_chunk_text_characters_including_context_overlap": 17333,
+      "aligned_word_unit_count": 8512,
+      "aligned_core_text_characters": 14968,
+      "normalized_core_text_characters": 14966,
+      "nemotron_chunk_count": 5921,
+      "nemotron_frame_count": 426279,
+      "nemotron_interval_count": 2250,
+      "nemotron_speaker_count": 8,
+      "streaming_mode": "low_latency"
+    }
+  },
+  "agreement": {
+    "transcript": {
+      "normalized_levenshtein_similarity_percent": 54.24,
+      "baseline_normalized_characters": 11066,
+      "candidate_normalized_characters": 14966,
+      "normalization": "Unicode NFKC + casefold; retain letters/digits only; candidate assembled from aligner tokens whose midpoint is inside the non-overlapping 28-second core of each ASR chunk."
+    },
+    "speaker_time": {
+      "mapped_overlap_precision_percent": 61.58,
+      "mapped_overlap_recall_percent": 49.55,
+      "mapped_overlap_f1_percent": 54.91,
+      "matched_speaker_seconds": 1605.43,
+      "baseline_speaker_seconds": 3239.8,
+      "candidate_speaker_seconds": 2607.23,
+      "optimal_speaker_mapping": {
+        "SPEAKER_00": "5",
+        "SPEAKER_01": "2",
+        "SPEAKER_02": "6",
+        "SPEAKER_03": "0",
+        "SPEAKER_04": "1"
+      },
+      "mapping": "Hungarian assignment maximizing summed overlap between per-speaker merged intervals; no boundary collar."
+    },
+    "speech_activity_time": {
+      "overlap_f1_percent": 73.49,
+      "overlap_precision_percent": 84.74,
+      "overlap_recall_percent": 64.88
+    }
+  },
+  "limitations": [
+    "Existing WhisperX transcript is an uncorrected initial import with zero revisions, not a human reference.",
+    "The exact WhisperX model/version for this stored output is not recorded in its metadata.",
+    "Nemotron's model card does not list Japanese among its stated supported languages; its diarization result should be treated as experimental for this Japanese recording.",
+    "Nemotron produced 8 speaker tracks, reaching the model's documented maximum of eight; this output does not establish the true speaker count.",
+    "Text similarity and speaker-time F1 measure agreement with the existing output, not which system is more accurate."
+  ],
+  "sources": {
+    "qwen_asr_and_forced_alignment": "https://huggingface.co/docs/transformers/main/model_doc/qwen3_asr",
+    "nemotron_model_card": "https://huggingface.co/nvidia/Nemotron-3-Diarization",
+    "nemotron_transformers_integration": "https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/nemotron3_diarization.md"
+  }
+}

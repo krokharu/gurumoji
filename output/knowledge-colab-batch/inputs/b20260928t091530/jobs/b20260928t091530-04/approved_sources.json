@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Paraphrased, study-scoped summary from the full-text article's Results section; the counts are not presented as general M-GTA requirements.",
+      "anchors": [
+        {
+          "anchor_id": "mgta-study-output-scope",
+          "end": "M-GTA output reported for the clinical application",
+          "extracted_text_sha256": "7ef53e849d42b03626402f39229d3beb49b26e239ae5b8398f01c2851f301bd0",
+          "kind": "section",
+          "start": "Results: categories and concepts"
+        }
+      ],
+      "authors": [
+        "Chihiro Iseki"
+      ],
+      "license": {
+        "license_id": "CC-BY-4.0",
+        "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.1016/j.apjon.2023.100184"
+      },
+      "publication_year": 2023,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+      "source_id": "LIT-iseki-2023-mgta-process",
+      "source_type": "paper",
+      "title": "The process of reaching psychological adjustment among adult women diagnosed with metastatic breast cancer and receiving cancer pharmacotherapy",
+      "version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c"
+    }
+  ]
+}

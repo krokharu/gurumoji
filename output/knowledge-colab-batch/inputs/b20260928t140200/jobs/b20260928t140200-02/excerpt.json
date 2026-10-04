@@ -1,0 +1,8 @@
+{
+  "anchor_id": "f-oneway-nan-policy-axis-slices",
+  "extracted_text_sha256": "ddc2e4ba9456141d2ba339741849a79909f56b907ace2d86a4e9eec903f28007",
+  "source_id": "RES-scipy-f-oneway",
+  "source_sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+  "source_version": "scipy-v1.18.0-manual-f_oneway-retrieved-2026-09-28",
+  "text": "SciPy v1.18.0 f_oneway supports three nan_policy choices: propagate, omit, and raise; propagate is the default. Under omit, missing values are removed separately within each axis slice. If too little data remains in a slice after omission, that slice's result is NaN."
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "character-trigram-similarity",
+  "extracted_text_sha256": "c6a8cb4d33aad554b95b8175f4c5b000b5c5fdbc20615d225a37093d18ec977d",
+  "source_id": "LIT-ziegler-2022-open-ended-checks",
+  "source_sha256": "09ad66c0ad0f86a3bc8f28dbe151f5323bfd05814c2eed43473da85971805e9c",
+  "source_version": "publisher-html-captured-2026-09-28-sha256-09ad66c0ad0f86a3",
+  "text": "To help overcome spelling and grammatical mistakes that may be common in typed or transcribed open-ended responses, I first reformat words to smaller segments or n -grams (Cavnar and Trenkle Reference Cavnar and Trenkle 1994 ). For instance, let $n=3$ , which is the recommended practice for small documents (Van der Loo Reference Van der Loo 2014 , 120). We can represent the word “banana” by sliding a window, in our case three characters wide since $n=3$ , across the word $\\left (\\fbox{ban}\\ \\fbox{ana}\\ \\fbox{nan}\\ \\fbox{ana} \\right )$ . We then count the frequency of each unique trigram (“ban” $=1$ , “nan” $=1$ , and “ana” $= 2$ ). For each participant i , I store their open-ended response ( $doc_{i1}$ ) and the prompt they received ( $doc_{i2}$ ) as two vectors, such that each trigram ( $n=3$ ) in the response is $g_{1doc_{i1}}, g_{2doc_{i1}}, ..., g_{ndoc_{i1}}$ and each trigram from the prompt is $g_{1doc_{i2}}, g_{2doc_{i2}}, ..., g_{ndoc_{i2}}$ . Then, I calculate a measure of similarity between the vectors of grams for each participant."
+}

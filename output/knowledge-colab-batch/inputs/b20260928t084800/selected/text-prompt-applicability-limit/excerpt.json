@@ -1,0 +1,8 @@
+{
+  "anchor_id": "text-prompt-applicability-limit",
+  "extracted_text_sha256": "709ea28e3e9c8669eb78132ecf673659e0f87caaa109ab9c1b5b0ead2b7f7769",
+  "source_id": "LIT-ziegler-2022-open-ended-checks",
+  "source_sha256": "09ad66c0ad0f86a3bc8f28dbe151f5323bfd05814c2eed43473da85971805e9c",
+  "source_version": "publisher-html-captured-2026-09-28-sha256-09ad66c0ad0f86a3",
+  "text": "This technique, therefore, is not applicable to prompts that rely on images (still or video), because there is no meaningful method of automated comparison between the prompt and the response. The method is also only applicable to experimental designs that provide respondents with some text as part of the control condition, which is recommended when the treatment is text to maintain internal validity (Steiner, Atzmüller, and Su Reference Steiner, Atzmüller and Su 2016 ). After respondents receive the prompt, they are required to briefly rephrase the content of the prompt to finish the manipulation check."
+}

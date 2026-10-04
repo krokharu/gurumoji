@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ginza-electra-pretraining-source",
+  "extracted_text_sha256": "590460876f7efe181e0779f319e7479548e2b762e3ef05b4e107dd5806cf82ec",
+  "source_id": "RES-ginza-official",
+  "source_sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+  "source_version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7",
+  "text": "The GiNZA v5.2.0 README states that ja_ginza_electra uses a Japanese ELECTRA model pretrained on more than 200 million Japanese sentences extracted from mC4. This is the pretraining source for that Transformers model and is separate from the parser and named-entity-recognition training datasets."
+}

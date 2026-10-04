@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-confidence-interval-methods-paraphrase",
+  "extracted_text_sha256": "7890ff562c5561ffdee022933d5ccc319a32bd9cee0e06313d91d237b4d09987",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "For confidence limits from a PearsonRResult, Fisher's transformation is the default route. Supplying a BootstrapMethod object instead delegates interval construction to scipy.stats.bootstrap with the object's settings. A resample with a degenerate distribution can yield NaN limits; the manual describes this as common in very small samples and gives roughly six observations as an example."
+}

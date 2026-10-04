@@ -1,0 +1,8 @@
+{
+  "anchor_id": "f-oneway-welch-anova-equal-var",
+  "extracted_text_sha256": "d7364b2f6bfa92ea7649a55d28e22e1c3ce3808166aa7621b2a42e4a960adb9b",
+  "source_id": "RES-scipy-f-oneway",
+  "source_sha256": "f1f260998e47f0d7d994c8a08574901fdaa828cba0ce80fc47af47e125ce43a7",
+  "source_version": "scipy-v1.18.0-manual-f_oneway-retrieved-2026-09-28",
+  "text": "In the SciPy v1.18.0 f_oneway API, equal_var=True is the default and selects standard one-way ANOVA with an equal-population-variance assumption. Setting equal_var=False selects Welch's ANOVA, which does not assume equal population variances. The option was added in SciPy 1.16.0."
+}

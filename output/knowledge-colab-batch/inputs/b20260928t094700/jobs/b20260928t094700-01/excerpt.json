@@ -1,0 +1,8 @@
+{
+  "anchor_id": "bertopic-five-plus-optional-sixth",
+  "extracted_text_sha256": "2ee1a3fa46cfa7a05577c8b5b5c4f5c649005f581835460756cfacb3f1419bbc",
+  "source_id": "RES-bertopic-official",
+  "source_sha256": "952f766df6f0030ecc5db2effdf136778372825bd1e675973d78701715df35dc",
+  "source_version": "github-v0.17.4-algorithm-retrieved-2026-09-28-sha256-952f766df6f0030e",
+  "text": "BERTopic v0.17.4 describes five steps for producing topic representations: extract embeddings, reduce dimensionality, cluster, tokenize topics, and calculate topic weights. Its Code Overview labels representation tuning as an additional, optional sixth step. Representation tuning is therefore not mandatory."
+}

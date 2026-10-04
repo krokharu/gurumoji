@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "official_page",
+      "adaptation_notice": "Paraphrased, selected summary of the BERTopic v0.17.4 official algorithm documentation; the sixth representation-tuning step is explicitly optional.",
+      "anchors": [
+        {
+          "anchor_id": "bertopic-five-plus-optional-sixth",
+          "end": "Five main representation stages and optional Step 6 tuning",
+          "extracted_text_sha256": "2ee1a3fa46cfa7a05577c8b5b5c4f5c649005f581835460756cfacb3f1419bbc",
+          "kind": "section",
+          "start": "BERTopic v0.17.4 Visual Overview and Code Overview"
+        }
+      ],
+      "authors": [
+        "Maarten Grootendorst"
+      ],
+      "license": {
+        "license_id": "MIT",
+        "terms": "MIT License; preserve copyright and permission notice"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://opensource.org/license/mit/"
+      },
+      "locator": {
+        "kind": "url",
+        "value": "https://github.com/MaartenGr/BERTopic/blob/v0.17.4/docs/algorithm/algorithm.md"
+      },
+      "publication_year": 2025,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "952f766df6f0030ecc5db2effdf136778372825bd1e675973d78701715df35dc",
+      "source_id": "RES-bertopic-official",
+      "source_type": "web",
+      "title": "BERTopic v0.17.4 algorithm documentation",
+      "version": "github-v0.17.4-algorithm-retrieved-2026-09-28-sha256-952f766df6f0030e"
+    }
+  ]
+}

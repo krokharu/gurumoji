@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ser-cross-corpus-domain-shift-limit",
+  "extracted_text_sha256": "98cf90cc80b81c1585c23e27de27a0af3ff01b3947f1bf3b48322ed50dc1aa3c",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "Most existing speech emotion recognition systems are trained and evaluated on a single corpus and in a single-language setting. In practical applications, training and test corpora may differ in language, culture, distribution mode, data scale, and other respects. The authors state that these cross-corpus differences cause idiosyncratic variation that impedes the generalization of current speech emotion recognition techniques, making cross-corpus SER an active research topic."
+}

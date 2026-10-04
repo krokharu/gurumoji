@@ -1,0 +1,57 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Full-text article page from PubMed Central (CC BY 4.0); selected Methods/Data analysis paragraphs; HTML tags and navigation excluded, whitespace normalized.",
+  "anchors": [
+    {
+      "anchor_id": "mgta-characteristics",
+      "end": "Methods: M-GTA characteristics",
+      "extracted_text_sha256": "b186924cbca94f51dcc5aed49e9a65a343837b4b17be8d10e9fd75fb2a3aa036",
+      "kind": "section",
+      "start": "Methods: M-GTA characteristics"
+    },
+    {
+      "anchor_id": "mgta-analysis-workflow",
+      "end": "Data analysis",
+      "extracted_text_sha256": "4595e10cb860f98bdcc1831803f4212acf3acb4137f8c34849a8a41dd4e9c803",
+      "kind": "section",
+      "start": "Data analysis"
+    },
+    {
+      "anchor_id": "mgta-analysis-review",
+      "end": "Ensuring authenticity of analysis",
+      "extracted_text_sha256": "3e0d4298ff567f9ee2ef50ce28e58cf1da1edb642880e28e25e5b46644ed1b13",
+      "kind": "section",
+      "start": "Ensuring authenticity of analysis"
+    }
+  ],
+  "authors": [
+    "Chihiro Iseki"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1016/j.apjon.2023.100184"
+  },
+  "publication_year": 2023,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "2c9f4fc3dbf2ff8c051f7b4dbe68d9599f659ceb9b907207b3e8ff1a573c69cc",
+  "source_id": "LIT-iseki-2023-mgta-process",
+  "source_type": "paper",
+  "title": "The process of reaching psychological adjustment among adult women diagnosed with metastatic breast cancer and receiving cancer pharmacotherapy",
+  "version": "PMC-fulltext-html-2026-09-28-sha256-2c9f4fc3dbf2ff8c"
+}

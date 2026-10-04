@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ginza-electra-backbone-pretraining-lineage",
+  "extracted_text_sha256": "af9b70d6460242f7cad10cbc96f6976bf9fe029a2282c82d5282ff9702860ac9",
+  "source_id": "RES-ginza-official",
+  "source_sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+  "source_version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7",
+  "text": "The GiNZA v5.2.0 README says ja_ginza_electra is trained using the transformer-ud-japanese-electra-base-discriminator model; that underlying model was pretrained on more than 200 million Japanese sentences extracted from mC4. The more-than-200-million figure describes the underlying pretrained model."
+}

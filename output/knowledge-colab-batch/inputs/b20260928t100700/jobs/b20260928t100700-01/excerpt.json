@@ -1,0 +1,8 @@
+{
+  "anchor_id": "freetxt-tool-function-and-language-scope",
+  "extracted_text_sha256": "795bd04860694300e7887eb8964b7d6165911afb5a80605647432a11e60519ca",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_sha256": "bfd7f51c4235cd07ea24a209c8985f2ca6e3dbcc897f47b6c86edee2e38c7e69",
+  "source_version": "publisher-abstract-verbatim-snapshot-2026-09-28",
+  "text": "Knight et al. describe FreeTxt as a corpus-based toolkit for systematic analysis and visualisation of free-text responses. Their paper reports that it is available for Welsh and/or English and was designed to let end users lead analyses of both small-scale and larger datasets. The authors say the approaches can be replicated and extended to other language contexts and sectors."
+}

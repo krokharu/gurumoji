@@ -1,0 +1,46 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Publisher PDF text extracted with pypdf; line-wrap hyphenation and whitespace normalized; selected page-2 sentences only.",
+  "anchors": [
+    {
+      "anchor_id": "ser-majority-single-corpus-qualifier",
+      "end": "Training and test corpus differences that can impede generalization",
+      "extracted_text_sha256": "dac9c03df591d4303013ab5752444a28a733bb6bd459f93533da934eda23f9c3",
+      "kind": "paragraph",
+      "start": "Cross-corpus SER: majority of existing systems and corpus differences"
+    }
+  ],
+  "authors": [
+    "Shiqing Zhang",
+    "Ruixin Liu",
+    "Xin Tao",
+    "Xiaoming Zhao"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC BY 4.0; attribution and change indication required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.3389/fnbot.2021.784514"
+  },
+  "publication_year": 2021,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_type": "paper",
+  "title": "Deep Cross-Corpus Speech Emotion Recognition: Recent Advances and Perspectives",
+  "version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0"
+}

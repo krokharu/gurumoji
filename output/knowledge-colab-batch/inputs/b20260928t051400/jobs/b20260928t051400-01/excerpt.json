@@ -1,0 +1,8 @@
+{
+  "anchor_id": "overlap-measures-and-context",
+  "extracted_text_sha256": "8c0ededeba3d183d10dcdd99e483f318695c689d965e4cec6712935dd3ff626e",
+  "source_id": "LIT-levinson-torreira-2015-timing",
+  "source_sha256": "2bee897da2f719cc1ef4ed45346744a78dcacc4db5f73063da755269de3fd43d",
+  "source_version": "Frontiers-publisher-fulltext-html-2026-09-28-sha256-2bee897da2f719cc",
+  "text": "We analyzed a subset of 348 conversations (totaling around 38 h of dyadic conversation) that were free of timing errors, and with annotations included in the NXT-Switchboard Corpus release The recordings were divided as follows: 77% of the signal corresponded to speech by one speaker only, 19.2% to silence (i.e., either pauses within a speaker’s turn or gaps as defined above), and only 3.8% to simultaneous speech by both speakers (either between-overlaps or within-overlaps). If we exclude silent parts, 95.3% of the speech signal corresponded to speech by one speaker. This seems to fit well with Sacks and colleagues’ observation that “overwhelmingly, one party speaks at a time” ( Sacks et al., 1974 , p. 700). With regard to how common overlaps are in terms of proportion of turn-transitions, Figure 2 shows the distribution of the duration of gaps and between-overlaps combined together as FTOs (i.e., with positive values for gaps and negative values for between-overlaps). Between-overlaps (negative FTOs) represented 30.1% of all floor transfers."
+}

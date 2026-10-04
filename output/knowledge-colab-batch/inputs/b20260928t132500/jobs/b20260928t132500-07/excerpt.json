@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-confidence_interval-bootstrap-api-name",
+  "extracted_text_sha256": "eb82cf2d245d43ad1e7d12ebfcc1c99f2e6f18dc1afe3560ad6d143ffdcb4609",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "PearsonRResult.confidence_interval is the documented method for obtaining limits. If the caller supplies a BootstrapMethod instance as its method argument, the limits are calculated through scipy.stats.bootstrap using that instance's configuration. This is an alternative to the default Fisher transformation."
+}

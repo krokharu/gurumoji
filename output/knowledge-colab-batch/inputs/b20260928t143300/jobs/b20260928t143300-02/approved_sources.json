@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Two study-scoped design facts paraphrased from the selected publisher article section 4.2.2. No participant transcripts, personal data, or verbatim passages are included.",
+      "anchors": [
+        {
+          "anchor_id": "participation-measures",
+          "end": "13",
+          "extracted_text_sha256": "fd4f1bddcc66c2e2e74c0c93f98039565b1850adc66db2aced8aee2fac5319d0",
+          "kind": "page",
+          "start": "13"
+        },
+        {
+          "anchor_id": "study-context",
+          "end": "14",
+          "extracted_text_sha256": "c890a8da1d4c32d3fed37544c9ed0b4cdac333c7e3634aa3cb85ff5261e3438c",
+          "kind": "page",
+          "start": "14"
+        },
+        {
+          "anchor_id": "cross-session-study-group-composition",
+          "end": "Four principal groups and nine teacher groups",
+          "extracted_text_sha256": "da46693dd7c79d033810fc0fa120886947791fb1eacce0a4fb17d4a756843009",
+          "kind": "section",
+          "start": "Composition of the study's 13 online focus groups"
+        },
+        {
+          "anchor_id": "cross-session-uniform-protocol",
+          "end": "Same script and outline across the study's groups",
+          "extracted_text_sha256": "c5457b55b618a1d27e46ca145dbaacc9427a2f226d5485fd4a7ce86f4c6d1f5b",
+          "kind": "section",
+          "start": "A common protocol for focus groups on different days"
+        }
+      ],
+      "authors": [
+        "Donatella Poliandri",
+        "Monica Perazzolo",
+        "Giuseppe Carmelo Pillera",
+        "Letizia Giampietro"
+      ],
+      "license": {
+        "license_id": "CC-BY-4.0",
+        "terms": "CC BY 4.0; attribution and change indication required"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.3389/fsoc.2023.1145264"
+      },
+      "publication_year": 2023,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "ceff84c3d635dcc5f9ed70218851055e907d97817e13d92250b5a75ffd66058c",
+      "source_id": "LIT-poliandri-2023-online-focus-groups",
+      "source_type": "paper",
+      "title": "Dematerialized participation challenges: Methods and practices for online focus groups",
+      "version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-ceff84c3d635dcc5"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ginza-framework-components",
+  "extracted_text_sha256": "feda596de8e7d2cf785330034ba64ce6ad854feb739b0f9700944d1e9e21467b",
+  "source_id": "RES-ginza-official",
+  "source_sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+  "source_version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7",
+  "text": "The official GiNZA v5.2.0 README identifies spaCy as GiNZA's key framework. It says SudachiPy provides tokenization and part-of-speech tagging. It separately states that the Transformer-based model ja_ginza_electra uses Hugging Face Transformers as the framework for pretrained models. These are the README's descriptions of component roles; they do not report measured accuracy or transcript-specific performance. (License section.)"
+}

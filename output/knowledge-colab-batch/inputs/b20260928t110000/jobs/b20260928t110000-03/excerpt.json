@@ -1,0 +1,8 @@
+{
+  "anchor_id": "freetxt-summariser-comparison-direction-section-4",
+  "extracted_text_sha256": "e52b7312c05159d4242beb410b3aa4138eb3fffa729c2368c1cb19403ab486bf",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_sha256": "dffb0133c0c217516e64126f639a3c13db8501ea9f5c333dc4bdf2f4fbd15d3f",
+  "source_version": "repository-vor-sections-3.2-3.4-4-evidence-snapshot-2026-09-28-sha256-dffb0133c0c21751",
+  "text": "著者らは、FreeTxtの抽出型要約機能について、アンケートやフィードバックデータに対してよりも、長文ドキュメントに対して有用だったと報告しています。比較の向きは、「長文ドキュメントに対する有用性 > アンケート／フィードバックデータに対する有用性」です。これはパートナーの評価に基づく、当時の現行版の短所として記載されています。"
+}

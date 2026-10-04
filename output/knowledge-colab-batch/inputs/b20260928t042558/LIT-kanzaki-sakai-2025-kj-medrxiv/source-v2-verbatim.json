@@ -1,0 +1,44 @@
+{
+  "access_scope": "full_text",
+  "adaptation_notice": "Verbatim selected method passage captured from the public medRxiv v1 full-text PDF through indexed full-text results; the retained snapshot contains only the selected passage, not the full PDF.",
+  "anchors": [
+    {
+      "anchor_id": "kj-workflow",
+      "end": "KJ method illustration and relational mapping",
+      "extracted_text_sha256": "0bd90895bf04a26965b209f9fa0838f44071140b13b2ca725f8202b1eeeb4237",
+      "kind": "paragraph",
+      "start": "Data analysis: coding, record cards, and theme extraction"
+    }
+  ],
+  "authors": [
+    "Maki Kanzaki",
+    "Hiroko Sakai"
+  ],
+  "license": {
+    "license_id": "CC-BY-4.0",
+    "terms": "CC BY 4.0; attribution and change indication required"
+  },
+  "license_url": {
+    "kind": "https",
+    "value": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "locator": {
+    "kind": "doi",
+    "value": "10.1101/2025.10.05.25337379"
+  },
+  "publication_year": 2025,
+  "rights": {
+    "allowed_routes": [
+      "local",
+      "colab",
+      "export"
+    ],
+    "classification": "licensed"
+  },
+  "schema_version": 1,
+  "sha256": "07395a96eeb334a6b7b4dbf9c09518de8536b2b9d8b1176d39d54457cdf99be3",
+  "source_id": "LIT-kanzaki-sakai-2025-kj-medrxiv",
+  "source_type": "paper",
+  "title": "Perceptions of parenting twins as experienced by fathers: A qualitative study",
+  "version": "medrxiv-v1-verbatim-method-excerpt-snapshot-2026-09-28"
+}

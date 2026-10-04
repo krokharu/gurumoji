@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ser-cross-corpus-variation-factors",
+  "extracted_text_sha256": "a6ac5984913f5770622a8211ac2851da0dd842c3186cadb7cf3cf715cafaee5e",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "Zhang et al.'s review notes that the majority of existing speech-emotion-recognition systems use a single corpus and a single-language setting for training and evaluation. For cross-corpus applications, training and test corpora may differ in language, culture, distribution mode, or data scale; the review says such differences can create variations that impede generalization."
+}

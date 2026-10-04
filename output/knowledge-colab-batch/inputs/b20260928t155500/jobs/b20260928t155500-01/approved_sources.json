@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "official_page",
+      "adaptation_notice": "A short paraphrase from the versioned README License section is used for draft Claim generation. Outputs must retain the README's component boundaries and make no performance claim.",
+      "anchors": [
+        {
+          "anchor_id": "license-and-dependencies",
+          "end": "License",
+          "extracted_text_sha256": "4c411972eb1a8b3e94b268f9f4831b320b9ae802ebf0ec94bb86c86735cdee01",
+          "kind": "section",
+          "start": "License"
+        },
+        {
+          "anchor_id": "training-data-description",
+          "end": "Training Datasets",
+          "extracted_text_sha256": "0525e6c5beb00f325908ef3f62dc4ce396dc68f56b48af68d9b4ffac6a5a3a44",
+          "kind": "section",
+          "start": "Training Datasets"
+        },
+        {
+          "anchor_id": "ginza-framework-components",
+          "end": "Hugging Face Transformers framework for ja_ginza_electra",
+          "extracted_text_sha256": "feda596de8e7d2cf785330034ba64ce6ad854feb739b0f9700944d1e9e21467b",
+          "kind": "section",
+          "start": "License: spaCy and SudachiPy component roles"
+        }
+      ],
+      "authors": [
+        "Megagon Labs"
+      ],
+      "license": {
+        "license_id": "MIT",
+        "terms": "MIT License; preserve copyright and permission notice"
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://opensource.org/license/mit/"
+      },
+      "locator": {
+        "kind": "url",
+        "value": "https://github.com/megagonlabs/ginza/blob/v5.2.0/README.md"
+      },
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "71652a6e50e94ee71020d16b38dd7e67a2c679149a2622a83fe9ef8615ec2dc7",
+      "source_id": "RES-ginza-official",
+      "source_type": "web",
+      "title": "GiNZA - Japanese NLP Library（公式README v5.2.0）",
+      "version": "github-v5.2.0-readme-retrieved-2026-09-28-sha256-71652a6e50e94ee7"
+    }
+  ]
+}

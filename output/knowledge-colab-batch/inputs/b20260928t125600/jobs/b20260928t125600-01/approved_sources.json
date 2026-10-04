@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "access_scope": "full_text",
+      "adaptation_notice": "Selected Methods findings paraphrased from the CC BY 4.0 MDPI article. No interview transcripts, personal data, or verbatim article passages are included.",
+      "anchors": [
+        {
+          "anchor_id": "scat-application-and-procedure",
+          "end": "Methods 2.6 Characteristics and Reliability of Coding and Theorization",
+          "extracted_text_sha256": "b5abaa8d6ce2649358a99d9918b7a16e501d0627e877877dc2021f0391112b27",
+          "kind": "section",
+          "start": "Abstract; Methods 2.5 Methods of Analysis"
+        },
+        {
+          "anchor_id": "scat-six-step-study-implementation",
+          "end": "Theory-writing: posit a theory based on the conceptualization",
+          "extracted_text_sha256": "3655b09ef62167b35300e48792b6d9af328393a2967f48e556bb9558bf98ab9d",
+          "kind": "section",
+          "start": "The analysis involves the following steps (see Supplementary Materials)"
+        },
+        {
+          "anchor_id": "scat-analysis-supervision-by-experienced-researcher",
+          "end": "well-versed in SCAT analysis",
+          "extracted_text_sha256": "e589ccebbe8ce43a6464eb94266d6d2ad0b8d2e4b9b5b31e46e0520578ea9e6e",
+          "kind": "section",
+          "start": "The data analysis process was supervised by a researcher"
+        }
+      ],
+      "authors": [
+        "Nobuko Shimizu",
+        "Takako Yamada",
+        "Nobuyuki Honda",
+        "Miyako Mochizuki",
+        "Mayumi Kato",
+        "Noboru Hasegawa",
+        "Hunsa Sethabouppha",
+        "Nattaya Suwankruhasn",
+        "Chalinee Suvanayos"
+      ],
+      "license": {
+        "license_id": "CC-BY-4.0",
+        "terms": "Creative Commons Attribution 4.0; attribution required and changes must be indicated."
+      },
+      "license_url": {
+        "kind": "https",
+        "value": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "locator": {
+        "kind": "doi",
+        "value": "10.3390/jal3010002"
+      },
+      "publication_year": 2023,
+      "rights": {
+        "allowed_routes": [
+          "local",
+          "colab",
+          "export"
+        ],
+        "classification": "licensed"
+      },
+      "schema_version": 1,
+      "sha256": "b7d8fe5964a2de5d8a6c5c858d41468baff10bd8e0d40ce5245add6656266612",
+      "source_id": "LIT-shimizu-2023-scat-application",
+      "source_type": "paper",
+      "title": "Qualitative Study on Important Elements of Life for Japanese and Thai Older Adults",
+      "version": "mdpi-jal-2023-publisher-pdf-2026-09-28-sha256-b7d8fe5964a2de5d"
+    }
+  ]
+}

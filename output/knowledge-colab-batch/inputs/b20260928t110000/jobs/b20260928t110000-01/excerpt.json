@@ -1,0 +1,8 @@
+{
+  "anchor_id": "freetxt-sentiment-accuracy-english-welsh-section-3-2",
+  "extracted_text_sha256": "a2d7bc30b74a4d6b3a65620f66e3d12cec11671f4ddd12027a2bf7447c0e5fa2",
+  "source_id": "LIT-knight-2024-freetxt",
+  "source_sha256": "dffb0133c0c217516e64126f639a3c13db8501ea9f5c333dc4bdf2f4fbd15d3f",
+  "source_version": "repository-vor-sections-3.2-3.4-4-evidence-snapshot-2026-09-28-sha256-dffb0133c0c21751",
+  "text": "In the article's description of FreeTxt's sentiment pipeline, the selected multilingual BERT model's page is cited as reporting about 95% accuracy on English text; the authors' experiments on manually annotated Welsh reviews found about 73%, which they identify as leaving room for improvement. These are distinct evidence bases, and the Welsh estimate is specific to their experiment."
+}

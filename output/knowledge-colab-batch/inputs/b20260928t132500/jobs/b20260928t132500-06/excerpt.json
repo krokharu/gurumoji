@@ -1,0 +1,8 @@
+{
+  "anchor_id": "pearsonr-bootstrap-confidence-interval",
+  "extracted_text_sha256": "ec0b672e5f9cee43a69ff82375f8a954c1973dd52d1762f8aab115ab82f3d1bb",
+  "source_id": "RES-scipy-pearsonr",
+  "source_sha256": "9999856b875cf15abcad22654b16bd3d2801f89eef28b42a048114e93eac68c3",
+  "source_version": "scipy-v1.18.0-manual-pearsonr-retrieved-2026-09-28",
+  "text": "For the interval method on a PearsonRResult, choosing a BootstrapMethod configuration delegates the confidence-limit calculation to SciPy's bootstrap routine, which uses the options stored in that configuration."
+}

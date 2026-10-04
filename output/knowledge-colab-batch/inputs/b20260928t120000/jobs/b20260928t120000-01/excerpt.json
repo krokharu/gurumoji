@@ -1,0 +1,8 @@
+{
+  "anchor_id": "ser-cross-corpus-mismatch-generalization",
+  "extracted_text_sha256": "a58a0858e4dca8771583ee37b6788767f297a4f83562ecc3dd52e3db0fd6d4c0",
+  "source_id": "LIT-zhang-2021-cross-corpus-ser",
+  "source_sha256": "2f3b80d1cd0247d0b36e99cbdff14c5f14ee680a08b35ada4a46c4a43c7b9d81",
+  "source_version": "publisher-vor-frontiers-retrieved-2026-09-28-sha256-2f3b80d1cd0247d0",
+  "text": "Zhang et al.'s review explains that training and test speech corpora in cross-corpus speech emotion recognition may differ in language, culture, distribution mode, or data scale. Such cross-corpus differences can create idiosyncratic variation that impedes the generalization of current SER techniques."
+}
