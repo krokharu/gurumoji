@@ -1,0 +1,24 @@
+{
+  "source_commit": "97847d12715493fcabd7368d1851167fb7cd577a",
+  "source_file": "numeric-projection-api-97847d1.json",
+  "source_sha256": "0a7f7b786fe5e6b62a6c1f7d9ea1ba5b453910badda49ccb424352bf66c5d87b",
+  "projected_file": "timing-projection.json",
+  "projected_sha256": "8ee46b8e89853070009ffc7cd9a5b65a273097cbbb6e296db62b65d64ef6774b",
+  "cases_kept": [
+    "numeric_ascii",
+    "numeric_padded",
+    "numeric_exponent",
+    "numeric_fullwidth",
+    "numeric_arabic",
+    "numeric_underscore",
+    "numeric_zero",
+    "true_zero",
+    "number",
+    "unknown",
+    "bad",
+    "above_limit",
+    "two"
+  ],
+  "projection": "Only omit unused cases, full-job response fields and temporary filesystem paths. Copy raw segments, read-only segment_timings, values/types, identity, names/profiles and duration coverage unchanged. No executed-state override and no client-side recomputation. Stale/malformed derivatives are separately declared in each DOM test.",
+  "limits": "Synthetic temporary Flask fixture and offline DOM integration; not production data, browser/native-input/audio/AT execution."
+}

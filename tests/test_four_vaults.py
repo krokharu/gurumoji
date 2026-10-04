@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from itertools import permutations
 from pathlib import Path
 from unittest.mock import patch
@@ -70,6 +71,126 @@ class VaultRegistryTests(unittest.TestCase):
         self.assertEqual(props["revision"], 1)
         self.assertIn("large-v3", body)
         self.assertIn("Whisper文字起こし", body)
+
+    def test_same_second_republish_recovers_lost_registry_without_rewriting_notes(self):
+        now = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+        with patch("gurumoji.vault_registry.datetime") as clock:
+            clock.now.return_value = now
+            self.publish()
+            catalog = self.registry.load()
+            roots = self.registry.roots()
+            before = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+                      for kind in GENERATED for path in roots[kind].rglob("*.md")}
+            log = self.registry.note_log.read_bytes()
+            self.registry.catalog_file.unlink()
+
+            # An exact byte match must repair only the catalog, not write the
+            # live note or create another history version/change-log event.
+            with patch("gurumoji.vault_note_policy.write_atomic") as write_note:
+                self.assertEqual(self.publish(), "unchanged")
+                write_note.assert_not_called()
+            recovered = self.registry.load()
+            self.assertEqual(set(recovered["notes"]), set(catalog["notes"]))
+            for note_id, entry in catalog["notes"].items():
+                self.assertEqual(recovered["notes"][note_id],
+                                 {key: value for key, value in entry.items() if key != "history"})
+
+            # Restored content hashes must also allow the normal fast path
+            # after the timestamp changes, with the original identity intact.
+            clock.now.return_value = now + timedelta(seconds=1)
+            with patch("gurumoji.vault_note_policy.write_atomic") as write_note:
+                self.assertEqual(self.publish(), "unchanged")
+                write_note.assert_not_called()
+            self.assertEqual({path: (path.read_bytes(), path.stat().st_mtime_ns)
+                              for kind in GENERATED for path in roots[kind].rglob("*.md")}, before)
+            self.assertEqual(self.registry.note_log.read_bytes(), log)
+
+            # Once recovered, a researcher deletion remains protected.
+            (roots["input"] / self.note).unlink()
+            self.assertEqual(self.publish(revision=1), "missing")
+            self.assertFalse((roots["input"] / self.note).exists())
+            entry = self.registry.load()["notes"]["input-item-" + entity_key("job-1")]
+            self.assertEqual((entry["sync"], entry["revision"]), ("missing", 1))
+
+    def test_matching_interrupted_write_refreshes_metadata_and_keeps_history_and_path(self):
+        now = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+        with patch("gurumoji.vault_registry.datetime") as clock:
+            clock.now.return_value = now
+            self.publish()
+            data = self.registry.load()
+            note_id = "input-item-" + entity_key("job-1")
+            expected = dict(data["notes"][note_id])
+            entry = data["notes"][note_id]
+            path = self.registry.root("input") / self.note
+            renamed = path.with_name("retained-name.md")
+            path.rename(renamed)
+            expected["path"] = renamed.relative_to(self.registry.root("input")).as_posix()
+            entry.update(path=expected["path"], title="interrupted", revision=-1,
+                         source_hash="old", content_hash="old", sha256="old",
+                         pending=expected["sha256"], sync="writing")
+            self.registry.save(data)
+            before = (renamed.read_bytes(), renamed.stat().st_mtime_ns)
+
+            self.assertEqual(self.publish(), "unchanged")
+            self.assertEqual(self.registry.load()["notes"][note_id], expected)
+            self.assertEqual((renamed.read_bytes(), renamed.stat().st_mtime_ns), before)
+            self.assertFalse(path.exists())
+
+    def test_registry_recovery_archives_researcher_edits_before_replacing_them(self):
+        now = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+        with patch("gurumoji.vault_registry.datetime") as clock:
+            clock.now.return_value = now
+            for recovery in ("lost-entry", "interrupted"):
+                with self.subTest(recovery=recovery):
+                    self.publish()
+                    data = self.registry.load()
+                    note_id = "input-item-" + entity_key("job-1")
+                    expected = dict(data["notes"][note_id])
+                    root = self.registry.root("input")
+                    path = root / self.note
+                    generated = path.read_bytes()
+                    histories = {p: p.read_bytes() for p in (root / "99-Archive/history").rglob("*.md")}
+                    edited = generated.replace(b"tags:\n", b"aliases: [researcher-alias]\ncustom: preserved\ntags:\n- researcher-tag\n")
+                    edited += "\n研究者のメモ\n".encode("utf-8")
+                    path.write_bytes(edited)
+                    if recovery == "lost-entry":
+                        del data["notes"][note_id]
+                    else:
+                        data["notes"][note_id].update(pending=expected["sha256"], sync="writing")
+                    self.registry.save(data)
+
+                    self.assertEqual(self.publish(), "overwritten")
+                    self.assertEqual(path.read_bytes(), generated)
+                    self.assertTrue(all(p.read_bytes() == content for p, content in histories.items()))
+                    current = self.registry.load()["notes"][note_id]
+                    new_history = root / current["history"][-1]
+                    props, body = unpack(new_history.read_text(encoding="utf-8"))
+                    self.assertEqual(props["history_of_note_id"], note_id)
+                    self.assertNotEqual(props["note_id"], note_id)
+                    self.assertEqual(props["custom"], "preserved")
+                    self.assertIn("researcher-tag", props["tags"])
+                    self.assertIn("graph/history", props["tags"])
+                    self.assertNotIn("aliases", props)  # History must not steal live links.
+                    self.assertIn("研究者のメモ", body)
+                    self.assertEqual(current["sha256"], expected["sha256"])
+                    self.assertEqual((current["sync"], current["pending"]), ("current", ""))
+                    if recovery == "interrupted":
+                        self.assertEqual(current["history"][:-1], expected["history"])
+
+    def test_registry_recovery_stops_when_an_edit_cannot_be_archived(self):
+        self.publish()
+        data = self.registry.load()
+        note_id = "input-item-" + entity_key("job-1")
+        del data["notes"][note_id]
+        self.registry.save(data)
+        path = self.registry.root("input") / self.note
+        edited = path.read_bytes() + "\n失ってはいけない研究者のメモ\n".encode("utf-8")
+        path.write_bytes(edited)
+        with patch("gurumoji.vault_note_policy._save_history", side_effect=OSError("history unavailable")):
+            with self.assertRaisesRegex(OSError, "history unavailable"):
+                self.publish()
+        self.assertEqual(path.read_bytes(), edited)
+        self.assertNotIn(note_id, self.registry.load()["notes"])
 
     def test_human_edits_are_kept_in_history_and_deletions_are_not_recreated(self):
         self.publish()

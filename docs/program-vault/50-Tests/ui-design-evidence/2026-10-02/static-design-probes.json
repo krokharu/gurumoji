@@ -1,0 +1,123 @@
+{
+  "method": "source-isolated Node functions with synthetic DOM stubs; not a browser or actual app runtime",
+  "manual_definition": {
+    "definition_id": "synthetic_definition",
+    "name": "合成の測定定義",
+    "description": "合成データ用の測定説明",
+    "unit_of_analysis": "segment",
+    "source_columns": [
+      "text"
+    ],
+    "output_column": "synthetic_score",
+    "data_type": "number",
+    "measurement_level": "ratio",
+    "measurement_rule": "text_length",
+    "method": "descriptive",
+    "status": "draft"
+  },
+  "missing_selectors": [
+    "#analysis-definition-source",
+    "#analysis-definition-rule",
+    "#analysis-definition-type",
+    "#analysis-definition-level",
+    "#analysis-definition-method"
+  ],
+  "trial_adoption_requests": [
+    {
+      "url": "/api/library/synthetic-only/analysis/definitions/synthetic_definition",
+      "method": "PUT",
+      "body": {
+        "definition_id": "synthetic_definition",
+        "name": "合成の測定定義",
+        "description": "合成データ用の測定説明",
+        "unit_of_analysis": "segment",
+        "source_columns": [
+          "text"
+        ],
+        "output_column": "synthetic_score",
+        "data_type": "number",
+        "measurement_level": "ratio",
+        "measurement_rule": "text_length",
+        "method": "descriptive",
+        "status": "draft"
+      }
+    },
+    {
+      "url": "/api/library/synthetic-only/analysis/definitions/synthetic_definition/trials",
+      "method": "POST",
+      "body": {
+        "limit": 20
+      }
+    },
+    {
+      "url": "/api/library/synthetic-only/analysis/definitions/synthetic_definition",
+      "method": "PUT",
+      "body": {
+        "definition_id": "synthetic_definition",
+        "name": "合成の測定定義",
+        "description": "合成データ用の測定説明",
+        "unit_of_analysis": "segment",
+        "source_columns": [
+          "text"
+        ],
+        "output_column": "synthetic_score",
+        "data_type": "number",
+        "measurement_level": "ratio",
+        "measurement_rule": "text_length",
+        "method": "descriptive",
+        "status": "adopted",
+        "expected_revision": 1
+      }
+    }
+  ],
+  "execution_states": [
+    {
+      "status": "failed",
+      "heading": "分析を実行しています",
+      "message": "Synthetic execution failure",
+      "results_button_hidden": true,
+      "review_button_hidden": false,
+      "review_label": "失敗した処理を再試行"
+    },
+    {
+      "status": "waiting",
+      "heading": "分析を再開できます",
+      "message": "Synthetic execution failure",
+      "results_button_hidden": true,
+      "review_button_hidden": false,
+      "review_label": "失敗した処理を再試行"
+    },
+    {
+      "status": "cancelled",
+      "heading": "分析を中止しました",
+      "message": "固定した計画と親成果の確定順に処理しています。",
+      "results_button_hidden": true,
+      "review_button_hidden": true,
+      "review_label": "失敗した処理を再試行"
+    },
+    {
+      "status": "completed",
+      "heading": "分析が完了しました",
+      "message": "選択した成果物の保存と公開を確定しました。",
+      "results_button_hidden": false,
+      "review_button_hidden": true,
+      "review_label": "失敗した処理を再試行"
+    },
+    {
+      "status": "cancelling",
+      "heading": "分析を実行しています",
+      "message": "固定した計画と親成果の確定順に処理しています。",
+      "results_button_hidden": true,
+      "review_button_hidden": true,
+      "review_label": "失敗した処理を再試行"
+    },
+    {
+      "status": "running",
+      "heading": "分析を実行しています",
+      "message": "固定した計画と親成果の確定順に処理しています。",
+      "results_button_hidden": true,
+      "review_button_hidden": true,
+      "review_label": "失敗した処理を再試行"
+    }
+  ]
+}

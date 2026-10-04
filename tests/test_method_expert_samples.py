@@ -3,6 +3,8 @@
 This is the sample verification recorded in docs/program-vault/50-Tests/method-expert-sample-verification.md.
 Morphology runs on the fallback analyser here; the GiNZA path was checked separately (see that note).
 """
+import csv
+import io
 import json
 import shutil
 import tempfile
@@ -233,7 +235,6 @@ class ExpertSampleTests(unittest.TestCase):
         self.configure("fit", "thematic")
         _, fit, result = self.saved("fit", "sample-saved-fit-0001")
         _, one, _ = self.saved("one_speaker", "sample-saved-one-speaker-0001")
-        _, untimed, _ = self.saved("no_times", "sample-saved-no-times-0001")
         _, sparse, _ = self.saved("sparse_emotion", "sample-saved-sparse-emotion-0001")
         responsible = {
             "participation": "exp-participation-balance", "conversation_dynamics": "exp-conversation-timing",
@@ -251,7 +252,6 @@ class ExpertSampleTests(unittest.TestCase):
             (one, "participation", "blocked", ("min_speakers", "block", "fail")),
             (one, "group_statistics", "blocked", ("statistics_min_groups", "block", "fail")),
             (one, "correlation", "needs_attention", ("min_included_segments", "warn", "fail")),
-            (untimed, "conversation_dynamics", "blocked", ("valid_time_ratio_min", "block", "fail")),
             (sparse, "audio_emotion", "needs_attention", ("emotion_coverage_min", "warn", "fail")),
             (fit, "morphology", "needs_attention", ("morphology_engine_ready", "warn", "fail")),
         ]
@@ -262,6 +262,38 @@ class ExpertSampleTests(unittest.TestCase):
                 self.assertIn(check, failed(review))
                 self.assertIn(f"担当専門家：{review['title']}", "\n".join(methods[method_id]["limitations"]))
         self.assertIn("exp-thematic-analysis", result["algorithms"]["experts"])
+
+    def test_untimed_empty_result_has_no_saved_judgement_but_keeps_blocked_preconditions(self):
+        # v7 no longer fabricates a zero-valued timeline bin for wholly unknown times.
+        # An evaluated empty method and a method that was never run remain different states.
+        run, methods, result = self.saved("no_times", "sample-saved-no-times-0001")
+        timing = methods["conversation_dynamics"]
+        self.assertEqual(timing["status"], "empty")
+        self.assertEqual(timing["previews"], [])
+        self.assertNotIn("expert_review", timing)
+        self.assertEqual(methods["transformer_topics"]["status"], "not_run")
+        self.assertNotIn("expert_review", methods["transformer_topics"])
+        store = app.analysis_archive_store()
+        artifacts = store.artifacts(run["id"])
+        for dataset in ("transitions", "gaps", "overlaps", "timeline"):
+            with self.subTest(dataset=dataset):
+                self.assertEqual(app.analysis_csv_rows(result["analysis"], dataset)[1], [])
+                artifact = next(row for row in artifacts if row["name"] == f"tables/{dataset}.csv")
+                saved = store.read_artifact(artifact["id"])[1].decode("utf-8-sig")
+                self.assertEqual(list(csv.DictReader(io.StringIO(saved))), [])
+        overview_response = self.client.get("/api/library/no_times/analysis/methods")
+        self.assertEqual(overview_response.status_code, 200)
+        overview = overview_response.get_json()
+        timing = next(row for row in overview["methods"] if row["method_id"] == "conversation_dynamics")
+        self.assertEqual((timing["status"], timing["produced"], timing["verdict"], timing["expert_scope"]),
+                         ("empty", False, "none", "preconditions"))
+        review = overview["experts"][timing["expert_id"]]
+        self.assertEqual((review["expert_id"], review["selection"], review["status"]),
+                         ("exp-conversation-timing", "preconditions", "blocked"))
+        self.assertIn(("valid_time_ratio_min", "block", "fail"), failed(review))
+        self.assertIn("有効な時刻", timing["verdict_reason"])
+        # Looking at current applicability never writes a result review into the fixed run.
+        self.assertEqual(self.result(run["id"]), result)
 
     def test_transformer_results_are_judged_only_when_produced(self):
         analysis = app.group_analysis_for_row(app.library_row("fit"))

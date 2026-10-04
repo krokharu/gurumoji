@@ -9,6 +9,8 @@ from typing import Any, Callable
 from flask import Blueprint, Flask, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from ..services.speaker_registry import speaker_csv_columns
+
 from ..handlers.speaker_registry import (
     SpeakerIdentificationHandler,
     SpeakerIdentificationRequestError,
@@ -107,11 +109,24 @@ def register_speaker_routes(
             expected_revision = parse_registry_revision(
                 request.form.get("registry_revision")
             )
-            records, imported_count, revision = import_csv(
-                read_upload(upload, max_csv_bytes()),
-                expected_revision=expected_revision,
-            )
+            content = read_upload(upload, max_csv_bytes())
+            preview = request.form.get("preview") == "1"
+            before = handler().list()["speakers"] if preview else []
+            kwargs = {"expected_revision": expected_revision}
+            if preview:
+                kwargs["preview"] = True
+            records, imported_count, revision = import_csv(content, **kwargs)
+            before_by_id = {item["id"]: item for item in before}
+            def comparable(record):
+                return {key: value for key, value in record.items() if key not in {"created_at", "updated_at"}}
+            summary = {
+                "added": sum(item["id"] not in before_by_id for item in records),
+                "updated": sum(item["id"] in before_by_id and comparable(item) != comparable(before_by_id[item["id"]]) for item in records),
+                "columns": speaker_csv_columns(content),
+            } if preview else None
             return jsonify({
+                "preview": preview,
+                "summary": summary,
                 "speakers": records,
                 "total": len(records),
                 "imported_count": imported_count,

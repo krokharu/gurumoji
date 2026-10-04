@@ -1,0 +1,78 @@
+{
+  "kind": "version 2, clean static proposed user views",
+  "source_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "all_content": "synthetic",
+  "annotation_location": "outside-legend.md",
+  "screens": [
+    {
+      "id": "a-measurement-desktop",
+      "title": "A案 利用者表示：測定 desktop",
+      "width": 1280,
+      "height": 1013,
+      "description": "非機能の提案。開発注釈を画面外へ分けた利用者表示。合成duration測定の定義・4個票・0と欠測・採用前の状態。"
+    },
+    {
+      "id": "a-evidence-desktop",
+      "title": "A案 利用者表示：結果と根拠 desktop",
+      "width": 1280,
+      "height": 1268,
+      "description": "非機能の提案。AI下書き、未確定の研究者メモ、分析時の原資料を区別。固定結果の入力12版と現在13版の差を示し、音声再生を無効化。"
+    },
+    {
+      "id": "a-measurement-390",
+      "title": "A案 利用者表示：測定 390px",
+      "width": 390,
+      "height": 1446,
+      "description": "非機能の提案。開発注釈を画面外へ分けた利用者表示。合成duration測定の定義・4個票・0と欠測・採用前の状態。"
+    },
+    {
+      "id": "a-evidence-390",
+      "title": "A案 利用者表示：結果と根拠 390px",
+      "width": 390,
+      "height": 1299,
+      "description": "非機能の提案。AI下書き、未確定の研究者メモ、分析時の原資料を区別。固定結果の入力12版と現在13版の差を示し、音声再生を無効化。"
+    },
+    {
+      "id": "b-measurement-desktop",
+      "title": "B案 利用者表示：測定 desktop",
+      "width": 1280,
+      "height": 1005,
+      "description": "非機能の提案。開発注釈を画面外へ分けた利用者表示。合成duration測定の定義・4個票・0と欠測・採用前の状態。"
+    },
+    {
+      "id": "b-evidence-desktop",
+      "title": "B案 利用者表示：結果と根拠 desktop",
+      "width": 1280,
+      "height": 963,
+      "description": "非機能の提案。AI下書き、未確定の研究者メモ、分析時の原資料を区別。固定結果の入力12版と現在13版の差を示し、音声再生を無効化。"
+    },
+    {
+      "id": "b-measurement-390",
+      "title": "B案 利用者表示：測定 390px",
+      "width": 390,
+      "height": 1385,
+      "description": "非機能の提案。開発注釈を画面外へ分けた利用者表示。合成duration測定の定義・4個票・0と欠測・採用前の状態。"
+    },
+    {
+      "id": "b-evidence-390",
+      "title": "B案 利用者表示：結果と根拠 390px",
+      "width": 390,
+      "height": 1205,
+      "description": "非機能の提案。AI下書き、未確定の研究者メモ、分析時の原資料を区別。固定結果の入力12版と現在13版の差を示し、音声再生を無効化。"
+    },
+    {
+      "id": "b-measurement-changed-desktop",
+      "title": "B案 補助状態：定義変更後 desktop",
+      "width": 1280,
+      "height": 856,
+      "description": "非機能の提案。定義を秒から文字数へ変更した後。前の秒数試行は採用に使えず、再試行するまで採用は無効。"
+    },
+    {
+      "id": "b-measurement-changed-390",
+      "title": "B案 補助状態：定義変更後 390px",
+      "width": 390,
+      "height": 929,
+      "description": "非機能の提案。定義を秒から文字数へ変更した後。前の秒数試行は採用に使えず、再試行するまで採用は無効。"
+    }
+  ]
+}

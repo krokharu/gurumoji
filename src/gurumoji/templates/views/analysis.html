@@ -6,6 +6,7 @@
           <p>発話量・言葉・会話の流れを、保存済みの分析結果から確認します。</p>
         </div>
         <div class="analysis-header-actions">
+          <button id="analysis-history-open" class="secondary-button compact-button" type="button">分析の履歴と根拠</button>
           <button id="analysis-run-button" class="primary-button compact-button" type="button">基礎分析を実行</button>
           <button id="analysis-refresh-button" class="analysis-legacy-run-control" type="button" tabindex="-1" aria-hidden="true">再集計</button>
           <button id="analysis-open-item-button" class="secondary-button compact-button" type="button" hidden>文字起こしを開く</button>
@@ -64,6 +65,7 @@
             <p id="analysis-execution-message">分析対象を固定しています。</p>
           </div>
         </section>
+        <section id="analysis-execution-publications" aria-label="保存先と公開試行の記録"></section>
         <div class="analysis-execution-meta">
           <span>経過時間 <strong id="analysis-execution-elapsed">0:00</strong></span>
           <span>実行方法 <strong id="analysis-execution-mode">自動実行</strong></span>

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="1446" viewBox="0 0 390 1446" role="img" aria-labelledby="title desc"><title id="title">A案 利用者表示：測定 390px</title><desc id="desc">非機能の提案。開発注釈を画面外へ分けた利用者表示。合成duration測定の定義・4個票・0と欠測・採用前の状態。</desc><rect width="390" height="1446" fill="#f4f5f0"/><rect x="0" y="0" width="390" height="35" rx="0" fill="#1c6b50" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="16" y="23" fill="#fffef9" font-family="Noto Sans CJK JP, sans-serif" font-size="12" font-weight="700">提案モックアップ / 非機能 / 合成データ</text>
+<text x="16" y="72" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="23" font-weight="700">Gurumoji</text>
+<text x="16" y="106" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">文字起こし　 結果一覧　 分析　 話者</text>
+<path d="M16 121 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="150" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="21" font-weight="700">相談会サンプル</text>
+<text x="16" y="181" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">現在の入力：12版</text>
+<text x="16" y="210" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">全5発話・除外1 → 試行4</text>
+<rect x="16" y="230" width="358" height="44" rx="6" fill="#e9f2e6" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="28" y="258" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">設定・手動分析</text>
+<text x="350" y="258" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">▾</text>
+<text x="24.0" y="307" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="12" font-weight="400">1 定義 ✓</text>
+<rect x="137.33333333333331" y="286" width="115.33333333333333" height="31" rx="5" fill="#e9f2e6" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="145.33333333333331" y="307" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="12" font-weight="700">2 試行・確認</text>
+<text x="266.66666666666663" y="307" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="12" font-weight="400">3 実行準備</text>
+<text x="16" y="349" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="20" font-weight="700">発話の長さ（秒）</text>
+<text x="16" y="378" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">新しい定義・未採用</text>
+<text x="16" y="402" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">発話の秒数 / 数値 / 比率尺度 / 記述統計</text>
+<text x="16" y="427" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">重要性や関与の強さは表しません。</text>
+<path d="M16 454.45 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="483.45" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">▸ 定義の内容を確認する</text>
+<text x="16" y="510.45" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="20" font-weight="700">試行結果</text>
+<text x="16" y="539.45" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">除外後の先頭4発話を試しました</text>
+<text x="16" y="564.2" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">定義1版 · 入力12版で試行</text>
+<rect x="16" y="593.6500000000001" width="358" height="76" rx="7" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="30" y="619.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">有効3発話の平均</text>
+<text x="30" y="649.6500000000001" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="24" font-weight="700">20.7 秒</text>
+<text x="182" y="648.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">有効3 / 欠測1</text>
+<rect x="16" y="689.6500000000001" width="358" height="82" rx="6" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="715.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">S001 · 00:00–01:00</text>
+<text x="28" y="748.6500000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">60秒</text>
+<text x="108" y="748.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">有効</text>
+<rect x="16" y="781.6500000000001" width="358" height="82" rx="6" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="807.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">S002 · 01:00–01:02</text>
+<text x="28" y="840.6500000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">2秒</text>
+<text x="108" y="840.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">有効</text>
+<rect x="16" y="873.6500000000001" width="358" height="82" rx="6" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="899.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">S003 · 01:02–01:02</text>
+<text x="28" y="932.6500000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">0秒</text>
+<text x="108" y="932.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">計算済みゼロ</text>
+<rect x="16" y="965.6500000000001" width="358" height="82" rx="6" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="991.6500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">S004 · 時刻不明</text>
+<text x="28" y="1024.65" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">欠測</text>
+<text x="108" y="1024.65" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">発話を確認</text>
+<path d="M108 1029.65 h70" stroke="#bac6bb" fill="none"/>
+<text x="16" y="1077.65" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">0秒は平均に含みます。時刻不明の1発話は、平均から除</text>
+<text x="16" y="1100.75" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">いています。</text>
+<path d="M16 1139.85 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="1169.85" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">□ 規則と試行値を確認しました</text>
+<rect x="16" y="1204.6" width="224" height="44" rx="7" fill="#e9f2e6" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="28" y="1232.6" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">この定義を採用</text>
+<text x="16" y="1272.6" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">採用しても全件実行は始まりません。次の画面で実行内容を</text>
+<text x="16" y="1294.05" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">確認します。</text>
+<rect x="16" y="1319.5" width="224" height="44" rx="7" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="1347.5" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">定義へ戻る</text>
+<path d="M16 1387.5 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="1415.5" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">この測定では外部AIへ送信しません</text></svg>

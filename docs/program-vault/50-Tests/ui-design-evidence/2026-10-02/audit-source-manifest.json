@@ -1,0 +1,86 @@
+{
+  "observed_at_utc": "2026-10-02T18:30:00Z",
+  "head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "branch": "dot/cloud-cpu-setup",
+  "git_status": "",
+  "files": [
+    {
+      "path": "src/gurumoji/templates/index.html",
+      "sha256": "8df16767ce16375a07eb17056df7143b1f55152aca2ca2592270e91b906ae7eb"
+    },
+    {
+      "path": "src/gurumoji/templates/views/analysis.html",
+      "sha256": "6142cc3dda809e735cd186d05fc8a752af22935e06ccc4fdc0ba3152e3223808"
+    },
+    {
+      "path": "src/gurumoji/templates/views/create.html",
+      "sha256": "b6b9e8c8bdbebe9bb20587bca9a638a69319dd0ad39b5620975749b1be85adb6"
+    },
+    {
+      "path": "src/gurumoji/templates/views/result.html",
+      "sha256": "67e721a6bfaebacb75817634ac4cb654650a2c64ab41f8d8e783fb56f7aed763"
+    },
+    {
+      "path": "src/gurumoji/templates/views/speakers.html",
+      "sha256": "06832f6bd1887e695ebf9c34ef8dd9fa210ee8f4e4677fab947f05cadc004be6"
+    },
+    {
+      "path": "src/gurumoji/static/style.css",
+      "sha256": "ab2c6d3e00593dca360232afd8e02839811c7f803748bab58327dddbbb3fe3f4"
+    },
+    {
+      "path": "src/gurumoji/static/app.js",
+      "sha256": "2f019e9d1f741280109f72eeb8ec62fe35b9f739e57bf0aed5936605950ee876"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-execution.js",
+      "sha256": "9616e145a1829fe487bc6320d565203752ed36102b6679afcbfc9e7b1965b16c"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-content.js",
+      "sha256": "a819dadcb48be54d6d4d5afc8a88e320de391f3423422a144307025474dd8d23"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-visualizations.js",
+      "sha256": "3c614bd67f719a1e54868152bf8c0bb1e1481eb1463b01cdaabcdab5c70a2a00"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-method-view.js",
+      "sha256": "09731bfe968c9d4bc7263aac4a5a2558866eb31cbe161f62ae2a254801f5fb7f"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-storage.js",
+      "sha256": "3383a66dafde9ab71c7fa6ccc1dfdc80c5310e0a17c8aed84b724ebcc2c66ccf"
+    },
+    {
+      "path": "src/gurumoji/analysis_core.py",
+      "sha256": "54ea3182553c23e169ae22a74d23da66e94a83a553b4ae1605f37aac35085829"
+    },
+    {
+      "path": "src/gurumoji/analysis_pipeline.py",
+      "sha256": "d14c64127e65a5a0b3bf255298bf38270920a34430a3685bc077d520ea28c9e6"
+    },
+    {
+      "path": "src/gurumoji/analysis_store.py",
+      "sha256": "23990097345b92330da5affbd4622b7b1726dcd098f33ec44e5a095be020a505"
+    },
+    {
+      "path": "docs/program-vault/20-Modules/ui-screens.md",
+      "sha256": "9dee2e42882d069c244c7b0091209f19894a21f65ea4c9a402fc76542f385df1"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-ux-issues.md",
+      "sha256": "c6f0bc30d41c6d90a9c75e220f625e969a0b285260197965f43858ce5d0a0c54"
+    },
+    {
+      "path": "docs/program-vault/40-Design/decisions.md",
+      "sha256": "3409dcd4c31fb218f9b73d2e7ca87a77d65a8d75e214d05a15eabd1aba24d20c"
+    },
+    {
+      "path": "docs/program-vault/40-Design/analysis-milestone-visualization-design.md",
+      "sha256": "7a424d0d4410733e1878eef03fd5bb56027cdae115520e26575598244393721b"
+    }
+  ],
+  "visual_evidence_version": "4b311df original Windows screenshots; not patched HEAD",
+  "browser_current_head": "not run by this auditor"
+}

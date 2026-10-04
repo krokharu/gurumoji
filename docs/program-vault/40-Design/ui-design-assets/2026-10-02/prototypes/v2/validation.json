@@ -1,0 +1,106 @@
+{
+  "validation_kind": "v2 static proposal artifacts, not live application acceptance",
+  "source_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "screens": [
+    {
+      "file": "a-evidence-390.svg",
+      "width": 390.0,
+      "full_height": 1299.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "a-evidence-desktop.svg",
+      "width": 1280.0,
+      "full_height": 1268.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "a-measurement-390.svg",
+      "width": 390.0,
+      "full_height": 1446.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "a-measurement-desktop.svg",
+      "width": 1280.0,
+      "full_height": 1013.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-evidence-390.svg",
+      "width": 390.0,
+      "full_height": 1205.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-evidence-desktop.svg",
+      "width": 1280.0,
+      "full_height": 963.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-measurement-390.svg",
+      "width": 390.0,
+      "full_height": 1385.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-measurement-changed-390.svg",
+      "width": 390.0,
+      "full_height": 929.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-measurement-changed-desktop.svg",
+      "width": 1280.0,
+      "full_height": 856.0,
+      "not_a_viewport": true
+    },
+    {
+      "file": "b-measurement-desktop.svg",
+      "width": 1280.0,
+      "full_height": 1005.0,
+      "not_a_viewport": true
+    }
+  ],
+  "image_count": 10,
+  "text_alternative_count": 10,
+  "issues": [],
+  "app_git_status": "",
+  "not_run": [
+    "live application",
+    "browser reflow",
+    "assistive technology",
+    "user performance",
+    "actual API behavior"
+  ],
+  "sha256": {
+    "a-evidence-390.svg": "f8b473e7d6fc84050e7565b5608a19a6fe172f63fd4c3b6933777dbc1d07b431",
+    "a-evidence-desktop.svg": "5f039f1d28e64da0618a6ccacb177a34fb375b21257436cf544fc2d3f3d213cb",
+    "a-measurement-390.svg": "f961c00ceed58d59078a2160d9d9271836436c7fb27c4e8ec3c1f272576a3779",
+    "a-measurement-desktop.svg": "36f0ae7aecc3828e8ef36c1c44d1f5dc9beca65ebd5e596e00539c63baa8a880",
+    "b-evidence-390.svg": "1718894d24684a0d126491bc5119a43d06e38c0768a21c3aad5c9ba6289d58c6",
+    "b-evidence-desktop.svg": "a4106fd37153dd7d65896079eed73a1253bfc459e3d9aa45090763e081aa85b2",
+    "b-measurement-390.svg": "dfc7c415097fe50f3a70eb4ff5af89fd043ba80768e89d05e8a4dc4fb16146b8",
+    "b-measurement-changed-390.svg": "500c60e0da60b38745c0491c97714177a8e3d98ac7bceb6ce6b351d505d9949a",
+    "b-measurement-changed-desktop.svg": "a2762a83313ff3bc87ef59098a143fef64aea98b94360d94ed6487f630474f20",
+    "b-measurement-desktop.svg": "3de51d57696405e48feee36912131cb7630b45df48a01f89f2e5ab69c18fc396",
+    "build-index.py": "68f375f38129d18cb7052109264a062c278490e42b5e5299e7666e39c6fecda1",
+    "build-user-views.py": "a9ccf57e7685d8f0080f198e9bcfe7edd6cd5acb3b8bfd5b3567f918d08b06b2",
+    "index.html": "bb7bd976eee548ba1b6817d896ac16ba48877bfc033f9563f509270028ab4fcb",
+    "outside-legend.md": "0c969e06f58df87e7d8dbc4cfe11a9387d0457ecccf71fc99c9f957a4c500032",
+    "render-log.txt": "7c447ad4055ac0e813afa970bf410fe300afadb1bd722775498dd7a785b584d7",
+    "rendered/a-evidence-390.png": "2186f4758516a96292dbb50829a2029c68ed4eb43b4333eaac577af0a34e8702",
+    "rendered/a-evidence-desktop.png": "b21eeb523ecc0c6f2311649ac7dd9c061db39960b1ef3b0fc200602def2dbb86",
+    "rendered/a-measurement-390.png": "44fd05d66c7e7fa9db16d7ee6655dd61fc7d0d87902bb1094814d55737ec4cf1",
+    "rendered/a-measurement-desktop.png": "95c51955f6dafbe54319354d3500ee6a98bba456d71ab71718b3f955bacb300b",
+    "rendered/b-evidence-390.png": "5baa423aac7bda9c9b29fbfab115834956325a5c8643450064cd946eb2911566",
+    "rendered/b-evidence-desktop.png": "5833b732126fa1406ab6080acfa363162d7b084c5230dbc8e8527b1a606290e9",
+    "rendered/b-measurement-390.png": "5d665d9301a3152394e89ea6f63aa36e49f17deecfab0717c32071ecaee193f4",
+    "rendered/b-measurement-changed-390.png": "c28cce7267bcd8712f440d6039df0319ff6e97bf974271e9918e5da4af6eabb1",
+    "rendered/b-measurement-changed-desktop.png": "f6c73fc6251772c68c9cba8dcd9ae2a31b1e4219e0f9f1881d71384db229de7f",
+    "rendered/b-measurement-desktop.png": "8c1499688a52d71bab4ebeb645fc72a48dab5497715ce4b063a863769cb10a45",
+    "validate-user-views.py": "f5ec372f96340a05534e9054e42599c19a2b4cbe53a00fe32f552a7939431c6f",
+    "wireframe-manifest.json": "ddc07d39c81dc6e36f5f6bb67270e075e40d18e74c8c36eaba966f26ae935220"
+  }
+}

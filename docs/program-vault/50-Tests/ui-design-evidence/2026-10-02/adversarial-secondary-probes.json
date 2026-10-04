@@ -1,0 +1,122 @@
+{
+  "method": "independent WCAG luminance math and AST-extracted original read methods on synthetic in-memory SQLite; no browser",
+  "color_results": [
+    {
+      "label": "drop-zone OLD base-rule pair (overridden in create form)",
+      "foreground": "#8a948f",
+      "background": "#f2f8ec",
+      "ratio": 2.8918383620435404,
+      "normal_text_aa": false,
+      "large_text_aa": false
+    },
+    {
+      "label": "drop-zone OLD base-rule pair (overridden in create form)",
+      "foreground": "#8a948f",
+      "background": "#fafcf7",
+      "ratio": 3.028643129250047,
+      "normal_text_aa": false,
+      "large_text_aa": true
+    },
+    {
+      "label": "drop-zone actual default background after all-width create-form overrides",
+      "foreground": "#8a948f",
+      "background": "#ffffff",
+      "ratio": 3.128141841795455,
+      "normal_text_aa": false,
+      "large_text_aa": true
+    },
+    {
+      "label": "orange on nominal card / actual registry overview endpoints",
+      "foreground": "#e87941",
+      "background": "#fffef9",
+      "ratio": 2.871495405883727,
+      "normal_text_aa": false,
+      "large_text_aa": false
+    },
+    {
+      "label": "orange on nominal card / actual registry overview endpoints",
+      "foreground": "#e87941",
+      "background": "#f8faf5",
+      "ratio": 2.7592975901680834,
+      "normal_text_aa": false,
+      "large_text_aa": false
+    },
+    {
+      "label": "orange on nominal card / actual registry overview endpoints",
+      "foreground": "#e87941",
+      "background": "#f1f5ed",
+      "ratio": 2.6267391655205534,
+      "normal_text_aa": false,
+      "large_text_aa": false
+    },
+    {
+      "label": "analysis side status, actual override",
+      "foreground": "#97451d",
+      "background": "#f2f5ef",
+      "ratio": 5.991741353458703,
+      "normal_text_aa": true,
+      "large_text_aa": true
+    },
+    {
+      "label": "solid field focus border on white",
+      "foreground": "#1c6b50",
+      "background": "#ffffff",
+      "ratio": 6.425377018909027,
+      "normal_text_aa": true,
+      "large_text_aa": true
+    },
+    {
+      "label": "qualitative matrix focus override on white",
+      "foreground": "#2975be",
+      "background": "#ffffff",
+      "ratio": 4.791960055798523,
+      "normal_text_aa": true,
+      "large_text_aa": true
+    },
+    {
+      "label": "35%-green focus ring only",
+      "background": "#fffef9",
+      "ratio": 1.721903225052044,
+      "non_text_aa": false
+    },
+    {
+      "label": "35%-green focus ring only",
+      "background": "#f4f5f0",
+      "ratio": 1.692321025658332,
+      "non_text_aa": false
+    },
+    {
+      "label": "35%-green focus ring only",
+      "background": "#ffffff",
+      "ratio": 1.7250457434138058,
+      "non_text_aa": false
+    },
+    {
+      "label": "orange on semi-transparent save bar, black/white backdrop bounds",
+      "alpha": 0.95,
+      "ratio_bounds": [
+        2.5709018108442634,
+        2.8728893432134126
+      ],
+      "all_below_normal_text_aa": true
+    },
+    {
+      "label": "orange on semi-transparent save bar, black/white backdrop bounds",
+      "alpha": 0.96,
+      "ratio_bounds": [
+        2.629389913330198,
+        2.872610471371078
+      ],
+      "all_below_normal_text_aa": true
+    }
+  ],
+  "history": {
+    "synthetic_rows": 105,
+    "list_count": 100,
+    "comparison_count": 100,
+    "newest_id": "synthetic_104",
+    "oldest_listed_id": "synthetic_005",
+    "oldest_still_gettable_by_id": "synthetic_000",
+    "rows_deleted": 0
+  }
+}

@@ -96,7 +96,7 @@ def register_analysis_view_routes(
             research = build_research_analysis(analysis)
             export = request.args.get("format") == "csv"
             result = search_kwic(analysis, research["linguistics"]["morphemes"],
-                                 request.args.get("q", ""), mode=request.args.get("mode", "literal"),
+                                 request.args.get("q", ""), mode=request.args.get("mode", "normalized"),
                                  speaker=request.args.get("speaker", ""),
                                  offset=0 if export else offset, limit=None if export else limit)
             if export:

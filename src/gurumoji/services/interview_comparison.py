@@ -65,9 +65,14 @@ def build_interview_comparison(
             "objective": profile.get("objective", ""),
             "included_segment_count": len(included),
             "speaker_count": int(overview.get("speaker_count") or 0),
-            "participant_count": int(overview.get("participant_count") or 0),
-            "session_duration": float(overview.get("session_duration") or 0),
-            "total_speaking_seconds": float(overview.get("total_speaking_seconds") or 0),
+            "participant_count": overview.get("participant_count"),
+            "observed_participant_count": overview.get("observed_participant_count"),
+            "session_duration": overview.get("session_duration"),
+            "session_timed_turn_count": overview.get("session_timed_turn_count"),
+            "session_missing_time_turn_count": overview.get("session_missing_time_turn_count"),
+            "total_speaking_seconds": overview.get("total_speaking_seconds"),
+            "timed_turn_count": overview.get("timed_turn_count"),
+            "missing_time_turn_count": overview.get("missing_time_turn_count"),
             "term_count": term_totals[item_id],
             "excluded_segment_count": int(
                 analysis["automatic"]["data_quality"].get("excluded_segments") or 0

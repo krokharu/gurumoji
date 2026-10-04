@@ -1,0 +1,25 @@
+{
+  "record_kind": "example_only_not_an_observation",
+  "schema_version": 1,
+  "task_id": "Wxx-Sxx-example",
+  "observed_at_utc": null,
+  "target_commit": null,
+  "working_tree_manifest": null,
+  "design_or_prompt_revision": null,
+  "source_ids": [],
+  "hypothesis": "対象版を明示すると、別のrunを現在データとして読む誤りが減るか",
+  "evidence_kind": "not_run",
+  "environment": {"browser": null, "viewport": null, "assistive_technology": null},
+  "comparison": {"baseline": null, "candidate": null, "assignment": null},
+  "task_and_fixture": {"scenario_id": null, "synthetic_fixture_hash": null, "conditions": null},
+  "metrics": [
+    {"name": "correct_target_and_version_completion", "definition": "指定された対象と版で課題を完遂した試行", "numerator": null, "denominator": null, "unit": "trial"},
+    {"name": "time_to_verified_evidence", "definition": "開始点から正しい版の根拠へ戻った時点まで。測定条件と打切り規則を事前に指定", "observations": [], "unit": "seconds"},
+    {"name": "lost_edit_count", "definition": "保存・移動・再接続後に回復できなかった合成編集数", "count": null, "denominator": null, "unit": "edit"}
+  ],
+  "result": "not_run",
+  "evidence_refs": [],
+  "limitations": ["例示用。実測値、効果、利用者実験結果を含まない"],
+  "decision": null,
+  "next_check": null
+}

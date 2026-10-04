@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Mapping
 
+from ...ai_effort import cleanup_enabled
 from ..ai.transcript_finishing import run_full_cleanup
 
 def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any]) -> None:
@@ -718,7 +719,9 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 segments,
                 check_cancelled=check_cancelled,
                 create_context_outline=create_context_outline,
-                clean_with_outline=clean_with_outline if options.clean_transcript else None,
+                clean_with_outline=(clean_with_outline
+                                    if options.clean_transcript and cleanup_enabled(options.ai_efforts)
+                                    else None),
                 review_with_jev=review_original_with_jev if options.jev_compare else None,
                 attach_jev=attach_jev_comparison,
                 on_failure=warn_full_cleanup,
@@ -944,6 +947,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             check_cancelled,
             formatting_result=formatting_result,
             write_word_cloud_file=options.write_word_cloud,
+            session_profile=session_profile,
         )
         check_cancelled()
         set_stage("output", "結果ファイルの保存", 45)

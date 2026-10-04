@@ -31,6 +31,40 @@ const analysisAdvisorModelField = document.querySelector('#analysis-advisor-mode
 const analysisAdvisorProposeButton = document.querySelector('#analysis-advisor-propose');
 const analysisAdvisorFlow = document.querySelector('#analysis-advisor-flow');
 const analysisAdvisorResult = document.querySelector('#analysis-advisor-result');
+let analysisDialogGeneration = 0;
+let analysisAdvisorGeneration = 0;
+let analysisStartOwner = null;
+let analysisPlanGeneration = 0;
+let analysisRunOwner = 0;
+const analysisRunOperations = new Map();
+function captureAnalysisDialog() {
+  const context = captureAnalysisContext();
+  const generation = analysisDialogGeneration;
+  return {context, current: () => generation === analysisDialogGeneration && analysisRunDialog?.open && isAnalysisContextCurrent(context)};
+}
+function invalidateAnalysisDialog() {
+  ++analysisDialogGeneration;
+  ++analysisAdvisorGeneration;
+  ++analysisPlanGeneration;
+  if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = false;
+}
+function closeAnalysisExecutionDialog() {
+  // Native close events may be delivered after another opening; retire now.
+  invalidateAnalysisDialog();
+  if (!analysisRunDialog?.open) return false;
+  analysisRunDialog.close();
+  return true;
+}
+function captureAnalysisRun(operation) {
+  const itemId = analysisExecutionState.itemId, id = analysisExecutionState.id;
+  const owner = analysisRunOwner, generation = analysisExecutionState.generation;
+  const token = {};
+  analysisRunOperations.set(operation, token);
+  return {itemId, id, current: () => owner === analysisRunOwner && id === analysisExecutionState.id
+    && itemId === analysisExecutionState.itemId && generation === analysisExecutionState.generation
+    && analysisRunOperations.get(operation) === token,
+    release: () => { if (analysisRunOperations.get(operation) === token) analysisRunOperations.delete(operation); }};
+}
 let analysisPlanningProposal = null;
 let analysisPlanningItemId = '';
 let analysisAdvisorItemId = '';
@@ -47,19 +81,261 @@ function analysisExecutionMode() {
   return document.querySelector('input[name="analysis_run_mode"]:checked')?.value || 'automatic';
 }
 
+const analysisMeasurementPresets = {
+  text_length: {name: '発話の文字数', description: '発話本文の文字数を数えます。内容の良さや重要度は測りません。', source: 'text', rule: 'text_length', type: 'number', level: 'ratio', method: 'descriptive', limits: '文字数は発話内容の意味・重要度・理解度を表しません。'},
+  duration: {name: '発話時間', description: '有効な開始・終了時刻の差を秒で測ります。', source: 'duration', rule: 'duration', type: 'number', level: 'ratio', method: 'descriptive', limits: '時刻不明・不正な発話は欠測です。重なりを含むため会議全体の長さとは一致しません。'},
+  speaker_frequency: {name: '話者ID別の度数', description: '各発話の話者IDをカテゴリとして数えます。', source: 'speaker', rule: 'identity', type: 'category', level: 'nominal', method: 'frequency', limits: '発話の分割単位に依存します。話者の役割・参加意欲・影響力を推定しません。'},
+  role_frequency: {name: '役割別の度数', description: '各発話に登録された役割をカテゴリとして数えます。', source: 'role', rule: 'identity', type: 'category', level: 'nominal', method: 'frequency', limits: '会話で明示設定した役割、話者管理の登録値、分析準備の発話別の役割を集計します。自動の「参加者」補完と記録元が不明な値は欠測です。分析準備の役割があれば優先し、本文から役割を推測しません。'}
+};
+let analysisMeasurement = null;
+function analysisMeasurementPreset() {
+  return analysisMeasurementPresets[document.querySelector('#analysis-definition-preset')?.value] || analysisMeasurementPresets.text_length;
+}
+function analysisMeasurementNewIdentity() {
+  const suffix = (typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : createSubmissionId()).replace(/[^A-Za-z0-9]/g, '').slice(0, 32);
+  return `measure_${suffix}`;
+}
+function analysisMeasurementReset() {
+  analysisMeasurement = {context: captureAnalysisContext(), touched: new Set(), saved: null, trial: null, adopted: null, operation: null};
+  for (const key of ['name', 'id', 'description', 'output']) {
+    const input = document.querySelector(`#analysis-definition-${key}`);
+    if (input) input.value = '';
+  }
+  analysisMeasurementFillGenerated();
+}
+function analysisMeasurementFillGenerated() {
+  const state = analysisMeasurement, preset = analysisMeasurementPreset();
+  if (!state) return;
+  const generatedId = analysisMeasurementNewIdentity();
+  const values = {name: preset.name, description: preset.description, id: generatedId, output: generatedId};
+  for (const [key, value] of Object.entries(values)) {
+    const input = document.querySelector(`#analysis-definition-${key}`);
+    if (input && !state.touched.has(key) && (key !== 'id' && key !== 'output' || !input.value)) input.value = value;
+  }
+}
+function analysisMeasurementFingerprint() { return JSON.stringify(analysisExecutionDefinitionFromForm('draft')); }
+function analysisMeasurementCurrent() { return analysisMeasurement && isAnalysisContextCurrent(analysisMeasurement.context); }
+function analysisMeasurementRefreshContext() {
+  const previous = analysisMeasurement;
+  if (!previous || analysisMeasurementCurrent()
+      || previous.context.itemId !== analysisState.itemId
+      || previous.context.navigation !== analysisNavigationGeneration || !analysisState.data) return false;
+  const protectStoredIdentity = Boolean(previous.saved || previous.adopted || previous.pendingAdoption || previous.operation);
+  analysisMeasurement = {context: captureAnalysisContext(), touched: new Set(previous.touched),
+    saved: null, trial: null, adopted: null, operation: null,
+    contextNotice: '入力版が更新されました。定義の文言を保持し、前の試行・採用を失効しました。下書き保存と少数試行から確認してください。'};
+  if (protectStoredIdentity) {
+    // Preserve any already stored or uncertain old definition; never rewrite it.
+    document.querySelector('#analysis-definition-id').value = analysisMeasurementNewIdentity();
+    analysisMeasurement.touched.delete('id');
+    analysisMeasurement.contextNotice += ' 旧定義を保つため別の下書きIDを用意しました。';
+  }
+  const confirm = document.querySelector('#analysis-definition-confirm');
+  if (confirm) confirm.checked = false;
+  analysisMeasurementRender();
+  analysisExecutionUpdatePlanSummary({preserveMessage: true});
+  if (analysisRunDialog?.open) analysisExecutionSetDialogMessage(analysisMeasurement.contextNotice
+    + (hasUnsavedAnalysisChanges() ? ' 分析設定に追加の未保存変更があります。先に保存してください。' : ''), true);
+  return true;
+}
+function analysisMeasurementInvalidate(event) {
+  if (!analysisMeasurementCurrent()) return;
+  const state = analysisMeasurement;
+  ++analysisPlanGeneration;
+  const key = event?.target?.id?.replace('analysis-definition-', '');
+  if (['name', 'id', 'description', 'output'].includes(key)) state.touched.add(key);
+  if (state.adopted) {
+    // Keep the adopted record intact. An edit always begins another identity.
+    const id = analysisMeasurementNewIdentity();
+    const explicitNewId = key === 'id' && document.querySelector('#analysis-definition-id').value !== state.adopted.definition_id;
+    if (!explicitNewId) document.querySelector('#analysis-definition-id').value = id;
+    if (!explicitNewId) state.touched.delete('id');
+    state.saved = null;
+  } else if (key === 'id') state.saved = null;
+  state.operation = null; state.trial = null; state.adopted = null; state.blocked = false;
+  const confirm = document.querySelector('#analysis-definition-confirm');
+  if (confirm) confirm.checked = false;
+  analysisMeasurementFillGenerated();
+  analysisMeasurementRender();
+  analysisExecutionUpdatePlanSummary();
+}
+function analysisMeasurementRender() {
+  const state = analysisMeasurement, preset = analysisMeasurementPreset();
+  const definition = analysisExecutionDefinitionFromForm();
+  const current = analysisMeasurementCurrent();
+  const unchanged = current && state.saved && state.saved.fingerprint === analysisMeasurementFingerprint();
+  const busy = Boolean(state?.operation || state?.pendingAdoption);
+  const analysisUnsaved = hasUnsavedAnalysisChanges();
+  const confirmed = Boolean(document.querySelector('#analysis-definition-confirm')?.checked);
+  const setText = (selector, text) => { const node = document.querySelector(selector); if (node) node.textContent = text; };
+  setText('#analysis-definition-summary', `定義名: ${definition.name || '未入力'} ／ ID: ${definition.definition_id || '未入力'} ／ 列: ${definition.output_column || '未入力'} ／ 説明: ${definition.description || '未入力'}`);
+  setText('#analysis-definition-conditions', `計算条件（読取専用）: 発話単位 / 入力 ${preset.source} / 規則 ${preset.rule} / 型 ${preset.type} / 尺度 ${preset.level} / 集計 ${preset.method} / 分母は対象発話全体 / 欠測は理由付きnull`);
+  setText('#analysis-definition-limits', `測定の限界: ${preset.limits} 試行は固定された最大20発話です。全件の代表性を保証しません。外部AIへの送信はありません。`);
+  setText('#analysis-definition-state', state?.pendingAdoption ? '採用結果が未確定です。保存状態の確認前にもう一度更新しません。' : state?.adopted ? `採用済み: 第${state.adopted.version}版。下の「全件分析を開始」で実行します。`
+    : state?.trial ? '試行結果を確認し、チェックを付けてから採用してください。'
+      : unchanged ? '下書き保存済み。少数試行はまだ採用されていません。' : '未保存の測定下書きです。');
+  const stateNotice = document.querySelector('#analysis-definition-state');
+  if (state?.contextNotice && stateNotice) stateNotice.textContent = `${state.contextNotice} ${stateNotice.textContent}`;
+  for (const [selector, disabled] of [
+    ['#analysis-definition-save', busy || !current || analysisUnsaved || Boolean(state?.blocked)], ['#analysis-definition-trial', busy || !unchanged || analysisUnsaved || Boolean(state?.adopted) || Boolean(state?.blocked)],
+    ['#analysis-definition-confirm', busy || !state?.trial || Boolean(state?.adopted)],
+    ['#analysis-definition-adopt', busy || !state?.trial || !confirmed || analysisUnsaved || Boolean(state?.adopted)]
+  ]) { const button = document.querySelector(selector); if (button) button.disabled = disabled; }
+  const inspect = document.querySelector('#analysis-definition-inspect');
+  if (inspect) { inspect.hidden = !state?.pendingAdoption;inspect.disabled = Boolean(state?.operation); }
+  document.querySelectorAll('#analysis-manual-definition input:not([type="checkbox"]), #analysis-definition-preset').forEach(control => { control.disabled = busy; });
+  const host = document.querySelector('#analysis-definition-trial-result');
+  if (!host) return;
+  host.replaceChildren();
+  const trial = state?.trial;
+  if (!trial) return;
+  const note = document.createElement('p');
+  note.textContent = `固定試行 ${trial.sample_size}件 / 対象${trial.total_count}件・除外${trial.excluded_count}件 / 有効${trial.valid_count}件・欠測${trial.missing_count}件 / 定義 第${trial.definition_version}版・revision ${trial.definition_revision} / 入力 ${trial.input_hash} / 本文と音声は現在のデータから補完しません。`;
+  const table = document.createElement('table'); table.className = 'analysis-table';
+  const caption = document.createElement('caption'); caption.textContent = '保存された試行行（欠測はnullと理由を表示）';table.append(caption);
+  const columns = [...new Set((trial.rows || []).flatMap(row => Object.keys(row)))];
+  const head = document.createElement('tr');for (const key of columns) { const th = document.createElement('th');th.scope = 'col';th.textContent = key;head.append(th); }table.append(head);
+  for (const row of trial.rows || []) {
+    const tr = document.createElement('tr');
+    for (const key of columns) {
+      const td = document.createElement('td');
+      td.textContent = row[key] === null ? 'null（欠測）' : row[key] === undefined ? '—' : String(row[key]);
+      if (key.endsWith('__missing_reason') && row[key] === 'role_not_recorded') {
+        td.textContent += '（役割未記録：自動補完は測定に使用しません）';
+      } else if (key.endsWith('__missing_reason') && row[key] === 'role_provenance_unknown') {
+        td.textContent += '（役割の記録元不明：旧データ等）';
+      }
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+  const wrap = document.createElement('div');wrap.className = 'analysis-table-wrap';wrap.append(table);host.append(note, wrap);
+}
+function analysisExecutionSyncDisplay() {
+  const detail = document.querySelector('input[name="analysis_display_mode"]:checked')?.value === 'detail';
+  document.querySelectorAll('[data-analysis-detail]').forEach(node => { node.hidden = !detail; });
+}
+async function analysisMeasurementInspect() {
+  const state = analysisMeasurement;
+  if (!analysisMeasurementCurrent() || !state.pendingAdoption) return;
+  if (state.operation) {
+    const waitingDialog = captureAnalysisDialog(), pending = state.pendingAdoption;
+    if (!state.operation.finished) return;
+    await state.operation.finished;
+    if (waitingDialog.current() && state === analysisMeasurement && state.pendingAdoption === pending) return analysisMeasurementInspect();
+    return;
+  }
+  const pending = state.pendingAdoption, dialog = captureAnalysisDialog(), token = {};
+  token.finished = new Promise(resolve => { token.finish = resolve; });
+  state.operation = token;
+  const owns = () => state === analysisMeasurement && state.operation === token && state.pendingAdoption === pending
+    && dialog.current() && pending.fingerprint === analysisMeasurementFingerprint();
+  analysisMeasurementRender();
+  try {
+    const result = await analysisExecutionRequestJson(pending.base, {cache: 'no-store'});
+    if (!owns()) return;
+    const definition = result.definition;
+    const same = !definition.validation_error && Object.entries(pending.draft).every(([key, value]) => key === 'status' || JSON.stringify(definition[key]) === JSON.stringify(value));
+    if (same && definition.status === 'adopted' && definition.last_trial?.trial_id === pending.trial.trial_id
+        && definition.last_trial?.input_hash === pending.trial.input_hash && definition.last_trial?.definition_hash === pending.trial.definition_hash) {
+      state.adopted = definition; state.trial = pending.trial; state.saved = {definition, fingerprint: pending.fingerprint};
+      state.pendingAdoption = null;state.blocked = false;
+      analysisExecutionSetDialogMessage('確認済み試行と一致する採用版を保存先で確認しました。');
+    } else if (same && definition.status === 'draft') {
+      state.saved = {definition, fingerprint: pending.fingerprint};state.trial = null;state.adopted = null;
+      state.pendingAdoption = null;state.blocked = false;
+      analysisExecutionSetDialogMessage('保存先は下書きです。少数試行から確認し直してください。');
+    } else {
+      state.trial = null;state.adopted = null;state.pendingAdoption = null;state.blocked = true;
+      analysisExecutionSetDialogMessage('保存先の定義が変更・廃止されています。別の定義IDで下書きを作成してください。', true);
+    }
+  } catch (error) {
+    if (owns()) analysisExecutionSetDialogMessage('採用の保存状態を取得できませんでした。「保存状態を再確認」で取得するまで更新を止めています。', true);
+  } finally {
+    const refresh = state === analysisMeasurement && state.operation === token
+      && analysisMeasurementCurrent() && analysisRunDialog?.open;
+    if (state.operation === token) state.operation = null;
+    token.finish();
+    if (refresh) { analysisMeasurementRender();analysisExecutionUpdatePlanSummary({preserveMessage:true}); }
+  }
+}
+
+async function analysisMeasurementAction(action) {
+  if (!analysisMeasurementCurrent() || analysisMeasurement.operation) return;
+  if (analysisMeasurement.pendingAdoption) { await analysisMeasurementInspect(); return; }
+  if (analysisMeasurement.blocked) return;
+  const validation = analysisExecutionValidateDefinition();
+  if (validation) { analysisExecutionSetDialogMessage(validation, true); return; }
+  const state = analysisMeasurement, dialog = captureAnalysisDialog(), fingerprint = analysisMeasurementFingerprint();
+  const token = {}; token.finished = new Promise(resolve => { token.finish = resolve; }); state.operation = token;
+  let adoptionSubmitted = false;
+  const owns = () => state === analysisMeasurement && state.operation === token && dialog.current() && fingerprint === analysisMeasurementFingerprint();
+  const draft = analysisExecutionDefinitionFromForm('draft');
+  const base = `/api/library/${encodeURIComponent(state.context.itemId)}/analysis/definitions/${encodeURIComponent(draft.definition_id)}`;
+  const headers = {'Content-Type': 'application/json'};
+  analysisMeasurementRender();
+  try {
+    if (action === 'save') {
+      if (state.adopted) throw new Error('採用済み定義は保持されます。編集すると別の下書きになります。');
+      const result = await analysisExecutionRequestJson(base, {method: 'PUT', headers, body: JSON.stringify({...draft, expected_revision: state.saved?.definition.definition_id === draft.definition_id ? state.saved.definition.revision : 0})});
+      if (!owns()) return;
+      state.saved = {definition: result.definition, fingerprint};state.trial = null;state.adopted = null;state.contextNotice = '';
+    } else if (action === 'trial') {
+      if (!state.saved || state.saved.fingerprint !== fingerprint || state.adopted) throw new Error('変更した下書きを先に保存してください。');
+      state.trial = null;
+      document.querySelector('#analysis-definition-confirm').checked = false;
+      analysisMeasurementRender();
+      const result = await analysisExecutionRequestJson(`${base}/trials`, {method: 'POST', headers, body: JSON.stringify({limit: 20})});
+      if (!owns()) return;
+      if (result.trial.definition_id !== draft.definition_id || result.trial.definition_revision !== state.saved.definition.revision || result.trial.definition_version !== state.saved.definition.version) throw new Error('試行中に定義が更新されました。下書きを再読込してください。');
+      state.trial = result.trial;
+      document.querySelector('#analysis-definition-confirm').checked = false;
+    } else if (action === 'adopt') {
+      if (!state.trial || !document.querySelector('#analysis-definition-confirm')?.checked || state.adopted) throw new Error('固定試行を確認し、確認欄にチェックしてください。');
+      adoptionSubmitted = true;
+      state.pendingAdoption = {base, draft, trial: state.trial, fingerprint};
+      const result = await analysisExecutionRequestJson(base, {method: 'PUT', headers, body: JSON.stringify({...draft, status: 'adopted', expected_revision: state.saved.definition.revision, expected_trial: state.trial})});
+      if (!owns()) return;
+      state.pendingAdoption = null;
+      state.adopted = result.definition;
+      state.saved = {definition: result.definition, fingerprint};
+    }
+    if (owns()) analysisExecutionSetDialogMessage('');
+  } catch (error) {
+    if (!owns()) return;
+    if (action === 'adopt' && adoptionSubmitted) {
+      state.operation = null;
+      document.querySelector('#analysis-definition-confirm').checked = false;
+      await analysisMeasurementInspect();
+    } else if (action === 'save' && !state.saved && !state.touched.has('id')
+        && (error.code === 'revision_conflict' || error.status === 409)) {
+      document.querySelector('#analysis-definition-id').value = analysisMeasurementNewIdentity();
+      if (!state.touched.has('output')) document.querySelector('#analysis-definition-output').value = document.querySelector('#analysis-definition-id').value;
+      state.trial = null;state.operation = null;
+      analysisMeasurementRender();
+      analysisExecutionUpdatePlanSummary({preserveMessage:true});
+      analysisExecutionSetDialogMessage('生成IDが既存の定義と重なりました。別の下書きIDを用意しました。内容を確認して保存してください。', true);
+    } else analysisExecutionSetDialogMessage(error.message, true);
+  } finally {
+    // A reopened dialog still displays this same operation's busy state.
+    // Release its controls without accepting the retired opening's result.
+    const refresh = state === analysisMeasurement && state.operation === token
+      && analysisMeasurementCurrent() && analysisRunDialog?.open;
+    if (state.operation === token) state.operation = null;
+    token.finish();
+    if (refresh) { analysisMeasurementRender(); analysisExecutionUpdatePlanSummary({preserveMessage: true}); }
+  }
+}
+
 function analysisExecutionDefinitionFromForm(status = 'draft') {
-  const source = document.querySelector('#analysis-definition-source')?.value || 'text';
-  const rule = document.querySelector('#analysis-definition-rule')?.value || 'text_length';
+  const preset = analysisMeasurementPreset();
   return {
     definition_id: document.querySelector('#analysis-definition-id')?.value.trim() || '',
     name: document.querySelector('#analysis-definition-name')?.value.trim() || '',
     description: document.querySelector('#analysis-definition-description')?.value.trim() || '',
-    unit_of_analysis: 'segment', source_columns: [source],
+    unit_of_analysis: 'segment', source_columns: [preset.source], aggregation: 'none', missing_rule: 'null_with_reason', denominator: 'all_included_segments',
     output_column: document.querySelector('#analysis-definition-output')?.value.trim() || '',
-    data_type: document.querySelector('#analysis-definition-type')?.value || (rule === 'identity' ? 'category' : 'number'),
-    measurement_level: document.querySelector('#analysis-definition-level')?.value || (rule === 'identity' ? 'nominal' : 'ratio'),
-    measurement_rule: rule,
-    method: document.querySelector('#analysis-definition-method')?.value || 'descriptive',
+    data_type: preset.type, measurement_level: preset.level, measurement_rule: preset.rule, method: preset.method,
     status
   };
 }
@@ -80,7 +356,17 @@ function analysisExecutionSyncManualFields() {
 function analysisExecutionValidatePlan() {
   if (!analysisState.itemId || !analysisState.data) return '先に分析対象を読み込んでください。';
   if (hasUnsavedAnalysisChanges()) return '未保存の分析設定・手動コード・準備記録があります。保存してから実行してください。';
+  if (typeof isAnalysisOrchestrationActive === 'function' && isAnalysisOrchestrationActive()) return '自律分析の実行または開始確認中です。保存済み実行の状態を確認してください。';
   if (analysisExecutionMode() !== 'manual') return '';
+  const error = analysisExecutionValidateDefinition();
+  if (error) return error;
+  if (!analysisMeasurementCurrent() || !analysisMeasurement.adopted || !analysisMeasurement.trial
+      || analysisMeasurement.saved?.fingerprint !== analysisMeasurementFingerprint()) return '下書きを保存し、少数試行を確認して採用してから全件分析を開始してください。';
+  return '';
+}
+
+function analysisExecutionValidateDefinition() {
+  if (!analysisState.itemId || !analysisState.data || hasUnsavedAnalysisChanges()) return '対象の分析設定・準備記録を保存してください。';
   const value = analysisExecutionDefinitionFromForm();
   if (!value.name) return '手動実行ではラベル名を入力してください。';
   if (!/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(value.definition_id)) return '定義IDは英字で始まる3〜64文字の英数字・_・-です。';
@@ -92,7 +378,7 @@ function analysisExecutionValidatePlan() {
   return '';
 }
 
-function analysisExecutionUpdatePlanSummary() {
+function analysisExecutionUpdatePlanSummary(options = {}) {
   analysisExecutionSyncManualFields();
   const manual = analysisExecutionMode() === 'manual';
   const summary = document.querySelector('#analysis-run-plan-summary');
@@ -110,16 +396,22 @@ function analysisExecutionUpdatePlanSummary() {
     }
   }
   const error = analysisExecutionValidatePlan();
-  analysisExecutionSetDialogMessage(error, Boolean(error));
-  if (analysisRunStartButton) analysisRunStartButton.disabled = Boolean(error);
+  if (!options.preserveMessage) analysisExecutionSetDialogMessage(error, Boolean(error));
+  if (analysisRunStartButton) analysisRunStartButton.disabled = Boolean(error || analysisStartOwner);
 }
 
 function openAnalysisExecutionDialog(options = {}) {
   if (!analysisRunDialog || typeof analysisRunDialog.showModal !== 'function') return;
+  if (typeof isAnalysisOrchestrationActive === 'function' && isAnalysisOrchestrationActive()) { showAnalysisOrchestration(); return; }
   if (analysisExecutionState.active) {
     showAnalysisExecutionView();
     return;
   }
+  invalidateAnalysisDialog();
+  if (!analysisMeasurementCurrent() && !analysisMeasurementRefreshContext()) analysisMeasurementReset();
+  if (document.querySelector('#analysis-definition-confirm')) document.querySelector('#analysis-definition-confirm').checked = false;
+  analysisMeasurementRender();
+  analysisExecutionSyncDisplay();
   const requestedMode = options.mode === 'manual' ? 'manual' : 'automatic';
   if (analysisPlanningItemId && analysisPlanningItemId !== analysisState.itemId) {
     analysisPlanningProposal = null;
@@ -137,10 +429,14 @@ function openAnalysisExecutionDialog(options = {}) {
   if (details) details.open = Boolean(options.showDetails || requestedMode === 'manual');
   analysisExecutionUpdatePlanSummary();
   if (!analysisRunDialog.open) analysisRunDialog.showModal();
+  if (analysisMeasurement?.pendingAdoption) analysisMeasurementInspect();
   window.requestAnimationFrame(() => document.querySelector('input[name="analysis_run_mode"]:checked')?.focus());
 }
 
 function analysisAdvisorClearProposal() {
+  ++analysisAdvisorGeneration;
+  ++analysisPlanGeneration;
+  if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = false;
   analysisPlanningProposal = null;
   analysisPlanningItemId = '';
   if (analysisAdvisorFlow) { analysisAdvisorFlow.hidden = true; analysisAdvisorFlow.replaceChildren(); }
@@ -216,6 +512,9 @@ async function analysisAdvisorPropose() {
   const item = analysisState.data.item;
   const requestedItemId = analysisState.itemId;
   analysisAdvisorClearProposal();
+  const dialog = captureAnalysisDialog();
+  const owner = ++analysisAdvisorGeneration;
+  const owns = () => dialog.current() && owner === analysisAdvisorGeneration;
   renderAnalysisAdvisorFlow({state: 'running', objective, provider: selected, model: selectedModel});
   if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = true;
   analysisExecutionSetDialogMessage('計画候補を生成しています。');
@@ -230,7 +529,7 @@ async function analysisAdvisorPropose() {
         provider_policy: cloud ? 'cloud_allowed' : 'local_only'
       })
     });
-    if (analysisState.itemId !== requestedItemId || analysisAdvisorEngine?.value !== selected
+    if (!owns() || analysisState.itemId !== requestedItemId || analysisAdvisorEngine?.value !== selected
         || analysisAdvisorObjective?.value.trim() !== objective
         || (selected !== 'transformer' && (analysisAdvisorModel?.value.trim() || '') !== selectedModel)) return;
     analysisPlanningProposal = response.proposal;
@@ -255,11 +554,11 @@ async function analysisAdvisorPropose() {
     analysisExecutionUpdatePlanSummary();
     analysisExecutionSetDialogMessage('計画候補を確認しました。開始すると既存2手法を実行し、候補を実行記録へ残します。');
   } catch (error) {
-    if (analysisState.itemId !== requestedItemId) return;
+    if (!owns()) return;
     renderAnalysisAdvisorFlow({state: 'failed', objective, provider: selected, model: selectedModel});
     analysisExecutionSetDialogMessage(error.message || '計画候補を生成できませんでした。', true);
   } finally {
-    if (analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = false;
+    if (owns() && analysisAdvisorProposeButton) analysisAdvisorProposeButton.disabled = false;
   }
 }
 
@@ -300,6 +599,8 @@ function analysisExecutionLogFromEvents(events) {
 }
 
 function analysisExecutionApplyResponse(response) {
+  if (response.pipeline_id && response.pipeline_id !== analysisExecutionState.id) return;
+  analysisExecutionState.generation = response.generation ?? analysisExecutionState.generation;
   analysisExecutionState.status = response.status;
   analysisExecutionState.active = ['accepted', 'running', 'waiting', 'cancelling'].includes(response.status)
     && response.allowed_actions?.includes('cancel');
@@ -317,13 +618,11 @@ function analysisExecutionApplyResponse(response) {
     ...(analysisExecutionState.settings || {}), progress: response.progress,
     planning: response.planning || null,
     publications: response.publications || [], allowedActions: response.allowed_actions || [],
+    recovery: response.recovery || null,
     error: response.error || '', waitReason: response.wait_reason || '', resultRun: response.result_run
   };
   analysisExecutionState.logs = analysisExecutionLogFromEvents(response.events);
   analysisExecutionState.cancelRequested = response.status === 'cancelling';
-  if (response.status === 'completed' && typeof loadAnalysisItem === 'function' && analysisExecutionState.itemId) {
-    loadAnalysisItem(analysisExecutionState.itemId, {execute: true});
-  }
   if (['completed', 'cancelled', 'failed'].includes(response.status)) analysisExecutionClearPersisted();
   else analysisExecutionPersist();
   renderAnalysisExecution();
@@ -331,9 +630,9 @@ function analysisExecutionApplyResponse(response) {
 
 function analysisExecutionStatusLabel(status) {
   return {
-    pending: '待機', active: '実行中', waiting: '入力・回復待ち', committed: '完了',
+    idle: '開始準備', accepted: '受付済み', running: '実行中', cancelling: '中止待ち', completed: '処理完了', pending: '待機', active: '実行中', waiting: '入力・回復待ち', committed: '完了',
     failed: '失敗', cancelled: '取消', not_applicable: '対象外'
-  }[status] || status;
+  }[status] || `不明な状態 (${status || '未取得'})`;
 }
 
 function analysisExecutionPercent() {
@@ -390,8 +689,66 @@ function renderAnalysisExecutionFlow(current) {
   }));
 }
 
+function analysisExecutionPublicationEvidence() {
+  const settings = analysisExecutionState.settings || {};
+  const attempts = settings.resultRun?.publication_attempts || [];
+  const latest = attempts.at(-1);
+  const roles = ['research', 'input', 'orchestrator', 'visualization'];
+  const records = Object.fromEntries((settings.publications || []).map(row => [row.target_role, row]));
+  const notSelected = roles.every(role => records[role]?.status === 'not_selected');
+  const blocked = latest?.status === 'blocked' && Array.isArray(latest.executed) && latest.executed.length === 0;
+  const complete = latest?.status === 'completed' && roles.every(role => latest.effective?.includes(role)
+    && latest.executed?.includes(role) && latest.outcomes?.[role]?.status === 'published' && records[role]?.status === 'published');
+  return {attempts, latest, roles, records, notSelected, blocked, complete};
+}
+function analysisExecutionRetryAction() {
+  const settings = analysisExecutionState.settings || {};
+  if (settings.recovery?.mode === 'blocked' || analysisExecutionPublicationEvidence().blocked) return '';
+  return ['retry_publication', 'retry_failed'].find(action => settings.allowedActions?.includes(action)) || '';
+}
+function analysisExecutionHeadline() {
+  return {idle: '分析の開始準備', accepted: '分析を受け付けました', running: '分析を実行しています',
+    waiting: '分析は確認・回復を待っています', failed: '分析が失敗しました',
+    cancelling: '分析の中止を待っています', cancelled: '分析を中止しました', completed: '分析処理が完了しました'}[analysisExecutionState.status]
+    || `分析状態を確認できません（${analysisExecutionState.status || '不明'}）`;
+}
+function renderAnalysisPublicationEvidence() {
+  const host = document.querySelector('#analysis-execution-publications');
+  if (!host) return;
+  host.replaceChildren();
+  const evidence = analysisExecutionPublicationEvidence();
+  const heading = document.createElement('p');
+  heading.textContent = evidence.notSelected ? 'Vault保存は選択されていません。本体成果物のみが対象です。'
+    : evidence.blocked ? '保存済み固定packageの欠落・不整合により公開を停止しました。再計算や再生成で置き換えません。'
+      : evidence.complete ? '4つのVaultへの書出し成功を今回の試行記録で確認しました。'
+        : evidence.latest ? 'Vault保存は未完了です。保存先ごとの結果を確認してください。' : '4保存先の実行記録は不明です。旧履歴や記録未取得を保存成功とは判定しません。';
+  host.append(heading);
+  const list = document.createElement('ul');
+  const names = {research:'ResearchVault', input:'InputVault', orchestrator:'OrchestratorVault', visualization:'VisualizationVault'};
+  const statuses = {published:'書出し成功',publishing:'書出し中',not_selected:'対象外',pending:'待機',failed:'失敗',conflict:'競合',unknown:'不明',missing:'欠落',blocked:'停止'};
+  for (const role of evidence.roles) {
+    const record = evidence.records[role], outcome = evidence.latest?.outcomes?.[role];
+    const state = record?.status || 'unknown';
+    const row = document.createElement('li');
+    const hasExecutionRecord = Array.isArray(evidence.latest?.executed);
+    const executed = hasExecutionRecord ? (evidence.latest.executed.includes(role) ? '今回のwriter実行あり' : '今回のwriter実行なし') : 'writer実行記録不明';
+    const writerConfirmed = hasExecutionRecord && evidence.latest.executed.includes(role) && outcome?.status === 'published';
+    const label = state === 'published' && !writerConfirmed ? '台帳上published（書出し未確認）' : statuses[state] || `不明な状態 (${state})`;
+    row.textContent = `${names[role]}: ${label} / ${executed}${record?.error || outcome?.error ? ` / ${record?.error || outcome?.error}` : ''}`;
+    list.append(row);
+  }
+  host.append(list);
+  if (evidence.latest) { const note = document.createElement('p');note.textContent = `公開試行 ${evidence.latest.attempt_id} / 状態 ${evidence.latest.status} / package ${evidence.latest.package_hash || '不明'}`;host.append(note); }
+  const recovery = analysisExecutionState.settings?.recovery;
+  if (recovery?.mode === 'blocked' || recovery?.pending) {
+    const note = document.createElement('p');note.textContent = recovery.mode === 'blocked'
+      ? `自動回復は停止しています（${recovery.reason_code || '理由未取得'}）。利用可能な手動再開操作はありません。`
+      : '再起動後の自動回復を待っています。確定済みの成果物を保持します。';host.append(note);
+  }
+}
+
 function renderAnalysisExecution() {
-  if (analysisExecutionView && !analysisExecutionView.hidden) analysisExecutionSetWorkspaceVisibility(true);
+  if (analysisState.itemId === analysisExecutionState.itemId && analysisExecutionView && !analysisExecutionView.hidden) analysisExecutionSetWorkspaceVisibility(true);
   const stagesHost = document.querySelector('#analysis-execution-stages');
   if (stagesHost) {
     stagesHost.replaceChildren();
@@ -429,12 +786,11 @@ function renderAnalysisExecution() {
     const publications = analysisExecutionState.settings?.publications || [];
     const publicationFailure = publications.find(value => !['published', 'not_selected', 'pending'].includes(value.status));
     message.textContent = failed?.error || publicationFailure?.error || analysisExecutionState.settings?.error
-      || (analysisExecutionState.status === 'completed' ? '選択した成果物の保存と公開を確定しました。' : '固定した計画と親成果の確定順に処理しています。');
+      || (analysisExecutionState.status === 'completed' ? '本体の分析処理が完了しました。Vault保存の確認は下の実行記録を参照してください。' : analysisExecutionState.status === 'waiting' ? '停止理由と利用可能な操作を確認してください。' : analysisExecutionHeadline());
   }
   const heading = document.querySelector('#analysis-execution-title');
-  if (heading) heading.textContent = analysisExecutionState.status === 'completed' ? '分析が完了しました'
-    : analysisExecutionState.status === 'waiting' ? '分析を再開できます'
-      : analysisExecutionState.status === 'cancelled' ? '分析を中止しました' : '分析を実行しています';
+  if (heading) heading.textContent = analysisExecutionHeadline();
+  renderAnalysisPublicationEvidence();
   const summary = document.querySelector('#analysis-execution-summary');
   if (summary) summary.textContent = 'M0〜M7をサーバー側の永続ゲートで管理します。完了済み成果物は再試行時も保持されます。';
   const elapsed = document.querySelector('#analysis-execution-elapsed');
@@ -459,11 +815,13 @@ function renderAnalysisExecution() {
     cancel.disabled = analysisExecutionState.cancelRequested;
     cancel.textContent = analysisExecutionState.cancelRequested ? '中止を待っています…' : '分析を中止';
   }
-  if (results) results.hidden = analysisExecutionState.status !== 'completed';
+  if (results) results.hidden = !analysisExecutionState.settings?.resultRun?.id
+    || analysisExecutionState.settings.resultRun.status !== 'completed';
   if (review) {
-    review.hidden = !['waiting', 'failed'].includes(analysisExecutionState.status);
-    review.textContent = analysisExecutionState.settings?.allowedActions?.includes('retry_publication')
-      ? '公開だけ再試行' : '失敗した処理を再試行';
+    const action = analysisExecutionRetryAction();
+    review.hidden = !action;
+    review.disabled = analysisRunOperations.has('retry');
+    review.textContent = action === 'retry_publication' ? '保存済みpackageから4保存先への公開だけ再試行' : '失敗した処理を再試行';
   }
   if (analysisRunButton) analysisRunButton.textContent = analysisExecutionState.active ? '実行状況を見る' : '分析を実行';
   if (analysisExecutionChip) {
@@ -473,7 +831,7 @@ function renderAnalysisExecution() {
     analysisExecutionChip.classList.toggle('has-error', ['waiting', 'failed'].includes(analysisExecutionState.status));
   }
   if (analysisExecutionChipLabel) analysisExecutionChipLabel.textContent = analysisExecutionState.active
-    ? `${current?.id || 'M0'} 実行中` : analysisExecutionState.status === 'completed' ? '分析完了' : '分析を確認';
+    ? `${current?.id || 'M0'} ${analysisExecutionStatusLabel(analysisExecutionState.status)}` : analysisExecutionStatusLabel(analysisExecutionState.status);
 }
 
 function analysisExecutionSetWorkspaceVisibility(showExecution) {
@@ -517,23 +875,24 @@ function hideAnalysisExecutionView({updateRoute = true} = {}) {
 async function analysisExecutionRequestJson(input, options = {}) {
   const response = await apiFetch(input, options);
   const data = await readJsonResponse(response);
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  if (!response.ok) { const error = new Error(data.error || `HTTP ${response.status}`); error.status = response.status;error.code = data.reason_code || data.code;throw error; }
   return data;
 }
 
 async function analysisExecutionPoll() {
-  if (!analysisExecutionState.id || analysisExecutionState.resuming) return;
-  analysisExecutionState.resuming = true;
+  if (!analysisExecutionState.id || analysisRunOperations.has('poll')) return;
+  const request = captureAnalysisRun('poll');
   try {
-    const data = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(analysisExecutionState.itemId)}/analysis/pipelines/${encodeURIComponent(analysisExecutionState.id)}`);
+    const data = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(request.itemId)}/analysis/pipelines/${encodeURIComponent(request.id)}`);
+    if (!request.current()) return;
     analysisExecutionApplyResponse(data);
   } catch (error) {
+    if (!request.current()) return;
     analysisExecutionState.logs.push(`状態取得失敗：${error.message}`);
     renderAnalysisExecution();
-  } finally {
-    analysisExecutionState.resuming = false;
-  }
-  if (['accepted', 'running', 'cancelling'].includes(analysisExecutionState.status)) {
+  } finally { request.release(); }
+  if (request.id === analysisExecutionState.id && request.itemId === analysisExecutionState.itemId
+      && ['accepted', 'running', 'cancelling'].includes(analysisExecutionState.status)) {
     window.clearTimeout(analysisExecutionState.pollTimer);
     analysisExecutionState.pollTimer = window.setTimeout(analysisExecutionPoll, 350);
   }
@@ -541,61 +900,59 @@ async function analysisExecutionPoll() {
 
 async function analysisExecutionPrepareDefinition() {
   if (analysisExecutionMode() !== 'manual') return [];
-  const draft = analysisExecutionDefinitionFromForm('draft');
-  if (analysisExecutionState.definitionRevision) draft.expected_revision = analysisExecutionState.definitionRevision;
-  const base = `/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/definitions/${encodeURIComponent(draft.definition_id)}`;
-  const jsonHeaders = {'Content-Type': 'application/json'};
-  const saved = await analysisExecutionRequestJson(base, {method: 'PUT', headers: jsonHeaders, body: JSON.stringify(draft)});
-  analysisExecutionState.definitionRevision = saved.definition.revision;
-  const trial = await analysisExecutionRequestJson(`${base}/trials`, {method: 'POST', headers: jsonHeaders, body: JSON.stringify({limit: 20})});
-  const trialHost = document.querySelector('#analysis-definition-trial-result');
-  if (trialHost) trialHost.textContent = `試行 ${trial.trial.sample_size}件：有効${trial.trial.valid_count}件・欠測${trial.trial.missing_count}件。外部送信なし。`;
-  const adopted = await analysisExecutionRequestJson(base, {method: 'PUT', headers: jsonHeaders, body: JSON.stringify({
-    ...draft, status: 'adopted', expected_revision: analysisExecutionState.definitionRevision
-  })});
-  analysisExecutionState.definitionRevision = adopted.definition.revision;
-  return [draft.definition_id];
+  if (analysisExecutionValidatePlan()) throw new Error(analysisExecutionValidatePlan());
+  return [analysisMeasurement.adopted.definition_id];
 }
 
 async function startAnalysisExecution(event) {
   event?.preventDefault();
+  if (analysisStartOwner) return;
   analysisExecutionUpdatePlanSummary();
-  const validation = analysisExecutionValidatePlan();
-  if (validation) return;
+  if (analysisExecutionValidatePlan()) return;
+  const dialog = captureAnalysisDialog();
+  const token = {}; analysisStartOwner = token;
+  const planGeneration = analysisPlanGeneration;
+  const owns = () => analysisStartOwner === token && dialog.current() && planGeneration === analysisPlanGeneration;
+  const itemId = dialog.context.itemId, item = dialog.context.data.item;
+  const payload = {
+    request_id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : createSubmissionId(),
+    source_revision: item.revision_count, analysis_revision: item.analysis_revision,
+    mode: analysisExecutionMode(), definition_ids: [],
+    provider_policy: ['openai', 'google'].includes(analysisPlanningProposal?.provider) ? 'cloud_allowed' : 'local_only',
+    ...(analysisPlanningProposal && analysisPlanningItemId === itemId ? {planning_proposal: structuredClone(analysisPlanningProposal)} : {}),
+    publication_targets: document.querySelector('#analysis-run-publish')?.checked ? ['input', 'orchestrator', 'visualization'] : [],
+    research_protocol: {classification: 'exploratory', data_viewed: true}
+  };
   if (analysisRunStartButton) analysisRunStartButton.disabled = true;
-  analysisExecutionSetDialogMessage('固定計画と少数試行を確認しています。');
   try {
-    const definitionIds = await analysisExecutionPrepareDefinition();
-    const item = analysisState.data.item;
-    const publish = Boolean(document.querySelector('#analysis-run-publish')?.checked);
-    const payload = {
-      request_id: typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : createSubmissionId(),
-      source_revision: item.revision_count, analysis_revision: item.analysis_revision,
-      mode: analysisExecutionMode(), definition_ids: definitionIds,
-      provider_policy: analysisPlanningProposal?.provider === 'openai' || analysisPlanningProposal?.provider === 'google' ? 'cloud_allowed' : 'local_only',
-      ...(analysisPlanningProposal && analysisPlanningItemId === analysisState.itemId ? {planning_proposal: analysisPlanningProposal} : {}),
-      publication_targets: publish ? ['input', 'orchestrator', 'visualization'] : [],
-      research_protocol: {classification: 'exploratory', data_viewed: true}
-    };
-    await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/plans/preview`, {
+    payload.definition_ids = await analysisExecutionPrepareDefinition();
+    if (!owns()) return;
+    if (payload.mode === 'manual') {
+      payload.expected_definition_versions = {[analysisMeasurement.adopted.definition_id]: analysisMeasurement.adopted.version};
+      payload.expected_input_hash = analysisMeasurement.trial.input_hash;
+      payload.source_revision = analysisMeasurement.trial.source_revision;
+      payload.analysis_revision = analysisMeasurement.trial.analysis_revision;
+    }
+    if (!owns()) return;
+    await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(itemId)}/analysis/plans/preview`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
     });
-    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/pipelines`, {
+    if (!owns()) return;
+    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(itemId)}/analysis/pipelines`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
     });
-    const selected = analysisCatalog.find(value => value.id === analysisState.itemId);
-    Object.assign(analysisExecutionState, {
-      id: response.pipeline_id, itemId: analysisState.itemId,
-      itemName: selected?.source_name || item.source_name || '分析対象',
-      mode: payload.mode, startedAt: Date.now(), restored: false
-    });
+    // A submitted request remains owned by A even if its dialog has since closed.
+    ++analysisRunOwner; analysisRunOperations.clear();
+    Object.assign(analysisExecutionState, {id: response.pipeline_id, itemId,
+      itemName: item.source_name || '分析対象', mode: payload.mode, startedAt: Date.now(), restored: false, generation: response.generation ?? 0});
     analysisExecutionApplyResponse(response);
-    if (analysisRunDialog?.open) analysisRunDialog.close();
-    showAnalysisExecutionView();
+    if (owns()) { closeAnalysisExecutionDialog(); showAnalysisExecutionView(); }
+    else analysisExecutionPoll();
   } catch (error) {
-    analysisExecutionSetDialogMessage(error.message || '分析計画を開始できませんでした。', true);
+    if (owns()) analysisExecutionSetDialogMessage(error.message || '分析計画を開始できませんでした。', true);
   } finally {
-    if (analysisRunStartButton) analysisRunStartButton.disabled = Boolean(analysisExecutionValidatePlan());
+    if (analysisStartOwner === token) analysisStartOwner = null;
+    if (dialog.current() && analysisRunStartButton) analysisRunStartButton.disabled = Boolean(analysisExecutionValidatePlan());
   }
 }
 
@@ -604,57 +961,71 @@ async function cancelAnalysisExecution() {
   if (!window.confirm('現在の分析を中止しますか？ 完了済みの結果は保持されます。')) return;
   analysisExecutionState.cancelRequested = true;
   renderAnalysisExecution();
+  const request = captureAnalysisRun('cancel');
   try {
-    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(analysisExecutionState.itemId)}/analysis/pipelines/${encodeURIComponent(analysisExecutionState.id)}/cancel`, {
+    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(request.itemId)}/analysis/pipelines/${encodeURIComponent(request.id)}/cancel`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
     });
+    if (!request.current()) return;
+    ++analysisRunOwner; analysisRunOperations.clear();
     analysisExecutionApplyResponse(response);
     analysisExecutionPoll();
   } catch (error) {
+    if (!request.current()) return;
     analysisExecutionState.cancelRequested = false;
     analysisExecutionState.logs.push(`中止要求失敗：${error.message}`);
     renderAnalysisExecution();
-  }
+  } finally { request.release(); }
 }
 
 async function analysisExecutionReviewPlan() {
-  const retry = analysisExecutionState.settings?.allowedActions?.some(value => value.startsWith('retry'));
-  if (!retry) {
-    hideAnalysisExecutionView();
-    openAnalysisExecutionDialog({mode: analysisExecutionState.mode, showDetails: true});
-    return;
-  }
+  const retry = analysisExecutionRetryAction();
+  if (!retry || analysisRunOperations.has('retry')) return;
+  const request = captureAnalysisRun('retry');
   try {
-    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(analysisExecutionState.itemId)}/analysis/pipelines/${encodeURIComponent(analysisExecutionState.id)}/retry`, {
+    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(request.itemId)}/analysis/pipelines/${encodeURIComponent(request.id)}/retry`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
     });
+    if (!request.current()) return;
+    ++analysisRunOwner; analysisRunOperations.clear();
     analysisExecutionApplyResponse(response);
     analysisExecutionPoll();
   } catch (error) {
+    if (!request.current()) return;
     analysisExecutionState.logs.push(`再試行失敗：${error.message}`);
     renderAnalysisExecution();
-  }
+  } finally { request.release(); }
+}
+
+async function analysisExecutionOpenResults() {
+  const context = captureAnalysisContext(), request = captureAnalysisRun('results');
+  const runId = analysisExecutionState.settings?.resultRun?.id;
+  try {
+    if (!runId || analysisExecutionState.settings?.resultRun?.status !== 'completed' || !request.itemId || !request.current() || !isAnalysisContextCurrent(context)) return;
+    if (typeof openFixedAnalysisRun === 'function') await openFixedAnalysisRun(request.itemId, runId);
+  } finally { request.release(); }
 }
 
 function analysisExecutionBind() {
   listen(analysisRunButton, 'click', () => analysisExecutionState.active ? showAnalysisExecutionView() : openAnalysisExecutionDialog());
   listen(analysisRunSettingsButton, 'click', () => openAnalysisExecutionDialog({mode: 'manual', showDetails: true}));
-  listen(document.querySelector('#close-analysis-run-dialog'), 'click', () => analysisRunDialog?.close());
+  listen(document.querySelector('#close-analysis-run-dialog'), 'click', closeAnalysisExecutionDialog);
+  listen(analysisRunDialog, 'close', () => { if (!analysisRunDialog.open) invalidateAnalysisDialog(); });
+  listen(analysisRunDialog, 'cancel', invalidateAnalysisDialog);
   listen(analysisRunForm, 'submit', startAnalysisExecution);
+  for (const action of ['save', 'trial', 'adopt']) listen(document.querySelector(`#analysis-definition-${action}`), 'click', () => analysisMeasurementAction(action));
+  listen(document.querySelector('#analysis-definition-confirm'), 'change', analysisMeasurementRender);
+  listen(document.querySelector('#analysis-definition-inspect'), 'click', analysisMeasurementInspect);
+  document.querySelectorAll('#analysis-manual-definition input:not([type="checkbox"]), #analysis-definition-preset').forEach(control => listen(control, 'input', analysisMeasurementInvalidate));
+  document.querySelectorAll('input[name="analysis_display_mode"]').forEach(control => listen(control, 'change', analysisExecutionSyncDisplay));
   listen(analysisAdvisorProposeButton, 'click', analysisAdvisorPropose);
   listen(analysisAdvisorEngine, 'change', analysisAdvisorSyncEngine);
   listen(analysisAdvisorObjective, 'input', analysisAdvisorClearProposal);
   listen(analysisAdvisorModel, 'input', analysisAdvisorClearProposal);
   document.querySelectorAll('input[name="analysis_run_mode"], #analysis-manual-definition input, #analysis-manual-definition select, #analysis-run-publish')
-    .forEach(control => listen(control, 'input', analysisExecutionUpdatePlanSummary));
+    .forEach(control => listen(control, 'input', () => { ++analysisPlanGeneration; analysisExecutionUpdatePlanSummary(); }));
   listen(document.querySelector('#analysis-execution-background'), 'click', () => hideAnalysisExecutionView());
-  listen(document.querySelector('#analysis-execution-results'), 'click', async () => {
-    if (typeof loadAnalysisStorage === 'function') await loadAnalysisStorage();
-    if (typeof loadAnalysisItem === 'function' && analysisExecutionState.itemId) {
-      await loadAnalysisItem(analysisExecutionState.itemId, {execute: true});
-    }
-    hideAnalysisExecutionView();
-  });
+  listen(document.querySelector('#analysis-execution-results'), 'click', analysisExecutionOpenResults);
   listen(document.querySelector('#analysis-execution-review'), 'click', analysisExecutionReviewPlan);
   listen(document.querySelector('#analysis-execution-cancel'), 'click', cancelAnalysisExecution);
   listen(analysisExecutionChip, 'click', showAnalysisExecutionView);

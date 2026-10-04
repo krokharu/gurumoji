@@ -1,0 +1,38 @@
+{
+  "method": "original function with synthetic deferred fetch and target change; no browser or real HTTP",
+  "requested_item": "synthetic-A",
+  "visible_item_at_response": "synthetic-B",
+  "current_data_classification_origin": "A-late",
+  "current_data_revision": 8,
+  "result": {
+    "ok": true,
+    "payload": {
+      "segment_classification": {
+        "origin": "A-late",
+        "result": {
+          "segments": [
+            {
+              "segment_id": "A1"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "requests": [
+    {
+      "url": "/api/library/synthetic-A/analysis/classifications",
+      "body": {
+        "request_id": "synthetic-submission",
+        "source_revision": 1,
+        "analysis_revision": 1,
+        "use_jev": false
+      }
+    }
+  ],
+  "alerts": [
+    "テンプレートと保存済みTransformer結果から分類候補を作成しています。",
+    "発話分類を保存しました。"
+  ],
+  "caveat": "Current run control is CSS-hidden; this is a latent handler regression exposed by restoring W01. No persistence corruption or live UI reproduction is claimed."
+}

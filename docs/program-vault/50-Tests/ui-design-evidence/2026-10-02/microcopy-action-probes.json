@@ -1,0 +1,51 @@
+{
+  "method": "original JS render/review functions with synthetic DOM; backend allowed_actions statically verified in analysis_pipeline.py823-831",
+  "cases": [
+    {
+      "status": "failed",
+      "allowedActions": [],
+      "button_hidden": false,
+      "label": "失敗した処理を再試行",
+      "effect": [
+        "hide_execution",
+        "open_settings"
+      ]
+    },
+    {
+      "status": "waiting",
+      "allowedActions": [
+        "cancel"
+      ],
+      "button_hidden": false,
+      "label": "失敗した処理を再試行",
+      "effect": [
+        "hide_execution",
+        "open_settings"
+      ]
+    },
+    {
+      "status": "waiting",
+      "allowedActions": [
+        "cancel",
+        "retry_failed"
+      ],
+      "button_hidden": false,
+      "label": "失敗した処理を再試行",
+      "effect": [
+        "/api/library/synthetic-A/analysis/pipelines/synthetic-pipeline/retry"
+      ]
+    },
+    {
+      "status": "waiting",
+      "allowedActions": [
+        "cancel",
+        "retry_publication"
+      ],
+      "button_hidden": false,
+      "label": "公開だけ再試行",
+      "effect": [
+        "/api/library/synthetic-A/analysis/pipelines/synthetic-pipeline/retry"
+      ]
+    }
+  ]
+}

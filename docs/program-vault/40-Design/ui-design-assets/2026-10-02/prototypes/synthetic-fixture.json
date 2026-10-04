@@ -1,0 +1,16 @@
+{
+  "fixture_kind": "synthetic design example, not application output",
+  "item": {"id": "demo-session", "name": "相談会サンプル", "trial_input_revision": 12, "current_revision_for_evidence": 13},
+  "definition": {"definition_id": "dur_review", "status": "draft", "revision": 1, "name": "発話の長さ（秒）", "description": "発話の長さを測る。重要性や関与の強さは測らない。", "unit_of_analysis": "segment", "source_columns": ["duration"], "output_column": "speech_seconds", "data_type": "number", "measurement_level": "ratio", "measurement_rule": "duration", "method": "descriptive"},
+  "prior_adopted_definition": {"definition_id": "dur_base", "revision": 2, "proposed_handling": "keep unchanged; edit separate draft ID"},
+  "segments": [
+    {"id": "S001", "speaker": "A", "start": 0, "end": 60, "duration": 60, "text": "利用した場面を教えてください。", "excluded": false},
+    {"id": "S002", "speaker": "B", "start": 60, "end": 62, "duration": 2, "text": "待つ時間が長いと感じます", "excluded": false},
+    {"id": "S003", "speaker": "A", "start": 62, "end": 62, "duration": 0, "text": "場所によって違うかもしれません。", "excluded": false},
+    {"id": "S004", "speaker": "B", "start": null, "end": null, "duration": null, "time_unknown": true, "text": "時刻がない発話の合成例", "excluded": false},
+    {"id": "S005", "speaker": "A", "start": 80, "end": 81, "duration": 1, "text": "除外された合成例", "excluded": true}
+  ],
+  "expected_trial_example": {"limit": 4, "sample_size": 4, "valid_count": 3, "missing_count": 1, "values": [60, 2, 0], "display_mean": 20.7, "missing_reason_for_S004": "invalid_source_value", "external_calls": 0},
+  "trial_ui_dependency": "per-row IDs/reasons/definition revision and pinned trial input fields are not provided by current trial API; never join current source silently",
+  "evidence": {"run_id": "R-demo-07", "kind": "ai_insights", "input_revision": 12, "evidence_id": "E-002", "segment_id": "S002", "quote_text": "待つ時間が長いと感じます", "current_revision": 13, "current_text_changed": true, "audio_action": "blocked until matching source is established", "ai_draft": "待ち時間について改善を求める発話がある可能性", "researcher_note": "他の発話も確認してから判断する。", "researcher_note_status": "unconfirmed"}
+}

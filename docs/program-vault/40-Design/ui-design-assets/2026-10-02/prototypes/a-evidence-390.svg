@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="1659" viewBox="0 0 390 1659" role="img" aria-labelledby="title desc"><title id="title">A案 結果と根拠 390px</title><desc id="desc">低忠実度・非機能の提案。AI下書き、原資料、研究者メモを分け、固定runの生成時引用と現在版の相違を表示。音声へ誤接続せず同じ結果の位置とfocusへ戻る。</desc><rect width="390" height="1659" fill="#f4f5f0"/><rect x="0" y="0" width="390" height="38" rx="0" fill="#1c6b50" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="16" y="25" fill="#fffef9" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">提案モックアップ / 非機能 / 合成データ</text>
+<text x="16" y="73" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="23" font-weight="700">Gurumoji</text>
+<text x="275" y="71" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">A案 · 390px</text>
+<text x="16" y="105" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">文字起こし / 結果 / 分析・可視化 / 話者</text>
+<path d="M16 119 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="150" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="21" font-weight="700">結果から根拠へ戻る</text>
+<text x="16" y="174" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">A · 既存モード＋段階レビュー</text>
+<rect x="16" y="197.1" width="358" height="45" rx="5" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="225.1" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">自動分析 / 概要  ▾</text>
+<rect x="16" y="259.1" width="358" height="124.30000000000007" rx="6" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="30" y="283.1" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">対象と表示版</text>
+<text x="30" y="306.1" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">合成データ：相談会サンプル / 固定 run R-demo-07</text>
+<text x="30" y="329.20000000000005" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">生成時 rev12 / 現在 rev13：更新あり。旧結果はその</text>
+<text x="30" y="352.30000000000007" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">まま表示。</text>
+<text x="16" y="398.4000000000001" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">同じ結果カードの中で、必要な根拠だけを展開する。</text>
+<rect x="16" y="441.5000000000001" width="161.234375" height="26" rx="4" fill="#fff1df" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="25" y="459.5000000000001" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">AI下書き · 研究者未確認</text>
+<text x="16" y="490.5000000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">待ち時間について改善を求める発話があ</text>
+<text x="16" y="521.8500000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">る可能性</text>
+<text x="16" y="559.2000000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">保存済みAI見解の合成例。頻度だけで重要性・合意</text>
+<text x="16" y="583.9500000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">を断定しない。ここを開いても新しい推論はしない</text>
+<text x="16" y="608.7000000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">。</text>
+<text x="16" y="645.4500000000002" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">根拠 1発話 / 表示filter「待ち時間」</text>
+<text x="16" y="676.5500000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">反対の例や前後文脈を確認する。少数の引用だけでは全</text>
+<text x="16" y="699.6500000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">体の結論にしない。</text>
+<rect x="16" y="737.7500000000002" width="135.609375" height="26" rx="4" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="25" y="755.7500000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">研究者メモ · 未確定</text>
+<text x="16" y="781.7500000000002" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">他の発話も確認してから判断する。</text>
+<rect x="16" y="820.5000000000002" width="358" height="45" rx="5" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="849.5000000000002" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">▼ 根拠の発話を確認（1件）</text>
+<text x="16" y="896.5000000000002" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">根拠 E-002</text>
+<text x="16" y="921.5000000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">固定 run R-demo-07 / 入力 rev12</text>
+<text x="16" y="942.9500000000003" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">発話 S002 / 話者B / 01:00–01:02</text>
+<rect x="16" y="979.0500000000003" width="148.609375" height="26" rx="4" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="25" y="997.0500000000003" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">原資料 · 生成時の本文</text>
+<text x="16" y="1026.0500000000002" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="18" font-weight="700">「待つ時間が長いと感じます」</text>
+<text x="16" y="1068.7500000000002" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">前 S001：利用した場面を教えてください。</text>
+<text x="16" y="1091.8500000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">後 S003：場所によって違うかもしれません。</text>
+<rect x="16" y="1126.95" width="358" height="101.19999999999982" rx="6" fill="#fff1df" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="30" y="1150.95" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">現在版とは一致していません</text>
+<text x="30" y="1173.95" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">現在 rev13 では本文を編集。古い引用を現在の音声</text>
+<text x="30" y="1197.05" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">へ自動接続しません。旧版の引用は保持します。</text>
+<rect x="16" y="1243.1499999999999" width="248" height="44" rx="7" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="1271.1499999999999" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">音声で確認（照合前は不可）</text>
+<text x="16" y="1299.1499999999999" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">音声が利用できない場合も、生成時本文と来歴を残す。版不</text>
+<text x="16" y="1320.6" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">明の旧runは「版不明」。</text>
+<text x="16" y="1352.05" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">戻る先：同じrun・filter・結果カード・選択引用・スク</text>
+<text x="16" y="1375.1499999999999" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">ロール位置・起点focus</text>
+<rect x="16" y="1408.2499999999998" width="238" height="44" rx="7" fill="#fffef9" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="1436.2499999999998" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">結果に戻る / 根拠を閉じる</text>
+<rect x="16" y="1486.2499999999998" width="358" height="124.29999999999973" rx="6" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="30" y="1510.2499999999998" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">復帰と読取の実装前提</text>
+<text x="30" y="1533.2499999999998" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">固定viewer・完全な復帰は未実装の提案。既存artifa</text>
+<text x="30" y="1556.3499999999997" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">ctの不足を調べる。回復処理を伴い得るpipeline sta</text>
+<text x="30" y="1579.4499999999996" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">tus取得を保存結果の閲覧から呼ばない。</text>
+<text x="16" y="1628.5499999999995" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="11" font-weight="400">図は提案の静止表示。音声再生・本文保存・実行はできません。</text></svg>

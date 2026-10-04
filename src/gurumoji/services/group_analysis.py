@@ -63,6 +63,7 @@ from .group_analysis_exports import (
     focus_group_analysis_report_markdown,
 )
 
+GROUP_ANALYSIS_ALGORITHM_VERSION = "focus-group-local-7"
 ANALYSIS_UNITS = {"turn"}
 ANALYSIS_GROUP_FIELDS = {"none", "role", "organization", "department", "job_title"}
 ANALYSIS_INTERPRETATION_STATUSES = {"draft", "reviewed"}
@@ -195,6 +196,7 @@ def default_analysis_config() -> dict[str, Any]:
         "cooccurrence_top_terms": 60,
         "statistics_group_by": "speaker",
         "crosstab_terms": [],
+        "crosstab_match_mode": "normalized",
         "codebook": [],
         "codebook_version": 0,
         "codebook_change_reason": "",
@@ -318,6 +320,7 @@ def normalize_analysis_config(raw: Any) -> dict[str, Any]:
     statistics_group_by = clean_single_line(
         source.get("statistics_group_by", config["statistics_group_by"]), 20
     )
+    crosstab_match_mode = clean_single_line(source.get("crosstab_match_mode"), 30)
     status = clean_single_line(
         source.get("interpretation_status", config["interpretation_status"]), 30
     )
@@ -362,6 +365,8 @@ def normalize_analysis_config(raw: Any) -> dict[str, Any]:
             else "speaker"
         ),
         "crosstab_terms": normalize_tags(source.get("crosstab_terms"))[:30],
+        "crosstab_match_mode": crosstab_match_mode
+        if crosstab_match_mode in {"normalized", "surface", "literal"} else "normalized",
         "codebook": normalize_analysis_codebook(source.get("codebook")),
         "transformer_topics": normalize_transformer_topics(source.get("transformer_topics")),
         "codebook_version": max(0, min(codebook_version, 100000)),
@@ -542,7 +547,7 @@ def analysis_segment_bounds(segment: dict[str, Any]) -> tuple[float, float, bool
     try:
         raw_start = float(segment.get("start", 0) or 0)
         raw_end = float(segment.get("end", raw_start) or raw_start)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0.0, 0.0, False
     if not math.isfinite(raw_start) or not math.isfinite(raw_end):
         return 0.0, 0.0, False
@@ -845,6 +850,30 @@ def _linked_registry_profiles(
     }
 
 
+def _add_recorded_role_measurements(timeline: list[dict[str, Any]], profiles: dict[str, dict[str, Any]],
+                                    registry_profiles: dict[str, dict[str, Any]]) -> None:
+    """Add measurement provenance without changing participation-analysis defaults.
+
+    Prepared roles override explicit/copied session roles. A registry-only
+    profile may use its recorded default; ambiguous legacy participant values
+    never silently become an observed session override or a registry value.
+    """
+    for segment in timeline:
+        profile = profiles.get(segment["speaker"], {})
+        source = profile.get("session_role_source", "legacy_unknown")
+        value = None
+        if segment["role_source"] == "preparation":
+            value, source = segment["role"], "preparation"
+        elif source in ("explicit", "registry"):
+            value = profile.get("session_role")
+        elif source == "default":
+            registry = registry_profiles.get(str(profile.get("global_speaker_id") or ""), {})
+            if registry.get("default_role"):
+                value, source = registry["default_role"], "registry"
+        segment["recorded_role"] = value
+        segment["recorded_role_source"] = source
+
+
 def _tally_speaker_turn(
     buckets: dict[str, dict[str, Any]],
     emotion_rows: dict[tuple[str, str, str], dict[str, Any]],
@@ -859,8 +888,11 @@ def _tally_speaker_turn(
         "speaker": speaker,
         "speaker_name": item["speaker_name"],
         "role": item["role"],
+        "observed_roles": set(),
         "color": item["color"],
         "turn_count": 0,
+        "timed_turn_count": 0,
+        "timed_characters": 0,
         "speaking_seconds": 0.0,
         "characters": 0,
         "question_candidates": 0,
@@ -870,10 +902,18 @@ def _tally_speaker_turn(
         "code_counts": Counter(),
     })
     bucket["turn_count"] += 1
-    bucket["speaking_seconds"] += duration
+    bucket["observed_roles"].add(item["role"])
+    bucket["role"] = next(iter(bucket["observed_roles"])) if len(bucket["observed_roles"]) == 1 else "mixed"
+    if item["valid_time"]:
+        if not bucket["timed_turn_count"]:
+            bucket["first_start"], bucket["last_end"] = start, end
+        bucket["timed_turn_count"] += 1
+        bucket["speaking_seconds"] += duration
+        if duration > 0:
+            bucket["timed_characters"] += item["characters"]
+        bucket["first_start"] = min(float(bucket["first_start"]), start)
+        bucket["last_end"] = max(float(bucket["last_end"]), end)
     bucket["characters"] += item["characters"]
-    bucket["first_start"] = min(float(bucket["first_start"]), start)
-    bucket["last_end"] = max(float(bucket["last_end"]), end)
     if item["question_candidate"]:
         bucket["question_candidates"] += 1
     for emotion in item["emotion_details"]:
@@ -888,9 +928,15 @@ def _tally_speaker_turn(
             "emotion": emotion["label_ja"],
             "count": 0,
             "seconds": 0.0,
+            "timed_turn_count": 0,
+            "missing_time_turn_count": 0,
         })
         emotion_row["count"] += 1
-        emotion_row["seconds"] += duration
+        if item["valid_time"]:
+            emotion_row["timed_turn_count"] += 1
+            emotion_row["seconds"] += duration
+        else:
+            emotion_row["missing_time_turn_count"] += 1
     for code_id in item["annotation"].get("codes", []):
         bucket["code_counts"][code_id] += 1
 
@@ -906,6 +952,7 @@ def _analysis_timeline(
     speaker_names: dict[str, Any],
     session_profile: dict[str, str],
     excluded_speakers: set[str],
+    registered_roles: set[str] | None = None,
 ) -> tuple[
     list[dict[str, Any]],
     dict[str, dict[str, Any]],
@@ -930,7 +977,10 @@ def _analysis_timeline(
         start, end, valid_time = analysis_segment_bounds(segment)
         if not valid_time:
             quality["invalid_time"] += 1
-        duration = max(0.0, end - start)
+        # Keep the numeric timeline contract, but never count a placeholder or
+        # clamped invalid interval as measured speech. Consumers use valid_time
+        # to distinguish this placeholder from an observed zero-length turn.
+        duration = max(0.0, end - start) if valid_time else 0.0
         text = str(segment.get("text") or "")
         annotation = annotations[segment_id] if segment_id in annotations else _empty_annotation()
         profile = profiles.get(speaker, {})
@@ -940,14 +990,16 @@ def _analysis_timeline(
             or default_speaker_name(speaker)
         )
         role = str(profile.get("session_role") or "participant")
+        role_source = "registered" if speaker in (registered_roles or set()) else "default"
         if prepared_by_id.get(segment_id, {}).get("role", "unknown") != "unknown":
             role = prepared_by_id[segment_id]["role"]
+            role_source = "preparation"
         emotion_details = analysis_emotion_entries(segment)
         if emotion_details:
             quality["emotion_covered"] += 1
         if not text:
             quality["empty_text"] += 1
-        if duration <= 0:
+        if valid_time and duration <= 0:
             quality["zero_duration"] += 1
         item = {
             "id": segment_id,
@@ -961,6 +1013,8 @@ def _analysis_timeline(
             "speaker": speaker,
             "speaker_name": display_name,
             "role": role,
+            "role_source": role_source,
+            "role_confirmed": role_source == "preparation" and bool(prepared_by_id[segment_id].get("speaker_verified")),
             "color": str(profile.get("theme_color") or "#1C6B50"),
             "text": text,
             "original_text": str(
@@ -999,6 +1053,19 @@ def _speaking_total(speaker_buckets: dict[str, dict[str, Any]], labels: list[str
     return sum(float(speaker_buckets[label]["speaking_seconds"]) for label in labels)
 
 
+def _timing_coverage(rows) -> dict[str, int]:
+    """Count observed and missing timing without adding unobserved speakers."""
+    turns = sum(int(row["turn_count"]) for row in rows)
+    timed = sum(int(row["timed_turn_count"]) for row in rows)
+    return {"turn_count": turns, "timed_turn_count": timed,
+            "missing_time_turn_count": turns - timed}
+
+
+def _observed_seconds(seconds: float, coverage: dict[str, int]) -> float | None:
+    # Empty input has a genuine empty sum; recorded but wholly untimed input does not.
+    return round(seconds, 3) if coverage["timed_turn_count"] or not coverage["turn_count"] else None
+
+
 def _speaker_profile_fields(
     profile: dict[str, Any], registry_profile: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1025,9 +1092,15 @@ def _speaker_metrics(
     profiles: dict[str, dict[str, Any]],
     registry_profiles: dict[str, dict[str, Any]],
     balance_labels: list[str],
+    balance_population: list[str],
+    balance_role_valid: bool,
     total_speaking: float,
 ) -> list[dict[str, Any]]:
     balance_total = _speaking_total(speaker_buckets, balance_labels)
+    all_coverage = _timing_coverage(list(speaker_buckets.values()))
+    balance_coverage = _timing_coverage([speaker_buckets[label] for label in balance_population])
+    all_ratio_valid = total_speaking > 0 and all_coverage["missing_time_turn_count"] == 0
+    balance_ratio_valid = balance_role_valid and balance_total > 0 and balance_coverage["missing_time_turn_count"] == 0
     metrics: list[dict[str, Any]] = []
     for label, bucket in sorted(
         speaker_buckets.items(),
@@ -1035,9 +1108,11 @@ def _speaker_metrics(
     ):
         seconds = float(bucket["speaking_seconds"])
         turns = int(bucket["turn_count"])
+        timed_turns = int(bucket["timed_turn_count"])
         characters = int(bucket["characters"])
         participant_share = (
-            seconds / balance_total if label in balance_labels and balance_total > 0 else 0.0
+            (seconds / balance_total if label in balance_labels else 0.0)
+            if balance_ratio_valid and timed_turns else None
         )
         profile = profiles.get(label, {})
         registry_profile = registry_profiles.get(
@@ -1047,17 +1122,22 @@ def _speaker_metrics(
             "speaker": label,
             "speaker_name": bucket["speaker_name"],
             "role": bucket["role"],
+            "role_status": "mixed" if len(bucket["observed_roles"]) > 1 else "single",
+            "observed_roles": sorted(bucket["observed_roles"]),
             "color": bucket["color"],
             "turn_count": turns,
-            "speaking_seconds": round(seconds, 3),
-            "speaking_percent": round(100 * seconds / total_speaking, 2) if total_speaking else 0.0,
-            "participant_percent": round(100 * participant_share, 2),
-            "average_turn_seconds": round(seconds / turns, 3) if turns else 0.0,
+            "timed_turn_count": timed_turns,
+            "missing_time_turn_count": turns - timed_turns,
+            "timed_characters": int(bucket["timed_characters"]),
+            "speaking_seconds": round(seconds, 3) if timed_turns else None,
+            "speaking_percent": round(100 * seconds / total_speaking, 2) if all_ratio_valid else None,
+            "participant_percent": round(100 * participant_share, 2) if participant_share is not None else None,
+            "average_turn_seconds": round(seconds / timed_turns, 3) if timed_turns else None,
             "characters": characters,
-            "characters_per_minute": round(60 * characters / seconds, 2) if seconds else 0.0,
+            "characters_per_minute": round(60 * bucket["timed_characters"] / seconds, 2) if seconds else None,
             "question_candidates": int(bucket["question_candidates"]),
-            "first_start": round(float(bucket["first_start"]), 3),
-            "last_end": round(float(bucket["last_end"]), 3),
+            "first_start": round(float(bucket["first_start"]), 3) if timed_turns else None,
+            "last_end": round(float(bucket["last_end"]), 3) if timed_turns else None,
             "emotion_counts": dict(bucket["emotion_counts"]),
             "code_counts": dict(bucket["code_counts"]),
             "included_in_balance": label in balance_labels,
@@ -1068,7 +1148,7 @@ def _speaker_metrics(
 
 def _dominant_speaker(speaker_metrics: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(
-        (item for item in speaker_metrics if item["included_in_balance"]),
+        (item for item in speaker_metrics if item["included_in_balance"] and item["participant_percent"] is not None),
         key=lambda item: item["participant_percent"],
         default=None,
     )
@@ -1080,7 +1160,10 @@ def _participation_balance(
     *,
     participant_labels: list[str],
     balance_labels: list[str],
+    balance_population: list[str],
+    mixed_role_speaker_count: int,
     exclude_moderator: bool,
+    prepared: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     balance_seconds = [
         float(speaker_buckets[label]["speaking_seconds"]) for label in balance_labels
@@ -1090,19 +1173,38 @@ def _participation_balance(
         value / balance_total for value in balance_seconds if balance_total > 0
     ]
     dominant = _dominant_speaker(speaker_metrics)
+    participant_coverage = _timing_coverage([speaker_buckets[label] for label in participant_labels])
+    balance_coverage = _timing_coverage([speaker_buckets[label] for label in balance_population])
+    role_valid = not exclude_moderator or mixed_role_speaker_count == 0
+    complete = role_valid and balance_total > 0 and balance_coverage["missing_time_turn_count"] == 0
     return {
-        "participant_count": len(participant_labels),
-        "participant_speaking_seconds": round(
-            _speaking_total(speaker_buckets, participant_labels), 3
-        ),
+        "participant_count": (prepared or {}).get("participant_count"),
+        "observed_participant_count": None if mixed_role_speaker_count else len(participant_labels),
+        "mixed_role_speaker_count": mixed_role_speaker_count,
+        "unobserved_participant_count": None,
+        "participant_roster_available": False,
+        "unknown_speaker_turn_count": int(speaker_buckets.get("UNKNOWN", {}).get("turn_count", 0)),
+        "missing_time_turn_count": sum(int(row["turn_count"]) - int(row["timed_turn_count"]) for row in speaker_buckets.values()),
+        "participant_speaking_seconds": _observed_seconds(
+            _speaking_total(speaker_buckets, participant_labels), participant_coverage
+        ) if not mixed_role_speaker_count else None,
+        "participant_timed_turn_count": participant_coverage["timed_turn_count"],
+        "participant_missing_time_turn_count": participant_coverage["missing_time_turn_count"],
         "balance_speaker_count": len(balance_labels),
-        "balance_speaking_seconds": round(balance_total, 3),
-        "max_participant_percent": dominant["participant_percent"] if dominant else 0.0,
+        "balance_speaking_seconds": _observed_seconds(balance_total, balance_coverage) if role_valid else None,
+        "balance_timed_turn_count": balance_coverage["timed_turn_count"],
+        "balance_missing_time_turn_count": balance_coverage["missing_time_turn_count"],
+        "max_participant_percent": dominant["participant_percent"] if dominant else None,
         "max_participant_name": dominant["speaker_name"] if dominant else "",
-        "gini": round(analysis_gini(balance_seconds), 4),
-        "normalized_evenness": round(analysis_evenness(balance_seconds), 4),
-        "hhi": round(sum(value * value for value in balance_shares), 4),
-        "denominator": "participant_only" if exclude_moderator else "all_speakers",
+        "gini": round(analysis_gini(balance_seconds), 4) if complete else None,
+        "normalized_evenness": round(analysis_evenness(balance_seconds), 4) if complete else None,
+        "hhi": round(sum(value * value for value in balance_shares), 4) if complete else None,
+        "denominator": "observed_participant_speakers" if exclude_moderator else "observed_speakers",
+        "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）" if exclude_moderator else "有効な時刻がある全観測話者内（UNKNOWNを除く・司会等を含む）",
+        "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+        "metric_status": "computed" if complete else "not_computable",
+        "unavailable_reason": ("mixed_roles" if not role_valid else "missing_time" if balance_coverage["missing_time_turn_count"]
+                               else "zero_total" if not balance_total else ""),
     }
 
 
@@ -1165,6 +1267,20 @@ def _speaker_transitions(
     return rows, turn_taking
 
 
+def _timing_view(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Observed timing, including true zero-duration events, in a sorted copy."""
+    return sorted(
+        (item for item in timeline if item.get("valid_time", preparation.valid_time(item))
+         and preparation.valid_time(item)),
+        key=lambda item: (float(item["start"]), float(item["end"]), str(item.get("id") or "")),
+    )
+
+
+def _physical_time_view(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Positive-duration intervals only; preserve existing relation calculations."""
+    return [item for item in _timing_view(timeline) if float(item["end"]) > float(item["start"])]
+
+
 def _overlap_candidates(
     physical_timeline: list[dict[str, Any]], overlap_threshold: float
 ) -> tuple[list[dict[str, Any]], bool]:
@@ -1172,7 +1288,7 @@ def _overlap_candidates(
     candidates: list[dict[str, Any]] = []
     truncated = False
     active_segments: list[dict[str, Any]] = []
-    for current in physical_timeline:
+    for current in _physical_time_view(physical_timeline):
         current_start = float(current["start"])
         active_segments = [
             item for item in active_segments if float(item["end"]) > current_start
@@ -1184,16 +1300,19 @@ def _overlap_candidates(
             if previous["speaker"] == current["speaker"]:
                 continue
             overlap_end = min(float(previous["end"]), float(current["end"]))
-            seconds = max(0.0, overlap_end - current_start)
+            overlap_start = max(float(previous["start"]), current_start)
+            seconds = max(0.0, overlap_end - overlap_start)
             if seconds <= 0 or seconds < overlap_threshold:
                 continue
             if len(candidates) >= 10000:
                 truncated = True
                 continue
             candidates.append({
-                "start": round(current_start, 3),
+                "start": round(overlap_start, 3),
                 "end": round(overlap_end, 3),
                 "seconds": round(seconds, 3),
+                "from_segment_id": previous.get("id", ""),
+                "to_segment_id": current.get("id", ""),
                 "from_speaker": previous["speaker"],
                 "from_name": previous["speaker_name"],
                 "to_speaker": current["speaker"],
@@ -1209,7 +1328,7 @@ def _long_gaps(
     gaps: list[dict[str, Any]] = []
     coverage_end = 0.0
     previous_name = "開始"
-    for segment in physical_timeline:
+    for segment in _physical_time_view(physical_timeline):
         start = float(segment["start"])
         if start > coverage_end:
             duration = start - coverage_end
@@ -1230,7 +1349,7 @@ def _long_gaps(
 def _time_bins(
     valid_included: list[dict[str, Any]],
     *,
-    session_duration: float,
+    session_duration: float | None,
     requested_bin_seconds: int,
     speaker_buckets: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], int]:
@@ -1240,6 +1359,8 @@ def _time_bins(
     ANALYSIS_MAX_TIME_BINS for this session.
     """
     bin_seconds = requested_bin_seconds
+    if not valid_included:
+        return [], bin_seconds
     if session_duration and math.ceil(session_duration / bin_seconds) > ANALYSIS_MAX_TIME_BINS:
         bin_seconds = max(
             requested_bin_seconds,
@@ -1250,7 +1371,7 @@ def _time_bins(
         {
             "index": index,
             "start": index * bin_seconds,
-            "end": min((index + 1) * bin_seconds, session_duration) if session_duration else bin_seconds,
+            "end": min((index + 1) * bin_seconds, session_duration) if session_duration is not None else bin_seconds,
             "speaking_seconds": 0.0,
             "turn_count": 0,
             "speakers": Counter(),
@@ -1260,11 +1381,12 @@ def _time_bins(
     for segment in valid_included:
         start = float(segment["start"])
         end = float(segment["end"])
-        if end <= start:
-            continue
         first_bin = min(int(start // bin_seconds), bin_count - 1)
-        last_bin = min(int(max(start, end - 0.000001) // bin_seconds), bin_count - 1)
         bins[first_bin]["turn_count"] += 1
+        if end == start:
+            bins[first_bin]["speakers"][segment["speaker"]] += 0.0
+            continue
+        last_bin = min(int(max(start, end - 0.000001) // bin_seconds), bin_count - 1)
         for index in range(first_bin, last_bin + 1):
             piece_start = max(start, index * bin_seconds)
             piece_end = min(end, (index + 1) * bin_seconds)
@@ -1321,10 +1443,14 @@ def _code_metrics(
     metrics = []
     for code_id, code in codebook.items():
         coded = [item for item in included if code_id in item["annotation"].get("codes", [])]
+        timed = [item for item in coded if item["valid_time"]]
+        coverage = {"turn_count": len(coded), "timed_turn_count": len(timed), "missing_time_turn_count": len(coded) - len(timed)}
         metrics.append({
             **code,
             "segment_count": len(coded),
-            "speaking_seconds": round(sum(float(item["duration"]) for item in coded), 3),
+            "speaking_seconds": _observed_seconds(float(sum(float(item["duration"]) for item in timed)), coverage),
+            "timed_turn_count": coverage["timed_turn_count"],
+            "missing_time_turn_count": coverage["missing_time_turn_count"],
             "characters": sum(int(item["characters"]) for item in coded),
             "speaker_count": len({item["speaker"] for item in coded if item["speaker"] != "UNKNOWN"}),
             "unknown_speaker_turns": sum(item["speaker"] == "UNKNOWN" for item in coded),
@@ -1427,7 +1553,7 @@ def _comparison_group_name(metric: dict[str, Any], group_by: str) -> str:
     profile_value = metric.get("profile")
     profile = profile_value if isinstance(profile_value, dict) else {}
     if group_by == "role":
-        return str(metric["role"] or "未設定")
+        return "役割混在（話者単位）" if metric.get("role_status") == "mixed" else str(metric["role"] or "未設定")
     if group_by.startswith("attribute:"):
         attributes = profile.get("attributes")
         attribute_value = (
@@ -1443,21 +1569,27 @@ def _comparison_group_rows(
     speaker_metrics: list[dict[str, Any]], group_by: str, total_speaking: float
 ) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
+    role_incomplete = group_by == "role" and any(row.get("role_status") == "mixed" for row in speaker_metrics)
     if group_by != "none":
         for metric in speaker_metrics:
             group_name = _comparison_group_name(metric, group_by)
             group = groups.setdefault(group_name, {
                 "group": group_name, "speaker_count": 0, "turn_count": 0,
                 "speaking_seconds": 0.0, "characters": 0,
+                "timed_turn_count": 0, "missing_time_turn_count": 0,
             })
             group["speaker_count"] += 1
             group["turn_count"] += int(metric["turn_count"])
-            group["speaking_seconds"] += float(metric["speaking_seconds"])
+            group["speaking_seconds"] += float(metric["speaking_seconds"] or 0)
+            group["timed_turn_count"] += int(metric["timed_turn_count"])
+            group["missing_time_turn_count"] += int(metric["missing_time_turn_count"])
             group["characters"] += int(metric["characters"])
+    complete = total_speaking > 0 and not any(row["missing_time_turn_count"] for row in speaker_metrics)
     return [{
         **value,
-        "speaking_seconds": round(float(value["speaking_seconds"]), 3),
-        "speaking_percent": round(100 * float(value["speaking_seconds"]) / total_speaking, 2) if total_speaking else 0.0,
+        "speaking_seconds": _observed_seconds(float(value["speaking_seconds"]), value) if not role_incomplete else None,
+        "speaking_percent": round(100 * float(value["speaking_seconds"]) / total_speaking, 2) if complete and not role_incomplete else None,
+        "role_aggregation_status": "mixed" if role_incomplete else "consistent",
     } for value in groups.values()]
 
 
@@ -1469,13 +1601,18 @@ def _moderator_summary(
     facilitators = [
         item for item in speaker_metrics if item["role"] in ANALYSIS_FACILITATOR_ROLES
     ]
-    moderator_seconds = sum(float(item["speaking_seconds"]) for item in facilitators)
+    role_incomplete = any(row.get("role_status") == "mixed" for row in speaker_metrics)
+    moderator_seconds = sum(float(item["speaking_seconds"] or 0) for item in facilitators)
+    coverage = _timing_coverage(facilitators)
+    complete = total_speaking > 0 and not any(row["missing_time_turn_count"] for row in speaker_metrics)
     response_gaps = turn_taking["moderator_response_gaps"]
     return {
-        "assigned": bool(facilitators),
-        "speaking_seconds": round(moderator_seconds, 3),
-        "speaking_percent": round(100 * moderator_seconds / total_speaking, 2) if total_speaking else 0.0,
-        "question_candidates": sum(int(item["question_candidates"]) for item in facilitators),
+        "assigned": bool(facilitators) if not role_incomplete else None,
+        **coverage,
+        "speaking_seconds": _observed_seconds(moderator_seconds, coverage) if not role_incomplete else None,
+        "speaking_percent": round(100 * moderator_seconds / total_speaking, 2) if complete and not role_incomplete else None,
+        "question_candidates": sum(int(item["question_candidates"]) for item in facilitators) if not role_incomplete else None,
+        "role_aggregation_status": "mixed" if role_incomplete else "consistent",
         "participant_responses": len(response_gaps),
         "moderator_to_participant_transitions": turn_taking["moderator_to_participant"],
         "average_response_gap_seconds": round(
@@ -1497,15 +1634,19 @@ def _observations(
     """Points worth a researcher's look; none of them is a judgement."""
     observations: list[dict[str, str]] = []
     dominant = _dominant_speaker(speaker_metrics)
+    if any(row.get("role_status") == "mixed" for row in speaker_metrics):
+        observations.append({"level": "info", "label": "話者内の役割混在",
+                             "message": "同じ話者に複数の役割が記録されています。全体の発話時間は保持し、役割に依存する割合・司会・役割別集計は算出しません。発話ごとの役割は元記録で確認できます。"})
+    population_label = "参加者内" if config["exclude_moderator"] else "観測話者内"
     if dominant and float(dominant["participant_percent"]) >= 50:
         observations.append({
             "level": "attention",
             "label": "発話時間の集中候補",
-            "message": f"{dominant['speaker_name']}の参加者内発話時間が{dominant['participant_percent']:.1f}%です。重要性や影響力を意味する値ではありません。",
+            "message": f"{dominant['speaker_name']}の{population_label}発話時間が{dominant['participant_percent']:.1f}%です。重要性や影響力を意味する値ではありません。",
         })
     low_names = [
         item["speaker_name"] for item in speaker_metrics
-        if item["included_in_balance"]
+        if item["included_in_balance"] and item["participant_percent"] is not None
         and float(item["participant_percent"]) < float(config["low_participation_percent"])
     ]
     if low_names:
@@ -1514,7 +1655,7 @@ def _observations(
             "label": "発言機会の確認候補",
             "message": f"設定した{config['low_participation_percent']:g}%未満: {', '.join(low_names)}。沈黙の意味は記録・文脈と合わせて判断してください。",
         })
-    if moderator["speaking_percent"] >= 40:
+    if moderator["speaking_percent"] is not None and moderator["speaking_percent"] >= 40:
         observations.append({
             "level": "attention",
             "label": "司会発話比率の確認",
@@ -1655,7 +1796,8 @@ def _attach_saved_results(
         if isinstance(transformer_saved, dict) and transformer_saved else None
     )
     transformer_stale = bool(transformer_result) and transformer_result.get("fingerprint") != transformer_input_fingerprint(
-        analysis, model=str(transformer_result.get("engine", {}).get("name") or DEFAULT_TRANSFORMER_MODEL)
+        analysis, model=str(transformer_result.get("engine", {}).get("name") or DEFAULT_TRANSFORMER_MODEL),
+        parameters=transformer_result.get("parameters"),
     )
     analysis["transformer"] = {"result": transformer_result, "stale": transformer_stale}
     analysis["session_outline"] = build_session_outline(
@@ -1686,9 +1828,9 @@ def _attach_saved_results(
     }
 
 
-def _attach_method_experts(analysis: dict[str, Any]) -> None:
+def _attach_method_experts(analysis: dict[str, Any], *, catalog=None) -> None:
     # Only the experts named by the analysis plan are read (docs/program-vault/50-Analysis-Methods/10-Experts).
-    analysis["experts"] = method_experts.review_for_analysis(analysis)
+    analysis["experts"] = method_experts.review_for_analysis(analysis, catalog=catalog)
     expert_procedure = method_experts.plan_procedure(analysis["experts"])
     if expert_procedure:
         analysis["manual"]["focus_group_plan"]["procedure"] = expert_procedure
@@ -1705,6 +1847,7 @@ def group_analysis_for_row(
     *,
     include_research_rows: bool = False,
     execute: bool = True,
+    defer_research: bool = False,
     connect: Callable[[], Any],
     row_segments: Callable[[Any], list[dict[str, Any]]],
     row_original_segments: Callable[[Any], tuple[dict[str, dict[str, Any]], str]],
@@ -1739,29 +1882,34 @@ def group_analysis_for_row(
         speaker_names=speaker_names,
         session_profile=session_profile,
         excluded_speakers=set(config["excluded_speakers"]),
+        registered_roles={speaker for speaker, profile in profiles.items()
+                          if (isinstance(raw_profiles.get(speaker), dict) and raw_profiles[speaker].get("session_role"))
+                          or registry_profiles.get(str(profile.get("global_speaker_id") or ""), {}).get("default_role")},
     )
+    _add_recorded_role_measurements(timeline, profiles, registry_profiles)
     included = [item for item in timeline if not item["excluded"]]
-    valid_included = [
-        item for item in included
-        if item["valid_time"] and float(item["end"]) > float(item["start"])
-    ]
-    physical_timeline = [
-        item for item in timeline
-        if item["valid_time"] and float(item["end"]) > float(item["start"])
-    ]
+    valid_included = _physical_time_view(included)
+    physical_timeline = _physical_time_view(timeline)
 
     # Participation.
     total_speaking = sum(float(item["speaking_seconds"]) for item in speaker_buckets.values())
     participant_labels = [
         label for label, item in speaker_buckets.items()
-        if item["role"] not in ANALYSIS_NON_PARTICIPANT_ROLES
+        if item["role"] not in ANALYSIS_NON_PARTICIPANT_ROLES and label != "UNKNOWN" and len(item["observed_roles"]) == 1
     ]
-    balance_labels = participant_labels if config["exclude_moderator"] else list(speaker_buckets)
+    mixed_role_speaker_count = sum(label != "UNKNOWN" and len(item["observed_roles"]) > 1 for label, item in speaker_buckets.items())
+    timing_coverage = _timing_coverage(list(speaker_buckets.values()))
+    eligible_balance_labels = participant_labels if config["exclude_moderator"] else list(speaker_buckets)
+    balance_population = [label for label in eligible_balance_labels if label != "UNKNOWN"]
+    balance_labels = [label for label in eligible_balance_labels
+                      if label != "UNKNOWN" and speaker_buckets[label]["timed_turn_count"] > 0]
     speaker_metrics = _speaker_metrics(
         speaker_buckets,
         profiles=profiles,
         registry_profiles=registry_profiles,
         balance_labels=balance_labels,
+        balance_population=balance_population,
+        balance_role_valid=not config["exclude_moderator"] or mixed_role_speaker_count == 0,
         total_speaking=total_speaking,
     )
     balance = _participation_balance(
@@ -1769,7 +1917,10 @@ def group_analysis_for_row(
         speaker_metrics,
         participant_labels=participant_labels,
         balance_labels=balance_labels,
+        balance_population=balance_population,
+        mixed_role_speaker_count=mixed_role_speaker_count,
         exclude_moderator=config["exclude_moderator"],
+        prepared=prepared,
     )
 
     # Turn-taking and timing.
@@ -1780,10 +1931,12 @@ def group_analysis_for_row(
         physical_timeline, float(config["overlap_seconds"])
     )
     long_gaps = _long_gaps(physical_timeline, float(config["long_gap_seconds"]))
-    session_duration = max((float(item["end"]) for item in physical_timeline), default=0.0)
+    timing_timeline = _timing_view(timeline)
+    timing_included = _timing_view(included)
+    session_duration = max((float(item["end"]) for item in timing_timeline), default=None)
     requested_bin_seconds = int(config["time_bin_seconds"])
     time_bins, bin_seconds = _time_bins(
-        valid_included,
+        timing_included,
         session_duration=session_duration,
         requested_bin_seconds=requested_bin_seconds,
         speaker_buckets=speaker_buckets,
@@ -1802,7 +1955,7 @@ def group_analysis_for_row(
     analysis = {
         # Additive fields preserve the v1 export contract for existing tools.
         "schema_version": 1,
-        "algorithm_version": "focus-group-local-2",
+        "algorithm_version": GROUP_ANALYSIS_ALGORITHM_VERSION,
         "generated_at": utc_now_iso(),
         "item": {
             "id": row["id"],
@@ -1830,12 +1983,19 @@ def group_analysis_for_row(
         ],
         "automatic": {
             "overview": {
-                "session_duration": round(session_duration, 3),
+                "session_duration": round(session_duration, 3) if session_duration is not None else None,
+                "session_timed_turn_count": len(timing_timeline),
+                "session_missing_time_turn_count": len(timeline) - len(timing_timeline),
                 "segment_count": len(timeline),
                 "included_segment_count": len(included),
                 "speaker_count": len(speaker_metrics),
-                "participant_count": len(participant_labels),
-                "total_speaking_seconds": round(total_speaking, 3),
+                "participant_count": prepared.get("participant_count"),
+                "observed_participant_count": None if mixed_role_speaker_count else len(participant_labels),
+                "mixed_role_speaker_count": mixed_role_speaker_count,
+                "observed_speaker_count": sum(row["speaker"] != "UNKNOWN" for row in speaker_metrics),
+                "total_speaking_seconds": _observed_seconds(total_speaking, timing_coverage),
+                "timed_turn_count": timing_coverage["timed_turn_count"],
+                "missing_time_turn_count": timing_coverage["missing_time_turn_count"],
                 "average_cross_speaker_gap_seconds": round(sum(consecutive_gaps) / len(consecutive_gaps), 3) if consecutive_gaps else None,
             },
             "speaker_metrics": speaker_metrics,
@@ -1847,8 +2007,9 @@ def group_analysis_for_row(
             "time_bins": time_bins,
             "requested_time_bin_seconds": requested_bin_seconds,
             "effective_time_bin_seconds": bin_seconds,
+            "timing_order_basis": "validated_start_end_id_sorted_copy",
             "keywords": _keyword_rows(included, speaker_metrics, set(config["stop_words"])),
-            "emotions": [{**value, "seconds": round(float(value["seconds"]), 3)} for value in emotion_rows.values()],
+            "emotions": [{**value, "seconds": round(float(value["seconds"]), 3) if value["timed_turn_count"] else None} for value in emotion_rows.values()],
             "groups": _comparison_group_rows(speaker_metrics, config["group_by"], total_speaking),
             "observations": _observations(
                 speaker_metrics,
@@ -1904,14 +2065,28 @@ def group_analysis_for_row(
         "segments": timeline,
         "exports": _analysis_export_links(row["id"]),
     }
+    if quality["invalid_time"]:
+        analysis["cautions"].append(
+            "時間の合計・平均・発話速度は時刻が有効な発話だけを対象にします。"
+            "時刻不明の発話は0秒の観測とは扱わず、本文の件数・文字数には含めます。"
+        )
+    if defer_research:
+        # A genuine boundary: never consult the process research cache here.
+        return analysis
     analysis = _attach_research(
         analysis, execute=execute, include_research_rows=include_research_rows
     )
+    return finish_group_analysis(analysis, row)
+
+
+def finish_group_analysis(analysis: dict[str, Any], row: Any, *, expert_catalog=None) -> dict[str, Any]:
+    """Attach saved views after research, shared by monolithic and staged builds."""
+    session_profile = analysis["item"]["session_profile"]
     _attach_saved_results(analysis, row, session_profile)
     # The planned agenda, parsed the same way the workspace outline block reads it,
     # so themes imported from it match the plan items line for line.
     analysis["plan_items"] = plan_items(analysis["item"].get("session_profile"))
-    _attach_method_experts(analysis)
+    _attach_method_experts(analysis, catalog=expert_catalog)
     # Added last so links the research step already set keep their position.
     for dataset in ANALYSIS_CSV_FIELDS:
         analysis["exports"][dataset] = f"/api/library/{row['id']}/analysis/export.csv?dataset={dataset}"

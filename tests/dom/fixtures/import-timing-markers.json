@@ -1,0 +1,1301 @@
+{
+  "snapshot": "5d5c59456fc24e58e32d3ec278a7beb7dc4f3e13",
+  "cases": [
+    {
+      "id": "marker-array-positive",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/60681f20870857b29f17b069ad38b223/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/60681f20870857b29f17b069ad38b223/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-array-positive_話者分離.json",
+            "url": "/api/library/60681f20870857b29f17b069ad38b223/files/marker-array-positive_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "60681f20870857b29f17b069ad38b223",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 13.0,
+            "segment_id": "candidate",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": [],
+            "start": 8.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": 13,
+            "id": "candidate",
+            "speaker": "A",
+            "start": 8,
+            "text": "synthetic timing",
+            "time_unknown": []
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-array-positive.wav",
+        "speaker_data_url": "/api/library/60681f20870857b29f17b069ad38b223/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/60681f20870857b29f17b069ad38b223/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.5
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.5
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 10,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "0ce77f1dfa824fe2351105bfebac3e3c73432ba21da8248e54cc88684d0f1861"
+    },
+    {
+      "id": "marker-array-string",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/7d88851ddc845b15a2bcf93f27c2a496/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/7d88851ddc845b15a2bcf93f27c2a496/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-array-string_話者分離.json",
+            "url": "/api/library/7d88851ddc845b15a2bcf93f27c2a496/files/marker-array-string_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "7d88851ddc845b15a2bcf93f27c2a496",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 10.0,
+            "segment_id": "candidate",
+            "source_end": "1_0",
+            "source_start": "０",
+            "source_time_unknown": [],
+            "start": 0.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": "1_0",
+            "id": "candidate",
+            "speaker": "A",
+            "start": "０",
+            "text": "synthetic timing",
+            "time_unknown": []
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-array-string.wav",
+        "speaker_data_url": "/api/library/7d88851ddc845b15a2bcf93f27c2a496/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/7d88851ddc845b15a2bcf93f27c2a496/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 10,
+            "seconds": 10,
+            "characters": 16,
+            "share": 0.6666666666666666
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.3333333333333333
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 15,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 0,
+            "end": 10
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "fc6ac3807d53e6050cf5274ffb7f3a078e6da96e9540fefa6e2f0d18a4171d79"
+    },
+    {
+      "id": "marker-array-zero",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/995c9da7dfb45fafb6b4c2c99b6f01c9/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/995c9da7dfb45fafb6b4c2c99b6f01c9/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-array-zero_話者分離.json",
+            "url": "/api/library/995c9da7dfb45fafb6b4c2c99b6f01c9/files/marker-array-zero_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "995c9da7dfb45fafb6b4c2c99b6f01c9",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 10.0,
+            "segment_id": "candidate",
+            "source_end": 10,
+            "source_start": 10,
+            "source_time_unknown": [],
+            "start": 10.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": 10,
+            "id": "candidate",
+            "speaker": "A",
+            "start": 10,
+            "text": "synthetic timing",
+            "time_unknown": []
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-array-zero.wav",
+        "speaker_data_url": "/api/library/995c9da7dfb45fafb6b4c2c99b6f01c9/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/995c9da7dfb45fafb6b4c2c99b6f01c9/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 0,
+            "seconds": 0,
+            "characters": 16,
+            "share": 0.0
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 1.0
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 5,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 10,
+            "end": 10
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "d19a9000af815fd4e24c6f0af95195b06dd343ad31a810cae248448bc0b9e83b"
+    },
+    {
+      "id": "marker-object-positive",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/d270562017e35239b29fcabcc971e34a/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/d270562017e35239b29fcabcc971e34a/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-object-positive_話者分離.json",
+            "url": "/api/library/d270562017e35239b29fcabcc971e34a/files/marker-object-positive_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "d270562017e35239b29fcabcc971e34a",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 13.0,
+            "segment_id": "candidate",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": {},
+            "start": 8.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": 13,
+            "id": "candidate",
+            "speaker": "A",
+            "start": 8,
+            "text": "synthetic timing",
+            "time_unknown": {}
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-object-positive.wav",
+        "speaker_data_url": "/api/library/d270562017e35239b29fcabcc971e34a/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/d270562017e35239b29fcabcc971e34a/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.5
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.5
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 10,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "d71c96b27853c7dd4e903186c32c89a7e56d3b0c4fd4b882a1eab097cbf4e025"
+    },
+    {
+      "id": "marker-object-string",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/58ab0980ebe350a2a20c9eed8b62b0fb/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/58ab0980ebe350a2a20c9eed8b62b0fb/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-object-string_話者分離.json",
+            "url": "/api/library/58ab0980ebe350a2a20c9eed8b62b0fb/files/marker-object-string_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "58ab0980ebe350a2a20c9eed8b62b0fb",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 10.0,
+            "segment_id": "candidate",
+            "source_end": "1_0",
+            "source_start": "０",
+            "source_time_unknown": {},
+            "start": 0.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": "1_0",
+            "id": "candidate",
+            "speaker": "A",
+            "start": "０",
+            "text": "synthetic timing",
+            "time_unknown": {}
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-object-string.wav",
+        "speaker_data_url": "/api/library/58ab0980ebe350a2a20c9eed8b62b0fb/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/58ab0980ebe350a2a20c9eed8b62b0fb/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 10,
+            "seconds": 10,
+            "characters": 16,
+            "share": 0.6666666666666666
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 0.3333333333333333
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 15,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 0,
+            "end": 10
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "823e839d6b2e745d9e20823634a90b59e9e7d401a7ed76581a24dd914751e69d"
+    },
+    {
+      "id": "marker-object-zero",
+      "job": {
+        "ai_usage": {},
+        "analysis_export_url": "/api/library/865ab473b0815152ac9db6d2516a7bbe/analysis/export.json",
+        "analysis_revision": 0,
+        "analysis_updated_at": null,
+        "analysis_url": "/api/library/865ab473b0815152ac9db6d2516a7bbe/analysis",
+        "burn_subtitled_video": false,
+        "comparison_key": "",
+        "comparison_label": "未設定",
+        "comparison_source": "",
+        "created_at": "2026-10-04T03:05:10+00:00",
+        "duration": 13.0,
+        "emotion_analysis": null,
+        "emotions": [],
+        "files": [
+          {
+            "name": "marker-object-zero_話者分離.json",
+            "url": "/api/library/865ab473b0815152ac9db6d2516a7bbe/files/marker-object-zero_%E8%A9%B1%E8%80%85%E5%88%86%E9%9B%A2.json"
+          }
+        ],
+        "formatting_result": {},
+        "group_id": "",
+        "group_name": "",
+        "id": "865ab473b0815152ac9db6d2516a7bbe",
+        "language": "ja",
+        "match_count": null,
+        "media_kind": null,
+        "media_url": null,
+        "meeting_minutes": {
+          "analysis": {
+            "decision_count": 0,
+            "due_count": 0,
+            "priority_counts": {
+              "high": 0,
+              "low": 0,
+              "medium": 0,
+              "unspecified": 0
+            },
+            "speaker_activity": [],
+            "task_count": 0
+          },
+          "decisions": [],
+          "generated_at": "",
+          "method": "rule_based_candidate_extraction",
+          "summary": [],
+          "tasks": [],
+          "version": "1.0"
+        },
+        "missing_time_turn_count": 0,
+        "outline": null,
+        "output_dir": "/tmp/gurumoji-marker-import-38x5e3bf/imports",
+        "preview": "synthetic timing synthetic timing",
+        "revision_count": 0,
+        "segment_count": 2,
+        "segment_timings": [
+          {
+            "end": 10.0,
+            "segment_id": "candidate",
+            "source_end": 10,
+            "source_start": 10,
+            "source_time_unknown": {},
+            "start": 10.0,
+            "valid": true
+          },
+          {
+            "end": 13.0,
+            "segment_id": "reference",
+            "source_end": 13,
+            "source_start": 8,
+            "source_time_unknown": null,
+            "start": 8.0,
+            "valid": true
+          }
+        ],
+        "segments": [
+          {
+            "end": 10,
+            "id": "candidate",
+            "speaker": "A",
+            "start": 10,
+            "text": "synthetic timing",
+            "time_unknown": {}
+          },
+          {
+            "end": 13,
+            "id": "reference",
+            "speaker": "B",
+            "start": 8,
+            "text": "synthetic timing"
+          }
+        ],
+        "session_outline": {
+          "plan": {
+            "available": false,
+            "discussed_count": 0,
+            "item_count": 0,
+            "items": [],
+            "match": "none",
+            "source": "",
+            "unmatched_count": 0
+          },
+          "result": {
+            "available": false,
+            "outline_available": false,
+            "rows": [],
+            "sources": [],
+            "topic_count": 0,
+            "transformer_available": false,
+            "transformer_mode": "",
+            "transformer_stale": false
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "source_name": "marker-object-zero.wav",
+        "speaker_data_url": "/api/library/865ab473b0815152ac9db6d2516a7bbe/speakers.csv",
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          },
+          "B": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "B",
+            "theme_color": "#2F80ED"
+          }
+        },
+        "speakers": [
+          "A",
+          "B"
+        ],
+        "status": "completed",
+        "thumbnail_url": "/api/library/865ab473b0815152ac9db6d2516a7bbe/thumbnail?v=2026-10-04T03%3A05%3A10%2B00%3A00",
+        "timed_turn_count": 2,
+        "updated_at": "2026-10-04T03:05:10+00:00",
+        "write_json": true,
+        "write_srt": false
+      },
+      "expected": {
+        "metrics": {
+          "A": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 0,
+            "seconds": 0,
+            "characters": 16,
+            "share": 0.0
+          },
+          "B": {
+            "count": 1,
+            "timedCount": 1,
+            "missingTimeCount": 0,
+            "timedSeconds": 5,
+            "seconds": 5,
+            "characters": 16,
+            "share": 1.0
+          }
+        },
+        "timed": 2,
+        "missing": 0,
+        "seconds": 5,
+        "duration": 13,
+        "valid": [
+          {
+            "valid": true,
+            "start": 10,
+            "end": 10
+          },
+          {
+            "valid": true,
+            "start": 8,
+            "end": 13
+          }
+        ]
+      },
+      "raw_db_sha256": "ed2235ca2c6bcc8ffdd08eb7e73d581b33c329098615cf213782448975a473f5"
+    }
+  ]
+}

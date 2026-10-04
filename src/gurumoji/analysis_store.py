@@ -16,11 +16,13 @@ import os
 import re
 import threading
 import uuid
+import unicodedata
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import quote, urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
+from .analysis_core import PUBLICATION_TARGETS, EFFECTIVE_PUBLICATION_WRITERS, validate_publication_targets
 from .services.durable_files import write_durably
 
 LOGGER = logging.getLogger(__name__)
@@ -50,6 +52,19 @@ def initialize_store(connection) -> None:
         stale INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '',
         note_path TEXT NOT NULL DEFAULT '', app_url TEXT NOT NULL DEFAULT '',
         provider TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '')""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS analysis_publication_attempts (
+        attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        package_hash TEXT NOT NULL, requested_json TEXT NOT NULL, effective_json TEXT NOT NULL,
+        executed_json TEXT NOT NULL DEFAULT '[]', outcomes_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, ended_at TEXT,
+        UNIQUE(run_id,sequence))""")
+    for attempt in connection.execute("SELECT attempt_id,outcomes_json FROM analysis_publication_attempts WHERE status='publishing'").fetchall():
+        outcomes = json.loads(attempt["outcomes_json"])
+        for value in outcomes.values():
+            if value.get("status") == "pending":
+                value.update(status="unknown", error="再起動で公開結果の確認が中断されました。")
+        connection.execute("UPDATE analysis_publication_attempts SET status='incomplete',outcomes_json=?,error=?,ended_at=? WHERE attempt_id=?",
+                           (canonical(outcomes).decode(), "公開試行が中断されました。", datetime.now(timezone.utc).isoformat(), attempt["attempt_id"]))
     connection.execute("CREATE INDEX IF NOT EXISTS analysis_runs_item ON analysis_runs(item_id,created_at)")
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_artifacts (
         id TEXT PRIMARY KEY, run_id TEXT NOT NULL, path TEXT NOT NULL,
@@ -95,6 +110,25 @@ def safe_path(root: Path, relative: str) -> Path:
     if not target.resolve().is_relative_to(root.resolve()):
         raise ValueError("保存先の外は参照できません。")
     return target
+
+
+def _artifact_member_key(name: str) -> str:
+    """Validate portable ZIP-member syntax without repairing the stored name.
+
+    Filesystem containment remains safe_path's responsibility. Output stem
+    sanitizers would silently rename immutable members, so they cannot be used here.
+    """
+    if (not isinstance(name, str) or not name or name.startswith("/")
+            or re.search(r'[<>:"\\|?*\x00-\x1f\x7f]', name)):
+        raise StoreConflict("固定packageのファイル名が安全な相対パスではありません。")
+    parts = name.split("/")
+    if any(part in {"", ".", ".."} or part.endswith((".", " ")) or PureWindowsPath(part).is_reserved() for part in parts):
+        raise StoreConflict("固定packageのファイル名に未対応のパス要素があります。")
+    if len(name.encode("utf-8")) > 65535:
+        raise StoreConflict("固定packageのファイル名がZIPの上限を超えています。")
+    # Case-insensitive / normalization-insensitive destinations must not overwrite
+    # another member. The original spelling and file bytes are never changed.
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def write_atomic(path: Path, data: bytes, *, create_only: bool = False) -> None:
@@ -172,7 +206,7 @@ class AnalysisStore:
         self.run_notes = Path(database_file).parent / "obsidian_layout" / "run_notes"
         self._note_events: list = []
 
-    def publish_vaults(self, run_id: str) -> dict[str, str]:
+    def _publish_generated_vaults(self, run_id: str) -> dict[str, str]:
         """Mirror a completed run into the Input, Orchestrator, and Visualization Vaults.
 
         Those Vaults hold ID-linked summaries only. A failure there never changes
@@ -188,8 +222,8 @@ class AnalysisStore:
             for artifact in artifacts:
                 name = artifact["name"]
                 if name.startswith("tables/") and name.endswith(".csv"):
-                    with safe_path(self.root, artifact["path"]).open(encoding="utf-8-sig", newline="") as handle:
-                        fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(handle), [])
+                    content = self.read_artifact(artifact["id"])[1].decode("utf-8-sig")
+                    fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(io.StringIO(content)), [])
             self.vaults.note_events = []
             statuses = self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
             self._note_events.extend(self.vaults.note_events)
@@ -206,54 +240,40 @@ class AnalysisStore:
             self._last_publication_outcomes[run_id] = outcomes
             return {"error": str(exc)}
 
+    def publication_attempts(self, run_id: str) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM analysis_publication_attempts WHERE run_id=? ORDER BY sequence", (run_id,),
+            ).fetchall()
+        return [{**{key: row[key] for key in ("attempt_id", "sequence", "package_hash", "status", "error", "created_at", "ended_at")},
+                 **{key: json.loads(row[key + "_json"]) for key in ("requested", "effective", "executed", "outcomes")}}
+                for row in rows]
+
     def publication_outcomes(self, run_id: str) -> dict[str, dict[str, str]]:
-        """Return per generated-Vault publication state for one fixed package."""
-        run = self.get(run_id)
-        if not run:
+        """Only a durable attempt proves that these writers processed this package."""
+        if not self.get(run_id):
             raise LookupError("保存結果がありません。")
-        if run_id in self._last_publication_outcomes:
-            return copy.deepcopy(self._last_publication_outcomes[run_id])
-        try:
-            data = self.vaults.load()
-        except (OSError, ValueError) as exc:
-            return {kind: {"status": "unknown", "error": str(exc)}
-                    for kind in ("input", "orchestrator", "visualization")}
-        snapshot_note = "input-snapshot-" + str(run["snapshot_id"])
-        run_note = "orchestrator-run-" + run_id
-        visual_prefix = "visual-" + run_id + "-"
+        attempts = self.publication_attempts(run_id)
+        if attempts:
+            return copy.deepcopy(attempts[-1]["outcomes"])
+        return {kind: {"status": "unknown", "error": "公開試行記録がなく、完了を確認できません。"}
+                for kind in EFFECTIVE_PUBLICATION_WRITERS}
 
-        def outcome(note_ids: list[str]) -> dict[str, str]:
-            if not note_ids:
-                return {"status": "unknown", "error": "公開対象ノートを確認できません。"}
-            entries = [data.get("notes", {}).get(note_id) for note_id in note_ids]
-            if any(entry is None for entry in entries):
-                return {"status": "unknown", "error": "公開対象ノートがありません。"}
-            sync = {str(entry.get("sync") or "unknown") for entry in entries if entry}
-            if sync <= {"current"}:
-                return {"status": "published", "error": ""}
-            if "conflict" in sync:
-                return {"status": "conflict", "error": "利用者の編集を保持したため競合しています。"}
-            if "missing" in sync:
-                return {"status": "failed", "error": "管理対象ノートが移動または削除されています。"}
-            return {"status": "unknown", "error": "公開状態を確認できません。"}
-
-        visual_ids = [note_id for note_id in data.get("notes", {}) if note_id.startswith(visual_prefix)]
-        # A run with no tabular visual still has a valid Visualization publication:
-        # its generated index/home are current and there was nothing to write.
-        visual = outcome(visual_ids) if visual_ids else {"status": "published", "error": ""}
-        return {
-            "input": outcome([snapshot_note]),
-            "orchestrator": outcome([run_note]),
-            "visualization": visual,
-        }
+    def publish_vaults(self, run_id: str) -> dict[str, str]:
+        """Compatibility entry point using the same scope and durable-attempt guard."""
+        self.publish(run_id)
+        return {kind: value["status"] for kind, value in self.publication_outcomes(run_id).items()
+                if kind in PUBLICATION_TARGETS}
 
     def refresh_vaults(self, item_id: str) -> None:
         """Republish only runs whose stale state differs from their Orchestrator note.
 
         Comparisons that include this conversation are checked as well.
+        Autonomous output requires its dedicated source/generation/attempt guard;
+        generic refresh cannot authorize those writers.
         """
         with self.connect() as conn:
-            rows = conn.execute("""SELECT id,stale FROM analysis_runs WHERE status='completed' AND
+            rows = conn.execute("""SELECT id,stale FROM analysis_runs WHERE status='completed' AND kind!='autonomous_analysis' AND
                 (item_id=? OR id IN (SELECT run_id FROM analysis_run_members WHERE item_id=?))""",
                                 (item_id, item_id)).fetchall()
         for row in rows:
@@ -306,33 +326,68 @@ class AnalysisStore:
             row = conn.execute("""SELECT a.* FROM analysis_artifacts a JOIN analysis_runs r ON r.id=a.run_id
                 WHERE a.id=? AND r.status='completed'""", (artifact_id,)).fetchone()
         if row is None: raise LookupError("保存済みファイルが見つかりません。")
+        _artifact_member_key(row["name"])
         path = safe_path(self.root, row["path"])
         content = path.read_bytes()
-        if hashlib.sha256(content).hexdigest() != row["sha256"]:
+        if len(content) != row["bytes"] or hashlib.sha256(content).hexdigest() != row["sha256"]:
             raise StoreConflict("保存済みファイルが外部で変更されています。")
         return dict(row), content
 
     def public(self, row: dict, *, local: bool = False) -> dict:
         result = {key: row[key] for key in ("id", "item_id", "kind", "source_revision", "analysis_revision",
                   "created_at", "status", "vault_status", "stale", "error", "provider", "model")}
-        result["artifacts"] = [{key: a[key] for key in ("id", "name", "media_type", "rows", "bytes")}
+        result.update({key: row.get(key) for key in ("fingerprint", "input_fingerprint", "snapshot_id")})
+        result["artifacts"] = [{key: a[key] for key in ("id", "name", "media_type", "rows", "bytes", "sha256")}
                                for a in self.artifacts(row["id"])]
         for artifact in result["artifacts"]:
             artifact["url"] = f"/api/analysis/artifacts/{artifact['id']}"
         result["obsidian_uri"] = ("obsidian://open?" + urlencode({"path": str(self.vault / row["note_path"])})
                                     if local and row["note_path"] and row["vault_status"] == "completed" else "")
         result["vault_notes"] = self.vault_notes(row["id"])
-        # vault_status covers ResearchVault only; the generated Vaults are reported separately (OBS-18).
-        result["vault_outputs"] = self._vault_outputs(row)
-        result["vault_outputs_complete"] = all(
-            value["status"] == "published" for value in result["vault_outputs"].values())
+        # One SQLite read snapshot: never mix outcomes and writer evidence from
+        # different publication attempts that finish during this GET.
+        with self.connect() as connection:
+            connection.execute("BEGIN")
+            attempts = connection.execute("SELECT * FROM analysis_publication_attempts WHERE run_id=? ORDER BY sequence", (row["id"],)).fetchall()
+            result["publication_attempts"] = [
+                {**{key: attempt[key] for key in ("attempt_id", "sequence", "package_hash", "status", "error", "created_at", "ended_at")},
+                 **{key: json.loads(attempt[key + "_json"]) for key in ("requested", "effective", "executed", "outcomes")}}
+                for attempt in attempts]
+            result["publication_records"] = []
+            if row["kind"] == "milestone_analysis" and connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='analysis_pipeline_publications'").fetchone():
+                records = connection.execute("""SELECT target_role,status,error,result_run_id,package_hash
+                    FROM analysis_pipeline_publications WHERE pipeline_id=(
+                        SELECT pipeline_id FROM analysis_pipeline_requests WHERE result_run_id=?
+                        ORDER BY created_at DESC,pipeline_id DESC LIMIT 1) ORDER BY target_role""", (row["id"],)).fetchall()
+                result["publication_records"] = [dict(record) for record in records]
+        latest = result["publication_attempts"][-1] if result["publication_attempts"] else {}
+        all_outputs = latest.get("outcomes", {}) if latest else {
+            kind: {"status": "unknown", "error": "公開試行記録がなく、完了を確認できません。"}
+            for kind in EFFECTIVE_PUBLICATION_WRITERS}
+        result["publication_outcomes"] = all_outputs
+        result["vault_outputs"] = {kind: value for kind, value in all_outputs.items() if kind in PUBLICATION_TARGETS}
+        requested = latest.get("requested", [])
+        effective = latest.get("effective", [])
+        executed = latest.get("executed", [])
+        valid_scope = (isinstance(requested, list) and len(requested) == len(PUBLICATION_TARGETS)
+                       and set(requested) == set(PUBLICATION_TARGETS)
+                       and isinstance(effective, list) and len(effective) == len(EFFECTIVE_PUBLICATION_WRITERS)
+                       and set(effective) == set(EFFECTIVE_PUBLICATION_WRITERS)
+                       and isinstance(executed, list) and len(executed) == len(EFFECTIVE_PUBLICATION_WRITERS)
+                       and set(executed) == set(EFFECTIVE_PUBLICATION_WRITERS))
+        result["vault_outputs_complete"] = row["status"] == "completed" and bool(row.get("fingerprint")) and valid_scope and latest.get("status") == "completed" and latest.get("package_hash") == row.get("fingerprint") and all(
+            kind in latest.get("effective", []) and kind in latest.get("executed", [])
+            and all_outputs.get(kind, {}).get("status") == "published"
+            for kind in EFFECTIVE_PUBLICATION_WRITERS)
         return result
 
     def _vault_outputs(self, row: dict) -> dict[str, dict[str, str]]:
         if row["status"] != "completed":
             return {}
         try:
-            return self.publication_outcomes(row["id"])
+            return {kind: value for kind, value in self.publication_outcomes(row["id"]).items()
+                    if kind in PUBLICATION_TARGETS}
         except (OSError, ValueError, LookupError) as exc:
             return {kind: {"status": "unknown", "error": str(exc)}
                     for kind in ("input", "orchestrator", "visualization")}
@@ -341,7 +396,7 @@ class AnalysisStore:
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
-             publish: bool = True) -> dict:
+             publish: bool = True, commit_guard=None) -> dict:
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
@@ -361,6 +416,11 @@ class AnalysisStore:
                     match = conn.execute("SELECT * FROM analysis_runs WHERE fingerprint=? AND item_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1", (fingerprint, item_id)).fetchone()
                 if match: previous = dict(match)
             if previous and previous["status"] == "completed":
+                if commit_guard is not None:
+                    with self.connect() as connection:
+                        connection.execute("BEGIN IMMEDIATE")
+                        commit_guard(connection)
+                self._verified_package(previous["id"])
                 if publish and previous["vault_status"] != "completed":
                     self.publish(previous["id"])
                 elif publish:
@@ -383,6 +443,9 @@ class AnalysisStore:
                        "app_url": app_url, "provider": provider, "model": model,
                        "member_ids": list(member_ids or []), "publish": publish}
             with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if commit_guard is not None:
+                    commit_guard(conn)
                 conn.execute("""INSERT INTO analysis_runs(id,request_id,item_id,kind,fingerprint,input_fingerprint,
                     snapshot_id,source_revision,analysis_revision,created_at,status,app_url,provider,model)
                     VALUES (?,?,?,?,?,?,?,?,?,?,'writing',?,?,?) ON CONFLICT(id) DO UPDATE SET status='writing',error=''""",
@@ -431,6 +494,9 @@ class AnalysisStore:
                                   "bytes": len(content), "rows": None})
                 check_cancelled()
                 with self.connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    if commit_guard is not None:
+                        commit_guard(conn)
                     for artifact in artifacts:
                         conn.execute("""INSERT OR REPLACE INTO analysis_artifacts
                             (id,run_id,path,name,media_type,sha256,bytes,rows) VALUES (:id,:run_id,:path,:name,:media_type,:sha256,:bytes,:rows)""", artifact)
@@ -449,10 +515,174 @@ class AnalysisStore:
             run = self.get(run_id)
             if not run: raise LookupError("保存結果がありません。")
             if run['status'] == 'completed': return self.publish(run_id)
+            if run['kind'] in {'milestone_analysis', 'autonomous_analysis'}:
+                raise StoreConflict("未完了の固定保存は、その分析の専用画面から再試行してください。")
             with self.connect() as conn:
                 row = conn.execute("SELECT payload_json FROM analysis_pending_packages WHERE run_id=?", (run_id,)).fetchone()
             if not row: raise StoreConflict("再保存用の入力がありません。分析画面から保存してください。")
             return self.save(**json.loads(row[0]))
+
+    def _verified_package(self, run_id: str) -> tuple[dict, dict]:
+        """Validate every immutable catalog artifact before any publication side effect."""
+        snapshot, result, _manifest, _content = self.verified_package(run_id)
+        return snapshot, result
+
+    def verified_package(self, run_id: str) -> tuple[dict, dict, dict, dict[str, bytes]]:
+        """Read the fixed package only; never recover, publish, stamp or rewrite it."""
+        run = self.get(run_id)
+        artifacts = self.artifacts(run_id)
+        by_name = {artifact["name"]: artifact for artifact in artifacts}
+        required = {"input.json", "result.json", "parameters.json", "manifest.json"}
+        if not run or run["status"] != "completed" or not required <= by_name.keys():
+            raise StoreConflict("固定packageが欠落しています。再計算せず停止しました。")
+        member_keys = [_artifact_member_key(artifact["name"]) for artifact in artifacts]
+        members = set(member_keys)
+        if len(members) != len(member_keys) or any(
+                "/".join(key.split("/")[:index]) in members
+                for key in member_keys for index in range(1, len(key.split("/")))):
+            raise StoreConflict("固定packageのファイル名が移動先で競合するため停止しました。")
+        content = {artifact["name"]: self.read_artifact(artifact["id"])[1] for artifact in artifacts}
+        manifest = json.loads(content["manifest.json"])
+        if not isinstance(manifest, dict) or manifest.get("schema_version") not in (None, STORE_VERSION):
+            raise StoreConflict("固定packageの形式に対応していません。")
+        entries = manifest.get("artifacts")
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) or not isinstance(entry.get("name"), str) for entry in entries):
+            raise StoreConflict("固定packageのmanifest形式が正しくありません。")
+        expected = {artifact["name"]: artifact for artifact in entries}
+        actual = {name: artifact for name, artifact in by_name.items() if name != "manifest.json"}
+        if (len(by_name) != len(artifacts) or len(expected) != len(manifest.get("artifacts", []))
+                or expected != actual or manifest.get("analysis_id") != run_id
+                or manifest.get("fingerprint") != run["fingerprint"]
+                or manifest.get("input_snapshot_id") != run["snapshot_id"]):
+            raise StoreConflict("固定packageのmanifestが一致しません。再計算せず停止しました。")
+        snapshot, result = json.loads(content["input.json"]), json.loads(content["result.json"])
+        if not isinstance(snapshot, dict) or not isinstance(result, dict):
+            raise StoreConflict("固定packageのJSON形式が正しくありません。")
+        if digest(snapshot) != run["snapshot_id"]:
+            raise StoreConflict("固定packageの入力snapshot hashが一致しません。再計算せず停止しました。")
+        if result.get("schema_version") not in (None, STORE_VERSION):
+            raise StoreConflict("固定結果の形式に対応していません。")
+        parameters = json.loads(content["parameters.json"])
+        if not isinstance(parameters, dict) or not isinstance(result.get("parameters", {}), dict):
+            raise StoreConflict("固定packageの条件形式が正しくありません。")
+        if parameters != result.get("parameters", {}):
+            raise StoreConflict("固定packageの条件が一致しません。")
+        return snapshot, result, manifest, content
+
+    def _publication_scope(self, run: dict, result: dict, targets: list[str] | None) -> list[str]:
+        if run["kind"] in {"milestone_analysis", "autonomous_analysis"}:
+            saved = result.get("parameters", {}).get("publication_targets")
+            if saved is None:
+                raise StoreConflict("旧packageの公開範囲を確認できません。新しい範囲へ自動拡大しません。")
+            saved = validate_publication_targets(saved)
+            if targets is not None and validate_publication_targets(targets) != saved:
+                raise StoreConflict("再公開は保存時の承認範囲から変更できません。")
+            if run["kind"] == "autonomous_analysis" and saved and run.get("stale"):
+                raise StoreConflict("入力変更後の自律分析はVaultへ公開できません。固定成果物を確認してください。")
+            return saved
+        return validate_publication_targets(list(PUBLICATION_TARGETS) if targets is None else targets)
+
+    def _record_blocked_publication(self, run: dict, targets: list[str] | None, error: Exception) -> None:
+        """Keep validation failures visible without claiming any writer ran."""
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            latest = connection.execute("SELECT * FROM analysis_publication_attempts WHERE run_id=? ORDER BY sequence DESC LIMIT 1", (run["id"],)).fetchone()
+            if latest and latest["status"] == "publishing":
+                return
+            requested = json.loads(latest["requested_json"]) if latest else targets
+            if requested is None and run["kind"] not in {"milestone_analysis", "autonomous_analysis"}:
+                requested = list(PUBLICATION_TARGETS)
+            if requested is None:
+                return  # Legacy scope is unknown; never invent permission.
+            requested = validate_publication_targets(requested)
+            if targets is not None and validate_publication_targets(targets) != requested:
+                return  # A request for a different scope was not accepted.
+            effective = list(EFFECTIVE_PUBLICATION_WRITERS) if requested else []
+            message = str(error)[:1000]
+            outcomes = {kind: {"status": "failed" if kind in effective else "not_selected", "error": message}
+                        for kind in EFFECTIVE_PUBLICATION_WRITERS}
+            now = datetime.now(timezone.utc).isoformat()
+            connection.execute("""INSERT INTO analysis_publication_attempts
+                (attempt_id,run_id,sequence,package_hash,requested_json,effective_json,executed_json,outcomes_json,status,error,created_at,ended_at)
+                VALUES (?,?,?,?,?,?,'[]',?,'blocked',?,?,?)""", (uuid.uuid4().hex, run["id"], latest["sequence"] + 1 if latest else 1,
+                run["fingerprint"], canonical(requested).decode(), canonical(effective).decode(), canonical(outcomes).decode(), message, now, now))
+
+    def publish(self, run_id: str, *, targets: list[str] | None = None, commit_guard=None,
+                reuse_completed: bool = False) -> dict:
+        with STORE_LOCK:
+            run = self.get(run_id)
+            if not run or run["status"] != "completed":
+                raise LookupError("完了した保存結果がありません。")
+            # Scope resolution reads the saved result and never recomputes a missing package.
+            try:
+                snapshot, result = self._verified_package(run_id)
+                requested = self._publication_scope(run, result, targets)
+                if run["kind"] == "autonomous_analysis" and requested and commit_guard is None:
+                    raise StoreConflict("自律分析の公開は専用の保存・公開再試行から実行してください。")
+            except (OSError, ValueError, KeyError, TypeError, LookupError) as exc:
+                self._record_blocked_publication(run, targets, exc)
+                raise
+            effective = list(EFFECTIVE_PUBLICATION_WRITERS) if requested else []
+            outcomes = {kind: {"status": "pending" if kind in effective else "not_selected", "error": ""}
+                        for kind in EFFECTIVE_PUBLICATION_WRITERS}
+            attempt_id = uuid.uuid4().hex
+            now = datetime.now(timezone.utc).isoformat()
+            with self.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if commit_guard is not None:
+                    commit_guard(connection)
+                latest = connection.execute("SELECT * FROM analysis_publication_attempts WHERE run_id=? ORDER BY sequence DESC LIMIT 1", (run_id,)).fetchone()
+                if latest and latest["status"] == "publishing":
+                    raise StoreConflict("このpackageの公開試行はまだ実行中です。")
+                if latest and (json.loads(latest["requested_json"]) != requested or latest["package_hash"] != run["fingerprint"]):
+                    raise StoreConflict("公開試行の固定packageまたは承認範囲が一致しません。")
+                # Pipeline cancellation may arrive after the publication committed.
+                # Reuse only the latest durable success, after package verification,
+                # scope checks and the caller's current-generation guard above.
+                # Direct user-requested republication keeps its existing behavior.
+                if (reuse_completed and latest and latest["status"] == "completed" and effective
+                        and all(json.loads(latest["outcomes_json"]).get(kind, {}).get("status") == "published"
+                                for kind in effective)):
+                    return self.get(run_id)
+                sequence = latest["sequence"] + 1 if latest else 1
+                connection.execute("""INSERT INTO analysis_publication_attempts
+                    (attempt_id,run_id,sequence,package_hash,requested_json,effective_json,outcomes_json,status,created_at)
+                    VALUES (?,?,?,?,?,?,?,'publishing',?)""", (attempt_id, run_id, sequence, run["fingerprint"],
+                    canonical(requested).decode(), canonical(effective).decode(), canonical(outcomes).decode(), now))
+            executed: list[str] = []
+            error = ""
+            self._note_events = []
+            self._last_publication_outcomes.pop(run_id, None)
+            try:
+                if requested:
+                    executed.extend(PUBLICATION_TARGETS)
+                    self._update_publication_attempt(attempt_id, executed, outcomes, "publishing")
+                    self._publish_generated_vaults(run_id)
+                    generated = self._last_publication_outcomes.get(run_id, {})
+                    for kind in PUBLICATION_TARGETS:
+                        outcomes[kind] = generated.get(kind, {"status": "unknown", "error": "公開結果が返されませんでした。"})
+                    executed.append("research")
+                    self._update_publication_attempt(attempt_id, executed, outcomes, "publishing")
+                    published = self._publish_research(run_id)
+                    state = published.get("vault_status", "unknown")
+                    outcomes["research"] = {"status": "published" if state == "completed" else state,
+                                             "error": str(published.get("error") or "")}
+            except Exception as exc:
+                error = str(exc)[:1000]
+                for kind in effective:
+                    if outcomes[kind]["status"] == "pending":
+                        outcomes[kind] = {"status": "failed" if kind in executed else "unknown", "error": error}
+            status = ("not_selected" if not effective else "completed" if all(
+                outcomes[kind]["status"] == "published" for kind in effective) else "incomplete")
+            self._update_publication_attempt(attempt_id, executed, outcomes, status, error)
+            return self.get(run_id)
+
+    def _update_publication_attempt(self, attempt_id: str, executed: list[str], outcomes: dict,
+                                    status: str, error: str = "") -> None:
+        with self.connect() as connection:
+            connection.execute("""UPDATE analysis_publication_attempts SET executed_json=?,outcomes_json=?,status=?,error=?,ended_at=?
+                WHERE attempt_id=? AND status='publishing'""", (canonical(executed).decode(), canonical(outcomes).decode(),
+                status, error, None if status == "publishing" else datetime.now(timezone.utc).isoformat(), attempt_id))
 
     def _read_package(self, run_id: str) -> tuple[dict, dict]:
         artifacts = {a["name"]: a for a in self.artifacts(run_id)}
@@ -585,13 +815,10 @@ class AnalysisStore:
             conn.execute("UPDATE analysis_runs SET vault_status='completed',note_path=?,error='' WHERE id=?",
                          (note_path, run["id"]))
 
-    def publish(self, run_id: str) -> dict:
+    def _publish_research(self, run_id: str) -> dict:
         with STORE_LOCK:
             run = self.get(run_id)
             if not run or run["status"] != "completed": raise LookupError("完了した保存結果がありません。")
-            # Independent of ResearchVault conflicts: the four Vaults use their own hash catalog.
-            self._note_events = []
-            self.publish_vaults(run_id)
             try:
                 if run["kind"] == "interview_comparison":
                     self._publish_comparison(run)
@@ -688,7 +915,9 @@ class AnalysisStore:
                                 graph_kind="analysis", graph_scope="detail")
                 with self.connect() as conn:
                     conn.execute("UPDATE analysis_runs SET vault_status='completed',note_path=?,error='' WHERE id=?", (note_path, run_id))
-                self.publish_index(item_id)
+                # Generated Vaults were already attempted above; do not recursively
+                # start a second publication while updating this Research index.
+                self._publish_index(item_id)
                 self._record_note_events(run_id)
             except Exception as exc:
                 message = str(exc) if isinstance(exc, StoreConflict) else "Vaultへの保存を完了できませんでした。結果ファイルは保持しています。"

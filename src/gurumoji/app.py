@@ -61,6 +61,18 @@ from .ai_effort import normalize_efforts
 from .analysis_method_registry import method_results
 from .analysis_store import AnalysisStore, StoreConflict
 from .analysis_pipeline import AnalysisPipelineService
+from .analysis_core import AnalysisContractError
+from .analysis_orchestration import AnalysisOrchestrationService, recover_orchestration_runs
+from .services.analysis_orchestration_adapters import make_orchestration_adapters, ADAPTER_VERSION as ORCHESTRATION_ADAPTER_VERSION
+from .services.analysis_orchestration_methods import run_orchestration_method
+from .services.analysis_orchestration_publication import (
+    AnalysisOrchestrationPublicationService, recover_orchestration_publications,
+)
+from .web.analysis_orchestration_routes import register_orchestration_routes
+from .services.analysis_history import AnalysisHistoryService
+from .services.analysis_slides import AnalysisSlidesService
+from .services.analysis_slide_templates import load_slide_templates
+from .web.analysis_slides_routes import register_analysis_slides_routes
 from .handlers.analysis_commands import AnalysisCommands, ComparisonRequestError
 from .handlers.analysis_queries import AnalysisQueries
 from .handlers.application_lifecycle import ApplicationLifecycle
@@ -224,7 +236,7 @@ from .handlers.segment_classification import make_segment_classification_command
 from .services.analysis_pipeline_adapters import (
     run_analysis_pipeline_method,
 )
-from .services.analysis_pipeline_adapters import make_analysis_pipeline_adapters
+from .services.analysis_pipeline_adapters import make_analysis_pipeline_adapters, make_staged_initial_builder
 from .services.library_schema import make_library_schema
 from .services.library_store import make_library_store
 from .services.output_import import make_output_import
@@ -527,9 +539,18 @@ def _vault_nesting_warnings() -> list[str]:
 
 def runtime_info() -> dict[str, Any]:
     colab = is_colab_runtime()
+    system = platform.system()
+    configured_kind = os.environ.get("MOJIOKOSI_RUNTIME", "").strip().lower()
+    kind = "colab" if colab else "cloud" if configured_kind == "cloud" else "local"
+    default_label = "Colab / Google Drive" if colab else "クラウド実行環境" if kind == "cloud" else "Gurumoji実行環境"
+    label = os.environ.get("MOJIOKOSI_RUNTIME_LABEL", "").strip()[:120] or default_label
     native_file_dialog = platform.system() == "Windows" and not colab and not REMOTE_ACCESS_ENABLED
     return {
-        "kind": "colab" if colab else "local",
+        "kind": kind,
+        "label": label,
+        "os": system,
+        "source_path_example": "/content/drive/MyDrive/..." if colab else r"C:\audio\recording.wav" if system == "Windows" else "/path/to/recording.wav",
+        "qwen_setup_note": "Windowsで scripts\\setup_qwen_stack.bat を実行して準備します。モデルは初回起動時に取得される場合があります。" if system == "Windows" else "現在のQwen独立環境ランチャーはWindows用です。この実行環境の対応状況を確認してください。",
         "colab": colab,
         "native_file_dialog": native_file_dialog,
         "browser_upload": not native_file_dialog,
@@ -611,12 +632,15 @@ def import_speaker_registry_csv(
     content: bytes,
     *,
     expected_revision: int,
+    preview: bool = False,
 ) -> tuple[list[dict[str, Any]], int, int]:
     return speaker_registry_store.import_speaker_registry_csv(
         content,
         expected_revision=expected_revision,
         max_upload_bytes=MAX_CSV_UPLOAD_BYTES,
-        save_records=save_speaker_registry_records,
+        save_records=(lambda *args, **kwargs: speaker_registry_store.preview_speaker_registry_records(
+            *args, connect=database_connection, **kwargs
+        )) if preview else save_speaker_registry_records,
     )
 
 
@@ -700,11 +724,13 @@ def group_analysis_for_row(
     *,
     include_research_rows: bool = False,
     execute: bool = True,
+    defer_research: bool = False,
 ) -> dict[str, Any]:
     return group_analysis.group_analysis_for_row(
         row,
         include_research_rows=include_research_rows,
         execute=execute,
+        defer_research=defer_research,
         connect=database_connection,
         row_segments=row_segments,
         row_original_segments=row_original_segments,
@@ -1470,6 +1496,14 @@ _application_lifecycle: ApplicationLifecycle | None = None
 def application_lifecycle() -> ApplicationLifecycle:
     global _application_lifecycle
     if _application_lifecycle is None:
+        def initialize_runtime_library() -> None:
+            # Called only after the application instance lock is acquired.
+            # Routine schema checks and read requests never interrupt live work.
+            initialize_library(repair_provenance=False)
+            with database_connection() as connection:
+                recover_orchestration_runs(connection)
+                recover_orchestration_publications(connection)
+
         def repair_provenance() -> None:
             with database_connection() as connection:
                 repair_output_import_provenance(connection)
@@ -1477,7 +1511,7 @@ def application_lifecycle() -> ApplicationLifecycle:
         _application_lifecycle = ApplicationLifecycle(
             acquire_instance_lock=lambda: acquire_instance_lock(),
             release_instance_lock=lambda: release_instance_lock(),
-            initialize_library=lambda: initialize_library(repair_provenance=False),
+            initialize_library=initialize_runtime_library,
             recover_edits=lambda: recover_edit_transactions(),
             repair_provenance=repair_provenance,
             recover_deletes=lambda: recover_delete_quarantines(),
@@ -1563,12 +1597,126 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
         snapshot_builder=build_analysis_pipeline_snapshot,
         method_runner=run_analysis_pipeline_method,
         save_result=store.save,
-        publish_result=store.publish,
+        publish_result=lambda run_id, **kwargs: store.publish(run_id, reuse_completed=True, **kwargs),
         publication_outcomes=store.publication_outcomes,
         public_run=public_run,
         runtime_key=str(DATABASE_FILE.resolve()),
         plan_advisor=advise_analysis_plan,
     )
+
+
+def call_orchestration_ai_json(
+    provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
+    check_cancelled=None, usage_callback=None, base_url="",
+):
+    """One transport dispatch per Handler task; retries must be ledgered.
+
+    Other existing AI workflows retain their normal transient HTTP retry policy.
+    An ambiguous response in this loop must never silently consume a second call.
+    """
+    def post_once(url, headers, payload, **kwargs):
+        return ai_client.post_json(
+            url, headers, payload, worker_file=AI_HTTP_WORKER_FILE,
+            run_subprocess=run_cancellable_subprocess, retry_delays=(), **kwargs,
+        )
+    return ai_client.call_ai_json(
+        provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
+        post=post_once, lmstudio_base=lmstudio_base_url,
+        lmstudio_model_id=lmstudio_model_id,
+        lmstudio_reasoning=lmstudio_reasoning_settings,
+        extract_openai=extract_openai_text, extract_google=extract_google_text,
+        extract_lmstudio=extract_lmstudio_text,
+        providers=AI_MODEL_PROVIDERS, check_cancelled=check_cancelled,
+        usage_callback=usage_callback, base_url=base_url,
+    )
+
+
+prepare_orchestration, run_orchestration_agent = make_orchestration_adapters(
+    call_ai_json=lambda *args, **kwargs: call_orchestration_ai_json(*args, **kwargs),
+    load_token_config=lambda: load_token_config(),
+    configured_ai_credentials=lambda *args: configured_ai_credentials(*args),
+)
+
+_orchestration_services: dict[str, AnalysisOrchestrationService] = {}
+_orchestration_publication_services: dict[str, AnalysisOrchestrationPublicationService] = {}
+_orchestration_service_lock = threading.RLock()
+
+
+def orchestration_source_guard(connection, item_id: str, expected_hash: str):
+    row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+    if row is None:
+        raise LookupError("対象の会話が削除されています。")
+    if archive_source_stamp(row, connection=connection) != expected_hash:
+        raise AnalysisContractError("元データが更新されています。固定成果物は残し、Vault公開を停止します。", code="revision_conflict")
+    return dict(row)
+
+
+def analysis_orchestration_service() -> AnalysisOrchestrationService:
+    # Preserve process-local worker ownership across read/cancel/resume requests.
+    # SQLite remains authoritative; this cache does not survive process restart.
+    key = str(DATABASE_FILE.resolve())
+    with _orchestration_service_lock:
+        if key not in _orchestration_services:
+            _orchestration_services[key] = AnalysisOrchestrationService(
+                connect=lambda: database_connection(),
+                find_item=lambda item_id: library_row(item_id),
+                source_fingerprint=lambda row: archive_source_stamp(row),
+                snapshot_builder=lambda row: build_analysis_pipeline_snapshot(row),
+                initial_builder=make_staged_initial_builder(
+                    archive_snapshot=lambda *args, **kwargs: archive_snapshot(*args, **kwargs),
+                    archive_source_stamp=lambda *args, **kwargs: archive_source_stamp(*args, **kwargs),
+                    group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
+                ),
+                agent_runner=lambda *args: run_orchestration_agent(*args),
+                method_runner=lambda *args: run_orchestration_method(*args),
+                write_lock=library_write_lock,
+                adapter_version=ORCHESTRATION_ADAPTER_VERSION,
+                on_complete=lambda item_id, run_id: analysis_orchestration_publication_service().finalize(item_id, run_id),
+            )
+        return _orchestration_services[key]
+
+
+@contextmanager
+def analysis_history_connection():
+    """Viewer reads cannot create a missing DB, migrate it, or commit writes."""
+    connection = sqlite3.connect(DATABASE_FILE.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA query_only = ON")
+        yield connection
+    finally:
+        connection.close()
+
+
+def analysis_history_item(item_id: str):
+    with analysis_history_connection() as connection:
+        return connection.execute("SELECT id,source_name FROM library_items WHERE id=?", (item_id,)).fetchone()
+
+
+def analysis_history_service() -> AnalysisHistoryService:
+    return AnalysisHistoryService(connect=analysis_history_connection, find_item=analysis_history_item)
+
+
+def analysis_slides_service() -> AnalysisSlidesService:
+    return AnalysisSlidesService(
+        export_result=lambda item_id, run_id: analysis_history_service().saved_export(item_id, run_id),
+        vault_factory=vault_registry,
+        templates=load_slide_templates(PROJECT_DIRECTORY),
+    )
+
+
+def analysis_orchestration_publication_service() -> AnalysisOrchestrationPublicationService:
+    key = str(DATABASE_FILE.resolve())
+    with _orchestration_service_lock:
+        if key not in _orchestration_publication_services:
+            _orchestration_publication_services[key] = AnalysisOrchestrationPublicationService(
+                connect=lambda: database_connection(),
+                store_factory=lambda: analysis_archive_store(),
+                source_guard=orchestration_source_guard,
+                export_locked=lambda db, item_id, run_id: analysis_orchestration_service().result_locked(db, item_id, run_id),
+                write_lock=library_write_lock,
+            )
+        return _orchestration_publication_services[key]
 
 
 def mark_analysis_run_stale(run_id: str) -> None:
@@ -1809,6 +1957,11 @@ def create_app() -> Flask:
     register_analysis_routes(
         flask_app, analysis_queries, analysis_commands, AI_MODEL_PROVIDERS
     )
+
+    register_orchestration_routes(flask_app, analysis_orchestration_service, prepare_orchestration,
+                                  analysis_orchestration_publication_service,
+                                  history_viewer=analysis_history_service)
+    register_analysis_slides_routes(flask_app, analysis_slides_service)
 
     register_speaker_routes(
         flask_app,

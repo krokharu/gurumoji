@@ -1,0 +1,700 @@
+{
+  "schema_version": 2,
+  "record_kind": "documentation_integration_manifest",
+  "as_of_utc": "2026-10-02T20:34:31.576377+00:00",
+  "baseline_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "design_documents_revision": "0.3",
+  "state": "uncommitted_documentation_only",
+  "source_snapshot_paths": "original research workspace labels for provenance, not required repo links",
+  "files": [
+    {
+      "path": ".agents/agents/gurumoji-ui-critic.md",
+      "sha256": "e7596ac9793e7dd4e1b7b9ce9efab0ed84298b58a6ddcea0772c3dbc14effe10",
+      "bytes": 9772,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "sha256": "0bb94e7db4d64c9111bf26dbbb639cb212979b997cf8ee5f3adfe7b95df82f46",
+      "bytes": 4044,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "9068d5d4051513591efbb69b793b57a6c1c313a74580908139140110e230e2c6",
+      "bytes": 6414,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "DESIGN.md",
+      "sha256": "a6493cbf5c4da128d5dd2e8891eb8ffe3112726215d19cbbe547117725fe9f60",
+      "bytes": 2520,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/00-AI-Entry.md",
+      "sha256": "8965e0345e66bb7931777aceed28058331b96770e82de95a329bc0b0a4fbcb61",
+      "bytes": 2803,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/00-Index.md",
+      "sha256": "ea98608b85f2058eb437d38012d978cdd40ebe59abd4d1f49946d9e84a3eabcd",
+      "bytes": 3688,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/20-Modules/ui-screens.md",
+      "sha256": "33d83da5b6c7cbf9c2290252544baa419944b22cf703a457894042f1afd4c00c",
+      "bytes": 13536,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "sha256": "2bae71145a7d1f983195ab6f405b59dd6f7b392bf30e165df5cfe70163777805",
+      "bytes": 1726,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/a-evidence-390.svg",
+      "sha256": "2ef65406b08da4e56c9121b226e938a1e81b074b4d56ea8c02575303fdceef41",
+      "bytes": 9766,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/a-evidence-390.svg",
+      "source_sha256": "2ef65406b08da4e56c9121b226e938a1e81b074b4d56ea8c02575303fdceef41",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/a-evidence-desktop.svg",
+      "sha256": "5da0a6ff6ba2a6a8896c6fdb428dcf5030ee6c54e32d006478d78683b8c80d4a",
+      "bytes": 10247,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/a-evidence-desktop.svg",
+      "source_sha256": "5da0a6ff6ba2a6a8896c6fdb428dcf5030ee6c54e32d006478d78683b8c80d4a",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/a-measurement-390.svg",
+      "sha256": "eb3e36bfad58504171c4901c083037e571ac3b4d955a2a9e449a8a59c9199167",
+      "bytes": 15245,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/a-measurement-390.svg",
+      "source_sha256": "eb3e36bfad58504171c4901c083037e571ac3b4d955a2a9e449a8a59c9199167",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/a-measurement-desktop.svg",
+      "sha256": "e2e7800fd0dbb56556555b57a730da297fc07abce25f94b0159ee33587e5387e",
+      "bytes": 14590,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/a-measurement-desktop.svg",
+      "source_sha256": "e2e7800fd0dbb56556555b57a730da297fc07abce25f94b0159ee33587e5387e",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/b-evidence-390.svg",
+      "sha256": "e87289af000b082e4a368129264a7a2c488bfd87d00afab35d3f2a90e8ff824b",
+      "bytes": 9109,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/b-evidence-390.svg",
+      "source_sha256": "e87289af000b082e4a368129264a7a2c488bfd87d00afab35d3f2a90e8ff824b",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/b-evidence-desktop.svg",
+      "sha256": "937245ef001132dd0284c28eed0c40be22ea5cb01e1fd9cd99403df990ca2422",
+      "bytes": 10557,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/b-evidence-desktop.svg",
+      "source_sha256": "937245ef001132dd0284c28eed0c40be22ea5cb01e1fd9cd99403df990ca2422",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/b-measurement-390.svg",
+      "sha256": "cbbfee775fc63f46ea42b1915585c0873b21616d03ee4b56944f47ca254723e4",
+      "bytes": 16538,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/b-measurement-390.svg",
+      "source_sha256": "cbbfee775fc63f46ea42b1915585c0873b21616d03ee4b56944f47ca254723e4",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/b-measurement-desktop.svg",
+      "sha256": "a1684401398302a5241a145f410a8fd800d846c93fefd17a4c3f7b863195c0ed",
+      "bytes": 15640,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/b-measurement-desktop.svg",
+      "source_sha256": "a1684401398302a5241a145f410a8fd800d846c93fefd17a4c3f7b863195c0ed",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "sha256": "e1e1cb01403af93a48b0bcef230d4b0336546f52a6ba6173e48ca7a30c9887a9",
+      "bytes": 16315,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/comparison.md",
+      "source_sha256": "b1907a6ff344edf3a5d747e7d2cc05ed41f920a69d8463e8c99fc472ac434d28",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/index.html",
+      "sha256": "1c4efeb3af48277d6bb1391cfd3c15c878609090c07e87a6a2b3d66eb4d7d0e8",
+      "bytes": 165818,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/index.html",
+      "source_sha256": "1c4efeb3af48277d6bb1391cfd3c15c878609090c07e87a6a2b3d66eb4d7d0e8",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/synthetic-fixture.json",
+      "sha256": "2ffebd324cf2bb2707c8b53053647b224a3eab4dc10f45befc6114367d43d6ce",
+      "bytes": 2408,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/synthetic-fixture.json",
+      "source_sha256": "2ffebd324cf2bb2707c8b53053647b224a3eab4dc10f45befc6114367d43d6ce",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/a-evidence-390.svg",
+      "sha256": "f8b473e7d6fc84050e7565b5608a19a6fe172f63fd4c3b6933777dbc1d07b431",
+      "bytes": 6793,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/a-evidence-390.svg",
+      "source_sha256": "f8b473e7d6fc84050e7565b5608a19a6fe172f63fd4c3b6933777dbc1d07b431",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/a-evidence-desktop.svg",
+      "sha256": "5f039f1d28e64da0618a6ccacb177a34fb375b21257436cf544fc2d3f3d213cb",
+      "bytes": 8412,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/a-evidence-desktop.svg",
+      "source_sha256": "5f039f1d28e64da0618a6ccacb177a34fb375b21257436cf544fc2d3f3d213cb",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/a-measurement-390.svg",
+      "sha256": "f961c00ceed58d59078a2160d9d9271836436c7fb27c4e8ec3c1f272576a3779",
+      "bytes": 8205,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/a-measurement-390.svg",
+      "source_sha256": "f961c00ceed58d59078a2160d9d9271836436c7fb27c4e8ec3c1f272576a3779",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/a-measurement-desktop.svg",
+      "sha256": "36f0ae7aecc3828e8ef36c1c44d1f5dc9beca65ebd5e596e00539c63baa8a880",
+      "bytes": 10410,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/a-measurement-desktop.svg",
+      "source_sha256": "36f0ae7aecc3828e8ef36c1c44d1f5dc9beca65ebd5e596e00539c63baa8a880",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-evidence-390.svg",
+      "sha256": "1718894d24684a0d126491bc5119a43d06e38c0768a21c3aad5c9ba6289d58c6",
+      "bytes": 6441,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-evidence-390.svg",
+      "source_sha256": "1718894d24684a0d126491bc5119a43d06e38c0768a21c3aad5c9ba6289d58c6",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-evidence-desktop.svg",
+      "sha256": "a4106fd37153dd7d65896079eed73a1253bfc459e3d9aa45090763e081aa85b2",
+      "bytes": 7651,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-evidence-desktop.svg",
+      "source_sha256": "a4106fd37153dd7d65896079eed73a1253bfc459e3d9aa45090763e081aa85b2",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-measurement-390.svg",
+      "sha256": "dfc7c415097fe50f3a70eb4ff5af89fd043ba80768e89d05e8a4dc4fb16146b8",
+      "bytes": 7751,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-measurement-390.svg",
+      "source_sha256": "dfc7c415097fe50f3a70eb4ff5af89fd043ba80768e89d05e8a4dc4fb16146b8",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-measurement-changed-390.svg",
+      "sha256": "500c60e0da60b38745c0491c97714177a8e3d98ac7bceb6ce6b351d505d9949a",
+      "bytes": 4874,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-measurement-changed-390.svg",
+      "source_sha256": "500c60e0da60b38745c0491c97714177a8e3d98ac7bceb6ce6b351d505d9949a",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-measurement-changed-desktop.svg",
+      "sha256": "a2762a83313ff3bc87ef59098a143fef64aea98b94360d94ed6487f630474f20",
+      "bytes": 5496,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-measurement-changed-desktop.svg",
+      "source_sha256": "a2762a83313ff3bc87ef59098a143fef64aea98b94360d94ed6487f630474f20",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/b-measurement-desktop.svg",
+      "sha256": "3de51d57696405e48feee36912131cb7630b45df48a01f89f2e5ab69c18fc396",
+      "bytes": 12275,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/b-measurement-desktop.svg",
+      "source_sha256": "3de51d57696405e48feee36912131cb7630b45df48a01f89f2e5ab69c18fc396",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "sha256": "bb7bd976eee548ba1b6817d896ac16ba48877bfc033f9563f509270028ab4fcb",
+      "bytes": 133421,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/index.html",
+      "source_sha256": "bb7bd976eee548ba1b6817d896ac16ba48877bfc033f9563f509270028ab4fcb",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "sha256": "0f1f64507bb5ac96b12694c4c98784b4e974feab175a1114226d321b6d82681c",
+      "bytes": 13764,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/outside-legend.md",
+      "source_sha256": "0c969e06f58df87e7d8dbc4cfe11a9387d0457ecccf71fc99c9f957a4c500032",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/a-evidence-390.png",
+      "sha256": "2186f4758516a96292dbb50829a2029c68ed4eb43b4333eaac577af0a34e8702",
+      "bytes": 145988,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/a-evidence-390.png",
+      "source_sha256": "2186f4758516a96292dbb50829a2029c68ed4eb43b4333eaac577af0a34e8702",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/a-evidence-desktop.png",
+      "sha256": "b21eeb523ecc0c6f2311649ac7dd9c061db39960b1ef3b0fc200602def2dbb86",
+      "bytes": 177655,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/a-evidence-desktop.png",
+      "source_sha256": "b21eeb523ecc0c6f2311649ac7dd9c061db39960b1ef3b0fc200602def2dbb86",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/a-measurement-390.png",
+      "sha256": "44fd05d66c7e7fa9db16d7ee6655dd61fc7d0d87902bb1094814d55737ec4cf1",
+      "bytes": 140086,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/a-measurement-390.png",
+      "source_sha256": "44fd05d66c7e7fa9db16d7ee6655dd61fc7d0d87902bb1094814d55737ec4cf1",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/a-measurement-desktop.png",
+      "sha256": "95c51955f6dafbe54319354d3500ee6a98bba456d71ab71718b3f955bacb300b",
+      "bytes": 174378,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/a-measurement-desktop.png",
+      "source_sha256": "95c51955f6dafbe54319354d3500ee6a98bba456d71ab71718b3f955bacb300b",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-evidence-390.png",
+      "sha256": "5baa423aac7bda9c9b29fbfab115834956325a5c8643450064cd946eb2911566",
+      "bytes": 134018,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-evidence-390.png",
+      "source_sha256": "5baa423aac7bda9c9b29fbfab115834956325a5c8643450064cd946eb2911566",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-evidence-desktop.png",
+      "sha256": "5833b732126fa1406ab6080acfa363162d7b084c5230dbc8e8527b1a606290e9",
+      "bytes": 163541,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-evidence-desktop.png",
+      "source_sha256": "5833b732126fa1406ab6080acfa363162d7b084c5230dbc8e8527b1a606290e9",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-measurement-390.png",
+      "sha256": "5d665d9301a3152394e89ea6f63aa36e49f17deecfab0717c32071ecaee193f4",
+      "bytes": 134721,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-measurement-390.png",
+      "source_sha256": "5d665d9301a3152394e89ea6f63aa36e49f17deecfab0717c32071ecaee193f4",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-measurement-changed-390.png",
+      "sha256": "c28cce7267bcd8712f440d6039df0319ff6e97bf974271e9918e5da4af6eabb1",
+      "bytes": 99560,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-measurement-changed-390.png",
+      "source_sha256": "c28cce7267bcd8712f440d6039df0319ff6e97bf974271e9918e5da4af6eabb1",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-measurement-changed-desktop.png",
+      "sha256": "f6c73fc6251772c68c9cba8dcd9ae2a31b1e4219e0f9f1881d71384db229de7f",
+      "bytes": 117754,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-measurement-changed-desktop.png",
+      "source_sha256": "f6c73fc6251772c68c9cba8dcd9ae2a31b1e4219e0f9f1881d71384db229de7f",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/rendered/b-measurement-desktop.png",
+      "sha256": "8c1499688a52d71bab4ebeb645fc72a48dab5497715ce4b063a863769cb10a45",
+      "bytes": 183215,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/rendered/b-measurement-desktop.png",
+      "source_sha256": "8c1499688a52d71bab4ebeb645fc72a48dab5497715ce4b063a863769cb10a45",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/validation.json",
+      "sha256": "fa5837f4247e1a591cab49ab37008d8e284916df024b70e4d751b77e43fb4d47",
+      "bytes": 4498,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/validation.json",
+      "source_sha256": "fa5837f4247e1a591cab49ab37008d8e284916df024b70e4d751b77e43fb4d47",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/wireframe-manifest.json",
+      "sha256": "ddc07d39c81dc6e36f5f6bb67270e075e40d18e74c8c36eaba966f26ae935220",
+      "bytes": 3595,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/v2/wireframe-manifest.json",
+      "source_sha256": "ddc07d39c81dc6e36f5f6bb67270e075e40d18e74c8c36eaba966f26ae935220",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/validation.json",
+      "sha256": "c7221c9f2ef6aa8455ca72d2ad00890fc77afcdd082a4b9f41116e718d4ea63f",
+      "bytes": 3693,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/validation.json",
+      "source_sha256": "c7221c9f2ef6aa8455ca72d2ad00890fc77afcdd082a4b9f41116e718d4ea63f",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/verification.md",
+      "sha256": "09fe231d904f43fbdb6519c6ec5b6c74adc330548b97d33a8a0db323007245a7",
+      "bytes": 4419,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/verification.md",
+      "source_sha256": "16f77c14c75ba480b0b1b4410aff22b1ef3c99f84a80a67fe0c0ac98ff97e065",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/wireframe-manifest.json",
+      "sha256": "dbec4bebb16a658cd16472583431dc8bd5ec4897803701a945bd9b51b011a26d",
+      "bytes": 3249,
+      "source_snapshot": "artifacts/design-sprint-20261003/prototypes/wireframe-manifest.json",
+      "source_sha256": "dbec4bebb16a658cd16472583431dc8bd5ec4897803701a945bd9b51b011a26d",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-contract.md",
+      "sha256": "650db76ab120a2da45cc22fb51a5cc4d9f90fe94c49bc93a01b8b5f75ef15c0f",
+      "bytes": 16463,
+      "source_snapshot": "artifacts/design-sprint-20261003/draft-DESIGN.md",
+      "source_sha256": "c7267fe1b74e91be1d9c2fcb90d2ab193ef92e2b7049e7ef35e3f998f566a94f",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "sha256": "b017cdbb1db4cb1f4437e14e470708d55e6f57dfb481e568230541b98bb76c1b",
+      "bytes": 37574,
+      "source_snapshot": "artifacts/design-sprint-20261003/design-implementation-plan.md",
+      "source_sha256": "edb65e6cef529291b151076afd82d3b007b847a6f3f73d24968ebd0c2a1ec28f",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans",
+      "destination_sha256_at_initial_copy": "327408cf004e39eba3f3470313e0ae66a298d7f80ed07030db053961991c6177",
+      "post_copy_review": "Scoped documentation maintenance/copyediting only; design implementation remains proposed"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "sha256": "e283664434f7204b78d9fd9ffc5b489c096c49a3c69ae51eea7c69d2a1a17328",
+      "bytes": 11588,
+      "source_snapshot": "artifacts/design-sprint-20261003/agent-design-knowledge.md",
+      "source_sha256": "060f3d6722d6334f5cef022bf770cc50cac242c7c6792d52f635b8a603ebed63",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans",
+      "destination_sha256_at_initial_copy": "4a5391df1191b4248928f7d0841344b842bd1cbe74156920b70ebbddc0ef1136",
+      "post_copy_review": "Scoped documentation maintenance/copyediting only; design implementation remains proposed"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "sha256": "7f17ce12573593c6bdc2e07d39f5f4251c5749bb84459f9eb17cde77cae80c66",
+      "bytes": 38374,
+      "source_snapshot": "artifacts/design-sprint-20261003/prompt-research.md",
+      "source_sha256": "82a1764145b4e6ba8b6a0cfd5a8a7a08fd9c7c70f34de01eee91b536d7c516c7",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-source-ledger.json",
+      "sha256": "bca488d395a3c18ae01338db60c94cb4d7e82f9c36b762beab001401b5e0c41e",
+      "bytes": 25342,
+      "source_snapshot": "artifacts/design-sprint-20261003/prompt-source-ledger.json",
+      "source_sha256": "bca488d395a3c18ae01338db60c94cb4d7e82f9c36b762beab001401b5e0c41e",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-source-ledger.md",
+      "sha256": "faf65733696071261e28ff8a5388a458405f1b6eb6056f7b544ec91896c59092",
+      "bytes": 17122,
+      "source_snapshot": "artifacts/design-sprint-20261003/prompt-source-ledger.md",
+      "source_sha256": "605e2e737f108114e948cac726740c5ce69674f9f639b2270a0d8bd85813732b",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "sha256": "44bf10efaca04d838356cdbf0356a4a8d68abe9750270c5ab360a2ba9208fc9b",
+      "bytes": 6557,
+      "source_snapshot": "artifacts/design-sprint-20261003/prompt-workflow-task-briefs.md",
+      "source_sha256": "a75f274a866a7aed6f80139ca33bd77d809b50f94eaf73d157dfa1e2d214b0c4",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans",
+      "destination_sha256_at_initial_copy": "c3b351b179c79253390020c945ca01b6cc9cfbc70a9bff69daa6d9ad4b876738",
+      "post_copy_review": "Scoped documentation maintenance/copyediting only; design implementation remains proposed"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "sha256": "f1334e394b188d0ff4c52216c8a7ff37e52789869513174579c3868d7764a702",
+      "bytes": 31329,
+      "source_snapshot": "artifacts/design-sprint-20261003/reference-patterns.md",
+      "source_sha256": "481ab073aafb9599c138f373b59ca999a78d7fbd9a786c3bff17dd50089cb481",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/source-review.md",
+      "sha256": "444a9f0716d8b24c2d90b4ab5ddd61f1c7727e707a5c9d4bb7b1e547494f42d5",
+      "bytes": 30967,
+      "source_snapshot": "artifacts/design-sprint-20261003/source-review.md",
+      "source_sha256": "0e8602c429cc724c2de4a03fb90a36e96eeead73986723a514377fb59542075a",
+      "treatment": "Software Vault metadata and resolved relative links; ordinary attribution/republication guidance replaces non-product operational detail in both original and imported copy",
+      "source_sha256_before_public_copyedit": "b7d105c6ffd71e2f2c8a304a4bf83e4982d3af913be94fbb42e45e655f9c42a0",
+      "destination_sha256_at_initial_copy": "7839f78606c8d314151175fc88f63769a47c9f768010e050e6b3d5f13b3c673a",
+      "post_copy_review": "Scoped documentation maintenance/copyediting only; design implementation remains proposed"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-research.md",
+      "sha256": "e1e6067395e0a98cc1b0f16adc81318e764584e1f97b2d647ee11556d060fb9b",
+      "bytes": 42091,
+      "source_snapshot": "artifacts/design-sprint-20261003/ux-research.md",
+      "source_sha256": "e453d2647c762b230042ecf26bf6907e0b2d5e87a9950b2e93babeb05b0bfb09",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-source-ledger.json",
+      "sha256": "3e174118480fe12d9b85ea01e20f6b85b8738d0feed6bbc3646cb980a2d26180",
+      "bytes": 39749,
+      "source_snapshot": "artifacts/design-sprint-20261003/ux-source-ledger.json",
+      "source_sha256": "3e174118480fe12d9b85ea01e20f6b85b8738d0feed6bbc3646cb980a2d26180",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "sha256": "8016e344f7bbdafa3c8711c14f2f434ba3031c8e43ea277f4678b7a9637fef97",
+      "bytes": 11628,
+      "source_snapshot": "artifacts/design-sprint-20261003/browser-acceptance-methodology.md",
+      "source_sha256": "affdbd00168bc0ede30df3827788719167b9449802f242aa007c719678eaad92",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "sha256": "874786b3866b6ab6ccb7b9763ccec0c0fc6335feadb7e33b944cf3bba3b6f6c6",
+      "bytes": 2022,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "sha256": "fec531750b3b1eeb8616de26b52688a81b740a197d67d9f5682156883db2fd50",
+      "bytes": 29792,
+      "source_snapshot": "artifacts/design-sprint-20261003/adversarial-checks.md",
+      "source_sha256": "3afebcc95e2103cba357fc1a83353d21e188399a57dcc8463cb8c1650757235c",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-contract-probes.json",
+      "sha256": "baddea89113934a729769bcf8fd845009a48df9793394a18864155d526bec9b4",
+      "bytes": 735,
+      "source_snapshot": "artifacts/design-sprint-20261003/adversarial-contract-probes.json",
+      "source_sha256": "baddea89113934a729769bcf8fd845009a48df9793394a18864155d526bec9b4",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-contract-probes.py",
+      "sha256": "602cb49383cbd8cd15ecccd738ed5feed42d11a155f49895683253cb899df2ec",
+      "bytes": 3826,
+      "source_snapshot": "artifacts/design-sprint-20261003/adversarial-contract-probes.py",
+      "source_sha256": "602cb49383cbd8cd15ecccd738ed5feed42d11a155f49895683253cb899df2ec",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-secondary-probes.json",
+      "sha256": "636e2a44f31972fd36fa4a143ed946c10763f79a0f1d8b793d662f6562f2c459",
+      "bytes": 3500,
+      "source_snapshot": "artifacts/design-sprint-20261003/adversarial-secondary-probes.json",
+      "source_sha256": "636e2a44f31972fd36fa4a143ed946c10763f79a0f1d8b793d662f6562f2c459",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-secondary-probes.py",
+      "sha256": "ab30977579b5bf2ceb78e68794abc2d9957b0ba6371fcd8234e536bfb4db5529",
+      "bytes": 3522,
+      "source_snapshot": "artifacts/design-sprint-20261003/adversarial-secondary-probes.py",
+      "source_sha256": "ab30977579b5bf2ceb78e68794abc2d9957b0ba6371fcd8234e536bfb4db5529",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/audit-source-manifest.json",
+      "sha256": "128154006d18f5d8479a0c38549dbb1efae2a23f314156157be314b7002190ee",
+      "bytes": 3231,
+      "source_snapshot": "artifacts/design-sprint-20261003/audit-source-manifest.json",
+      "source_sha256": "128154006d18f5d8479a0c38549dbb1efae2a23f314156157be314b7002190ee",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/classification-late-response-probe.js",
+      "sha256": "10b9b5a89d724f5a1a9e43217d91371ecd096f8c0daf795f72905f50e1b3635d",
+      "bytes": 2282,
+      "source_snapshot": "artifacts/design-sprint-20261003/classification-late-response-probe.js",
+      "source_sha256": "10b9b5a89d724f5a1a9e43217d91371ecd096f8c0daf795f72905f50e1b3635d",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/classification-late-response-probe.json",
+      "sha256": "b9178ce8f762d23e0c9e017320cf9c4413ab8d13633e6a26c2eba2049dce1767",
+      "bytes": 1119,
+      "source_snapshot": "artifacts/design-sprint-20261003/classification-late-response-probe.json",
+      "source_sha256": "b9178ce8f762d23e0c9e017320cf9c4413ab8d13633e6a26c2eba2049dce1767",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "sha256": "29fdac89e90f723f623c7a6e660b4bd780c77d975d1bfbc6d6ada363dc6aeaff",
+      "bytes": 29077,
+      "source_snapshot": "artifacts/design-sprint-20261003/current-design-audit.md",
+      "source_sha256": "81e8a157b991d46578d4eea439e2393d43bbadce76a6d6d6a1a663d7277dc2d6",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.json",
+      "sha256": "02ba4020fc947bfb88404f6589d075e61e7c825ce39feb6e1d0548c2bb97d0ad",
+      "bytes": 28963,
+      "source_snapshot": "artifacts/design-sprint-20261003/current-design-evidence-matrix.json",
+      "source_sha256": "02ba4020fc947bfb88404f6589d075e61e7c825ce39feb6e1d0548c2bb97d0ad",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "sha256": "802a60c49581ed2fa58b53e0f6cf7c89e53cf3b8245598118fa442eccfa049cc",
+      "bytes": 26509,
+      "source_snapshot": "artifacts/design-sprint-20261003/current-design-evidence-matrix.md",
+      "source_sha256": "6ffc586c64e4b7b6b74df0ad8c062f314541d6175b9b702fb7adbdc398515db9",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "sha256": "b47735a9c669affa6e5768387718ce289fd5d4f9a753aff4dcf44a0a21dff521",
+      "bytes": 976,
+      "source_snapshot": "artifacts/design-sprint-20261003/definition-full-pipeline-probe.json",
+      "source_sha256": "b47735a9c669affa6e5768387718ce289fd5d4f9a753aff4dcf44a0a21dff521",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.py",
+      "sha256": "ab77000c07fbf9afa9d6b30ae49b0ecdc93e6ca0ae95b51ebdb9844b4ffa1e97",
+      "bytes": 4314,
+      "source_snapshot": "artifacts/design-sprint-20261003/definition-full-pipeline-probe.py",
+      "source_sha256": "ab77000c07fbf9afa9d6b30ae49b0ecdc93e6ca0ae95b51ebdb9844b4ffa1e97",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-evidence-manifest.json",
+      "sha256": "a22639f3b86de5e854900c2f0a1176e83eef1da95736dee7cf5ec51449da8f47",
+      "bytes": 2481,
+      "source_snapshot": "artifacts/design-sprint-20261003/definition-lifecycle-evidence-manifest.json",
+      "source_sha256": "a22639f3b86de5e854900c2f0a1176e83eef1da95736dee7cf5ec51449da8f47",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "sha256": "5f058659b1db0e5bd72645db294244153a49497503f892ecc1c48a0e54d96cb4",
+      "bytes": 817,
+      "source_snapshot": "artifacts/design-sprint-20261003/definition-lifecycle-probe.json",
+      "source_sha256": "5f058659b1db0e5bd72645db294244153a49497503f892ecc1c48a0e54d96cb4",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.py",
+      "sha256": "c8cb0c233c009e7252b31c1a5eb982f8afadf3a291766460fc6d285abec35d94",
+      "bytes": 5439,
+      "source_snapshot": "artifacts/design-sprint-20261003/definition-lifecycle-probe.py",
+      "source_sha256": "c8cb0c233c009e7252b31c1a5eb982f8afadf3a291766460fc6d285abec35d94",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "sha256": "a5930f15d27ba0bde495c47e25e7920c6463caf23571b284ea0a61df3c58cbb7",
+      "bytes": 26612,
+      "source_snapshot": "artifacts/design-sprint-20261003/mockup-critique.md",
+      "source_sha256": "2181040153bf55a3f4d71a589da53563ac6d6fe1781b871a578b1020d44b02d4",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prior-25-acceptance-matrix.md",
+      "sha256": "831c67d4cd8918fa7a02ac8e46b3786b6b645dddb3f50446b3b809c5ce0cc4e0",
+      "bytes": 11686,
+      "source_snapshot": "artifacts/all-improvements-review/acceptance-matrix.md",
+      "source_sha256": "25e3e4da4d9a56c727c0d66f9339a95fcb70c1dc936b3eba9e49be124691ea6e",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "sha256": "8821edb6ba72ea01b9284bf1c462724ece9f7752a338ea42958a75d995bf76c3",
+      "bytes": 31097,
+      "source_snapshot": "artifacts/design-sprint-20261003/prompt-workflow-dry-run.md",
+      "source_sha256": "47167ade772e97e54806fed836acf63b036b29be58d7eecc61bda3b8132c985c",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/specified-color-contrast.json",
+      "sha256": "301a29bb952102b9400fd16cbb13a0594694f1bbfab46bbd1d702dd743b9728d",
+      "bytes": 3411,
+      "source_snapshot": "artifacts/design-sprint-20261003/specified-color-contrast.json",
+      "source_sha256": "301a29bb952102b9400fd16cbb13a0594694f1bbfab46bbd1d702dd743b9728d",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/static-design-probes.js",
+      "sha256": "22da8e8bb942ee1ddfaf8bb509cc5ede2a522e301e07831c1ad80332b46216b3",
+      "bytes": 3859,
+      "source_snapshot": "artifacts/design-sprint-20261003/static-design-probes.js",
+      "source_sha256": "22da8e8bb942ee1ddfaf8bb509cc5ede2a522e301e07831c1ad80332b46216b3",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/static-design-probes.json",
+      "sha256": "48e5660be16b269546f70a9e0bd9eb8f5d7768a2973b570bdf599b887bfb01fa",
+      "bytes": 3995,
+      "source_snapshot": "artifacts/design-sprint-20261003/static-design-probes.json",
+      "source_sha256": "48e5660be16b269546f70a9e0bd9eb8f5d7768a2973b570bdf599b887bfb01fa",
+      "treatment": "byte-preserved"
+    },
+    {
+      "path": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "sha256": "d38f8a888f7f41391a6d51822dd74bc5f1637cf0795bd3501342de3054805abb",
+      "bytes": 22201,
+      "source_snapshot": "artifacts/design-sprint-20261003/user-scenario-walkthroughs.md",
+      "source_sha256": "423c4e953fded8c4f472ade20d649c36828f889d8da3d2d67d19c0513fc08e64",
+      "treatment": "Software Vault metadata and resolved relative links; documented scope correction for the two living plans"
+    },
+    {
+      "path": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "sha256": "613e2c28fd9da571e811dd82095b7839186c55dcf187d69d2c66f4ae3ab05cbf",
+      "bytes": 18030,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    },
+    {
+      "path": "docs/program-vault/90-Templates/ui-design-outcome.example.json",
+      "sha256": "3f6a8d9ebb2cd25ac2dea96206ecea53a5004e2f6dc9a1d48c3ce48a334b347d",
+      "bytes": 1420,
+      "treatment": "authored entry, maintenance note, optional template, or scoped existing-document update"
+    }
+  ],
+  "self_excluded": [
+    "integration-manifest.json",
+    "integration-validation.json"
+  ],
+  "excluded": [
+    "private five Vaults",
+    "runtime",
+    "credentials",
+    "browser profiles",
+    "renderer logs",
+    "prototype builder scripts",
+    "v1 duplicate PNGs"
+  ],
+  "visual_scope": {
+    "v1_specification_svgs": 8,
+    "v2_comparison_svgs": 8,
+    "v2_supplementary_svgs": 2,
+    "v2_pngs": 10,
+    "independent_user_studies": 0
+  },
+  "not_claimed": [
+    "UI implementation",
+    "current app browser acceptance",
+    "AT acceptance",
+    "platform registration or automatic discovery",
+    "model weight training",
+    "commit",
+    "push",
+    "PC synchronization"
+  ]
+}

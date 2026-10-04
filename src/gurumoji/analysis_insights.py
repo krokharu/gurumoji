@@ -9,7 +9,8 @@ from collections import defaultdict
 from typing import Any, Callable
 
 
-INSIGHT_VERSION = "content-insights-3"
+INSIGHT_VERSION = "content-insights-4"
+AI_VALIDATION_NOTE = "根拠IDの検査は、本文が主張を支持するか、真偽や「全員」などの範囲を確認するものではありません。原文・対象者集合との照合が必要です。"
 AI_CATEGORIES = {
     "overview": "総合的な見解",
     "themes": "主要テーマ",
@@ -19,7 +20,8 @@ AI_CATEGORIES = {
 }
 INSIGHT_CSV_FIELDS = {
     "insights": ["kind", "category", "title", "text", "segment_ids", "speakers",
-                 "count", "stale", "generated_at", "provider", "model"],
+                 "count", "stale", "generated_at", "provider", "model",
+                 "interpretation_status", "researcher_review_required", "validation_scope", "validation_note"],
     "characteristic_terms": ["speaker", "speaker_name", "term", "count", "total",
                              "percent", "other_count", "other_total", "other_percent",
                              "difference_pp", "segment_ids"],
@@ -149,19 +151,20 @@ def build_content_analysis(analysis: dict, morphemes: list[dict]) -> dict:
 
 
 def search_kwic(analysis: dict, morphemes: list[dict], query: str, *,
-                mode: str = "literal", speaker: str = "", offset: int = 0,
+                mode: str = "normalized", speaker: str = "", offset: int = 0,
                 limit: int | None = 50) -> dict:
-    if mode not in {"literal", "normalized"}:
+    if mode not in {"literal", "normalized", "surface"}:
         raise ValueError("検索方法が正しくありません。")
     query = query.strip()
     if not query or len(query) > 200:
         raise ValueError("検索語は1〜200文字で入力してください。")
     segments = included_segments(analysis)
     token_hits: dict[str, set] = defaultdict(set)
-    if mode == "normalized":
-        target = normalized_term(query)
+    if mode in {"normalized", "surface"}:
+        target = normalized_term(query) if mode == "normalized" else query
         for row in morphemes:
-            term = normalized_term(row.get("normalized") or row.get("lemma") or row.get("surface"))
+            term = (normalized_term(row.get("normalized") or row.get("lemma") or row.get("surface"))
+                    if mode == "normalized" else str(row.get("surface") or ""))
             if term == target and not row.get("excluded"):
                 token_hits[row["segment_id"]].add((int(row["begin"]), int(row["end"])))
     hits = []
@@ -202,6 +205,8 @@ def insight_csv_rows(analysis: dict) -> list[dict]:
     saved = insights.get("ai") or {}
     for row in saved.get("findings", []):
         rows.append({"kind": "AI見解・下書き", **row, "stale": insights.get("stale", False),
+                     "interpretation_status": "unverified_candidate", "researcher_review_required": True,
+                     "validation_scope": "reference_ids_only", "validation_note": AI_VALIDATION_NOTE,
                      **{k: saved.get(k, "") for k in ("generated_at", "provider", "model")}})
     return rows
 
@@ -253,7 +258,9 @@ def validate_findings(result: dict, allowed: dict[str, dict], expert: dict | Non
         if row["category"] == "shared" and len(speakers) < 2:
             raise ValueError(f"AI見解の{index}項目目：共通する意見には複数話者の根拠が必要です。")
         entry = {"category": row["category"], "title": title.strip(), "text": text.strip(),
-                 "segment_ids": ids, "speakers": speakers, "count": len(ids)}
+                 "segment_ids": ids, "speakers": speakers, "count": len(ids),
+                 "interpretation_status": "unverified_candidate", "researcher_review_required": True,
+                 "validation_scope": "reference_ids_only", "validation_note": AI_VALIDATION_NOTE}
         if expert:
             step = next((item for item in expert["steps"] if item["id"] == row.get("method_step")), None)
             if step is None:
@@ -526,7 +533,7 @@ def _timeline_rows(transformer: dict, covered: list[tuple[float, float]], bin_se
         if any(begin <= start < finish for begin, finish in covered):
             continue
         rows.append({
-            "start": round(start, 3), "end": round(max(end, start + bin_seconds), 3),
+            "start": round(start, 3), "end": round(max(end, start), 3),
             "title": str(leading.get("topic_label") or "テーマ候補"),
             "title_source": "transformer",
             "bullet_count": 0,

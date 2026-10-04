@@ -93,6 +93,31 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _manifest_assets(manifest: dict[str, Any], *, pending: bool = False) -> list[dict[str, Any]]:
+    """Validate recovery identities before making any move or delete decision."""
+    item_id, assets = manifest.get("item_id"), manifest.get("assets")
+    invalid = "ゴミ箱の移動記録の形式または識別情報が不正です。復旧が必要です。"
+    if (type(manifest.get("version")) is not int or manifest["version"] != 1
+            or not isinstance(item_id, str) or not item_id or item_id in {".", ".."}
+            or "/" in item_id or "\\" in item_id or not isinstance(assets, list)):
+        raise ValueError(invalid)
+    identities = {"media": {item_id}, "thumbnail": {
+        f"text_mining_{item_id}.svg", f"word_cloud_{item_id}.svg",
+    }}
+    for asset in assets:
+        if (not isinstance(asset, dict) or not isinstance(asset.get("kind"), str)
+                or asset["kind"] not in ASSET_FOLDERS or not isinstance(asset.get("name"), str)
+                or asset["name"] not in identities[asset["kind"]]):
+            raise ValueError(invalid)
+        if pending:
+            quarantine = asset.get("quarantine")
+            if not isinstance(quarantine, str) or Path(quarantine).name != asset["name"]:
+                raise ValueError(invalid)
+        if (not pending or "in_trash" in asset) and type(asset.get("in_trash")) is not bool:
+            raise ValueError(invalid)
+    return assets
+
+
 def _entry_path(root: Path, entry_id: str) -> Path:
     if not ENTRY_PATTERN.fullmatch(str(entry_id or "")):
         raise TrashError("ゴミ箱の項目が見つかりません。")
@@ -143,9 +168,10 @@ def discard(entry: Path) -> None:
 def finish(entry: Path, move: Callable[[Path, Path], None]) -> list[str]:
     """Move quarantined files into the entry and mark it trashed; returns errors."""
     manifest = _read_json(entry / PENDING)
+    assets = _manifest_assets(manifest, pending=True)
     errors: list[str] = []
-    for asset in manifest["assets"]:
-        source = Path(asset.pop("quarantine"))
+    for asset in assets:
+        source = Path(asset["quarantine"])
         target = entry / ASSET_FOLDERS[asset["kind"]] / asset["name"]
         if source.exists() or source.is_symlink():
             try:
@@ -158,6 +184,16 @@ def finish(entry: Path, move: Callable[[Path, Path], None]) -> list[str]:
             except OSError as exc:
                 errors.append(str(exc))
         asset["in_trash"] = target.exists() or target.is_symlink()
+        if not asset["in_trash"] and not (source.exists() or source.is_symlink()):
+            errors.append(f"ゴミ箱へ移動するファイルが見つかりません: {asset['name']}")
+    if errors:
+        # Keep the recovery journal, including every original quarantine path.
+        # A subsequent startup or restore can retry without losing partial moves.
+        _write_json(entry / PENDING, manifest)
+        _write_json(entry / MANIFEST, manifest)
+        return errors
+    for asset in manifest["assets"]:
+        asset.pop("quarantine", None)
     _write_json(entry / MANIFEST, manifest)
     (entry / PENDING).unlink()
     return errors
@@ -178,13 +214,50 @@ def recover_pending(root: Path, *, row_exists: Callable[[str], bool],
             continue
         try:
             manifest = _read_json(entry / PENDING)
+            _manifest_assets(manifest, pending=True)
             if row_exists(str(manifest["item_id"])):
                 discard(entry)  # the delete rolled back; quarantine recovery restores the files
             else:
                 warnings.extend(finish(entry, move))
-        except (OSError, ValueError, KeyError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             warnings.append(f"ゴミ箱の保留項目 {entry.name} を処理できませんでした: {exc}")
     return warnings
+
+
+def protected_quarantine_assets(root: Path) -> set[tuple[str, str]] | None:
+    """Protect unfinished trash assets from legacy delete-quarantine cleanup.
+
+    None means an unfinished or unreadable journal makes deletion unsafe. Also recognize
+    older final manifests with failed moves, which lacked a pending journal.
+    Only kind/name identities are read; paths from manifests are not followed.
+    """
+    protected: set[tuple[str, str]] = set()
+    if not root.is_dir():
+        return protected
+    try:
+        for entry in root.iterdir():
+            if not ENTRY_PATTERN.fullmatch(entry.name):
+                continue
+            # Recovery has already attempted pending moves. If any remain,
+            # their identities may be damaged: do not delete any orphan yet.
+            if (entry / PENDING).is_file():
+                return None
+            path = entry / MANIFEST
+            if not path.is_file():
+                continue
+            manifest = _read_json(path)
+            _manifest_assets(manifest)
+            item_id = manifest["item_id"]
+            identities = {"media": {item_id}, "thumbnail": {
+                f"text_mining_{item_id}.svg", f"word_cloud_{item_id}.svg",
+            }}
+            # A recorded trash entry owns these identities, even after a
+            # partial or damaged journal has been marked finalized. Its empty
+            # asset list cannot prove matching quarantined files are disposable.
+            protected.update((kind, name) for kind, names in identities.items() for name in names)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return protected
 
 
 def list_entries(root: Path, days: int) -> list[dict[str, Any]]:
@@ -196,6 +269,7 @@ def list_entries(root: Path, days: int) -> list[dict[str, Any]]:
             continue
         try:
             manifest = _read_json(entry / MANIFEST)
+            _manifest_assets(manifest, pending=(entry / PENDING).exists())
         except (OSError, ValueError):
             continue
         deleted_at = str(manifest.get("deleted_at") or "")
@@ -220,8 +294,16 @@ def list_entries(root: Path, days: int) -> list[dict[str, Any]]:
 
 def purge(root: Path, entry_id: str) -> None:
     entry = _entry_path(root, entry_id)
+    if (entry / PENDING).exists():
+        raise TrashError("ゴミ箱への移動が未完了です。アプリを再起動して復旧してから完全削除してください。")
     if not (entry / MANIFEST).is_file():
         raise TrashError("ゴミ箱の項目が見つかりません。")
+    try:
+        assets = _manifest_assets(_read_json(entry / MANIFEST))
+    except ValueError as exc:
+        raise TrashError(str(exc)) from exc
+    if any(not asset["in_trash"] for asset in assets):
+        raise TrashError("ゴミ箱への移動が未完了のファイルがあるため、完全削除を保留しました。復旧が必要です。")
     shutil.rmtree(entry)
 
 
@@ -232,10 +314,14 @@ def purge_expired(root: Path, days: int, now: datetime | None = None) -> list[st
     limit = (now or _now()) - timedelta(days=days)
     purged: list[str] = []
     for entry in root.iterdir():
-        if not ENTRY_PATTERN.fullmatch(entry.name) or not (entry / MANIFEST).is_file():
+        if (not ENTRY_PATTERN.fullmatch(entry.name) or not (entry / MANIFEST).is_file()
+                or (entry / PENDING).exists()):
             continue
         try:
-            deleted_at = datetime.fromisoformat(str(_read_json(entry / MANIFEST).get("deleted_at")))
+            manifest = _read_json(entry / MANIFEST)
+            if any(not asset["in_trash"] for asset in _manifest_assets(manifest)):
+                continue
+            deleted_at = datetime.fromisoformat(str(manifest.get("deleted_at")))
         except (OSError, ValueError, TypeError):
             continue
         if deleted_at < limit:
@@ -264,9 +350,20 @@ def restore(root: Path, entry_id: str, *, connect: Callable[[], Any],
     ``targets`` maps an asset kind to the directory it was deleted from.
     """
     entry = _entry_path(root, entry_id)
+    try:
+        if (entry / PENDING).is_file() and finish(entry, move):
+            raise TrashError("ゴミ箱への移動が未完了のため復元を保留しました。ファイルの使用を終了してから再試行してください。")
+    except ValueError as exc:
+        raise TrashError(str(exc)) from exc
     if not (entry / MANIFEST).is_file():
         raise TrashError("ゴミ箱の項目が見つかりません。")
-    manifest = _read_json(entry / MANIFEST)
+    try:
+        manifest = _read_json(entry / MANIFEST)
+        assets = _manifest_assets(manifest)
+    except ValueError as exc:
+        raise TrashError(str(exc)) from exc
+    if any(not asset["in_trash"] for asset in assets):
+        raise TrashError("ゴミ箱への移動が未完了のファイルがあるため、復元を保留しました。復旧が必要です。")
     item_id = str(manifest["item_id"])
     rows = manifest.get("rows") or {}
     if not rows.get("library_items"):

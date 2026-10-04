@@ -159,9 +159,24 @@ def normalize_conversation_speaker_profiles(
     for index, label in enumerate(sorted(labels)):
         value = source.get(label)
         value = value if isinstance(value, dict) else {}
-        role = clean_single_line(value.get("session_role", "participant"), 40)
-        if role not in SPEAKER_ROLES:
-            role = "participant"
+        supplied_role = clean_single_line(value.get("session_role", "participant"), 40)
+        role = supplied_role if supplied_role in SPEAKER_ROLES else "participant"
+        marker = value.get("session_role_source")
+        if marker in ("explicit", "registry", "default", "legacy_unknown"):
+            role_source = marker
+            if "session_role" not in value or supplied_role not in SPEAKER_ROLES or marker == "default" and role != "participant":
+                role_source = "legacy_unknown"
+        elif "session_role_source" in value:
+            role_source = "legacy_unknown"
+        elif "session_role" not in value:
+            role_source = "default"
+        elif supplied_role in SPEAKER_ROLES and supplied_role != "participant":
+            # Only participant was ever inserted as the historical fallback.
+            role_source = "explicit"
+        else:
+            # Reading or round-tripping legacy participant cannot certify
+            # whether it was entered by a person or inserted by normalization.
+            role_source = "legacy_unknown"
         consent_status = clean_single_line(value.get("consent_status", "unknown"), 30)
         recording_consent = clean_single_line(value.get("recording_consent", "unknown"), 30)
         attendance_status = clean_single_line(value.get("attendance_status", "attended"), 30)
@@ -184,6 +199,7 @@ def normalize_conversation_speaker_profiles(
             "display_name": display_name,
             "theme_color": theme_color,
             "session_role": role,
+            "session_role_source": role_source,
             "organization": clean_single_line(value.get("organization"), 200),
             "department": clean_single_line(value.get("department"), 200),
             "job_title": clean_single_line(value.get("job_title"), 200),

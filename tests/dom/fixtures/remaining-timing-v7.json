@@ -1,0 +1,3156 @@
+{
+  "source_commit": "a383df17d368e79e696cf6e51dd4808f15b5f719",
+  "cases": {
+    "all_unknown": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "u": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 0.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 0.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "u",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "f6b34e1ed6b949467f4e8327b1cc8c1fb80a08b3f192c376ef22b891015069a1",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": false
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 1,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 1,
+            "missing_time_turn_count": 1,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 1,
+            "session_duration": null,
+            "session_missing_time_turn_count": 1,
+            "session_timed_turn_count": 0,
+            "speaker_count": 1,
+            "timed_turn_count": 0,
+            "total_speaking_seconds": null
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": null,
+              "characters": 17,
+              "characters_per_minute": null,
+              "code_counts": {
+                "c": 1
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 1
+              },
+              "first_start": null,
+              "included_in_balance": false,
+              "last_end": null,
+              "missing_time_turn_count": 1,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": null,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": null,
+              "speaking_seconds": null,
+              "timed_characters": 0,
+              "timed_turn_count": 0,
+              "turn_count": 1
+            }
+          ],
+          "time_bins": [],
+          "emotions": [
+            {
+              "count": 1,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 1,
+              "model": "aist",
+              "model_name": "",
+              "seconds": null,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 0
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 1,
+            "balance_speaker_count": 0,
+            "balance_speaking_seconds": null,
+            "balance_timed_turn_count": 0,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": null,
+            "hhi": null,
+            "max_participant_name": "",
+            "max_participant_percent": null,
+            "metric_status": "not_computable",
+            "missing_time_turn_count": 1,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": null,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 1,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": null,
+            "participant_timed_turn_count": 0,
+            "unavailable_reason": "missing_time",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": null,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 1,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 0
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 17,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 1,
+              "segment_count": 1,
+              "speaker_count": 1,
+              "speaking_seconds": null,
+              "theme": "",
+              "timed_turn_count": 0,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 1
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 1,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": null,
+            "id": "u",
+            "speaker": "A",
+            "start": null,
+            "text": "synthetic duration",
+            "time_unknown": true
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": null,
+        "timed_turn_count": 0,
+        "missing_time_turn_count": 1,
+        "segment_count": 1,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration",
+        "files": []
+      }
+    },
+    "partial": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "k": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          },
+          "u": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 10.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 10.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "k",
+            "input_version": null,
+            "next_segment_id": "u",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "21c75daa84af0c845286c894adde0452f2d9a2d776f6ae55adcbcb171b1981ca",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": true
+          },
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 0.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 0.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "u",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "k",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "21c75daa84af0c845286c894adde0452f2d9a2d776f6ae55adcbcb171b1981ca",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 2,
+            "valid_time": false
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 2,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 2,
+            "missing_time_turn_count": 1,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 2,
+            "session_duration": 10.0,
+            "session_missing_time_turn_count": 1,
+            "session_timed_turn_count": 1,
+            "speaker_count": 1,
+            "timed_turn_count": 1,
+            "total_speaking_seconds": 10.0
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": 10.0,
+              "characters": 34,
+              "characters_per_minute": 102.0,
+              "code_counts": {
+                "c": 2
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 2
+              },
+              "first_start": 0.0,
+              "included_in_balance": true,
+              "last_end": 10.0,
+              "missing_time_turn_count": 1,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": null,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": null,
+              "speaking_seconds": 10.0,
+              "timed_characters": 17,
+              "timed_turn_count": 1,
+              "turn_count": 2
+            }
+          ],
+          "time_bins": [
+            {
+              "end": 10.0,
+              "index": 0,
+              "speakers": [
+                {
+                  "seconds": 10.0,
+                  "speaker": "A",
+                  "speaker_name": "A"
+                }
+              ],
+              "speaking_seconds": 10.0,
+              "start": 0,
+              "turn_count": 1
+            }
+          ],
+          "emotions": [
+            {
+              "count": 2,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 1,
+              "model": "aist",
+              "model_name": "",
+              "seconds": 10.0,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 1
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 1,
+            "balance_speaker_count": 1,
+            "balance_speaking_seconds": 10.0,
+            "balance_timed_turn_count": 1,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": null,
+            "hhi": null,
+            "max_participant_name": "",
+            "max_participant_percent": null,
+            "metric_status": "not_computable",
+            "missing_time_turn_count": 1,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": null,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 1,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 10.0,
+            "participant_timed_turn_count": 1,
+            "unavailable_reason": "missing_time",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": null,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 1,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 0
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 34,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 1,
+              "segment_count": 2,
+              "speaker_count": 1,
+              "speaking_seconds": 10.0,
+              "theme": "",
+              "timed_turn_count": 1,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 2
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 2,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": 10,
+            "id": "k",
+            "speaker": "A",
+            "start": 0,
+            "text": "synthetic duration"
+          },
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": null,
+            "id": "u",
+            "speaker": "A",
+            "start": null,
+            "text": "synthetic duration",
+            "time_unknown": true
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": 10.0,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 1,
+        "segment_count": 2,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration synthetic duration",
+        "files": []
+      }
+    },
+    "true_zero": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "z": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 0.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 0.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "z",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "32c72e48575898a2dc8d68e5eafc6ba1dad2a24a76538ba96a18221bd442026c",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": true
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 4,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 1,
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 1,
+            "session_duration": 0.0,
+            "session_missing_time_turn_count": 0,
+            "session_timed_turn_count": 1,
+            "speaker_count": 1,
+            "timed_turn_count": 1,
+            "total_speaking_seconds": 0.0
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": 0.0,
+              "characters": 17,
+              "characters_per_minute": null,
+              "code_counts": {
+                "c": 1
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 1
+              },
+              "first_start": 0.0,
+              "included_in_balance": true,
+              "last_end": 0.0,
+              "missing_time_turn_count": 0,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": null,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": null,
+              "speaking_seconds": 0.0,
+              "timed_characters": 0,
+              "timed_turn_count": 1,
+              "turn_count": 1
+            }
+          ],
+          "time_bins": [
+            {
+              "end": 0.0,
+              "index": 0,
+              "speakers": [
+                {
+                  "seconds": 0.0,
+                  "speaker": "A",
+                  "speaker_name": "A"
+                }
+              ],
+              "speaking_seconds": 0.0,
+              "start": 0,
+              "turn_count": 1
+            }
+          ],
+          "emotions": [
+            {
+              "count": 1,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 0,
+              "model": "aist",
+              "model_name": "",
+              "seconds": 0.0,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 1
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 0,
+            "balance_speaker_count": 1,
+            "balance_speaking_seconds": 0.0,
+            "balance_timed_turn_count": 1,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": null,
+            "hhi": null,
+            "max_participant_name": "",
+            "max_participant_percent": null,
+            "metric_status": "not_computable",
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": null,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 0,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 0.0,
+            "participant_timed_turn_count": 1,
+            "unavailable_reason": "zero_total",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": null,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 0,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 1
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 17,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 0,
+              "segment_count": 1,
+              "speaker_count": 1,
+              "speaking_seconds": 0.0,
+              "theme": "",
+              "timed_turn_count": 1,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 1
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 4,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": 0,
+            "id": "z",
+            "speaker": "A",
+            "start": 0,
+            "text": "synthetic duration"
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": 0.0,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 0,
+        "segment_count": 1,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration",
+        "files": []
+      }
+    },
+    "true_zero_at_ten": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "z": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 0.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 10.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "z",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "3118ff1509c3018646407f66c4c5ddff752e4095014bed29f971e4188f96a644",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 10.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": true
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 5,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 1,
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 1,
+            "session_duration": 10.0,
+            "session_missing_time_turn_count": 0,
+            "session_timed_turn_count": 1,
+            "speaker_count": 1,
+            "timed_turn_count": 1,
+            "total_speaking_seconds": 0.0
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": 0.0,
+              "characters": 17,
+              "characters_per_minute": null,
+              "code_counts": {
+                "c": 1
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 1
+              },
+              "first_start": 10.0,
+              "included_in_balance": true,
+              "last_end": 10.0,
+              "missing_time_turn_count": 0,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": null,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": null,
+              "speaking_seconds": 0.0,
+              "timed_characters": 0,
+              "timed_turn_count": 1,
+              "turn_count": 1
+            }
+          ],
+          "time_bins": [
+            {
+              "end": 10.0,
+              "index": 0,
+              "speakers": [
+                {
+                  "seconds": 0.0,
+                  "speaker": "A",
+                  "speaker_name": "A"
+                }
+              ],
+              "speaking_seconds": 0.0,
+              "start": 0,
+              "turn_count": 1
+            }
+          ],
+          "emotions": [
+            {
+              "count": 1,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 0,
+              "model": "aist",
+              "model_name": "",
+              "seconds": 0.0,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 1
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 0,
+            "balance_speaker_count": 1,
+            "balance_speaking_seconds": 0.0,
+            "balance_timed_turn_count": 1,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": null,
+            "hhi": null,
+            "max_participant_name": "",
+            "max_participant_percent": null,
+            "metric_status": "not_computable",
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": null,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 0,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 0.0,
+            "participant_timed_turn_count": 1,
+            "unavailable_reason": "zero_total",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": null,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 0,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 1
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 17,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 0,
+              "segment_count": 1,
+              "speaker_count": 1,
+              "speaking_seconds": 0.0,
+              "theme": "",
+              "timed_turn_count": 1,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 1
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 5,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": 10,
+            "id": "z",
+            "speaker": "A",
+            "start": 10,
+            "text": "synthetic duration"
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": 10.0,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 0,
+        "segment_count": 1,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration",
+        "files": []
+      }
+    },
+    "empty": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {},
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 6,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 0,
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 0,
+            "observed_speaker_count": 0,
+            "participant_count": null,
+            "segment_count": 0,
+            "session_duration": null,
+            "session_missing_time_turn_count": 0,
+            "session_timed_turn_count": 0,
+            "speaker_count": 0,
+            "timed_turn_count": 0,
+            "total_speaking_seconds": 0
+          },
+          "speaker_metrics": [],
+          "time_bins": [],
+          "emotions": [],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 0,
+            "balance_speaker_count": 0,
+            "balance_speaking_seconds": 0,
+            "balance_timed_turn_count": 0,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": null,
+            "hhi": null,
+            "max_participant_name": "",
+            "max_participant_percent": null,
+            "metric_status": "not_computable",
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": null,
+            "observed_participant_count": 0,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 0,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 0,
+            "participant_timed_turn_count": 0,
+            "unavailable_reason": "zero_total",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": null,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [],
+          "data_quality": {
+            "emotion_coverage_percent": 0.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 0,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 0
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 0,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 0,
+              "segment_count": 0,
+              "speaker_count": 0,
+              "speaking_seconds": 0.0,
+              "theme": "",
+              "timed_turn_count": 0,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": false
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": false
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": []
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 6,
+        "segments": [],
+        "speaker_names": {},
+        "speaker_profiles": {},
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": null,
+        "timed_turn_count": 0,
+        "missing_time_turn_count": 0,
+        "segment_count": 0,
+        "speakers": [],
+        "emotions": [],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "",
+        "files": []
+      }
+    },
+    "positive": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "k": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 10.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 10.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "k",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "3ec06f91093f0506a87efb7143a99e6d47e06bfec82d07a05d927f5158617749",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": true
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 7,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 1,
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 1,
+            "session_duration": 10.0,
+            "session_missing_time_turn_count": 0,
+            "session_timed_turn_count": 1,
+            "speaker_count": 1,
+            "timed_turn_count": 1,
+            "total_speaking_seconds": 10.0
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": 10.0,
+              "characters": 17,
+              "characters_per_minute": 102.0,
+              "code_counts": {
+                "c": 1
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 1
+              },
+              "first_start": 0.0,
+              "included_in_balance": true,
+              "last_end": 10.0,
+              "missing_time_turn_count": 0,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": 100.0,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": 100.0,
+              "speaking_seconds": 10.0,
+              "timed_characters": 17,
+              "timed_turn_count": 1,
+              "turn_count": 1
+            }
+          ],
+          "time_bins": [
+            {
+              "end": 10.0,
+              "index": 0,
+              "speakers": [
+                {
+                  "seconds": 10.0,
+                  "speaker": "A",
+                  "speaker_name": "A"
+                }
+              ],
+              "speaking_seconds": 10.0,
+              "start": 0,
+              "turn_count": 1
+            }
+          ],
+          "emotions": [
+            {
+              "count": 1,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 0,
+              "model": "aist",
+              "model_name": "",
+              "seconds": 10.0,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 1
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 0,
+            "balance_speaker_count": 1,
+            "balance_speaking_seconds": 10.0,
+            "balance_timed_turn_count": 1,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": 0.0,
+            "hhi": 1.0,
+            "max_participant_name": "A",
+            "max_participant_percent": 100.0,
+            "metric_status": "computed",
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": 1.0,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 0,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 10.0,
+            "participant_timed_turn_count": 1,
+            "unavailable_reason": "",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": 0.0,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [
+            {
+              "label": "発話時間の集中候補",
+              "level": "attention",
+              "message": "Aの参加者内発話時間が100.0%です。重要性や影響力を意味する値ではありません。"
+            }
+          ],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 0,
+            "invalid_time_segments": 0,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 0
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 17,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 0,
+              "segment_count": 1,
+              "speaker_count": 1,
+              "speaking_seconds": 10.0,
+              "theme": "",
+              "timed_turn_count": 1,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 1
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 7,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": 10,
+            "id": "k",
+            "speaker": "A",
+            "start": 0,
+            "text": "synthetic duration"
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": 10.0,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 0,
+        "segment_count": 1,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration",
+        "files": []
+      }
+    },
+    "excluded_unknown": {
+      "analysis": {
+        "algorithm_version": "focus-group-local-7",
+        "schema_version": 1,
+        "annotations": {
+          "k": {
+            "codes": [
+              "c"
+            ],
+            "excluded": false,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          },
+          "u": {
+            "codes": [
+              "c"
+            ],
+            "excluded": true,
+            "important": false,
+            "interaction_tags": [],
+            "memo": ""
+          }
+        },
+        "config": {
+          "analysis_method": "auto",
+          "analysis_unit": "turn",
+          "analyst_memo": "",
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "codebook_change_reason": "",
+          "codebook_history": [],
+          "codebook_version": 0,
+          "cooccurrence_min_count": 2,
+          "cooccurrence_top_terms": 60,
+          "crosstab_match_mode": "normalized",
+          "crosstab_terms": [],
+          "exclude_moderator": true,
+          "excluded_speakers": [],
+          "group_by": "none",
+          "interpretation_status": "draft",
+          "long_gap_seconds": 3.0,
+          "low_participation_percent": 10.0,
+          "method_rationale": "",
+          "morph_split_mode": "C",
+          "overlap_seconds": 0.2,
+          "research_question": "",
+          "statistics_group_by": "speaker",
+          "stop_words": [],
+          "time_bin_seconds": 300,
+          "transformer_topics": []
+        },
+        "segments": [
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": false,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 10.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 10.0,
+            "excluded": false,
+            "group_id": "不明",
+            "id": "k",
+            "input_version": null,
+            "next_segment_id": "u",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "21c75daa84af0c845286c894adde0452f2d9a2d776f6ae55adcbcb171b1981ca",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 1,
+            "valid_time": true
+          },
+          {
+            "analysis_needs_review": true,
+            "annotation": {
+              "codes": [
+                "c"
+              ],
+              "excluded": true,
+              "important": false,
+              "interaction_tags": [],
+              "memo": ""
+            },
+            "characters": 17,
+            "color": "#E86A5A",
+            "duration": 0.0,
+            "emotion_details": [
+              {
+                "label": "neu",
+                "label_ja": "平常",
+                "model": "aist",
+                "model_name": ""
+              }
+            ],
+            "emotions": [
+              "平常"
+            ],
+            "end": 0.0,
+            "excluded": true,
+            "group_id": "不明",
+            "id": "u",
+            "input_version": null,
+            "next_segment_id": "",
+            "original_text": "",
+            "original_text_available": false,
+            "original_text_status": "initial_import",
+            "previous_segment_id": "k",
+            "question_candidate": false,
+            "recorded_role": "participant",
+            "recorded_role_source": "explicit",
+            "role": "participant",
+            "role_confirmed": false,
+            "role_source": "registered",
+            "source_hash": "21c75daa84af0c845286c894adde0452f2d9a2d776f6ae55adcbcb171b1981ca",
+            "speaker": "A",
+            "speaker_name": "A",
+            "start": 0.0,
+            "text": "synthetic duration",
+            "utterance_order": 2,
+            "valid_time": false
+          }
+        ],
+        "item": {
+          "id": "content",
+          "source_name": "example.wav",
+          "revision_count": 3,
+          "analysis_revision": 1,
+          "session_profile": {
+            "comparison_group": "",
+            "field_notes": "",
+            "group_conditions": "",
+            "interview_group_id": "",
+            "location": "",
+            "moderator_guide": "",
+            "objective": "",
+            "session_date": "",
+            "session_date_source": "",
+            "session_type": "focus_group"
+          }
+        },
+        "executed": true,
+        "automatic": {
+          "overview": {
+            "average_cross_speaker_gap_seconds": null,
+            "included_segment_count": 1,
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "observed_participant_count": 1,
+            "observed_speaker_count": 1,
+            "participant_count": null,
+            "segment_count": 2,
+            "session_duration": 10.0,
+            "session_missing_time_turn_count": 1,
+            "session_timed_turn_count": 1,
+            "speaker_count": 1,
+            "timed_turn_count": 1,
+            "total_speaking_seconds": 10.0
+          },
+          "speaker_metrics": [
+            {
+              "average_turn_seconds": 10.0,
+              "characters": 17,
+              "characters_per_minute": 102.0,
+              "code_counts": {
+                "c": 1
+              },
+              "color": "#E86A5A",
+              "emotion_counts": {
+                "平常": 1
+              },
+              "first_start": 0.0,
+              "included_in_balance": true,
+              "last_end": 10.0,
+              "missing_time_turn_count": 0,
+              "observed_roles": [
+                "participant"
+              ],
+              "participant_percent": 100.0,
+              "profile": {
+                "attributes": {},
+                "conditions": "",
+                "department": "",
+                "job_title": "",
+                "organization": "",
+                "tags": []
+              },
+              "question_candidates": 0,
+              "role": "participant",
+              "role_status": "single",
+              "speaker": "A",
+              "speaker_name": "A",
+              "speaking_percent": 100.0,
+              "speaking_seconds": 10.0,
+              "timed_characters": 17,
+              "timed_turn_count": 1,
+              "turn_count": 1
+            }
+          ],
+          "time_bins": [
+            {
+              "end": 10.0,
+              "index": 0,
+              "speakers": [
+                {
+                  "seconds": 10.0,
+                  "speaker": "A",
+                  "speaker_name": "A"
+                }
+              ],
+              "speaking_seconds": 10.0,
+              "start": 0,
+              "turn_count": 1
+            }
+          ],
+          "emotions": [
+            {
+              "count": 1,
+              "emotion": "平常",
+              "label": "neu",
+              "missing_time_turn_count": 0,
+              "model": "aist",
+              "model_name": "",
+              "seconds": 10.0,
+              "speaker": "A",
+              "speaker_name": "A",
+              "timed_turn_count": 1
+            }
+          ],
+          "groups": [],
+          "balance": {
+            "balance_missing_time_turn_count": 0,
+            "balance_speaker_count": 1,
+            "balance_speaking_seconds": 10.0,
+            "balance_timed_turn_count": 1,
+            "denominator": "observed_participant_speakers",
+            "denominator_label": "有効な時刻がある観測発言者内（司会等を除く）",
+            "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+            "gini": 0.0,
+            "hhi": 1.0,
+            "max_participant_name": "A",
+            "max_participant_percent": 100.0,
+            "metric_status": "computed",
+            "missing_time_turn_count": 0,
+            "mixed_role_speaker_count": 0,
+            "normalized_evenness": 1.0,
+            "observed_participant_count": 1,
+            "participant_count": null,
+            "participant_missing_time_turn_count": 0,
+            "participant_roster_available": false,
+            "participant_speaking_seconds": 10.0,
+            "participant_timed_turn_count": 1,
+            "unavailable_reason": "",
+            "unknown_speaker_turn_count": 0,
+            "unobserved_participant_count": null
+          },
+          "moderator": {
+            "assigned": false,
+            "average_response_gap_seconds": null,
+            "cross_speaker_transitions": 0,
+            "missing_time_turn_count": 0,
+            "moderator_to_participant_transitions": 0,
+            "participant_responses": 0,
+            "participant_to_participant_transitions": 0,
+            "question_candidates": 0,
+            "role_aggregation_status": "consistent",
+            "speaking_percent": 0.0,
+            "speaking_seconds": 0,
+            "timed_turn_count": 0,
+            "turn_count": 0
+          },
+          "observations": [
+            {
+              "label": "発話時間の集中候補",
+              "level": "attention",
+              "message": "Aの参加者内発話時間が100.0%です。重要性や影響力を意味する値ではありません。"
+            }
+          ],
+          "data_quality": {
+            "emotion_coverage_percent": 100.0,
+            "empty_text_segments": 0,
+            "excluded_segments": 1,
+            "invalid_time_segments": 1,
+            "overlap_candidates_truncated": false,
+            "unknown_speaker_segments": 0,
+            "zero_duration_segments": 0
+          }
+        },
+        "manual": {
+          "code_metrics": [
+            {
+              "category": "",
+              "characters": 17,
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "group_count": null,
+              "id": "c",
+              "important_count": 0,
+              "include_example": "",
+              "label": "Synthetic code",
+              "missing_time_turn_count": 0,
+              "segment_count": 1,
+              "speaker_count": 1,
+              "speaking_seconds": 10.0,
+              "theme": "",
+              "timed_turn_count": 1,
+              "unknown_speaker_turns": 0
+            }
+          ],
+          "codebook": [
+            {
+              "category": "",
+              "color": "#E86A5A",
+              "description": "",
+              "exclude_example": "",
+              "id": "c",
+              "include_example": "",
+              "label": "Synthetic code",
+              "theme": ""
+            }
+          ],
+          "context_checks": [
+            {
+              "id": "research_question",
+              "kind": "manual",
+              "label": "研究質問",
+              "ready": false
+            },
+            {
+              "id": "objective",
+              "kind": "manual",
+              "label": "会話目的",
+              "ready": false
+            },
+            {
+              "id": "comparison_group",
+              "kind": "manual",
+              "label": "インタビュー比較グループ",
+              "ready": false
+            },
+            {
+              "id": "moderator",
+              "kind": "manual",
+              "label": "司会・進行役",
+              "ready": false
+            },
+            {
+              "id": "participant_roles",
+              "kind": "manual",
+              "label": "話者役割",
+              "ready": true
+            },
+            {
+              "id": "guide",
+              "kind": "manual",
+              "label": "質問ガイド・議題",
+              "ready": false
+            },
+            {
+              "id": "conditions",
+              "kind": "manual",
+              "label": "参加条件・グループ条件",
+              "ready": false
+            },
+            {
+              "id": "field_notes",
+              "kind": "manual",
+              "label": "観察・フィールドノート",
+              "ready": false
+            },
+            {
+              "id": "codebook",
+              "kind": "manual",
+              "label": "コードブック",
+              "ready": true
+            },
+            {
+              "id": "coding",
+              "kind": "manual",
+              "label": "手動コーディング",
+              "ready": true
+            },
+            {
+              "id": "original_snapshot",
+              "kind": "automatic",
+              "label": "原文スナップショット",
+              "ready": true
+            },
+            {
+              "id": "interaction_links",
+              "kind": "manual",
+              "label": "根拠発話を結ぶ相互作用記録",
+              "ready": false
+            }
+          ],
+          "case_code_matrix": [
+            {
+              "codes": [
+                {
+                  "code_id": "c",
+                  "code_label": "Synthetic code",
+                  "count": 1
+                }
+              ],
+              "role": "participant",
+              "speaker": "A",
+              "speaker_name": "A"
+            }
+          ]
+        }
+      },
+      "job": {
+        "id": "content",
+        "source_name": "example.wav",
+        "revision_count": 3,
+        "segments": [
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": 10,
+            "id": "k",
+            "speaker": "A",
+            "start": 0,
+            "text": "synthetic duration"
+          },
+          {
+            "emotions": {
+              "aist": {
+                "label": "neu",
+                "label_ja": "平常"
+              }
+            },
+            "end": null,
+            "id": "u",
+            "speaker": "A",
+            "start": null,
+            "text": "synthetic duration",
+            "time_unknown": true
+          }
+        ],
+        "speaker_names": {},
+        "speaker_profiles": {
+          "A": {
+            "attendance_status": "attended",
+            "conditions": "",
+            "consent_status": "unknown",
+            "department": "",
+            "display_name": "",
+            "global_speaker_id": "",
+            "job_title": "",
+            "notes": "",
+            "organization": "",
+            "recording_consent": "unknown",
+            "registration_status": "unidentified",
+            "session_role": "participant",
+            "session_role_source": "explicit",
+            "speaker_label": "A",
+            "theme_color": "#E86A5A"
+          }
+        },
+        "session_profile": {
+          "comparison_group": "",
+          "field_notes": "",
+          "group_conditions": "",
+          "interview_group_id": "",
+          "location": "",
+          "moderator_guide": "",
+          "objective": "",
+          "session_date": "",
+          "session_date_source": "",
+          "session_type": "focus_group"
+        },
+        "duration": 10.0,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 1,
+        "segment_count": 2,
+        "speakers": [
+          "A"
+        ],
+        "emotions": [
+          "平常"
+        ],
+        "media_kind": null,
+        "media_url": null,
+        "thumbnail_url": "/api/library/content/thumbnail?v=2026-10-04T02%3A12%3A45%2B00%3A00",
+        "preview": "synthetic duration synthetic duration",
+        "files": []
+      }
+    }
+  }
+}

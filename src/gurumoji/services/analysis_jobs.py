@@ -29,6 +29,7 @@ from ..transformer_analysis import (
     TOPIC_MODES,
     saved_embeddings as saved_transformer_embeddings,
     transformer_input_fingerprint,
+    transformer_source_provenance,
 )
 from .ai.settings import local_llm_model_required_message
 
@@ -347,6 +348,7 @@ def make_transformer_jobs(
                 topic_count=topic_count or None, mode=mode,
                 manual_topics=manual_topics or [], manual_min_similarity=min_similarity,
                 embeddings=embeddings, embedding_segment_ids=embedding_segment_ids, engine=engine,
+                revision=str((engine or {}).get("revision") or ""),
                 previous_candidates=previous_candidates,
                 progress=progress, check_cancelled=cancelled,
             )
@@ -354,6 +356,7 @@ def make_transformer_jobs(
                 "generated_at": utc_now_iso(), "request_id": request_id,
                 "source_revision": analysis["item"]["revision_count"],
                 "analysis_revision": analysis["item"]["analysis_revision"],
+                "source_provenance": transformer_source_provenance(analysis),
             })
             with transformer_jobs_lock, library_write_lock:
                 cancelled()
@@ -361,8 +364,8 @@ def make_transformer_jobs(
                 if latest is None:
                     raise AnalysisConflictError("対象の会話が削除されたため結果を保存しませんでした。")
                 current = group_analysis_for_row(latest)
-                expected = transformer_input_fingerprint(analysis, model=model)
-                actual = transformer_input_fingerprint(current, model=model)
+                expected = transformer_input_fingerprint(analysis, model=model, parameters=result.get("parameters"))
+                actual = transformer_input_fingerprint(current, model=model, parameters=result.get("parameters"))
                 if expected != actual:
                     raise AnalysisConflictError("分析中に元データが更新されました。再実行してください。")
                 full_analysis = group_analysis_for_row(latest, include_research_rows=True)

@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "algorithm_version": "focus-group-local-6",
+  "item": {
+    "id": "content",
+    "source_name": "example.wav",
+    "revision_count": 2,
+    "analysis_revision": 1
+  },
+  "config": {
+    "exclude_moderator": false,
+    "group_by": "role"
+  },
+  "annotations": {},
+  "segments": [],
+  "executed": true,
+  "automatic": {
+    "overview": {
+      "session_duration": 20.0,
+      "segment_count": 3,
+      "included_segment_count": 3,
+      "speaker_count": 2,
+      "participant_count": 6,
+      "observed_participant_count": 1,
+      "mixed_role_speaker_count": 0,
+      "observed_speaker_count": 2,
+      "total_speaking_seconds": 20.0,
+      "timed_turn_count": 3,
+      "missing_time_turn_count": 0,
+      "average_cross_speaker_gap_seconds": 0.0
+    },
+    "speaker_metrics": [
+      {
+        "speaker": "A",
+        "speaker_name": "A",
+        "role": "moderator",
+        "role_status": "single",
+        "observed_roles": [
+          "moderator"
+        ],
+        "color": "#E86A5A",
+        "turn_count": 2,
+        "timed_turn_count": 2,
+        "missing_time_turn_count": 0,
+        "timed_characters": 40,
+        "speaking_seconds": 10.0,
+        "speaking_percent": 50.0,
+        "participant_percent": 50.0,
+        "average_turn_seconds": 5.0,
+        "characters": 40,
+        "characters_per_minute": 240.0,
+        "question_candidates": 0,
+        "first_start": 0.0,
+        "last_end": 10.0,
+        "emotion_counts": {},
+        "code_counts": {},
+        "included_in_balance": true,
+        "profile": {
+          "organization": "",
+          "department": "",
+          "job_title": "",
+          "conditions": "",
+          "tags": [],
+          "attributes": {}
+        }
+      },
+      {
+        "speaker": "B",
+        "speaker_name": "B",
+        "role": "participant",
+        "role_status": "single",
+        "observed_roles": [
+          "participant"
+        ],
+        "color": "#2F80ED",
+        "turn_count": 1,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 0,
+        "timed_characters": 20,
+        "speaking_seconds": 10.0,
+        "speaking_percent": 50.0,
+        "participant_percent": 50.0,
+        "average_turn_seconds": 10.0,
+        "characters": 20,
+        "characters_per_minute": 120.0,
+        "question_candidates": 0,
+        "first_start": 10.0,
+        "last_end": 20.0,
+        "emotion_counts": {},
+        "code_counts": {},
+        "included_in_balance": true,
+        "profile": {
+          "organization": "",
+          "department": "",
+          "job_title": "",
+          "conditions": "",
+          "tags": [],
+          "attributes": {}
+        }
+      }
+    ],
+    "balance": {
+      "participant_count": 6,
+      "observed_participant_count": 1,
+      "mixed_role_speaker_count": 0,
+      "unobserved_participant_count": null,
+      "participant_roster_available": false,
+      "unknown_speaker_turn_count": 0,
+      "missing_time_turn_count": 0,
+      "participant_speaking_seconds": 10,
+      "participant_timed_turn_count": 1,
+      "participant_missing_time_turn_count": 0,
+      "balance_speaker_count": 2,
+      "balance_speaking_seconds": 20.0,
+      "balance_timed_turn_count": 3,
+      "balance_missing_time_turn_count": 0,
+      "max_participant_percent": 50.0,
+      "max_participant_name": "A",
+      "gini": 0.0,
+      "normalized_evenness": 1.0,
+      "hhi": 0.5,
+      "denominator": "observed_speakers",
+      "denominator_label": "有効な時刻がある観測発言者内（司会等を含む）",
+      "denominator_note": "実参加人数とは別の集合です。確認済み名簿がないため未発言者を0秒として補完しません。UNKNOWNと時刻欠測だけの話者は分母人数から除きますが、対象話者に時刻欠測があれば割合・均等度を算出しません。時間は時刻あり発話の小計です。",
+      "metric_status": "computed",
+      "unavailable_reason": ""
+    },
+    "moderator": {
+      "assigned": true,
+      "turn_count": 2,
+      "timed_turn_count": 2,
+      "missing_time_turn_count": 0,
+      "speaking_seconds": 10,
+      "speaking_percent": 50,
+      "question_candidates": 0,
+      "role_aggregation_status": "single",
+      "participant_responses": 1,
+      "moderator_to_participant_transitions": 1,
+      "average_response_gap_seconds": 0.0,
+      "participant_to_participant_transitions": 0,
+      "cross_speaker_transitions": 1
+    },
+    "groups": [
+      {
+        "group": "moderator",
+        "speaker_count": 1,
+        "turn_count": 2,
+        "speaking_seconds": 10,
+        "characters": 40,
+        "timed_turn_count": 2,
+        "missing_time_turn_count": 0,
+        "speaking_percent": 50
+      },
+      {
+        "group": "participant",
+        "speaker_count": 1,
+        "turn_count": 1,
+        "speaking_seconds": 10,
+        "characters": 20,
+        "timed_turn_count": 1,
+        "missing_time_turn_count": 0,
+        "speaking_percent": 50
+      }
+    ],
+    "time_bins": [
+      {
+        "index": 0,
+        "start": 0,
+        "end": 20.0,
+        "speaking_seconds": 20.0,
+        "turn_count": 3,
+        "speakers": [
+          {
+            "speaker": "A",
+            "speaker_name": "A",
+            "seconds": 10.0
+          },
+          {
+            "speaker": "B",
+            "speaker_name": "B",
+            "seconds": 10.0
+          }
+        ]
+      }
+    ],
+    "observations": []
+  }
+}

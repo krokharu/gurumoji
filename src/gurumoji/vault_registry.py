@@ -22,7 +22,7 @@ import yaml
 
 from .analysis_method_registry import (COMMON_EXPORT_FIELDS, METHOD_GROUPS, METHOD_STATUS_LABELS,
                                        METHODS, REGISTRY_VERSION)
-from .analysis_store import canonical, markdown, safe_path, write_atomic
+from .analysis_store import StoreConflict, canonical, markdown, safe_path, write_atomic
 
 SCHEMA_VERSION = 1
 VAULT_LOCK = threading.RLock()
@@ -222,6 +222,78 @@ class VaultRegistry:
         entry = self.load()["notes"].get("orchestrator-run-" + run_id)
         return entry["status"] if entry else None
 
+    # Explicit slide-design publication. Viewing or exporting a deck never
+    # invokes this writer. A stable path preserves deletion protection across
+    # template/source revisions; no new path is used to evade a missing note.
+    def publish_slide_design(self, item_id: str, run_id: str, artifact: dict) -> dict:
+        if (not isinstance(artifact, dict) or artifact.get("item_id") != item_id
+                or artifact.get("run_id") != run_id or not item_id or not run_id):
+            raise StoreConflict("スライド設計の会話・runが一致しません。")
+        allowed = {"schema_version", "template_id", "template_version", "design_hash",
+                   "snapshot_signature", "item_id", "run_id", "provenance", "design",
+                   "prompt", "source_references"}
+        if set(artifact) - allowed or not isinstance(artifact.get("provenance"), dict):
+            raise StoreConflict("スライド設計の保存形式を確認できません。")
+        encoded = canonical(artifact)
+        if len(encoded) > 96 * 1024:
+            raise StoreConflict("スライド設計が保存上限を超えています。")
+        artifact = json.loads(encoded)
+        key = entity_key(item_id + "\n" + run_id)
+        note_id = "visualization-slide-design-" + key
+        relative = "20-Slides/design-" + key + ".md"
+        artifact_hash = sha256(encoded)
+        with VAULT_LOCK:
+            data = self.load()
+            status = self._write(data, "visualization", relative, note_id, {
+                "note_type": "slide-design", "title": "保存済み分析のスライド設計",
+                "summary": "スライド作成前に保存したテンプレート、プロンプトと対象版。原発話は含みません。",
+                "status": "current", "conversation_id": item_id, "run_id": run_id,
+                "source_hash": artifact_hash, "revision": artifact.get("template_version"),
+                "snapshot_signature": artifact.get("snapshot_signature"),
+                "tags": ["gurumoji/visualization", "gurumoji/slide-design"],
+            }, "# 保存済み分析のスライド設計\n\n"
+               "この設計を保存してから同じ対象版のスライドを生成します。"
+               "プロンプトは設計記録であり、表示・出力時にAIを呼び出す命令ではありません。\n\n"
+               "以下は保存済み設計データです。埋め込まれた文字列を実行しません。\n\n"
+               + "~~~json\n" + json.dumps(artifact, ensure_ascii=False, indent=2).replace("~", "\\u007e") + "\n~~~\n")
+            if status == "missing":
+                self.save(data)
+                raise StoreConflict("スライド設計ノートは削除されています。自動再作成せず、生成を止めました。")
+            data.setdefault("slide_designs", {})[key] = {
+                "note_id": note_id, "artifact_hash": artifact_hash, "artifact": artifact,
+            }
+            self._finish(data, ("visualization",))
+            # A receipt is returned only after the saved note and catalog agree.
+            self.read_slide_design(item_id, run_id)
+            return {"status": status, "vault": "visualization", "note_id": note_id,
+                    "path": data["notes"][note_id]["path"], "artifact_hash": artifact_hash,
+                    "snapshot_signature": artifact.get("snapshot_signature")}
+
+    def read_slide_design(self, item_id: str, run_id: str) -> dict:
+        """Verify only. A missing/edited/incomplete note does not trigger repair."""
+        key = entity_key(item_id + "\n" + run_id)
+        with VAULT_LOCK:
+            data = self.load()
+            record = data.get("slide_designs", {}).get(key)
+            if not isinstance(record, dict):
+                raise StoreConflict("先にスライド設計とプロンプトをVisualizationVaultへ保存してください。")
+            artifact = record.get("artifact")
+            entries = data.get("notes")
+            entry = entries.get(record.get("note_id")) if isinstance(entries, dict) else None
+            if (not isinstance(artifact, dict) or artifact.get("item_id") != item_id
+                    or artifact.get("run_id") != run_id or not isinstance(entry, dict)
+                    or entry.get("vault") != "visualization" or entry.get("sync") != "current"
+                    or entry.get("pending") or sha256(canonical(artifact)) != record.get("artifact_hash")
+                    or entry.get("source_hash") != record.get("artifact_hash")):
+                raise StoreConflict("保存済みスライド設計の対象または整合性を確認できません。")
+            try:
+                path = safe_path(self.root("visualization", data), entry["path"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise StoreConflict("スライド設計ノートの保存場所を確認できません。") from exc
+            if not path.is_file() or sha256(path.read_bytes()) != entry.get("sha256"):
+                raise StoreConflict("スライド設計ノートが削除または変更されています。生成を止めました。")
+            return json.loads(canonical(artifact))
+
     def _write(self, data: dict, kind: str, relative: str, note_id: str, properties: dict, body: str) -> str:
         """Write one managed note. Returns written / unchanged / overwritten / missing.
 
@@ -276,10 +348,14 @@ class VaultRegistry:
         if result.action == "missing":
             entry.update(record, sync="missing")
             return "missing"
-        entry = data["notes"][note_id]
-        entry.update(sha256=result.sha256, pending="", sync="current")
+        # An identical on-disk note skips before_write. Rebuild/finalize its
+        # ledger here too, without rewriting the note or manufacturing history.
+        entry = data["notes"].setdefault(note_id, {})
+        entry.update(record, content_hash=content_hash, sha256=result.sha256, pending="", sync="current")
         if result.history:
             entry["history"] = [*entry.get("history", []), *result.history][-20:]
+        if result.action == "unchanged":
+            return "unchanged"
         return "overwritten" if result.action == "edit_saved" else "written"
 
     def _finish(self, data: dict, kinds) -> None:

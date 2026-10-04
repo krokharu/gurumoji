@@ -83,6 +83,35 @@ class DisplaySegmentRegressionTests(unittest.TestCase):
         self.assertEqual(segments[0]["speaker"], "SPEAKER_00")
         self.assertIn("途中", segments[0]["text"])
 
+    def test_separated_short_reply_keeps_its_speaker(self):
+        for before_end, after_start in ((2.0, 60.0), (29.9, 60.0), (2.0, 30.9)):
+            with self.subTest(before_end=before_end, after_start=after_start):
+                segments = app.make_display_segments([
+                    {"start": 0, "end": before_end, "speaker": "A", "text": "質問です"},
+                    {"start": 30, "end": 30.8, "speaker": "B", "text": "いいえ"},
+                    {"start": after_start, "end": 62, "speaker": "A", "text": "次の質問です"},
+                ])
+                self.assertEqual([s["speaker"] for s in segments], ["A", "B", "A"])
+
+    def test_unknown_neighbors_do_not_erase_known_short_speaker(self):
+        segments = app.make_display_segments([
+            {"start": 0, "end": 2, "text": "質問です"},
+            {"start": 2, "end": 2.3, "speaker": "B", "text": "いいえ"},
+            {"start": 2.3, "end": 4, "text": "次の質問です"},
+        ])
+        self.assertEqual([s["speaker"] for s in segments], [None, "B", None])
+
+    def test_separated_word_speaker_island_is_not_smoothed(self):
+        segments = app.make_display_segments([{
+            "start": 0, "end": 62, "speaker": "A", "text": "質問ですいいえ次の質問です",
+            "words": [
+                {"start": 0, "end": 2, "speaker": "A", "word": "質問です"},
+                {"start": 30, "end": 30.3, "speaker": "B", "word": "いいえ"},
+                {"start": 60, "end": 62, "speaker": "A", "word": "次の質問です"},
+            ],
+        }])
+        self.assertEqual([s["speaker"] for s in segments], ["A", "B", "A"])
+
 
 class GapSupplementRegressionTests(unittest.TestCase):
     def test_context_only_segment_at_gap_edge_is_dropped(self):

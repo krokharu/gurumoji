@@ -205,6 +205,13 @@
  [
   "/api/library/<item_id>/analysis/definitions/<definition_id>",
   [
+   "GET"
+  ],
+  "analysis_queries.get_analysis_definition"
+ ],
+ [
+  "/api/library/<item_id>/analysis/definitions/<definition_id>",
+  [
    "PUT"
   ],
   "analysis_queries.put_analysis_definition"
@@ -280,6 +287,132 @@
   "get_analysis_method_overview"
  ],
  [
+  "/api/library/<item_id>/analysis/orchestration",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.history"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.start"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.status"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/cancel",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.cancel"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/export.json",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.export_json"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/export.md",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.export_markdown"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/publication/retry",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.retry_publication"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/results",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.results"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/results/<result_id>",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.result"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/resume",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.resume"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/slides/design",
+  [
+   "POST"
+  ],
+  "analysis_slides.design"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/slides/presentation.pptx",
+  [
+   "GET"
+  ],
+  "analysis_slides.presentation"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/slides/preview",
+  [
+   "GET"
+  ],
+  "analysis_slides.preview"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/slides/templates",
+  [
+   "GET"
+  ],
+  "analysis_slides.templates"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/viewer",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.viewer_timeline"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/viewer/entries/<entry_id>",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.viewer_entry"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/viewer/sources/<utterance_id>",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.viewer_source"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/viewer",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.viewer_runs"
+ ],
+ [
   "/api/library/<item_id>/analysis/pipelines",
   [
    "POST"
@@ -334,6 +467,20 @@
    "POST"
   ],
   "analysis_queries.save_analysis_run"
+ ],
+ [
+  "/api/library/<item_id>/analysis/runs/<run_id>",
+  [
+   "GET"
+  ],
+  "analysis_queries.get_analysis_run"
+ ],
+ [
+  "/api/library/<item_id>/analysis/runs/<run_id>/previews/<artifact_id>",
+  [
+   "GET"
+  ],
+  "analysis_queries.get_analysis_run_preview"
  ],
  [
   "/api/library/<item_id>/analysis/semantic-search",

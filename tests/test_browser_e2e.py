@@ -1,6 +1,4 @@
 import re
-import shutil
-import subprocess
 import tempfile
 import threading
 import unittest
@@ -10,26 +8,16 @@ from unittest.mock import patch
 from werkzeug.serving import make_server
 
 import app
+import browser_support
 from support import use_temporary_library
 from gurumoji.web import system_routes
 
 
-def browser_executable() -> str | None:
-    candidates = [
-        shutil.which("msedge"),
-        shutil.which("chrome"),
-        shutil.which("chromium"),
-        shutil.which("chromium-browser"),
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    ]
-    return next((str(path) for path in candidates if path and Path(path).is_file()), None)
-
-
+@browser_support.ui_browser_test
 class BrowserJobRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="gurumoji-browser-")
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         use_temporary_library(self, self.root)
         with app.jobs_lock:
@@ -40,12 +28,9 @@ class BrowserJobRecoveryTests(unittest.TestCase):
         with app.jobs_lock:
             app.jobs.clear()
             app._job_admission_id = None
-        self.temporary.cleanup()
 
     def test_real_browser_restores_the_active_job(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest("Chrome, Edge, or Chromium is required for the browser smoke test")
+        browser_support.require_browser_executable()
 
         marker = "E2E_ACTIVE_JOB_RESTORED"
         job = app.JobRecord(
@@ -115,27 +100,8 @@ class BrowserJobRecoveryTests(unittest.TestCase):
                     },
                 ),
             ):
-                completed = subprocess.run(
-                    [
-                        browser,
-                        "--headless=new",
-                        "--disable-gpu",
-                        "--disable-background-networking",
-                        "--disable-extensions",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--no-sandbox",
-                        f"--user-data-dir={profile}",
-                        "--virtual-time-budget=5000",
-                        "--dump-dom",
-                        url,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=30,
-                    check=False,
+                completed = browser_support.run_browser_dom(
+                    url, profile=profile, virtual_time_budget_ms=5000, timeout_seconds=30,
                 )
         finally:
             server.shutdown()
@@ -162,9 +128,7 @@ class BrowserJobRecoveryTests(unittest.TestCase):
         self.assertNotRegex(progress_tag.group(0), r'\shidden(?:\s|=|>)')
 
     def test_ai_review_displays_reason_safely_and_restores_original_text(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest("Chrome, Edge, or Chromium is required")
+        browser_support.require_browser_executable()
         driver = r"""
 window.addEventListener('DOMContentLoaded', () => {
   try {
@@ -238,12 +202,11 @@ window.addEventListener('DOMContentLoaded', () => {
                     patch.object(app.app, 'send_static_file', side_effect=static), \
                     patch.object(app, 'get_machine_profile', return_value={}), \
                     patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
-                result = subprocess.run([
-                    browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
-                    '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-                    f'--user-data-dir={self.root / "review-profile"}', '--virtual-time-budget=2000',
-                    '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
-                ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
+                result = browser_support.run_browser_dom(
+                    f'http://127.0.0.1:{server.server_port}/',
+                    profile=self.root / "review-profile",
+                    virtual_time_budget_ms=2000, timeout_seconds=30,
+                )
         finally:
             server.shutdown()
             server.server_close()
@@ -254,9 +217,7 @@ window.addEventListener('DOMContentLoaded', () => {
         self.assertEqual(status.group(1), 'passed')
 
     def test_comparison_and_unsaved_navigation_regressions(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest('Chrome, Edge, or Chromium is required')
+        browser_support.require_browser_executable()
         for item_id in ('compare_a', 'compare_b'):
             app.upsert_library_item(item_id=item_id, source_name=item_id,
                 output_dir=self.root / item_id, media_path=None, language='ja',
@@ -367,12 +328,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     patch.object(app, 'get_machine_profile', return_value={}), \
                     patch.object(app, 'system_activity_snapshot', return_value={}), \
                     patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
-                result = subprocess.run([
-                    browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
-                    '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-                    f'--user-data-dir={self.root / "priority-profile"}', '--virtual-time-budget=10000',
-                    '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
-                ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+                result = browser_support.run_browser_dom(
+                    f'http://127.0.0.1:{server.server_port}/',
+                    profile=self.root / "priority-profile",
+                    virtual_time_budget_ms=10000, timeout_seconds=40,
+                )
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
@@ -382,9 +342,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         self.assertEqual(len(app.analysis_archive_store().list_comparisons()), 1)
 
     def test_real_browser_renders_pre_survey_dashboard(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest("Chrome, Edge, or Chromium is required for the browser smoke test")
+        browser_support.require_browser_executable()
 
         app.save_speaker_registry_records(
             [
@@ -432,27 +390,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 patch.object(app, "get_machine_profile", return_value=machine),
                 patch.object(app, "load_token_config", return_value=app.TokenConfig()),
             ):
-                completed = subprocess.run(
-                    [
-                        browser,
-                        "--headless=new",
-                        "--disable-gpu",
-                        "--disable-background-networking",
-                        "--disable-extensions",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--no-sandbox",
-                        f"--user-data-dir={profile}",
-                        "--virtual-time-budget=7000",
-                        "--dump-dom",
-                        url,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=30,
-                    check=False,
+                completed = browser_support.run_browser_dom(
+                    url, profile=profile, virtual_time_budget_ms=7000, timeout_seconds=30,
                 )
         finally:
             server.shutdown()
@@ -472,9 +411,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         self.assertIn("年齢層", completed.stdout)
 
     def test_registered_ui_ux_fixes_work_in_a_real_browser(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest('Chrome, Edge, or Chromium is required')
+        browser_support.require_browser_executable()
         driver = r"""
 window.addEventListener('DOMContentLoaded', async () => {
   const checks = [];
@@ -784,12 +721,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                             patch.object(app.app, 'send_static_file', side_effect=static), \
                             patch.object(app, 'get_machine_profile', return_value={}), \
                             patch.object(app, 'load_token_config', return_value=app.TokenConfig()):
-                        result = subprocess.run([
-                            browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
-                            '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-                            f'--window-size={width}', f'--user-data-dir={self.root / ("ux-profile-" + width.split(",")[0])}',
-                            '--virtual-time-budget=10000', '--dump-dom', f'http://127.0.0.1:{server.server_port}/',
-                        ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+                        result = browser_support.run_browser_dom(
+                            f'http://127.0.0.1:{server.server_port}/',
+                            profile=self.root / ("ux-profile-" + width.split(",")[0]),
+                            viewport=tuple(map(int, width.split(","))),
+                            virtual_time_budget_ms=10000, timeout_seconds=60,
+                        )
                 finally:
                     server.shutdown()
                     server.server_close()

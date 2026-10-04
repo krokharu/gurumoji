@@ -49,21 +49,20 @@ const METHOD_EXTERNAL_NOTES = {
 };
 
 function analysisMethodState() {
-  if (!analysisState.methods || analysisState.methods.itemId !== analysisState.itemId) {
-    analysisState.methods = {itemId: analysisState.itemId, loading: false, error: '', data: null, selected: ''};
+  if (!analysisState.methods || !isAnalysisContextCurrent(analysisState.methods.context)) {
+    analysisState.methods = {context: captureAnalysisContext(), itemId: analysisState.itemId, loading: false, error: '', data: null, selected: ''};
   }
   return analysisState.methods;
 }
 
 function invalidateAnalysisMethodOverview() {
-  const state = analysisMethodState();
-  state.data = null;
-  state.error = '';
+  analysisState.methods = null;
 }
 
 async function loadAnalysisMethodOverview() {
   const state = analysisMethodState();
   const itemId = analysisState.itemId;
+  const owns = () => analysisState.methods === state && isAnalysisContextCurrent(state.context);
   if (!itemId || state.loading || state.data) return;
   state.loading = true;
   state.error = '';
@@ -71,15 +70,17 @@ async function loadAnalysisMethodOverview() {
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/methods`, {cache: 'no-store'});
     const payload = await readJsonResponse(response);
     if (!response.ok) throw new Error(payload.error || '手法別の分析状態を取得できませんでした。');
-    if (analysisState.itemId !== itemId) return;
+    if (!owns()) return;
     state.data = payload;
     const methods = Array.isArray(payload.methods) ? payload.methods : [];
     if (!methods.some(method => method.method_id === state.selected)) {
       state.selected = ((methods.find(method => method.produced) || methods[0] || {}).method_id) || '';
     }
   } catch (error) {
+    if (!owns()) return;
     state.error = error.message;
   } finally {
+    if (!owns()) return;
     state.loading = false;
     if (analysisState.itemId === itemId && analysisState.mode === 'methods') renderAnalysisWorkspace();
   }
@@ -254,18 +255,18 @@ function buildSegmentClassificationPanel(compact) {
   const actions = analysisElement('div', 'segment-classification-actions');
   const run = analysisElement(
     'button', 'primary-button small',
-    segmentClassificationInProgress ? 'Jevで判定中…' : 'テンプレート＋Jev＋Transformerで判定'
+    segmentClassificationBusy() ? 'Jevで判定中…' : 'テンプレート＋Jev＋Transformerで判定'
   );
   run.type = 'button';
-  run.disabled = segmentClassificationInProgress || analysisState.dirty;
+  run.disabled = segmentClassificationBusy() || hasUnsavedAnalysisChanges();
   run.dataset.runSegmentClassification = 'true';
   actions.append(run);
-  if (analysisState.dirty) actions.append(analysisElement('small', '', '手動変更を保存してから実行してください。'));
+  if (hasUnsavedAnalysisChanges()) actions.append(analysisElement('small', '', '設定・手動変更・準備記録を保存してから実行してください。'));
   panel.body.append(actions);
 
   const rows = result && Array.isArray(result.segments) ? result.segments : [];
   if (!rows.length) {
-    panel.body.append(analysisElement('p', 'analysis-no-data', `分類結果はまだありません。画面上部の「分析を実行」から${summary.segment_count || 0}発話を一括判定できます。`));
+    panel.body.append(analysisElement('p', 'analysis-no-data', `分類結果はまだありません。この欄の「テンプレート＋Jev＋Transformerで判定」から${summary.segment_count || 0}発話を一括判定できます。`));
   } else {
     const ranked = [...rows].sort((a, b) => {
       const score = row => Math.max(
@@ -310,8 +311,12 @@ function buildSegmentClassificationPanel(compact) {
 }
 
 async function runSegmentClassification({useJev = true, quiet = false} = {}) {
-  if (!analysisState.itemId || !analysisState.data || segmentClassificationInProgress || analysisState.dirty) return;
-  segmentClassificationInProgress = true;
+  if (!analysisState.itemId || !analysisState.data || segmentClassificationBusy() || hasUnsavedAnalysisChanges()) return;
+  const context = captureAnalysisContext();
+  const token = {};
+  segmentClassificationRequests.set(context.itemId, token);
+  const owns = () => segmentClassificationRequests.get(context.itemId) === token;
+  const current = () => owns() && isAnalysisContextCurrent(context);
   renderAnalysisWorkspace();
   if (!quiet) setAlert(
     document.querySelector('#analysis-message'),
@@ -320,8 +325,8 @@ async function runSegmentClassification({useJev = true, quiet = false} = {}) {
       : 'テンプレートと保存済みTransformer結果から分類候補を作成しています。'
   );
   try {
-    const item = analysisState.data.item || {};
-    const response = await apiFetch(`/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/classifications`, {
+    const item = context.data.item || {};
+    const response = await apiFetch(`/api/library/${encodeURIComponent(context.itemId)}/analysis/classifications`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         request_id: createSubmissionId(),
@@ -332,16 +337,18 @@ async function runSegmentClassification({useJev = true, quiet = false} = {}) {
     });
     const payload = await readJsonResponse(response);
     if (!response.ok) throw new Error(payload.error || '発話分類を実行できませんでした。');
-    analysisState.data.segment_classification = payload.segment_classification;
+    if (!current()) return;
+    context.data.segment_classification = payload.segment_classification;
     invalidateAnalysisMethodOverview();
     const warning = payload.archive_warning ? ` ${payload.archive_warning}` : '';
     if (!quiet) setAlert(document.querySelector('#analysis-message'), `発話分類を保存しました。${warning}`, Boolean(payload.archive_warning));
     return {ok: true, payload};
   } catch (error) {
-    if (!quiet) setAlert(document.querySelector('#analysis-message'), error.message, true);
+    if (current() && !quiet) setAlert(document.querySelector('#analysis-message'), error.message, true);
     return {ok: false, error: error.message};
   } finally {
-    segmentClassificationInProgress = false;
-    renderAnalysisWorkspace();
+    const refresh = owns() && analysisState.itemId === context.itemId;
+    if (owns()) segmentClassificationRequests.delete(context.itemId);
+    if (refresh) renderAnalysisWorkspace();
   }
 }

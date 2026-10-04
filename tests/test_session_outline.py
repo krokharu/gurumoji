@@ -144,7 +144,7 @@ class SessionOutlineApiTests(unittest.TestCase):
         analysis = first.get("analysis", first)
         saved = transformer_result()
         saved.update({"source_revision": 0, "analysis_revision": 0,
-                      "fingerprint": transformer_input_fingerprint(analysis, model=DEFAULT_MODEL)})
+                      "fingerprint": transformer_input_fingerprint(analysis, model=DEFAULT_MODEL, parameters=saved.get("parameters"))})
         with app.database_connection() as connection:
             connection.execute(
                 "UPDATE library_items SET transformer_analysis_json=? WHERE id='session'",

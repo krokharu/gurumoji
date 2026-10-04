@@ -46,6 +46,11 @@ def focus_group_analysis_report_markdown(analysis: dict[str, Any]) -> str:
     overview = automatic.get("overview", {})
     prepared = manual.get("preparation", {})
     reviewed_rows = {r["segment_id"]: r for r in prepared.get("rows", [])}
+    seconds = overview.get("total_speaking_seconds")
+    time_text = f"{seconds} 秒" if seconds is not None else "不明"
+    timed, missing = overview.get("timed_turn_count"), overview.get("missing_time_turn_count")
+    if timed is not None and missing is not None:
+        time_text += f"（時刻あり {timed} 発話、時刻不明 {missing} 発話）"
     lines.extend([
         f"- 分析対象版: {prepared.get('input_version') or '未固定'} / source_hash: {prepared.get('source_hash', '不明')}",
         f"- 逐語録準備状態: {prepared.get('status', 'draft')}。本文照合と話者・順序の確認は別に管理する。",
@@ -77,7 +82,7 @@ def focus_group_analysis_report_markdown(analysis: dict[str, Any]) -> str:
         "## 直接確認できるデータ概要",
         "",
         f"- 発話数: {overview.get('segment_count', 0)}、実参加人数: {prepared.get('participant_count') if prepared.get('participant_count') is not None else '不明'}、確認済み発言者数: {prepared.get('known_speaker_count', 0)}。",
-        f"- 時間情報: 総発話時間 {overview.get('total_speaking_seconds', 0)} 秒。",
+        f"- 時間情報: 時刻あり発話の合計 {time_text}。",
         "- 以下のコード・相互作用の件数は記録済みの注釈数であり、重要性・代表性・支持人数を意味しない。",
         "",
         "## 内容に関する結果（コード済みの事実）",
@@ -163,7 +168,8 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "speaking_percent", "participant_percent", "average_turn_seconds",
         "characters", "characters_per_minute", "question_candidates",
         "first_start", "last_end", "included_in_balance", "emotion_counts",
-        "code_counts",
+        "code_counts", "timed_turn_count", "missing_time_turn_count", "timed_characters",
+        "role_status", "observed_roles",
     ],
     "transitions": [
         "from_speaker", "from_name", "from_role", "to_speaker", "to_name",
@@ -177,7 +183,7 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
     "keywords": ["term", "count", "by_speaker"],
     "emotions": [
         "speaker", "speaker_name", "model", "model_name", "label", "emotion",
-        "count", "seconds",
+        "count", "seconds", "timed_turn_count", "missing_time_turn_count",
     ],
     "timeline": [
         "index", "start", "end", "speaking_seconds", "turn_count", "speakers",
@@ -185,12 +191,13 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
     "codes": [
         "id", "label", "description", "include_example", "exclude_example", "category", "theme",
         "color", "segment_count", "speaking_seconds", "characters",
-        "speaker_count", "group_count", "important_count",
+        "speaker_count", "group_count", "important_count", "timed_turn_count", "missing_time_turn_count",
     ],
     "codebook_history": ["version", "changed_at", "reason", "summary"],
     "groups": [
         "group", "speaker_count", "turn_count", "speaking_seconds",
-        "speaking_percent", "characters",
+        "speaking_percent", "characters", "timed_turn_count", "missing_time_turn_count",
+        "role_aggregation_status",
     ],
     "coded_segments": [
         "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
@@ -198,7 +205,7 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
         "interaction_tags", "elicitation", "interaction_links", "dialogue_act",
         "dialogue_act_label", "importance_score", "review_score", "sensitivity_score",
-        "classification_status", "classification_note", "memo", "important", "excluded",
+        "classification_status", "classification_note", "memo", "important", "excluded", "valid_time",
     ],
     "analysis_units": [
         "segment_id", "group_id", "utterance_order", "start", "end", "duration", "speaker", "speaker_name",
@@ -206,7 +213,7 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
         "previous_segment_id", "next_segment_id", "code_ids", "code_labels", "categories", "themes",
         "interaction_tags", "elicitation", "interaction_links", "dialogue_act",
         "dialogue_act_label", "importance_score", "review_score", "sensitivity_score",
-        "classification_status", "classification_note", "memo", "important", "excluded",
+        "classification_status", "classification_note", "memo", "important", "excluded", "valid_time",
     ],
     "interactions": ["tag", "label", "count"],
     "interaction_links": [
@@ -223,7 +230,7 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
     "analysis_plan": ["section", "item", "status", "value", "role", "data_sufficiency", "reason", "limitation"],
     "important_quotes": [
         "segment_id", "start", "end", "speaker", "speaker_name", "role", "text",
-        "code_labels", "memo", "excluded",
+        "code_labels", "memo", "excluded", "valid_time",
     ],
     "segment_classifications": CLASSIFICATION_FIELDS,
     "segment_classification_crosstabs": SEGMENT_CLASSIFICATION_CROSSTAB_FIELDS,
@@ -278,13 +285,15 @@ def analysis_csv_rows(
             for code_id in annotation.get("codes", [])
             if str(code_details.get(str(code_id), {}).get("theme") or "")
         ))
+        valid_time = bool(segment.get("valid_time", preparation.valid_time(segment)))
         row = {
             "segment_id": segment["id"],
             "group_id": segment.get("group_id", "不明"),
             "utterance_order": segment.get("utterance_order", ""),
-            "start": segment["start"],
-            "end": segment["end"],
-            "duration": segment["duration"],
+            "start": segment["start"] if valid_time else None,
+            "end": segment["end"] if valid_time else None,
+            "duration": segment["duration"] if valid_time else None,
+            "valid_time": valid_time,
             "speaker": segment["speaker"],
             "speaker_name": segment["speaker_name"],
             "role": segment["role"],
@@ -399,9 +408,33 @@ def analysis_csv_rows(
     }
     transformer_result = analysis.get("transformer", {}).get("result") or {}
     if dataset.startswith("transformer_") and transformer_result:
-        common["schema_version"] = transformer_result.get("schema_version", common["schema_version"])
-        common["generated_at"] = transformer_result.get("generated_at", common["generated_at"])
-        common["algorithm_version"] = transformer_result.get("algorithm_version", common["algorithm_version"])
+        provenance = transformer_result.get("source_provenance") or {}
+        stale = bool(analysis.get("transformer", {}).get("stale"))
+        # Never give historical results the identity/review state of today's input.
+        # Legacy results have only partial provenance: missing fields stay missing.
+        common.update({
+            "current_source_name": common["source_name"],
+            "source_name": provenance.get("source_name"),
+            "current_revision_count": common["revision_count"],
+            "current_analysis_revision": common["analysis_revision"],
+            "current_input_version": common["input_version"], "current_source_hash": common["source_hash"],
+            "schema_version": transformer_result.get("schema_version"),
+            "generated_at": transformer_result.get("generated_at"),
+            "algorithm_version": transformer_result.get("algorithm_version"),
+            "revision_count": provenance.get("source_revision", transformer_result.get("source_revision")),
+            "analysis_revision": provenance.get("analysis_revision", transformer_result.get("analysis_revision")),
+            "analysis_updated_at": provenance.get("analysis_updated_at"),
+            "input_version": provenance.get("input_version"), "source_hash": provenance.get("source_hash"),
+            "analysis_needs_review": bool(stale or provenance.get("analysis_needs_review", True)),
+            "result_stale": stale, "provenance_status": "recorded" if provenance else "legacy_unknown",
+            "result_fingerprint": transformer_result.get("fingerprint"),
+            "embedding_fingerprint": transformer_result.get("embedding_fingerprint"),
+            "request_id": transformer_result.get("request_id"),
+            "model_name": transformer_result.get("engine", {}).get("name"),
+            "model_revision": transformer_result.get("engine", {}).get("revision"),
+            "generated_config": provenance.get("config"), "generated_parameters": transformer_result.get("parameters"),
+            "interpretation_status": "unverified_candidate", "researcher_review_required": True,
+        })
     rows = [{**common, **dict(value)} for value in sources[dataset]]
     fields = list(dict.fromkeys([*common, *ANALYSIS_CSV_FIELDS[dataset]]))
     return fields, rows

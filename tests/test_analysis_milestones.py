@@ -139,7 +139,8 @@ class AnalysisMilestoneTests(unittest.TestCase):
         context = json.loads(call.call_args.args[4])
         self.assertEqual(context["objective"], "参加の偏りを確認したい")
         self.assertEqual(set(context), {
-            "objective", "included_segment_count", "speaker_count", "invalid_time_segments", "available_methods",
+            "objective", "included_segment_count", "speaker_count", "unknown_speaker_segments",
+            "invalid_time_segments", "available_methods",
         })
         proposal = response.get_json()["proposal"]
         preview = self.client.post(self.url + "/plans/preview", json={

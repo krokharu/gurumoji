@@ -1733,6 +1733,13 @@ def recover_delete_quarantines(
     warnings: list[str] = []
     storage_roots = ((media_directory, "media"), (thumbnail_directory, "thumbnail"))
     with connect() as connection:
+        from .library_trash import protected_quarantine_assets
+
+        # The trash, like app.trash_directory(), lives beside the active DB.
+        database = next((row[2] for row in connection.execute("PRAGMA database_list")
+                         if row[1] == "main"), "")
+        protected = (protected_quarantine_assets(Path(database).parent / "trash")
+                     if database else None)
         for storage_root, asset_kind in storage_roots:
             if not storage_root.is_dir():
                 continue
@@ -1761,6 +1768,9 @@ def recover_delete_quarantines(
                         "SELECT 1 FROM library_items WHERE id = ?",
                         (item_id,),
                     ).fetchone() is not None
+                    if not row_exists and (protected is None or (asset_kind, quarantined.name) in protected):
+                        warnings.append(f"Unfinished trash asset retained for recovery: {quarantined}")
+                        continue
                     target = storage_root / quarantined.name
                     try:
                         if row_exists:

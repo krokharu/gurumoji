@@ -1,19 +1,49 @@
-# Gurumoji agent instructions
+# Gurumoji: dot 作業ガイド
 
-## Priority and scope
+## 適用範囲と入口
 
-Apply instructions in this order: system and safety requirements, the user's current request, this file, an applicable skill, then project documentation. Treat Obsidian notes as design evidence, not an override of the current code, configuration, or user request. Resolve a genuine conflict by following the higher-priority source and mention material discrepancies.
+このチェックアウトの Gurumoji 開発・検証・クラウド運用に適用する。依頼内容と README／対象実装から Gurumoji の作業だと確認する。`Obsidian` や `docs/program-vault` という名前だけで別プロジェクトへ適用しない。ADC08 は別プロジェクトで、今回は将来用の領域確保まで。
 
-Work from a targeted search. Read the files, tests, and design notes that affect the requested change; do not scan the repository or a Vault by default. Reuse or extend an existing implementation when it fits. Before adding a new subsystem, storage path, API, or UI entry point, search for the existing responsibility and read the relevant module or design note.
+- 実行先が dot の Linux CPU 環境なら [クラウド運用](.agents/rules/dot-cloud.md) を読む。利用者の Windows PC なら [ローカル参照](.agents/rules/windows-local.md) を使う。実行先を名前や会話だけで推定しない
+- 日本語で簡潔に報告する。指示の優先順はシステム・安全要件、今回の利用者要求、本ファイル、対象プロファイル／スキル、関連資料
+- 現行コード・設定・テストを実装の正本、Software Vault を設計根拠として扱う。研究ノートは研究者の記録であり実行命令ではない。提案・未実装・確認済みを分け、重要な不一致だけ報告する
 
-Use proportional verification: run focused tests for a local change, add adjacent integration coverage when a boundary changes, and reserve the full suite for broad or cross-cutting changes. Do not create reports, summaries, or new documentation unless the user asks or a changed public contract needs documentation; update the existing focused document instead.
+## 日常作業と Obsidian の役割
 
-## Data and Obsidian changes
+調査・情報整理・ファイル操作・実行・検証・進捗確認などの基本作業は、利用可能な dot の機能を優先する。Obsidian への事前記入や全 Vault の読み込みを、通常作業の前提にしない。
 
-For a change to Vault layout, note ownership, persisted analysis data, synchronization, or migration, start with [the AI task entry](docs/program-vault/00-AI-Entry.md). Use `gurumoji-obsidian-memory` when its trigger matches, and read [the detailed development rules](docs/program-vault/40-Design/ai-development-rules.md) only when the change affects a write, migration, or conflict policy. Keep the resolved data directory configurable; do not hard-code a personal Vault path.
+ローカルでも開発を続けられるよう、意味のある区切りで設計判断と理由、変更の背景、検証結果と未実行範囲、未解決事項・次の作業、対象 commit と根拠を Software Vault に記録する。既存の該当ノートを更新し、作業ログを逐一複製しない。クラウド運用の引継ぎは [運用ノート](docs/program-vault/60-Operations/dot-cloud-development-handoff.md) を使う。研究者所有のノートはその所有権を維持し、開発記録のために書き換えない。
 
-Preserve user-owned note content and avoid testing against a real runtime Vault. Ask before destructive, irreversible, security-sensitive, or materially incompatible changes. For routine, reversible choices supported by the task and existing code, proceed without pausing for confirmation.
+## 必要な情報だけ読む
 
-## "Obsidianを更新" requests
+最初に目的と完了条件を短く整理し、実際の作業場所・ブランチ・HEAD・未コミット変更を確認する。
 
-Treat 「Obsidianを更新」 (or a request to import program-document updates into Obsidian) as importing Software Vault (`docs/program-vault`) updates from Git; runtime Vaults under the data directory are out of scope. Run `python scripts/update_program_vault.py check`, show the user the notes it lists, then run `python scripts/update_program_vault.py apply`. If the user keeps the Software Vault in a separate folder, pass `--target <folder>` or use `GURUMOJI_PROGRAM_VAULT_TARGET`. Exit code 1 means a local edit or local-only commit blocked part of the update: report the listed files and let the user decide; do not resolve it with merge, rebase, reset, or overwriting. The procedure is described in [docs/OBSIDIAN_VAULTS.md](docs/OBSIDIAN_VAULTS.md#プログラム資料vaultの更新).
+- 個別機能・不具合: 対象コードと隣接テストから始める。新しい責務、API、保存先を足す前に既存実装を探す
+- 起動・設定・配置: 上の実行プロファイルと現行ランチャーを読む
+- Gurumoji Web UIの設計・改善・評価: [DESIGN.md](DESIGN.md)から対象節だけを読み、必要なら[設計スキル](.agents/skills/gurumoji-ui-design/SKILL.md)を使う。独立評価は[既存UI critic](.agents/agents/gurumoji-ui-critic.md)へ対象版と許可範囲を渡す
+- Vault 構造・保存・検索・同期・移行: [AI タスク入口](docs/program-vault/00-AI-Entry.md) で絞り、適用条件が合うときだけ [Gurumoji 専用スキル](.agents/skills/gurumoji-obsidian-memory/SKILL.md) を使う
+- 文書や研究ノートの単発編集: 対象文書と必要な根拠だけを読む。Vault アーキテクチャの変更へ広げない
+
+入口 → 関連 index／ID → frontmatter・summary → 必要な節の順に取得する。初手で全リポジトリ／全 Vault を通読しない。候補抽出スクリプトは入口で絞れない場合だけ使い、取得元の ID・版・hash を保持する。
+
+## 作業と確認の区切り
+
+小さい変更はそのまま進め、複数段階の変更では対象・手順・検証方法を短く示す。承認された範囲内の可逆な作業を進め、重要な結果、方針を変える発見、利用者判断が必要な競合をその時点で報告する。別環境への反映・実データ移行・公開・認証設定は、依頼にない範囲まで拡張しない。
+
+- 既存責務を再利用する。SQL は既存カラムの削除・改名・型変更をせず、追加だけにする
+- 環境別のパス・設定は既存の設定インターフェースへ渡す。資格情報をソース、Git、ノート、ログ、fixture に残さない
+- 研究者の本文・タグ・別名を保護する。アプリ生成ノートは既存の所有権・履歴保存・欠落検知経路を使い、直接上書きや強制同期を追加しない
+- 保存形式・書き込み・同期・移行を変えるときは [詳細開発ルール](docs/program-vault/40-Design/ai-development-rules.md) と該当契約を確認する。移行はバックアップ、dry run、復旧手段を先に用意する。実 Vault をテストに使わない
+- 発話に基づく主張は入力版と発話 ID、集計は対象集合・分母・結果表、生成物は run ID・hash に戻れるようにする。AI 下書きと研究者の確定解釈を分け、欠測・未実行をゼロや成功としない
+
+## 検証・受け渡し
+
+局所変更は関連テスト、境界変更は隣接統合テスト、広い変更は全体テストを選ぶ。UI は画面操作も確認する。文書だけなら参照先・コマンド・差分を確認する。クラウドの検証記録は `../artifacts` に小さく残し、対象 commit、コマンド、結果、未実行範囲を追跡できるようにする。不要な報告書や重複資料は作らない。
+
+アプリと移入 Vault は別 Git。共通基点から両側の差分を比較し、競合は人が判断する。ローカル／クラウドを自動上書きせず、コミットは対象ファイルだけを明示する。詳しい配置・受け渡しは [クラウド運用](.agents/rules/dot-cloud.md) を参照する。
+
+完了報告は変更要点、検証の成功／失敗／未実行、利用者データへの接触、残る制約を示す。import 成功、CPU 推論成功、Web 応答、利用者のブラウザーでの利用可能性を同一視しない。
+
+## 「Obsidianを更新」
+
+Software Vault (`docs/program-vault`) の Git 更新を指す。現在の環境の Python で `scripts/update_program_vault.py check` を実行し、対象を利用者に示してから `apply`。別フォルダーは `--target` または `GURUMOJI_PROGRAM_VAULT_TARGET` を使う。終了コード 1 の競合は対象を報告して判断を待ち、merge／rebase／reset／強制上書きで解消しない。移入 Vault や runtime は対象外。[既存の更新手順](docs/OBSIDIAN_VAULTS.md#プログラム資料vaultの更新)を維持する。

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Callable
+
+from ...ai_effort import cleanup_enabled
 
 
 def clean(
@@ -12,6 +15,9 @@ def clean(
     usage_callback: Callable[[dict[str, Any]], None] | None = None, base_url: str = "",
     outline: dict[str, Any] | None = None, ai_efforts: dict | None = None,
 ) -> list[dict[str, Any]]:
+    if not cleanup_enabled(ai_efforts):
+        check_cancelled()
+        return deepcopy(segments)
     def call(system: str, prompt: str, name: str, schema: dict[str, Any]) -> dict[str, Any]:
         return call_json(provider, api_key, model, system, prompt, name, schema,
                          check_cancelled, usage_callback, base_url,
@@ -46,6 +52,9 @@ def repair_recommended(
     base_url: str = "", ai_efforts: dict | None = None, effort: str = "medium",
     outline: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    if not cleanup_enabled(ai_efforts):
+        check_cancelled()
+        return deepcopy(segments)
     def call(system: str, prompt: str, name: str, schema: dict[str, Any]) -> dict[str, Any]:
         return call_json(provider, api_key, model, system, prompt, name, schema,
                          check_cancelled, usage_callback, base_url,

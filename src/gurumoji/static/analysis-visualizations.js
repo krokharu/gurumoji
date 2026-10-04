@@ -32,6 +32,11 @@ function appendAnalysisBar(container, label, value, detail = '', color = '#1C6B5
   const row = analysisElement('div', 'analysis-bar-row');
   const heading = analysisElement('div', 'analysis-bar-heading');
   heading.append(analysisElement('strong', '', label), analysisElement('span', '', detail));
+  if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) {
+    row.append(heading, analysisElement('p', 'analysis-caption', '割合は算出不可'));
+    container.append(row);
+    return row;
+  }
   const track = analysisElement('div', 'analysis-bar-track');
   const fill = analysisElement('i');
   const percent = boundedAnalysisPercent(value);
@@ -210,6 +215,8 @@ function buildAnalysisTimelineChart(rawBins, speakerMetrics = []) {
     note.textContent = speakerMode
       ? `発話時間が多い上位${visibleSpeakers.length}話者を表示しています。折れ線の高さは各時間帯の秒数で、累積値ではありません。`
       : '時間帯ごとの総発話秒数です。重なり発話がある場合、時間帯の長さを超えることがあります。';
+    const missing = speakerMetrics.reduce((sum, metric) => sum + (Number(metric.missing_time_turn_count) || 0), 0);
+    if (missing > 0) note.textContent += ` 時刻不明${missing}発話は時間帯へ配置できず、時刻あり発話だけの集計です。`;
   }
   totalButton.addEventListener('click', () => render('total'));
   speakerButton.addEventListener('click', () => render('speakers'));
@@ -341,9 +348,11 @@ function buildAnalysisExcitementChart(rawBins, sessionOutline = {}) {
 }
 
 function analysisPValueText(value) {
+  if (value === null || value === undefined || value === '') return '未計算';
   const number = Number(value);
-  if (!Number.isFinite(number)) return '—';
-  if (number < .001) return 'p < .001';
+  if (!Number.isFinite(number) || number < 0 || number > 1) return '未計算';
+  if (number === 0) return 'p < 1e-308（数値精度限界）';
+  if (number < .001) return `p = ${number.toExponential(2)}`;
   return `p = ${number.toFixed(3)}`;
 }
 
@@ -733,7 +742,7 @@ function buildAnalysisCorrelationTable(rows) {
         cell.classList.add(coefficient < 0 ? 'negative' : 'positive');
         cell.title = diagonal
           ? `${labels.get(rowId)}（同一変数）`
-          : `${labels.get(rowId)} × ${labels.get(columnId)}: r = ${coefficient.toFixed(3)}, ${analysisPValueText(item.p_value)}, N = ${item.n || 0}`;
+          : `${labels.get(rowId)} × ${labels.get(columnId)}: r = ${coefficient.toFixed(3)}, ${analysisPValueText(item.p_value)}, N = ${item.n || 0} / 欠測 ${item.missing ?? '—'} / 発話単位 / p値未補正`;
       }
       row.append(cell);
     });
@@ -771,7 +780,7 @@ function buildAnalysisCorrelationExplorer(correlations) {
     analysisElement('i'),
     analysisElement('span', '', '+1 強い正')
   );
-  const note = analysisElement('p', 'analysis-chart-note', '相関は因果関係を示しません。発話単位の探索値として原文・散布図・標本数も確認してください。');
+  const note = analysisElement('p', 'analysis-chart-note', '相関は因果関係を示しません。発話単位の探索値として原文・散布図・標本数・欠測も確認してください。p値は多重検定未補正で、同一話者内の発話の独立性は未検証です。');
   module.append(toolbar, stage, legend, note);
   const render = method => {
     buttons.forEach((button, key) => {
@@ -896,11 +905,11 @@ function buildAnalysisEffectChart(tests, compact) {
   chart.append(axis);
   rows.forEach(item => {
     const effect = Math.abs(Number(item.effect_size));
-    const row = analysisElement('article', `analysis-effect-row${item.significant_0_05 ? ' significant' : ''}`);
+    const row = analysisElement('article', 'analysis-effect-row');
     const heading = analysisElement('header');
     heading.append(
       analysisElement('strong', '', item.outcome_label || item.outcome || item.test),
-      analysisElement('span', '', `${item.effect_name || 'effect'}=${analysisNumberText(effect, 3)} / p ${analysisPValueText(item.p_value)}`)
+      analysisElement('span', '', `${item.effect_name || 'effect'}=${analysisNumberText(effect, 3)} / ${analysisPValueText(item.p_value)}`)
     );
     const track = analysisElement('div', 'analysis-effect-track');
     track.setAttribute('role', 'img');

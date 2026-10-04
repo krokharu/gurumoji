@@ -12,6 +12,7 @@ from .. import transcript_preparation as preparation
 from ..handlers.analysis_commands import TranscriptConflictError
 from ..text_utils import json_load, utc_now_iso, validate_json_value
 from .durable_files import path_is_within
+from .group_analysis import analysis_segment_bounds
 from .library_rows import (
     emotion_values,
     ensure_segment_ids,
@@ -79,6 +80,9 @@ def make_library_store(
             and path_is_within(media_path, media_directory() / str(row["id"]))
             and media_path.is_file()
         )
+        # Shared, read-only timing bounds: malformed one-record input cannot break the list.
+        timing = [analysis_segment_bounds(segment) for segment in segments]
+        timed_ends = [end for _start, end, valid in timing if valid]
         result: dict[str, Any] = {
             "id": row["id"],
             "source_name": row["source_name"],
@@ -87,7 +91,9 @@ def make_library_store(
             "output_dir": row["output_dir"] if local_path_access_allowed() else "",
             "language": row["language"],
             "segment_count": len(segments),
-            "duration": max((float(item.get("end", 0) or 0) for item in segments), default=0),
+            "duration": max(timed_ends, default=None),
+            "timed_turn_count": len(timed_ends),
+            "missing_time_turn_count": len(segments) - len(timed_ends),
             "speakers": speakers,
             "emotions": emotions,
             "preview": " ".join(str(item.get("text", "")).strip() for item in segments[:3]).strip()[:240],
@@ -120,6 +126,13 @@ def make_library_store(
             result.update({
                 "status": "completed",
                 "segments": segments,
+                # Display-only, bound to the raw values; never written back to segments.
+                "segment_timings": [
+                    {"segment_id": segment.get("id"), "source_start": segment.get("start"),
+                     "source_end": segment.get("end"), "source_time_unknown": segment.get("time_unknown"),
+                     "valid": valid, "start": start if valid else None, "end": end if valid else None}
+                    for segment, (start, end, valid) in zip(segments, timing)
+                ],
                 "speaker_names": speaker_names,
                 "session_profile": session_profile,
                 "speaker_profiles": row_speaker_profiles(row, segments, speaker_names),

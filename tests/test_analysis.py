@@ -2,7 +2,9 @@ import csv
 import io
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import closing
@@ -21,6 +23,7 @@ ANALYSIS_DATASETS = {
     "interaction_links": {"source_segment_id", "target_segment_id", "status"},
     "insights": {"kind", "category", "title", "text", "segment_ids", "stale"},
     "characteristic_terms": {"speaker", "term", "count", "total", "difference_pp", "segment_ids"},
+    "transformer_input_coverage": {"segment_id", "context_segment_ids", "token_measurement_status", "target_retention_status"},
     "transformer_topics": {"topic_id", "label", "keywords", "segment_count", "speaker_count"},
     "transformer_assignments": {"segment_id", "topic_id", "topic_label", "speaker", "text"},
     "transformer_speakers": {"topic_id", "speaker", "segment_count", "topic_percent"},
@@ -405,9 +408,10 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(metrics["PARTICIPANT_A"]["profile"]["tags"], ["既存利用者"])
 
         balance = data["automatic"]["balance"]
-        self.assertEqual(balance["participant_count"], 2)
+        self.assertIsNone(balance["participant_count"])
+        self.assertEqual(balance["observed_participant_count"], 2)
         self.assertEqual(balance["participant_speaking_seconds"], 15.0)
-        self.assertEqual(balance["denominator"], "participant_only")
+        self.assertEqual(balance["denominator"], "observed_participant_speakers")
 
         transitions = {
             (item["from_speaker"], item["to_speaker"]): item
@@ -797,8 +801,8 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(overview["segment_count"], 0)
         self.assertEqual(overview["speaker_count"], 0)
         self.assertEqual(overview["total_speaking_seconds"], 0.0)
-        self.assertEqual(data["automatic"]["balance"]["gini"], 0.0)
-        self.assertEqual(data["automatic"]["balance"]["normalized_evenness"], 0.0)
+        self.assertIsNone(data["automatic"]["balance"]["gini"])
+        self.assertIsNone(data["automatic"]["balance"]["normalized_evenness"])
 
         for dataset, expected_headers in ANALYSIS_DATASETS.items():
             with self.subTest(dataset=dataset):
@@ -1067,6 +1071,69 @@ class AnalysisApiTests(unittest.TestCase):
             {"SPEAKER_A", "SPEAKER_B"},
         )
         self.assertTrue(all(item["count"] == 1 for item in keyword["by_speaker"]))
+
+    def test_missing_times_do_not_distort_speaker_duration_or_rate(self):
+        item_id = self.create_analysis_item("missing_duration", [
+            {"id": "known", "start": 10, "end": 20, "speaker": "A", "text": "1234567890"},
+            {"id": "unknown", "speaker": "A", "text": "x" * 100},
+            {"id": "placeholder", "start": 0, "end": 100, "time_unknown": True,
+             "speaker": "A", "text": "x" * 100},
+        ])
+        data = self.client.get(f"/api/library/{item_id}/analysis").get_json()
+        metric = data["automatic"]["speaker_metrics"][0]
+        self.assertEqual(metric["turn_count"], 3)
+        self.assertEqual(metric["timed_turn_count"], 1)
+        self.assertEqual(metric["missing_time_turn_count"], 2)
+        self.assertEqual(metric["speaking_seconds"], 10)
+        self.assertEqual(metric["average_turn_seconds"], 10)
+        self.assertEqual(metric["characters"], 210)
+        self.assertEqual(metric["timed_characters"], 10)
+        self.assertEqual(metric["characters_per_minute"], 60)
+        self.assertEqual((metric["first_start"], metric["last_end"]), (10, 20))
+        self.assertEqual(data["automatic"]["overview"]["total_speaking_seconds"], 10)
+        self.assertEqual(data["automatic"]["data_quality"]["zero_duration_segments"], 0)
+        self.assertEqual(data["automatic"]["data_quality"]["invalid_time_segments"], 2)
+        with (
+            patch("gurumoji.research_analysis._load_ginza", return_value=(None, "test")),
+            patch("gurumoji.research_analysis._load_sudachi", return_value=(None, "test")),
+        ):
+            exported = self.client.get(f"/api/library/{item_id}/analysis/export.csv?dataset=segments_all")
+        self.assertEqual(exported.status_code, 200)
+        rows = list(csv.DictReader(io.StringIO(exported.data.decode("utf-8-sig"))))
+        self.assertEqual([row["duration_seconds"] for row in rows], ["10.0", "", ""])
+        self.assertEqual([row["characters_per_minute"] for row in rows], ["60.0", "", ""])
+        self.assertEqual([row["start"] for row in rows], ["10.0", "", ""])
+        self.assertEqual([row["end"] for row in rows], ["20.0", "", ""])
+        self.assertEqual([row["valid_time"] for row in rows], ["1", "0", "0"])
+
+        response = self.put_analysis(item_id, annotations={
+            segment_id: {"important": True}
+            for segment_id in ("known", "unknown", "placeholder")
+        })
+        self.assertEqual(response.status_code, 200)
+        for dataset in ("analysis_units", "coded_segments", "important_quotes"):
+            with self.subTest(dataset=dataset):
+                exported = self.client.get(f"/api/library/{item_id}/analysis/export.csv?dataset={dataset}")
+                self.assertEqual(exported.status_code, 200)
+                rows = list(csv.DictReader(io.StringIO(exported.data.decode("utf-8-sig"))))
+                self.assertEqual([row["start"] for row in rows], ["10.0", "", ""])
+                self.assertEqual([row["end"] for row in rows], ["20.0", "", ""])
+                self.assertEqual([row["valid_time"] for row in rows], ["1", "0", "0"])
+                if dataset != "important_quotes":
+                    self.assertEqual([row["duration"] for row in rows], ["10.0", "", ""])
+
+    def test_all_unknown_times_leave_speaker_averages_missing(self):
+        item_id = self.create_analysis_item("all_unknown_duration", [
+            {"id": "unknown", "speaker": "A", "text": "計測なし"},
+        ])
+        data = self.client.get(f"/api/library/{item_id}/analysis").get_json()
+        metric = data["automatic"]["speaker_metrics"][0]
+        self.assertEqual(metric["timed_turn_count"], 0)
+        self.assertEqual(metric["missing_time_turn_count"], 1)
+        self.assertIsNone(metric["average_turn_seconds"])
+        self.assertIsNone(metric["characters_per_minute"])
+        self.assertIsNone(metric["first_start"])
+        self.assertIsNone(metric["last_end"])
 
     def test_empty_emotion_payload_is_not_counted_as_coverage(self):
         item_id = self.create_analysis_item(
@@ -1420,6 +1487,41 @@ class AnalysisApiTests(unittest.TestCase):
             )
         finally:
             app.DATABASE_FILE = current_database
+
+
+class AnalysisDisplayHelperTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for the display-helper regression")
+    def test_duration_distribution_ignores_missing_times(self):
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        functions = []
+        for name in ("analysisNumberText", "analysisMedian", "analysisDurationSummary"):
+            function = re.search(rf"^function {name}\([^\n]+\n.*?^}}", script, re.M | re.S)
+            self.assertIsNotNone(function)
+            functions.append(function.group(0))
+        code = "\n".join(functions) + """
+const known = {valid_time: true, duration: 10};
+const unknown = {valid_time: false, duration: 0};
+const scenarios = [[known, unknown, unknown], [unknown, unknown, unknown],
+                   [{valid_time: true, duration: 0}],
+                   [{valid_time: true, duration: null}, {valid_time: true, duration: ''}]];
+console.log(JSON.stringify(scenarios.map(rows => {
+  const result = analysisDurationSummary(rows);
+  return [analysisNumberText(result.median, 2, '秒'), analysisNumberText(result.longest, 2, '秒')];
+})));
+"""
+        result = subprocess.run([shutil.which("node"), "-e", code], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout), [
+            ["10.00秒", "10.00秒"], ["—", "—"], ["0.00秒", "0.00秒"], ["—", "—"],
+        ])
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for the display-helper regression")
+    def test_missing_numbers_render_as_missing_not_zero(self):
+        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        function = re.search(r"^function analysisNumberText\([^\n]+\n.*?^}", script, re.M | re.S)
+        self.assertIsNotNone(function)
+        code = function.group(0) + "\nconsole.log(JSON.stringify([null, undefined, '', 0, 10].map(v => analysisNumberText(v))));"
+        result = subprocess.run([shutil.which("node"), "-e", code], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout), ["—", "—", "—", "0.0", "10.0"])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,47 @@ import unittest
 
 import app
 import test_content_analysis as support
+from gurumoji.analysis_core import validate_definition
+from gurumoji.analysis_pipeline import measure_segments, _manual_method
+
+
+def duration_definition():
+    return validate_definition({
+        "definition_id": "duration_value", "name": "発話時間", "description": "時刻の有効な発話の秒数",
+        "unit_of_analysis": "segment", "source_columns": ["duration"], "output_column": "duration_value",
+        "data_type": "number", "measurement_level": "ratio", "measurement_rule": "duration",
+        "method": "descriptive",
+    })
+
+
+class ManualDurationMeasurementTests(unittest.TestCase):
+    def test_unknown_time_is_missing_and_does_not_lower_manual_mean(self):
+        definition = duration_definition()
+        rows = measure_segments({"segments": [
+            {"id": "known", "start": 0, "end": 10, "duration": 10, "valid_time": True},
+            {"id": "unknown", "duration": 0, "valid_time": False},
+        ]}, [definition])
+        self.assertEqual([row["duration_value"] for row in rows], [10, None])
+        self.assertEqual([row["duration_value__missing_reason"] for row in rows], ["", "invalid_source_value"])
+        method, _ = _manual_method([definition], rows)
+        self.assertIn("有効N=1、平均=10.000", method["summaries"][0]["text"])
+
+    def test_missing_or_invalid_duration_stays_missing_but_measured_zero_is_valid(self):
+        definition = duration_definition()
+        sources = [
+            {"duration": 0},  # Neither timestamps nor an explicit validity marker.
+            {"start": 0, "end": 10, "duration": 10, "time_unknown": True},
+            *({"valid_time": True, "duration": value}
+              for value in (None, "", True, -1, float("nan"), float("inf"))),
+        ]
+        rows = measure_segments({"segments": sources}, [definition])
+        self.assertTrue(all(row["duration_value"] is None for row in rows))
+        self.assertTrue(all(row["duration_value__missing_reason"] == "invalid_source_value" for row in rows))
+        method, _ = _manual_method([definition], rows)
+        self.assertEqual(method["summaries"][0]["text"], "有効N=0")
+        rows = measure_segments({"segments": [{"start": 0, "end": 0, "duration": 0}]}, [definition])
+        self.assertEqual(rows[0]["duration_value"], 0)
+        self.assertEqual(rows[0]["duration_value__missing_reason"], "")
 
 
 class AnalysisResearchProtocolTests(unittest.TestCase):
@@ -85,6 +126,9 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
         )
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertEqual(saved.get_json()["definition"]["revision"], 1)
+        fetched = self.client.get(self.url + "/definitions/utterance_length")
+        self.assertEqual(fetched.status_code, 200, fetched.get_json())
+        self.assertEqual(fetched.get_json()["definition"]["definition_id"], "utterance_length")
         trial = self.client.post(
             self.url + "/definitions/utterance_length/trials", json={"limit": 3}
         )
@@ -118,6 +162,41 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
         committed = [event["payload"]["milestone"] for event in result["events"]
                      if event["type"] == "milestone_committed"]
         self.assertEqual(committed, [f"M{index}" for index in range(8)])
+
+    def test_duration_trial_and_pipeline_export_preserve_unknown_time(self):
+        with app.database_connection() as connection:
+            connection.execute("UPDATE library_items SET segments_json=? WHERE id='content'", (
+                json.dumps([
+                    {"id": "known", "speaker": "A", "text": "計測済み", "start": 0, "end": 10},
+                    {"id": "unknown", "speaker": "A", "text": "時刻不明", "time_unknown": True},
+                ]),
+            ))
+        definition = duration_definition()
+        saved = self.client.put(self.url + "/definitions/duration_value", json={**definition, "status": "draft"})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        trial_response = self.client.post(self.url + "/definitions/duration_value/trials", json={"limit": 3})
+        self.assertEqual(trial_response.status_code, 200, trial_response.get_json())
+        trial = trial_response.get_json()["trial"]
+        self.assertEqual((trial["sample_size"], trial["valid_count"], trial["missing_count"]), (2, 1, 1))
+        self.assertEqual(trial["values"], [10])
+        adopted = self.client.put(self.url + "/definitions/duration_value", json={
+            **definition, "status": "adopted", "expected_revision": 1,
+        })
+        self.assertEqual(adopted.status_code, 200, adopted.get_json())
+        started = self.client.post(self.url + "/pipelines", json=self.pipeline_payload(
+            "manual-duration-missing-request-0001", ["duration_value"],
+        ))
+        self.assertEqual(started.status_code, 202, started.get_json())
+        result = self.wait(started.get_json()["pipeline_id"])
+        self.assertEqual(result["status"], "completed", result)
+        rows = list(csv.DictReader(io.StringIO(
+            self.artifact(result["result_run"], "tables/measurements.csv").decode("utf-8-sig")
+        )))
+        self.assertEqual([row["duration_value"] for row in rows], ["10.0", ""])
+        self.assertEqual([row["duration_value__missing_reason"] for row in rows], ["", "invalid_source_value"])
+        package = json.loads(self.artifact(result["result_run"], "result.json"))
+        manual = next(row for row in package["methods"] if row["method_id"] == "descriptive_statistics")
+        self.assertIn("有効N=1、平均=10.000", manual["summaries"][0]["text"])
 
     def test_draft_definition_and_unsupported_inference_stop_before_execution(self):
         definition = {

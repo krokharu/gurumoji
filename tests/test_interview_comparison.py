@@ -46,6 +46,14 @@ class InterviewComparisonApiTests(unittest.TestCase):
         self.assertEqual([item["item_id"] for item in data["interviews"]], ["same_a", "same_b"])
         self.assertIn("term_count", data["interviews"][0])
 
+    def test_unknown_actual_participant_count_stays_null_and_observed_count_is_separate(self):
+        data = self.client.post("/api/library/interview-comparison", json={
+            "item_ids": ["same_a", "same_b"], "allow_different_content": False,
+        }).get_json()
+        for row in data["interviews"]:
+            self.assertIsNone(row["participant_count"])
+            self.assertEqual(row["observed_participant_count"], 1)
+
     def test_different_content_requires_explicit_override(self):
         payload = {"item_ids": ["same_a", "different"], "allow_different_content": False}
         blocked = self.client.post("/api/library/interview-comparison", json=payload)

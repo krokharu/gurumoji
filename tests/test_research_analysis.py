@@ -101,6 +101,59 @@ class ResearchAnalysisTests(unittest.TestCase):
     def setUp(self):
         research_analysis._RESEARCH_CACHE.clear()
 
+    def test_same_display_name_keeps_statistics_separate_by_speaker_id(self):
+        analysis = fixture_analysis("same_names")
+        source = analysis["segments"][0]
+        analysis["segments"] = [
+            {**source, "id": str(index), "speaker": speaker, "speaker_name": "同名",
+             "duration": duration, "end": duration, "question_candidate": speaker == "B"}
+            for index, (speaker, duration) in enumerate((("A", 1), ("A", 2), ("B", 5), ("B", 6)))
+        ]
+        rows = research_analysis._segment_dataset(analysis, [])
+        result = research_analysis._statistics_analysis(analysis, rows)
+        self.assertEqual(result["group_count"], 2)
+        groups = [row for row in result["descriptives"]
+                  if row["scope"] == "group" and row["variable"] == "duration_seconds"]
+        self.assertEqual({row["group_id"]: row["mean"] for row in groups}, {"A": 1.5, "B": 5.5})
+        self.assertEqual({row["group"] for row in groups}, {"同名 [A]", "同名 [B]"})
+        frequencies = [row for row in result["frequencies"] if row["variable"] == "speaker"]
+        self.assertEqual({row["value_id"]: row["count"] for row in frequencies}, {"A": 2, "B": 2})
+        question_rows = [row for row in result["crosstabs"] if row["column_variable"] == "question_candidate"]
+        self.assertEqual({row["row_value"] for row in question_rows}, {"同名 [A]", "同名 [B]"})
+        self.assertEqual({row["row_id"] for row in question_rows}, {"A", "B"})
+        anova = next(row for row in result["tests"]
+                     if row["outcome"] == "duration_seconds" and row["effect_name"] == "eta_squared")
+        self.assertEqual(anova["groups"], 2)
+        if result["engine"]["status"] == "ready":
+            self.assertEqual(anova["status"], "computed")
+
+    def test_speaker_label_that_matches_generated_label_stays_distinct(self):
+        rows = [{"speaker": "A", "speaker_name": "同名"},
+                {"speaker": "B", "speaker_name": "同名"},
+                {"speaker": "C", "speaker_name": "同名 [A]"}]
+        labels = research_analysis._speaker_labels(rows)
+        self.assertEqual(len(set(labels.values())), 3)
+
+    def test_unknown_time_is_missing_not_zero_in_research_statistics(self):
+        analysis = fixture_analysis("unknown_times")
+        source = analysis["segments"][0]
+        analysis["segments"] = [
+            {**source, "id": "known", "duration": 10, "end": 10, "valid_time": True},
+            {**source, "id": "unknown", "duration": 0, "end": 0, "valid_time": False},
+            {**source, "id": "placeholder", "duration": 100, "end": 100, "valid_time": False},
+        ]
+        rows = research_analysis._segment_dataset(analysis, [])
+        self.assertEqual([row["duration_seconds"] for row in rows], [10, None, None])
+        self.assertEqual([row["characters_per_minute"] for row in rows], [54, None, None])
+        result = research_analysis._statistics_analysis(analysis, rows)
+        duration = next(row for row in result["descriptives"]
+                        if row["scope"] == "overall" and row["variable"] == "duration_seconds")
+        self.assertEqual((duration["n"], duration["missing"], duration["mean"]), (1, 2, 10))
+        # Text-only measures still include every turn.
+        chars = next(row for row in result["descriptives"]
+                     if row["scope"] == "overall" and row["variable"] == "characters")
+        self.assertEqual(chars["n"], 3)
+
     def test_fallback_keeps_analysis_available_and_labels_limit(self):
         analysis = fixture_analysis("fallback_fixture")
         with (
@@ -173,7 +226,7 @@ class ResearchAnalysisTests(unittest.TestCase):
         self.assertEqual({row["column_value"] for row in table_rows}, {"あり", "なし"})
         test = next(
             row for row in statistics["tests"]
-            if row["outcome_label"] == "単語「改善」"
+            if row["outcome_label"] == "正規化語・完全一致「改善」"
         )
         self.assertEqual(test["test"], "Pearsonのカイ二乗検定")
         self.assertEqual(test["effect_name"], "cramers_v")

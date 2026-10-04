@@ -45,7 +45,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         analysis, morphemes, embeddings = fixture()
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=embeddings,
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3, min_topic_size=2,
         )
         self.assertEqual(result["coverage"]["segment_count"], 6)
         self.assertEqual(result["coverage"]["topic_count"], 3)
@@ -86,7 +86,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         all_embeddings = np.vstack([embeddings, [[.5, .5, 0], [.5, 0, .5]]]).astype("float32")
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=all_embeddings,
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3,
             min_topic_size=2, topic_count=2,
         )
         self.assertEqual(result["coverage"]["source_segment_count"], 8)
@@ -133,7 +133,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         self.assertEqual(sparse["status"], "computed_sparse")
         self.assertIn("p値から差を判定しません", sparse["interpretation"])
 
-    def test_speaker_results_require_explicit_language_and_keep_topic_evidence(self):
+    def test_speaker_results_are_unverified_candidates_with_topic_evidence(self):
         analysis, morphemes, embeddings = fixture()
         replacements = {
             "s1": "最初は反対でしたが、今は考えが変わりました。こちらがいいと思います",
@@ -145,7 +145,7 @@ class TransformerAnalysisTests(unittest.TestCase):
                 row["text"] = replacements[row["id"]]
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=embeddings,
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3, min_topic_size=2,
         )
         by_speaker = {}
         for row in result["speaker_results"]:
@@ -162,13 +162,15 @@ class TransformerAnalysisTests(unittest.TestCase):
         explicit_rows = [row for rows in by_speaker.values() for row in rows]
         self.assertTrue(all(row["topic_id"] for row in explicit_rows))
         self.assertTrue(all(row["evidence_segment_ids"] for row in explicit_rows))
-        self.assertEqual(result["coverage"]["explicit_speaker_result_count"], 3)
+        self.assertEqual(result["coverage"]["explicit_speaker_result_count"], 0)
+        self.assertEqual(result["coverage"]["candidate_speaker_result_count"], 3)
+        self.assertTrue(all(row["confidence"] == "unverified_candidate" for row in explicit_rows))
 
     def test_semantic_search_skips_noise_in_legacy_saved_result(self):
         analysis, morphemes, embeddings = fixture()
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=embeddings,
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3, min_topic_size=2,
         )
         result["assignments"][0]["text"] = "？"
         hits = subject.semantic_search(
@@ -180,7 +182,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         analysis, morphemes, embeddings = fixture()
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=embeddings,
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3, min_topic_size=2,
             mode="candidate", topic_count=2,
         )
         self.assertEqual(result["parameters"]["mode"], "candidate")
@@ -199,12 +201,12 @@ class TransformerAnalysisTests(unittest.TestCase):
 
         def fake_encode(texts, **kwargs):
             vectors = np.asarray([[1, 0, 0], [0, 1, 0]][:len(texts)], dtype="float32")
-            return vectors, {"name": "fixture", "dimensions": 3, "device": "cpu"}
+            return vectors, {"name": "fixture", "revision": "fixture-revision", "dimensions": 3, "device": "cpu"}
 
         with patch.object(subject, "encode_texts", side_effect=fake_encode):
             result = subject.analyze_transformer_topics(
                 analysis, morphemes, embeddings=embeddings,
-                engine={"name": "fixture", "dimensions": 3}, mode="manual",
+                engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, mode="manual", model_name="fixture",
                 manual_topics=manual_topics, manual_min_similarity=0.5,
             )
         self.assertEqual(result["parameters"]["mode"], "manual")
@@ -228,7 +230,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             subject.analyze_transformer_topics(
                 analysis, morphemes, embeddings=embeddings,
-                engine={"name": "fixture", "dimensions": 3}, mode="manual",
+                engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, mode="manual", model_name="fixture",
                 manual_topics=[{"label": "空のテーマ"}],
             )
 
@@ -236,7 +238,7 @@ class TransformerAnalysisTests(unittest.TestCase):
         analysis, morphemes, embeddings = fixture()
         result = subject.analyze_transformer_topics(
             analysis, morphemes, embeddings=embeddings, model_name="fixture",
-            engine={"name": "fixture", "dimensions": 3}, max_topics=3, min_topic_size=2,
+            engine={"name": "fixture", "revision": "fixture-revision", "dimensions": 3}, max_topics=3, min_topic_size=2,
         )
         reuse = subject.saved_embeddings(result, analysis, model="fixture")
         self.assertIsNotNone(reuse)
@@ -258,10 +260,10 @@ class TransformerAnalysisTests(unittest.TestCase):
                 embedding_segment_ids=["s9"] + segment_ids[1:], engine=engine,
             )
 
-    def test_dominant_default_participant_is_reported_as_facilitator_candidate(self):
+    def test_dominant_participant_keeps_registered_role(self):
         segment = {"speaker": "moderator-like", "role": "participant"}
         self.assertEqual(
-            subject._speaker_group(segment, "moderator-like"), "facilitator_candidate"
+            subject._speaker_group(segment, "moderator-like"), "participant"
         )
 
 
@@ -410,7 +412,7 @@ class TransformerApiTests(unittest.TestCase):
                         vector[index] = 1.0
                 vectors.append(vector or [1.0, 0.0, 0.0])
             return np.asarray(vectors, dtype="float32"), {
-                "name": kwargs.get("model_name", "fixture"), "dimensions": 3, "device": "cpu"}
+                "name": kwargs.get("model_name", "fixture"), "revision": "fixture-revision", "dimensions": 3, "device": "cpu"}
 
         with patch.object(app, "build_research_analysis", return_value={"linguistics": {"morphemes": self.morphemes}}), \
              patch.object(subject, "encode_texts", side_effect=fake_encode), \

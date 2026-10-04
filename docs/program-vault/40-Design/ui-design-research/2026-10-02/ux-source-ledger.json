@@ -1,0 +1,787 @@
+{
+  "title": "Gurumoji UX研究の出典台帳",
+  "created_on": "2026-10-02",
+  "retrieval_timezone": "UTC",
+  "purpose": "ux-research.md と後続 DESIGN.md の設計根拠の追跡",
+  "method": "一次の学術資料・著者公開版・公式標準を優先した目的指向の調査。体系的レビューではない。Wikipedia、まとめブログ、AI生成要約を根拠として採用していない。",
+  "types": {
+    "E": "人を対象とする比較実験。研究ごとのscopeと閲覧範囲を参照",
+    "O": "観察・インタビュー・調査",
+    "R": "研究統合・メタ分析",
+    "N": "標準の規範",
+    "G": "指針・方法論・実装パターン",
+    "D": "文献をGurumojiへ移した設計推論。本文に表示",
+    "B": "モデルやシステムの性能ベンチマーク。人のUI利用実験と区別"
+  },
+  "application_context": {
+    "source": "README.md と AGENTS.md の用途理解のみ",
+    "head_at_read": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+    "code_modified": false,
+    "user_research_conducted": false,
+    "wcag_conformance_audit_conducted": false,
+    "private_research_data_read": false
+  },
+  "sources": [
+    {
+      "id": "S01",
+      "title": "Guidelines for Human-AI Interaction",
+      "authors_or_organization": "Amershi, S., et al.",
+      "publication_date": "2019-05",
+      "evidence_type": [
+        "G",
+        "O"
+      ],
+      "url": "https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者所属機関の抄録・PDF 本文のガイドライン表を確認",
+      "study_or_document_scope": "既存提案を18指針へ統合。49名の実務家が20製品に適用した評価を含む",
+      "supported_claim": "能力・限界・修正可能性・制御等をUI設計に落とす指針",
+      "limitations": "個々の指針の効果量を測った実験ではない。2019年のGUI製品中心で、現在の生成AIや日本語研究を直接検証していない",
+      "knowledge_cards": [
+        "K03",
+        "K12"
+      ],
+      "doi": "10.1145/3290605.3300233",
+      "additional_urls": [
+        "https://www.microsoft.com/en-us/research/uploads/prod/2019/01/Guidelines-for-Human-AI-Interaction-camera-ready.pdf"
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "Interface design strategies for computer-assisted speech transcription",
+      "authors_or_organization": "Luz, S.; Masoodian, M.; Rogers, B.; Deering, C.",
+      "publication_date": "2008",
+      "evidence_type": [
+        "E"
+      ],
+      "url": "https://researchcommons.waikato.ac.nz/entities/publication/f81aef87-b420-488c-b70d-77abbb76938c",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "大学リポジトリの抄録と書誌のみ確認",
+      "study_or_document_scope": "文字起こしUIの修正、キーボード、テキスト駆動の音声再生などを評価",
+      "supported_claim": "テキストからの再生と修正機構は直接関連する設計先行研究",
+      "limitations": "本文・参加者詳細・効果量は今回未確認。2008年のASRへ関する結果を現在の性能に転用しない",
+      "knowledge_cards": [
+        "K07"
+      ],
+      "doi": "10.1145/1517744.1517812"
+    },
+    {
+      "id": "S03",
+      "title": "Evaluating ASR Confidence Scores for Automated Error Detection in User-Assisted Correction Interfaces",
+      "authors_or_organization": "Kuhn, K.; Kersken, V.; Zimmermann, G.",
+      "publication_date": "2025-04",
+      "evidence_type": [
+        "E",
+        "B"
+      ],
+      "url": "https://arxiv.org/html/2503.15124v1",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者公開v1全文。Methods、Results、Discussion、Limitationsを確認。2026-10-02に3.2、3.3.3、4.2.1を再確認し、誤り分類評価と利用者修正WERの対象を区別",
+      "study_or_document_scope": "9 ASRモデルの比較、90英語録音による信頼度スコアに基づく誤り分類の性能評価、36ドイツ語母語話者の被験者内修正実験。利用実験は3つの3分Whisper原稿を用い、置換・挿入・脱落を含むWERで修正結果を評価",
+      "supported_claim": "信頼度と誤りの相関は、誤り検出・修正効率の有効性と同じでない。強調条件間でWER改善差を検出しなかった",
+      "limitations": "CHI Extended Abstracts。再生し直せない一回修正。参加者は聴覚・視覚等の障害なしと自己申告。ASRが脱落させた語にはscoreが無く、信頼度に基づく誤り分類の性能評価からは除外されたが、別の利用者修正実験のWER評価には脱落誤りも含まれる。日本語・長時間・自由再生への一般化は未検証",
+      "knowledge_cards": [
+        "K04"
+      ],
+      "doi": "10.1145/3706599.3720038",
+      "additional_urls": [
+        "https://github.com/shuffle-project/asr-confidence-scores"
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "Does the Whole Exceed its Parts? The Effect of AI Explanations on Complementary Team Performance",
+      "authors_or_organization": "Bansal, G., et al.",
+      "publication_date": "2021-05",
+      "evidence_type": [
+        "E"
+      ],
+      "url": "https://arxiv.org/pdf/2006.14779",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者公開PDF。実験設計、結果要約、6.1 limitationsを確認",
+      "study_or_document_scope": "3データセット、感情分類と質問回答、説明形式とconfidence-onlyなどを比較",
+      "supported_claim": "説明がAIへの同意を高めてもチームの正確さが改善するとは限らない",
+      "limitations": "クラウドワーカーに適する分類・質問回答。主評価は判断の正確さ。専門家の研究実務、すべての説明形式、長期利用に一般化不可",
+      "knowledge_cards": [
+        "K05"
+      ],
+      "additional_urls": [
+        "https://www.microsoft.com/en-us/research/publication/does-the-whole-exceed-its-parts-the-effect-of-ai-explanations-on-complementary-team-performance/?lang=ko-kr"
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "To Trust or to Think: Cognitive Forcing Functions Can Reduce Overreliance on AI in AI-assisted Decision-making",
+      "authors_or_organization": "Buçinca, Z.; Malaya, M. B.; Gajos, K. Z.",
+      "publication_date": "2021-04",
+      "evidence_type": [
+        "E"
+      ],
+      "url": "https://arxiv.org/pdf/2102.09692",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者公開PDFの要旨・導入・結果解釈を確認",
+      "study_or_document_scope": "199名のMTurk参加者、3つのcognitive forcing設計と説明条件・AIなしを比較",
+      "supported_claim": "過信低減と主観的な使いやすさにはトレードオフがあり、介入効果にも個人差がある",
+      "limitations": "過信を完全には除去しない。特定課題・参加者・介入での結果。Gurumoji全操作への強制確認追加は支持しない",
+      "knowledge_cards": [
+        "K06"
+      ],
+      "doi": "10.1145/3449287"
+    },
+    {
+      "id": "S06",
+      "title": "Explanations Can Reduce Overreliance on AI Systems During Decision-Making",
+      "authors_or_organization": "Vasconcelos, H., et al.",
+      "publication_date": "2023-04",
+      "evidence_type": [
+        "E"
+      ],
+      "url": "https://cicl.stanford.edu/papers/vasconcelos2023explanations.pdf",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者大学PDF。設計・5研究概要・10.4 limitationsを確認",
+      "study_or_document_scope": "5研究、731名、模擬AIと迷路課題。課題・説明の難しさや報酬を操作",
+      "supported_claim": "説明が検証コストを下げる条件では過信低減に役立ち得る",
+      "limitations": "低リスクの迷路、理想的な説明、クラウドワーカー。唯一の正解のない生成・解釈課題、長期の専門職利用は未検証",
+      "knowledge_cards": [
+        "K05"
+      ],
+      "doi": "10.1145/3579605"
+    },
+    {
+      "id": "S07",
+      "title": "When combinations of humans and AI are useful: A systematic review and meta-analysis",
+      "authors_or_organization": "Vaccaro, M.; Almaatouq, A.; Malone, T.",
+      "publication_date": "2024-10-28",
+      "evidence_type": [
+        "R"
+      ],
+      "url": "https://www.nature.com/articles/s41562-024-02024-1",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "出版社の公開全文。Abstract、Results、Methods概要を確認",
+      "study_or_document_scope": "2020-01-01〜2023-06-30の106実験・370効果量。人のみ・AIのみ・協働を比較可能な研究",
+      "supported_claim": "人とAIの組合せの優越は自動的に成立しない。評価基準と単独の比較基準を明確にする",
+      "limitations": "出版バイアス・研究設計の異質性。対象期間のモデル群。創作課題の平均効果は単独では統計的に有意でなく、単純な創作万能説にしない",
+      "knowledge_cards": [
+        "評価計画"
+      ],
+      "doi": "10.1038/s41562-024-02024-1"
+    },
+    {
+      "id": "S08",
+      "title": "The Eyes Have It: A Task by Data Type Taxonomy for Information Visualizations",
+      "authors_or_organization": "Shneiderman, B.",
+      "publication_date": "1996",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://drum.lib.umd.edu/items/155a868e-fb83-4115-9899-9187ea8c0498",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者大学のリポジトリ概要と著者大学PDF検索本文を確認",
+      "study_or_document_scope": "可視化のデータ型とoverview/zoom/filter/details/relate/history/extractの整理",
+      "supported_claim": "探索、詳細確認、履歴、抽出を連結して考える概念枠組み",
+      "limitations": "認知実験による最適な画面順序の証明ではない。既知項目検索や熟練作業へ一律にoverviewを強制しない",
+      "knowledge_cards": [
+        "K01"
+      ],
+      "additional_urls": [
+        "https://www.cs.umd.edu/users/ben/papers/Shneiderman1996eyes.pdf"
+      ]
+    },
+    {
+      "id": "S09",
+      "title": "Crowdsourcing Graphical Perception: Using Mechanical Turk to Assess Visualization Design",
+      "authors_or_organization": "Heer, J.; Bostock, M.",
+      "publication_date": "2010-04",
+      "evidence_type": [
+        "E"
+      ],
+      "url": "https://hci.stanford.edu/publications/2010/crowd-perception/heer-chi2010.pdf",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者大学PDF。研究目的、Methods、position比較のResultsを確認",
+      "study_or_document_scope": "位置・長さ・角度・面積等の比例判断、明暗、図の大きさ・グリッド等の実験",
+      "supported_claim": "定量比較では視覚符号化により判断精度が異なる。共通軸の位置は有力な出発点",
+      "limitations": "単純化した知覚課題。アプリ全体の意味理解や統計妥当性、あらゆる棒グラフの優越を保証しない",
+      "knowledge_cards": [
+        "K09"
+      ],
+      "doi": "10.1145/1753326.1753357"
+    },
+    {
+      "id": "S10",
+      "title": "Why Authors Don’t Visualize Uncertainty",
+      "authors_or_organization": "Hullman, J.",
+      "publication_date": "2020-01",
+      "evidence_type": [
+        "O"
+      ],
+      "url": "https://users.eecs.northwestern.edu/~jhullman/Value_of_Uncertainty_Vis_CR.pdf",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者大学PDF要旨・Methods概要を確認",
+      "study_or_document_scope": "可視化著者90名の調査、13名の影響力ある実務者のインタビュー",
+      "supported_claim": "不確実性の省略には実務上・認知上・説得上の理由があり、単なる情報過多の問題に還元できない",
+      "limitations": "便利抽出と特定の制作文化。利用者実験によるある表現の効果を示す論文ではない",
+      "knowledge_cards": [
+        "K09"
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Cognitive Load During Problem Solving: Effects on Learning",
+      "authors_or_organization": "Sweller, J.",
+      "publication_date": "1988-04",
+      "evidence_type": [
+        "E",
+        "理論"
+      ],
+      "url": "https://onlinelibrary.wiley.com/doi/10.1207/s15516709cog1202_4",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "出版社の抄録と書誌を確認",
+      "study_or_document_scope": "学習・スキーマ獲得・問題解決の認知処理に関する理論と実験",
+      "supported_claim": "初心者と専門家の知識差、作業処理と学習の負担を分けて考える基礎",
+      "limitations": "今回本文の個別実験は未精査。一般Web UIの最適要素数、余白、クリック数の規格ではない",
+      "knowledge_cards": [
+        "K02",
+        "K10"
+      ],
+      "doi": "10.1207/s15516709cog1202_4"
+    },
+    {
+      "id": "S12",
+      "title": "10 Usability Heuristics for User Interface Design",
+      "authors_or_organization": "Nielsen, J.; Nielsen Norman Group",
+      "publication_date": "1994-04-24; reviewed 2024-01-30",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.nngroup.com/articles/ten-usability-heuristics/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "原著者の公式記事の検索抽出を確認",
+      "study_or_document_scope": "システム状態、利用者の言葉、制御、エラー、認識などの一般ヒューリスティック",
+      "supported_claim": "具体的なUI観察・改善案を作る検査観点",
+      "limitations": "原著者自身がbroad rules of thumbと位置づける。得点だけで使いやすさや適合を証明しない",
+      "knowledge_cards": [
+        "K10",
+        "K11",
+        "K12"
+      ]
+    },
+    {
+      "id": "S13",
+      "title": "Progressive Disclosure",
+      "authors_or_organization": "Nielsen, J.",
+      "publication_date": "2006-12-03",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.nngroup.com/articles/progressive-disclosure/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "原著者の公式記事の検索抽出を確認",
+      "study_or_document_scope": "重要・頻回機能を優先し二次機能を要求時に表示する指針",
+      "supported_claim": "初心者の入口と専門的な機能を両立させる設計候補",
+      "limitations": "効果量の付いた特定の比較実験ではない。隠しすぎによる発見性・反復操作のコストを検証する",
+      "knowledge_cards": [
+        "K02"
+      ]
+    },
+    {
+      "id": "S14",
+      "title": "Severity Ratings for Usability Problems",
+      "authors_or_organization": "Nielsen, J.",
+      "publication_date": "1994-11-01",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.nngroup.com/articles/how-to-rate-the-severity-of-usability-problems/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "原著者記事の全文検索抽出を確認",
+      "study_or_document_scope": "頻度、影響、持続性を考える0〜4の重大度と複数評価者の独立評価",
+      "supported_claim": "問題の発見と重大度採点を分け、判断根拠を残す",
+      "limitations": "測定誤差のない数値ではない。Gurumojiの研究完全性を含む定義は本調査の設計推論",
+      "knowledge_cards": [
+        "重大度"
+      ]
+    },
+    {
+      "id": "S15",
+      "title": "Thematic Analysis FAQs and Editor & Reviewer Guide",
+      "authors_or_organization": "Braun, V.; Clarke, V.",
+      "publication_date": "生きた著者資料。2021論文／2022書籍に基づく記載",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.thematicanalysis.net/faqs/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者サイトの検索索引にある該当チェック項目を確認。直接openは502/内部エラー",
+      "study_or_document_scope": "reflexive thematic analysisの方法・品質と他のTA方式との差異",
+      "supported_claim": "異なるTAの前提と手続を混同せず、引用と解釈の整合を検討する",
+      "limitations": "方法論指針でありUIの実験ではない。全ての質的方法にreflexive TAの基準を押し付けない。直接ページ再取得に制限あり",
+      "knowledge_cards": [
+        "K08"
+      ],
+      "additional_urls": [
+        "https://www.thematicanalysis.net/editor-checklist/",
+        "https://uwe-repository.worktribe.com/output/6631950/one-size-fits-all-what-counts-as-quality-practice-in-reflexive-thematic-analysis"
+      ]
+    },
+    {
+      "id": "S16",
+      "title": "The methodology of Focus Groups: the importance of interaction between research participants",
+      "authors_or_organization": "Kitzinger, J.",
+      "publication_date": "1994-01",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://doi.org/10.1111/1467-9566.ep11347023",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "出版社の抄録と書誌の検索抽出を確認",
+      "study_or_document_scope": "Focus groupと参加者間の相互作用に関する方法論",
+      "supported_claim": "単独の発言内容に加え、参加者間の応答や関係を分析可能にする",
+      "limitations": "今回は抄録範囲。現行UIや自動相互作用分類の性能は検証しない",
+      "knowledge_cards": [
+        "K01",
+        "K07"
+      ],
+      "doi": "10.1111/1467-9566.ep11347023"
+    },
+    {
+      "id": "S17",
+      "title": "Standards for Reporting Qualitative Research: A Synthesis of Recommendations",
+      "authors_or_organization": "O’Brien, B. C.; Harris, I. B.; Beckman, T. J.; Reed, D. A.; Cook, D. A.",
+      "publication_date": "2014-06-20 online; 2014-09 issue",
+      "evidence_type": [
+        "G",
+        "R"
+      ],
+      "url": "https://med.stanford.edu/content/dam/sm/chri2/documents/O%27Brien%20et%20al.%20-%202014%20-%20Standards%20for%20Reporting%20Qualitative%20Research%20A%20Sy.pdf",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "大学公開PDFの導入、目的、方法概要と報告基準を確認",
+      "study_or_document_scope": "既存指針と専門家推薦の統合による21項目のSRQR",
+      "supported_claim": "分析・解釈と経験的根拠の関係を報告できるようにする",
+      "limitations": "報告の完全性と研究のあらゆる品質は同じではない。方法の多様性を保持する基準で、単一ワークフローの強制ではない",
+      "knowledge_cards": [
+        "K01"
+      ],
+      "doi": "10.1097/ACM.0000000000000388"
+    },
+    {
+      "id": "S18",
+      "title": "CollabCoder: A Lower-barrier, Rigorous Workflow for Inductive Collaborative Qualitative Analysis with Large Language Models",
+      "authors_or_organization": "Gao, J., et al.",
+      "publication_date": "2024-05",
+      "evidence_type": [
+        "E",
+        "O"
+      ],
+      "url": "https://arxiv.org/html/2304.07366v4",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者公開v4。User Evaluation、Discussion、Limitationsを確認",
+      "study_or_document_scope": "16名8組の被験者内比較、Atlas.ti Webと比較。15件ずつの短い書評を用い、独立コード・比較・グループ化を支援",
+      "supported_claim": "LLM支援と研究者の判断を分けたワークフローに可能性があるが、AIへの依存・分類の誘導も起こり得る",
+      "limitations": "二人チーム、専門知識不要の書評、短期。半数弱が質的分析経験なし。多重コード・文脈依存の長いインタビューへの制約",
+      "knowledge_cards": [
+        "K03",
+        "K08"
+      ],
+      "doi": "10.1145/3613904.3642002",
+      "additional_urls": [
+        "https://gaojie058.github.io/CollabCoder/"
+      ]
+    },
+    {
+      "id": "S19",
+      "title": "Human-AI Collaboration in Thematic Analysis using ChatGPT: A User Study and Design Recommendations",
+      "authors_or_organization": "Yan, L., et al.",
+      "publication_date": "2023-11-07 preprint; 2024-05 CHI EA publication",
+      "evidence_type": [
+        "O"
+      ],
+      "url": "https://arxiv.org/abs/2311.03999",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "著者公開v1抄録・書誌に加え、Monash Universityの公式出版レコードを直接閲覧し、査読付きCHI EA 2024・Article 191・DOI・10名の研究者という抄録を照合。ACM出版DOIのopenは403",
+      "study_or_document_scope": "10名の質的研究者によるChatGPTとの協働の探索的研究",
+      "supported_claim": "初期探索や効率等への期待と、文脈・信頼性・一貫性等への懸念を示す",
+      "limitations": "小規模・探索的。知覚された有用性を客観的品質向上の効果量として扱わない。公開版と最終版の全差分は未照合",
+      "knowledge_cards": [
+        "K08"
+      ],
+      "doi": "10.1145/3613905.3650732",
+      "additional_urls": [
+        "https://research.monash.edu/en/publications/human-ai-collaboration-in-thematic-analysis-using-chatgpt-a-user-/"
+      ],
+      "publication_status": "査読付き会議論文として2024年出版。Monash Universityの公式出版レコードで確認"
+    },
+    {
+      "id": "S20",
+      "title": "PROV-DM: The PROV Data Model",
+      "authors_or_organization": "W3C",
+      "publication_date": "2013-04-30",
+      "evidence_type": [
+        "N"
+      ],
+      "url": "https://www.w3.org/TR/prov-dm/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "W3C仕様・PROV Overviewの位置付けと概要を確認",
+      "study_or_document_scope": "provenanceのentity/activity/agent等を表すデータモデル",
+      "supported_claim": "入力、生成活動、作成者、派生関係を別概念として保持する",
+      "limitations": "PROV-DMはRecommendation、OverviewはWorking Group Note。UIの最適レイアウトや利用者への効果を規定しない",
+      "knowledge_cards": [
+        "K13"
+      ],
+      "additional_urls": [
+        "https://www.w3.org/TR/prov-overview/"
+      ]
+    },
+    {
+      "id": "S21",
+      "title": "NASA Task Load Index",
+      "authors_or_organization": "NASA Human Systems Integration Division",
+      "publication_date": "1980年代に開発。公式ページの各資料に2026掲載日あり",
+      "evidence_type": [
+        "測定法"
+      ],
+      "url": "https://www.nasa.gov/human-systems-integration-division/nasa-task-load-index-tlx/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式ページの6次元・評価方法概要を確認",
+      "study_or_document_scope": "精神的・身体的・時間的要求、成績、努力、フラストレーションの主観負担",
+      "supported_claim": "作業成績とは別に多面的な主観負担を評価する手段",
+      "limitations": "今回尺度全文の日本語検証版は特定していない。短縮／無加重版を正式加重版と混同しない。因果的なUI良否の単独指標ではない",
+      "knowledge_cards": [
+        "評価計画"
+      ]
+    },
+    {
+      "id": "S22",
+      "title": "Web Content Accessibility Guidelines (WCAG) 2.2",
+      "authors_or_organization": "W3C",
+      "publication_date": "2024-12-12 Recommendation",
+      "evidence_type": [
+        "N"
+      ],
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "W3C現行Recommendationの書誌・達成基準・適合条件を確認",
+      "study_or_document_scope": "Webコンテンツの達成基準A/AA/AAAと適合要件",
+      "supported_claim": "アクセシビリティの検査基準として用いる",
+      "limitations": "本文が規範。抜粋チェックだけでは適合宣言できない。法律への適用判断、全障害ニーズへの充足、OS全体の適合は別",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S23a",
+      "title": "Tabs Pattern",
+      "authors_or_organization": "W3C WAI ARIA Authoring Practices Guide",
+      "publication_date": "継続更新資料",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/tabs/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式パターンのキーボードとARIA状態を確認",
+      "study_or_document_scope": "tablist/tab/tabpanel、選択、キーボード、遅延とactivation",
+      "supported_claim": "表示遅延が目立たない場合のみ自動activationを推奨する設計指針",
+      "limitations": "APGはWCAG達成基準そのものではない。実際のブラウザー・支援技術で検証する",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S23b",
+      "title": "Dialog (Modal) Pattern",
+      "authors_or_organization": "W3C WAI ARIA Authoring Practices Guide",
+      "publication_date": "継続更新資料",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式パターンのフォーカス・キー操作を確認",
+      "study_or_document_scope": "開閉時と内部のフォーカス制御、名前と役割",
+      "supported_claim": "モーダルの可視・操作・支援技術上の挙動を一致させる",
+      "limitations": "初期フォーカスと戻り先には内容やワークフローによる例外がある。すべてfirst buttonへ機械的に移さない",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S23c",
+      "title": "Developing a Keyboard Interface",
+      "authors_or_organization": "W3C WAI ARIA Authoring Practices Guide",
+      "publication_date": "継続更新資料",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式実装指針の概要を確認",
+      "study_or_document_scope": "複合widget、フォーカス、キーボード設計",
+      "supported_claim": "ARIAを付けるだけではキーボード挙動は実装されない",
+      "limitations": "各widgetのパターン、ネイティブHTML、支援技術の検証を合わせる",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S24",
+      "title": "Understanding SC 2.5.8 Target Size (Minimum)",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "2026-05-11 update",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "AAの対象サイズは原則24×24 CSS pxで例外がある。十分な間隔の例外も定義",
+      "limitations": "44×44をAAの必須値と誤記しない。アイコンの見た目ではなく実際のtargetを検査",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S25",
+      "title": "Understanding SC 2.4.11 Focus Not Obscured (Minimum)",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "フォーカスを受けた要素が作者のコンテンツで完全に隠れない",
+      "limitations": "AAの最低限であり、一部隠れてもよいという推奨ではない。AAAの完全可視やfocus appearanceと分離",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S26",
+      "title": "Understanding SC 4.1.3 Status Messages",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "状態メッセージをフォーカス移動なしで支援技術が提示可能にする",
+      "limitations": "すべての動的変更が同じ種類のstatusとは限らない。常時assertive読み上げで通知過多にしない",
+      "knowledge_cards": [
+        "K12",
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S27",
+      "title": "Understanding SC 1.4.10 Reflow",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/reflow.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "縦スクロール主体のコンテンツを幅320 CSS px相当で操作・知覚可能にする",
+      "limitations": "本質的に二次元の内容には例外あり。周辺の操作や本文まで一律に除外しない",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S28",
+      "title": "Understanding SC 1.4.3 Contrast (Minimum)",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "通常文字4.5:1、大きな文字3:1。対象・例外・厳密な比率を確認",
+      "limitations": "大きな文字の定義、inactiveやlogo等の例外あり。丸めて閾値を満たしたことにしない",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S29",
+      "title": "Understanding SC 1.4.11 Non-text Contrast",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "UI識別と状態、理解に必要なグラフィックの対象部分は隣接色と3:1",
+      "limitations": "すべての装飾線に一律適用する規定ではない。対象となる情報と例外を評価",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S30a",
+      "title": "Understanding SC 2.1.1 Keyboard",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "機能をキーボードインターフェースで操作可能にする",
+      "limitations": "本質的な軌跡依存入力等の例外に注意。単なるTab到達だけで機能完了を判断しない",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S30b",
+      "title": "Understanding SC 2.1.4 Character Key Shortcuts",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/character-key-shortcuts.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "文字キーのみのショートカットを停止・非文字キーへ再割当・要素フォーカス時のみ有効のいずれかにする",
+      "limitations": "Ctrl等付きshortcut全てに同じ規定を課すものではない。IMEガードはGurumojiへの追加設計推論",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S30c",
+      "title": "Understanding SC 2.5.7 Dragging Movements",
+      "authors_or_organization": "W3C WAI",
+      "publication_date": "継続更新資料。個別更新日は今回未記録",
+      "evidence_type": [
+        "G",
+        "Nの解説"
+      ],
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式解説と引用された達成基準を確認",
+      "study_or_document_scope": "WCAG 2.2の関連成功基準の解説。基準の正本はS22",
+      "supported_claim": "ドラッグ機能を、原則として単一ポインターでドラッグ不要の操作でも行えるようにする",
+      "limitations": "キーボード代替だけではこの基準の代替入力要件を満たすと限らない。本質的なドラッグ等には例外",
+      "knowledge_cards": [
+        "アクセシビリティ"
+      ]
+    },
+    {
+      "id": "S31",
+      "title": "Loading",
+      "authors_or_organization": "IBM Carbon Design System",
+      "publication_date": "2026-08-11 update",
+      "evidence_type": [
+        "G"
+      ],
+      "url": "https://www.carbondesignsystem.com/building-blocks/core/patterns/loading",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "公式本文のoverview/skeleton/loading/progressive/accessibilityを確認",
+      "study_or_document_scope": "短いロード、進捗、inline/full-screen等の使い分け",
+      "supported_claim": "ロードの性質と範囲に応じて状態表現を選ぶ",
+      "limitations": "公式デザインシステムの指針。UI全体のブロックや秒数を普遍的ルールとしない。進捗百分率の根拠は実装側で必要",
+      "knowledge_cards": [
+        "K11"
+      ]
+    },
+    {
+      "id": "S32",
+      "title": "Racial disparities in automated speech recognition",
+      "authors_or_organization": "Koenecke, A., et al.",
+      "publication_date": "2020-03-23 online; 2020-04-07 issue",
+      "evidence_type": [
+        "B"
+      ],
+      "url": "https://doi.org/10.1073/pnas.1915768117",
+      "accessed_on": "2026-10-02",
+      "access_method": "web search/open",
+      "inspection": "出版社の検索全文抽出、著者の再現コードページを確認",
+      "study_or_document_scope": "5商用ASR、米国英語話者のグループ別性能を測定したベンチマーク",
+      "supported_claim": "ASR全体平均だけでは話者条件間の誤りを見落とし得る",
+      "limitations": "2020年出版の米国英語・当時のシステム。Gurumojiの現行モデル、日本語話者、任意の属性群の格差率を直接示さない",
+      "knowledge_cards": [
+        "K04"
+      ],
+      "doi": "10.1073/pnas.1915768117",
+      "additional_urls": [
+        "https://github.com/stanford-policylab/asr-disparities"
+      ]
+    }
+  ],
+  "retrieval_limitations": [
+    "DOI 10.1145/3706599.3720038 は403。著者公開arXiv全文へ切替えた",
+    "BansalのNSF公開PDFとBuçincaのHarvard PDFはfetch timeout。著者公開arXiv PDFを確認した",
+    "BraunとClarkeの著者サイトはsearch-indexで該当チェック項目を確認できたが直接openは502/内部エラー。UWE書誌はsearch-indexで確認し、直接openは403。未確認の本文詳細を追加しない",
+    "Apple HIG progress indicatorsはJavaScript要求のみで本文を確認できず、根拠から除外した",
+    "Yanの最終出版DOIは403。著者公開v1の抄録とMonash University公式出版レコードを照合したが、出版版全体との同一性は確認していない",
+    "記事のクロール日や検索結果の相対日付は発行日としない。日付不明のliving documentはその旨を記録した"
+  ],
+  "next_validation": [
+    "合成データを用いた現行UIのタスクベース検査",
+    "日本語・長時間・多話者条件でのconfidence表示の検証",
+    "研究者の方法論の違いを踏まえた形成的ユーザーテスト",
+    "実ブラウザーと支援技術によるアクセシビリティ検査"
+  ]
+}

@@ -19,14 +19,14 @@
           <div id="session-outline-content" class="session-outline-content"></div>
         </details>
         <nav class="item-tabs" aria-label="作業画面の切り替え" role="tablist">
-          <button type="button" role="tab" class="item-tab active" data-item-tab="transcript" aria-selected="true" aria-controls="item-panel-transcript">発話の確認・編集</button>
-          <button type="button" role="tab" class="item-tab" data-item-tab="conversation" aria-selected="false" aria-controls="item-panel-conversation">会話・話者</button>
-          <button type="button" role="tab" class="item-tab" data-item-tab="summary" aria-selected="false" aria-controls="item-panel-summary">議事録・アウトライン</button>
-          <button type="button" role="tab" class="item-tab" data-item-tab="files" aria-selected="false" aria-controls="item-panel-files">ファイル・管理</button>
+          <button type="button" role="tab" class="item-tab active" id="item-tab-transcript" data-item-tab="transcript" aria-selected="true" aria-controls="item-panel-transcript">発話の確認・編集</button>
+          <button type="button" role="tab" class="item-tab" id="item-tab-conversation" data-item-tab="conversation" aria-selected="false" aria-controls="item-panel-conversation">会話・話者</button>
+          <button type="button" role="tab" class="item-tab" id="item-tab-summary" data-item-tab="summary" aria-selected="false" aria-controls="item-panel-summary">議事録・アウトライン</button>
+          <button type="button" role="tab" class="item-tab" id="item-tab-files" data-item-tab="files" aria-selected="false" aria-controls="item-panel-files">ファイル・管理</button>
         </nav>
       </header>
 
-      <div id="item-panel-transcript" class="item-panel" role="tabpanel" data-item-panel="transcript">
+      <div id="item-panel-transcript" class="item-panel" role="tabpanel" aria-labelledby="item-tab-transcript" data-item-panel="transcript">
         <div class="transcript-layout">
           <aside class="transcript-side">
             <div id="media-review" class="media-review" hidden>
@@ -61,12 +61,13 @@
               <label class="field"><span>並べ替え</span><select id="segment-sort"><option value="time_asc">時刻順</option><option value="time_desc">時刻の逆順</option><option value="speaker">話者別</option><option value="emotion">感情別</option><option value="keyword">キーワード一致順</option></select></label>
             </div>
             <div class="segment-list-header"><p id="segment-count"></p><button id="add-segment-button" class="secondary-button" type="button">＋ 発話を追加</button></div>
-            <div id="segment-editor" class="segment-editor"></div>
+            <div class="segment-undo"><span id="segment-delete-status" role="status" aria-live="polite"></span><button id="undo-segment-delete" class="secondary-button" type="button" hidden>発話の削除を元に戻す</button></div>
+        <div id="segment-editor" class="segment-editor"></div>
           </div>
         </div>
       </div>
 
-      <div id="item-panel-conversation" class="item-panel" role="tabpanel" data-item-panel="conversation" hidden>
+      <div id="item-panel-conversation" class="item-panel" role="tabpanel" aria-labelledby="item-tab-conversation" data-item-panel="conversation" hidden>
         <section class="conversation-profile-card">
           <div class="conversation-profile-head">
             <div>
@@ -99,7 +100,7 @@
         </section>
       </div>
 
-      <div id="item-panel-summary" class="item-panel" role="tabpanel" data-item-panel="summary" hidden>
+      <div id="item-panel-summary" class="item-panel" role="tabpanel" aria-labelledby="item-tab-summary" data-item-panel="summary" hidden>
         <section id="meeting-minutes-view" class="meeting-minutes-view" hidden aria-labelledby="meeting-minutes-title">
           <div class="meeting-minutes-head">
             <div>
@@ -171,7 +172,7 @@
         </section>
       </div>
 
-      <div id="item-panel-files" class="item-panel" role="tabpanel" data-item-panel="files" hidden>
+      <div id="item-panel-files" class="item-panel" role="tabpanel" aria-labelledby="item-tab-files" data-item-panel="files" hidden>
         <section class="item-files-card">
           <h3>出力ファイル</h3>
           <p>編集内容を保存すると、出力ファイルも同じ内容で更新されます。</p>
@@ -181,13 +182,16 @@
         <section class="result-danger-zone" aria-labelledby="result-danger-title">
           <div>
             <h3 id="result-danger-title">データの削除</h3>
-            <p>処理済みデータから削除し、保存メディアも削除します。出力ファイルと学習履歴は残ります。</p>
+            <p>会話と保存メディアをゴミ箱へ移します。保持期間内は復元できます。出力ファイルと学習履歴は残ります。</p>
           </div>
           <button id="delete-record-button" class="secondary-button danger" type="button">このデータを削除</button>
         </section>
       </div>
 
-      <div id="save-message" class="alert" hidden></div>
+      <div id="save-message" class="alert" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+      <section id="result-draft-recovery" class="draft-recovery" aria-label="未保存内容の退避" hidden>
+        <p data-draft-count></p><button id="export-result-draft" class="secondary-button" type="button">未保存内容をJSONで退避</button>
+      </section>
       <div class="sticky-actions">
         <button id="save-button" class="primary-button small" type="button">編集内容を保存</button>
         <button id="obsidian-finishing-button" class="secondary-button" type="button">Obsidianで仕上げ</button>

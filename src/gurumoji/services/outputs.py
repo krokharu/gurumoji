@@ -484,6 +484,7 @@ def write_outputs(
     formatting_result: dict[str, Any] | None = None,
     write_word_cloud_file: bool = False,
     *,
+    session_profile: dict[str, Any] | None = None,
     write_word_cloud: Callable[[Path, str, list[dict[str, Any]]], Path],
     emotion_csv_text: Callable[[list[dict[str, Any]], dict[str, str]], str],
 ) -> list[Path]:
@@ -529,6 +530,8 @@ def write_outputs(
         ],
         "segments": segments,
     }
+    if session_profile is not None:
+        payload["session_profile"] = session_profile
     if outline:
         payload["outline"] = outline
     if meeting_minutes:

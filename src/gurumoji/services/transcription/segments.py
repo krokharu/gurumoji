@@ -28,6 +28,7 @@ TRIPLE_PASS_MIN_GAP_SECONDS = 3.0
 TRIPLE_PASS_GAP_CONTEXT_SECONDS = 0.75
 TRIPLE_PASS_MIN_GAP_OVERLAP_RATIO = 0.6
 SHORT_SPEAKER_ISLAND_MAX_SECONDS = 0.55
+SHORT_SPEAKER_ISLAND_MAX_GAP_SECONDS = 0.2
 SPEAKER_BACKCHANNEL_TEXTS = {
     "はい", "ええ", "うん", "そう", "そうです", "なるほど", "確かに",
     "はいはい", "うんうん", "へえ", "ああ", "おお", "ん", "うーん",
@@ -334,6 +335,20 @@ def _joined_word_text(parts: list[str]) -> str:
     return text.strip()
 
 
+def _continuous_speaker_island(previous: dict[str, Any], current: dict[str, Any],
+                               following: dict[str, Any]) -> bool:
+    """Only smooth a fragment inside one continuous, known speaker's turn."""
+    return bool(
+        previous.get("speaker")
+        and previous["speaker"] == following.get("speaker")
+        and current.get("speaker") != previous["speaker"]
+        and abs(float(current["start"]) - float(previous["end"]))
+        <= SHORT_SPEAKER_ISLAND_MAX_GAP_SECONDS
+        and abs(float(following["start"]) - float(current["end"]))
+        <= SHORT_SPEAKER_ISLAND_MAX_GAP_SECONDS
+    )
+
+
 def _word_speaker_segments(raw: dict[str, Any]) -> list[dict[str, Any]]:
     """Split one WhisperX segment at word-level speaker transitions."""
     raw_words = raw.get("words")
@@ -411,8 +426,7 @@ def _word_speaker_segments(raw: dict[str, Any]) -> list[dict[str, Any]]:
         duration = max(0.0, float(current["end"]) - float(current["start"]))
         island_text = normalize_text_for_merge(_joined_word_text(current["_parts"]))
         if (
-            previous["speaker"] == following["speaker"]
-            and current["speaker"] != previous["speaker"]
+            _continuous_speaker_island(previous, current, following)
             and duration <= SHORT_SPEAKER_ISLAND_MAX_SECONDS
             and island_text not in SPEAKER_BACKCHANNEL_TEXTS
         ):
@@ -461,8 +475,7 @@ def make_display_segments(raw_segments: list[dict[str, Any]]) -> list[dict[str, 
         duration = max(0.0, float(current["end"]) - float(current["start"]))
         island_text = normalize_text_for_merge(str(current.get("text") or ""))
         if (
-            previous.get("speaker") == following.get("speaker")
-            and current.get("speaker") != previous.get("speaker")
+            _continuous_speaker_island(previous, current, following)
             and island_text not in SPEAKER_BACKCHANNEL_TEXTS
             and (
                 duration <= SHORT_SPEAKER_ISLAND_MAX_SECONDS

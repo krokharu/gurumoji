@@ -199,6 +199,48 @@ def persist_speaker_registry_record(
     )
 
 
+def prepare_speaker_registry_records(raw_records: Any, existing_records: dict[str, Any], *, merge_by_participant_code: bool = False) -> list[dict[str, Any]]:
+    """The same validation/merge for a preview and an atomic save; no writes."""
+    if not isinstance(raw_records, list) or len(raw_records) > 10000:
+        raise ValueError("Speaker registry data must be an array of at most 10000 records.")
+    prepared_records = raw_records
+    if merge_by_participant_code:
+        by_code = {
+            item["participant_code"].casefold(): item
+            for item in existing_records.values()
+            if item["participant_code"]
+        }
+        prepared_records = []
+        for raw in raw_records:
+            if not isinstance(raw, dict):
+                prepared_records.append(raw)
+                continue
+            code = clean_single_line(raw.get("participant_code"), 120).casefold()
+            previous = by_code.get(code) if code else None
+            if previous is None:
+                prepared_records.append(dict(raw))
+                continue
+            merged_attributes = {
+                **previous.get("attributes", {}),
+                **(raw.get("attributes") if isinstance(raw.get("attributes"), dict) else {}),
+            }
+            prepared_records.append({
+                **previous,
+                **raw,
+                "id": previous["id"],
+                "attributes": merged_attributes,
+            })
+
+    normalized = [
+        normalize_speaker_registry_record(
+            raw,
+            existing=existing_records.get(str(raw.get("id"))) if isinstance(raw, dict) else None,
+        )
+        for raw in prepared_records
+    ]
+    return normalized
+
+
 def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any = None,
     expected_revision: int | None = None, merge_by_participant_code: bool = False,
     connect: Callable[[], Any],
@@ -224,41 +266,9 @@ def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any =
                 for row in speaker_registry_rows(connection, include_inactive=True)
             )
         }
-        prepared_records = raw_records
-        if merge_by_participant_code:
-            by_code = {
-                item["participant_code"].casefold(): item
-                for item in existing_records.values()
-                if item["participant_code"]
-            }
-            prepared_records = []
-            for raw in raw_records:
-                if not isinstance(raw, dict):
-                    prepared_records.append(raw)
-                    continue
-                code = clean_single_line(raw.get("participant_code"), 120).casefold()
-                previous = by_code.get(code) if code else None
-                if previous is None:
-                    prepared_records.append(dict(raw))
-                    continue
-                merged_attributes = {
-                    **previous.get("attributes", {}),
-                    **(raw.get("attributes") if isinstance(raw.get("attributes"), dict) else {}),
-                }
-                prepared_records.append({
-                    **previous,
-                    **raw,
-                    "id": previous["id"],
-                    "attributes": merged_attributes,
-                })
-
-        normalized = [
-            normalize_speaker_registry_record(
-                raw,
-                existing=existing_records.get(str(raw.get("id"))) if isinstance(raw, dict) else None,
-            )
-            for raw in prepared_records
-        ]
+        normalized = prepare_speaker_registry_records(
+            raw_records, existing_records, merge_by_participant_code=merge_by_participant_code,
+        )
         for record in normalized:
             previous = existing_records.get(record["id"])
             persist_speaker_registry_record(connection, record, previous, now)
@@ -385,6 +395,32 @@ def speaker_csv_field_for_header(header: str) -> str | None:
     if "参加者" in normalized and ("コード" in normalized or "id" in normalized):
         return "participant_code"
     return None
+
+
+def preview_speaker_registry_records(raw_records: Any, *, expected_revision: int,
+    merge_by_participant_code: bool = False, connect: Callable[[], Any],
+) -> tuple[list[dict[str, Any]], int]:
+    with connect() as connection:
+        connection.execute("BEGIN")
+        revision = speaker_registry_revision(connection)
+        if revision != expected_revision:
+            raise SpeakerRegistryConflictError(revision)
+        existing = {item["id"]: item for item in (
+            speaker_registry_public(row) for row in speaker_registry_rows(connection)
+        )}
+        normalized = prepare_speaker_registry_records(
+            raw_records, existing, merge_by_participant_code=merge_by_participant_code,
+        )
+        return list({**existing, **{item["id"]: item for item in normalized}}.values()), revision
+
+
+def speaker_csv_columns(content: bytes) -> list[dict[str, str]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("cp932")
+    return [{"column": str(header), "field": "attributes" if speaker_csv_field_for_header(str(header)) is None else speaker_csv_field_for_header(str(header)) or "ignored"}
+            for header in (csv.DictReader(io.StringIO(text)).fieldnames or [])]
 
 
 def import_speaker_registry_csv(

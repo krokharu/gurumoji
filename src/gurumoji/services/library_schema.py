@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 from .. import transcript_preparation as preparation
 from ..analysis_pipeline import initialize_pipeline_store
+from ..analysis_orchestration import initialize_orchestration_store
+from .analysis_orchestration_publication import initialize_orchestration_publication_store
 from ..analysis_store import initialize_store
 from ..text_utils import json_load
 
@@ -385,6 +387,8 @@ def make_library_schema(
             ensure_output_import_provenance_schema(connection)
             initialize_store(connection)
             initialize_pipeline_store(connection)
+            initialize_orchestration_store(connection)
+            initialize_orchestration_publication_store(connection)
             preparation.initialize(connection)
             if repair_provenance:
                 repair_output_import_provenance(connection)

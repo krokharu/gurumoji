@@ -21,6 +21,7 @@ from ...ai_effort import (
     SCHEMA_STAGES,
     effort_payload,
     local_effort_payload,
+    local_cleanup_effort_payload,
     normalize_efforts,
 )
 
@@ -427,7 +428,10 @@ def call_ai_json(
     elif provider == "lmstudio":
         level = normalize_efforts(ai_efforts).get(SCHEMA_STAGES.get(schema_name), "auto")
         if level != "auto":
-            reasoning = local_effort_payload(level, lmstudio_reasoning(base_url, api_key, model))
+            resolve_effort = (local_cleanup_effort_payload
+                              if SCHEMA_STAGES.get(schema_name) == "cleanup"
+                              else local_effort_payload)
+            reasoning = resolve_effort(level, lmstudio_reasoning(base_url, api_key, model))
         request = lmstudio_request(
             lmstudio_base(base_url), api_key, lmstudio_model_id(model),
             system_prompt, user_prompt, schema_name, schema, reasoning,

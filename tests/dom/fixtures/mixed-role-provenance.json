@@ -1,0 +1,24 @@
+{
+  "backend_review_commit": "c6abf58d2cee48be32602bae9fdc930a742dfcb9",
+  "ui_acceptance_commit": "58682c7607f5e137512213f77f8a8c5d546d9d53",
+  "algorithm_version": "focus-group-local-6",
+  "origin_review": "artifacts/eight-hour-20261003/analysis-recovery-review/review.md",
+  "original_fixtures": {
+    "mixed_role_ui_v6_participant.json": {
+      "sha256": "834e926aafd9f11b4351752f2b578d6941af9afda7d35cb48f0d43a73cae98fe",
+      "projected_to": "fixtures/mixed-role-participant-v6.json"
+    },
+    "mixed_role_ui_v6_all.json": {
+      "sha256": "11a04cf9343a5d3707c9fbb978f6651d68d7dd447da1ecfc652652a27229b398",
+      "projected_to": "fixtures/mixed-role-all-v6.json"
+    }
+  },
+  "candidate_hashes": {
+    "mixed-role.test.cjs": "dec8ee0df195c7feab9e3fe21f5e4e5dca458e14df0e58d09eb2e73cbfb120e2",
+    "fixtures/mixed-role-all-v6.json": "25b9f48bcf494a70436d965ce61e46bf320dd43eddfab4dc324532d9575b42a7",
+    "fixtures/mixed-role-participant-v6.json": "42a8899cdfe17e1760007fa4aca15ef3d653d3f0f3c9e2c09ddc01db2bf62acb",
+    "fixtures/nonmixed-role-all-control.json": "8a2ca11f297b863c7c646e78172b57bc18a5143f1f2dc629bcf47059eba8646a"
+  },
+  "projection": "Keep schema/algorithm, item identity/revisions, exclude_moderator/group_by, empty annotations/segments, executed and automatic overview/speaker_metrics/balance/moderator/groups/time_bins/observations only. No real Vault, authentication, media, or research content.",
+  "nonmixed_control": "Synthetic derivative of the all-scope projection, not newly captured backend output: make A a single moderator and B a single participant; set observed participant count=1/mixed count=0, known moderator role aggregates, numeric per-role group time/percent, consistent A→B transition aggregates, and no mixed-role observations. Keep real participant count=6, whole time20s, A/B time10s each, all-scope50/50/Gini0."
+}

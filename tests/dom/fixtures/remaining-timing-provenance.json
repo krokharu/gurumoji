@@ -1,0 +1,9 @@
+{
+  "source_commit": "a383df17d368e79e696cf6e51dd4808f15b5f719",
+  "source_file": "timing-api-full-a383df1.json",
+  "source_sha256": "48591d5c5c0c252d8b8256b4ba778f7e3e7d2026f9b43751a14f565ea2c95933",
+  "projected_file": "remaining-timing-v7.json",
+  "projected_sha256": "f2443f1ab6517b8f681350bab30a7af794ce4bc1d7e90ee4d24b33cd2b0d6aef",
+  "projection": "Drop unused fields; all included calculation values, raw segments, coverage and versions are copied without recalculation. executed=true is display-only scaffolding replacing API executed=false; it does not attest to pipeline execution. No production database, private Vault, media, model or authentication data.",
+  "excluded_scenarios": "above_limit and huge_finite are covered by direct synthetic raw editor DOM tests rather than duplicating the API analysis fixtures."
+}

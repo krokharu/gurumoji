@@ -113,6 +113,16 @@ const aiModelError = document.querySelector('#ai-model-error');
 const saveAiModelButton = document.querySelector('#save-ai-model-button');
 
 let tokenConfigSnapshot = {};
+let configLoadState = 'loading';
+let lastMachineProfile = null;
+const manuallySelectedMachineFields = new Set();
+const deletingLibraryItems = new Set();
+let pendingSpeakerImport = null;
+let deletedSegmentUndo = [];
+let currentJobBaseline = null;
+let speakerRegistryBaseline = [];
+let resultSaveConflict = false;
+let speakerSaveConflict = false;
 let aiProviderManuallySelected = false;
 let aiModelCatalog = [];
 let activeAiModelProvider = '';
@@ -171,7 +181,22 @@ let analysisCatalog = [];
 let analysisRequestController = null;
 let analysisRequestSequence = 0;
 let analysisSaveInProgress = false;
-let segmentClassificationInProgress = false;
+let analysisSaveOwner = null;
+const segmentClassificationRequests = new Map();
+let analysisNavigationGeneration = 0;
+function captureAnalysisContext() {
+  return {itemId: analysisState.itemId, data: analysisState.data, navigation: analysisNavigationGeneration,
+    mutation: analysisMutationGeneration, sourceRevision: analysisState.data?.item?.revision_count,
+    analysisRevision: analysisState.data?.item?.analysis_revision};
+}
+function isAnalysisContextCurrent(context) {
+  return context.itemId === analysisState.itemId && context.data === analysisState.data
+    && context.navigation === analysisNavigationGeneration && context.mutation === analysisMutationGeneration
+    && context.sourceRevision === analysisState.data?.item?.revision_count
+    && context.analysisRevision === analysisState.data?.item?.analysis_revision;
+}
+function segmentClassificationBusy() { return segmentClassificationRequests.has(analysisState.itemId); }
+
 let analysisMutationGeneration = 0;
 let analysisInitialSectionApplied = false;
 let analysisNavigationFrame = 0;
@@ -331,6 +356,9 @@ function startBootSequence() {
 
 function setAlert(element, message, error = false) {
   if (!element) return;
+  element.setAttribute('role', error ? 'alert' : 'status');
+  element.setAttribute('aria-live', error ? 'assertive' : 'polite');
+  element.setAttribute('aria-atomic', 'true');
   element.textContent = message || '';
   element.hidden = !message;
   element.classList.toggle('error', error);
@@ -807,14 +835,80 @@ function syncTranscriptionBackend() {
   if (qwenVocabularyNote) qwenVocabularyNote.hidden = !qwenSelected;
 }
 
+function enabledTextDestinations() {
+  const provider = aiProvider?.value || 'none';
+  const mode = selectedTranscriptFinishingMode();
+  if (provider === 'none' || mode === 'off') return [];
+  const deferred = mode === 'recommended' && Boolean(finishInObsidian?.checked);
+  const recommended = mode === 'recommended' && !deferred
+    && Boolean(tokenConfigSnapshot.typesafe)
+    && (document.querySelector('[name="ai_effort_cleanup"]')?.value || 'medium') !== 'off';
+  const destinations = [];
+  if (mode === 'advanced' || recommended || detectNames?.checked || createOutline?.checked) {
+    destinations.push({provider, label: selectedOptionText(aiProvider), model: tokenConfigSnapshot[`${provider}_model`] || 'モデル未設定'});
+  }
+  if (recommended || (mode === 'advanced' && jevCompare?.checked)) {
+    destinations.push({provider: 'typesafe', label: 'TypeSafe Jev（外部サービス）', model: tokenConfigSnapshot.typesafe_model || 'jev-latest'});
+  }
+  return destinations;
+}
+
+function createReadiness() {
+  const blockers = [];
+  const notes = [];
+  let requiresModelAcknowledgement = false;
+  if (configLoadState !== 'loaded') blockers.push(configLoadState === 'error' ? '設定を確認できません。接続と処理装置から再確認してください' : '実行環境と設定を確認中です');
+  if (configLoadState === 'loaded') {
+    const backend = transcriptionBackend?.value || 'whisperx';
+    if (backend === 'whisperx' && !tokenConfigSnapshot.huggingface) blockers.push('話者分離に必要なHugging Faceトークンが未設定です');
+    const readiness = tokenConfigSnapshot.transcription_readiness?.[backend];
+    if (!readiness) blockers.push('方式・モデルの準備状態を取得できません。設定を再確認してください');
+    else {
+      blockers.push(...(readiness.blockers || []));
+      notes.push(...(readiness.notes || []));
+      requiresModelAcknowledgement = Boolean(readiness.notes?.length);
+      const device = document.querySelector('#transcription-device')?.value || 'cpu';
+      const model = readiness.models?.[device]?.[modelName?.value];
+      if (model) {
+        notes.push(`認識モデル: ${model.message}`);
+        if (model.status !== 'cached') requiresModelAcknowledgement = true;
+      } else if (backend === 'whisperx') {
+        notes.push('選択した認識モデルの取得状況は未確認です');
+        requiresModelAcknowledgement = true;
+      }
+    }
+    enabledTextDestinations().forEach(destination => {
+      if (!tokenConfigSnapshot[destination.provider]) blockers.push(`${destination.label}が未設定または接続できません`);
+      if (destination.provider === 'lmstudio' && !tokenConfigSnapshot.lmstudio_model) blockers.push('ローカルLLMのモデルが未設定です');
+    });
+    if (selectedTranscriptFinishingMode() === 'advanced' && aiProvider?.value === 'none') blockers.push('全文仕上げに使うAIを選択してください');
+  }
+  if (typeof aiEffortReadiness === 'function') {
+    const effortReadiness = aiEffortReadiness();
+    blockers.push(...effortReadiness.blockers);
+    notes.push(...effortReadiness.notes);
+  }
+  const acknowledged = Boolean(document.querySelector('#model-readiness-ack')?.checked);
+  return {ready: hasSelectedSource() && !blockers.length && (!requiresModelAcknowledgement || acknowledged), requiresModelAcknowledgement, acknowledged, blockers: [...new Set(blockers)], notes: [...new Set(notes)]};
+}
+
 function updateCreateSummary() {
   const hasSource = hasSelectedSource();
   if (fileDropZone) fileDropZone.classList.toggle('has-file', hasSource);
   if (pathDetail) pathDetail.classList.toggle('selected', hasSource);
 
-  const readyMessage = hasSource
-    ? '準備できました。文字起こしを開始できます'
-    : 'ファイルを選択してください';
+  const readiness = createReadiness();
+  const readyMessage = !hasSource ? 'ファイルを選択してください'
+    : readiness.blockers.length ? 'ファイル選択済み・開始前の確認が必要です'
+    : readiness.requiresModelAcknowledgement ? 'ファイル選択済み・モデルの確認や取得が必要です' : 'ファイル選択済み・開始時にモデルを読み込みます';
+  const modelAcknowledgement = document.querySelector('#model-readiness-ack-row');
+  if (modelAcknowledgement) modelAcknowledgement.hidden = !readiness.requiresModelAcknowledgement;
+  setAlert(document.querySelector('#setup-readiness-details'), [...readiness.blockers, ...readiness.notes].join('。'), Boolean(readiness.blockers.length));
+  const destinations = enabledTextDestinations();
+  const destinationText = destinations.length ? destinations.map(item => `${item.label} / ${item.model}`).join('、') : '送信なし';
+  document.querySelectorAll('[data-text-destinations]').forEach(element => { element.textContent = `今回のテキスト送信先: ${destinationText}`; });
+  const deferredNote = document.querySelector('#deferred-destination-note');
+  if (deferredNote) deferredNote.hidden = !(finishInObsidian?.checked && selectedTranscriptFinishingMode() === 'recommended');
   if (setupReadyState) setupReadyState.textContent = readyMessage;
   document.querySelectorAll('[data-setup-ready]').forEach(element => { element.textContent = readyMessage; });
 
@@ -894,14 +988,14 @@ function updateCreateSummary() {
   setText('[data-review-source]', sourceLabel);
   setText('[data-review-transcription-compact]', `認識モデル ${model}・${transcriptionHardware} / 話者分離 ${diarizationHardware}`);
   setText('[data-review-transcription]', `認識モデル: ${model} / ${transcriptionHardware}`);
-  setText('[data-review-diarization]', `話者分離: pyannote.audio / ${diarizationHardware}${fixedSpeakerLabel ? ` / ${fixedSpeakerLabel}` : ''}`);
+  setText('[data-review-diarization]', `話者分離: ${qwenSelected ? 'Nemotron 3' : 'pyannote.audio'} / ${diarizationHardware}${fixedSpeakerLabel ? ` / ${fixedSpeakerLabel}` : ''}`);
   setText('[data-review-finish]', `AI仕上げ ${finishingLabel}${finishInVault ? ' / Obsidianに保存してあとで整える' : ''}${emotionEnabled ? ` / 感情分析 ${emotionLabel}` : ''}`);
   setText('[data-review-output]', outputParts.join(' / '));
   setText('[data-flow-detail="1"]', hasSource ? sourceLabel : '未選択');
   setText('[data-flow-detail="2"]', `${mode} / ${model} / ${language}`);
-  setText('[data-flow-detail="3"]', hasSource ? '開始できます' : 'ファイルを選ぶと開始できます');
+  setText('[data-flow-detail="3"]', readiness.ready ? '開始時にモデル確認' : hasSource ? '開始前に要確認' : 'ファイルを選択');
 
-  if (startButton) startButton.disabled = jobRunning || !hasSource;
+  if (startButton) startButton.disabled = jobRunning || !readiness.ready;
   renderMobileWizard();
 }
 
@@ -1066,8 +1160,12 @@ function loadAnalysisView(requestedItemId, {discardDirty = false} = {}) {
   if (requestedItemId && analysisCatalogLoaded) {
     if (requestedItemId !== analysisState.itemId || !analysisState.data) {
       loadAnalysisItem(requestedItemId, {discardDirty});
-    } else if (analysisItemSelect) {
-      analysisItemSelect.value = requestedItemId;
+    } else {
+      if (analysisItemSelect) analysisItemSelect.value = requestedItemId;
+      const executionView = document.querySelector('#analysis-execution-view');
+      if (executionView) executionView.hidden = true;
+      renderAnalysisWorkspace();
+      onContentAnalysisLoaded();
     }
     return;
   }
@@ -1108,7 +1206,19 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   if (!force && !confirmLeave({target, itemId: targetItemId, analysisItemId: requestedAnalysisId})) return false;
   const resultVisible = resultCard && !resultCard.hidden;
   const switchingAnalysisItem = target === 'analysis' && requestedAnalysisId && requestedAnalysisId !== analysisState.itemId;
+  const contextChanged = document.body.dataset.view !== target || switchingAnalysisItem;
+  const closedFixedViewer = contextChanged && typeof closeFixedAnalysisViewer === 'function' && closeFixedAnalysisViewer();
+  const closedAnalysisDialog = contextChanged && typeof closeAnalysisExecutionDialog === 'function' && closeAnalysisExecutionDialog();
+  const closedOrchestrationDialog = contextChanged && typeof closeAnalysisOrchestrationDialogs === 'function' && closeAnalysisOrchestrationDialogs();
+  if (contextChanged) {
+    analysisNavigationGeneration += 1;
+    analysisSaveOwner = null;
+    analysisSaveInProgress = false;
+    analysisTermRunRequested = false;
+  }
   resultRequestSequence += 1;
+  // A previous view's save cannot own this view's button or messages.
+  if (saveButton) saveButton.disabled = false;
   if (resultVisible && currentJobDirty && target !== 'item') setCurrentJobDirty(false);
   if (target !== 'item' && mediaPlayer) mediaPlayer.pause();
   if (createView) createView.hidden = target !== 'new';
@@ -1119,6 +1229,11 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   if (resultCard) resultCard.hidden = target !== 'item';
   document.body.dataset.view = target;
   setActiveNavigation(target);
+  if (closedFixedViewer || closedAnalysisDialog || closedOrchestrationDialog) {
+    const navigation = target === 'analysis' ? showAnalysisButton : target === 'speakers' ? showSpeakersButton
+      : target === 'new' ? showNewButton : showLibraryButton;
+    if (navigation?.isConnected && !navigation.closest('[hidden]')) navigation.focus();
+  }
   if (target === 'analysis') loadAnalysisView(requestedAnalysisId, {discardDirty: force || Boolean(switchingAnalysisItem)});
   if (target === 'library') loadLibrary();
   if (target === 'speakers' && speakerRegistryCard) loadSpeakerRegistry();
@@ -1782,6 +1897,9 @@ async function loadSpeakerRegistry(force = false) {
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '話者管理データを取得できませんでした。');
     speakerRegistry = Array.isArray(data.speakers) ? data.speakers : [];
+    speakerRegistryBaseline = deepCopy(speakerRegistry);
+    speakerSaveConflict = false;
+    document.querySelector('#speaker-draft-recovery').hidden = true;
     speakerRegistryRevision = Number(data.registry_revision || 0);
     speakerRegistryDeletedIds.clear();
     speakerRegistryLoaded = true;
@@ -2034,6 +2152,34 @@ function renderSpeakerRegistry() {
   if (count) count.textContent = `${visible.length}人を表示（登録 ${speakerRegistry.length}人）`;
 }
 
+function downloadUnsavedDraft(kind) {
+  if (kind === 'transcript') captureSessionProfile();
+  const data = kind === 'transcript'
+    ? {schema: 'gurumoji.unsaved-transcript.v1', item_id: currentJobId, base_revision: currentJob?.revision_count, draft: deepCopy(currentJob)}
+    : {schema: 'gurumoji.unsaved-speakers.v1', base_revision: speakerRegistryRevision, speakers: deepCopy(speakerRegistry), delete_ids: [...speakerRegistryDeletedIds]};
+  const blob = new Blob([JSON.stringify({...data, exported_at: new Date().toISOString()}, null, 2)], {type: 'application/json;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `gurumoji-unsaved-${kind}-${Date.now()}.json`;
+  document.body.append(link); link.click(); link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function showDraftRecovery(kind) {
+  const panel = document.querySelector(kind === 'transcript' ? '#result-draft-recovery' : '#speaker-draft-recovery');
+  if (!panel) return;
+  panel.hidden = false;
+  const count = kind === 'transcript'
+    ? (currentJob?.segments || []).filter(segment => JSON.stringify(segment) !== JSON.stringify((currentJobBaseline?.segments || []).find(item => item.id === segment.id))).length
+    : speakerRegistry.filter(record => JSON.stringify(record) !== JSON.stringify(speakerRegistryBaseline.find(item => item.id === record.id))).length;
+  const deleted = kind === 'transcript' ? (currentJobBaseline?.segments || []).filter(item => !(currentJob?.segments || []).some(segment => segment.id === item.id)).length : speakerRegistryDeletedIds.size;
+  panel.querySelector('[data-draft-count]').textContent = `追加・変更 ${count}件 / 削除 ${deleted}件。会話設定も含む未保存内容全体をJSONで退避できます。退避後に再読み込みし、最新の内容と照合してください。自動上書きはしません。`;
+  panel.querySelector('button')?.focus();
+}
+listen(document.querySelector('#export-result-draft'), 'click', () => downloadUnsavedDraft('transcript'));
+listen(document.querySelector('#export-speaker-draft'), 'click', () => downloadUnsavedDraft('speakers'));
+
 async function saveSpeakerRegistry() {
   if (speakerRegistrySaveInProgress) return;
   const invalid = speakerRegistry.find(record => (
@@ -2062,13 +2208,17 @@ async function saveSpeakerRegistry() {
     const data = await readJsonResponse(response);
     if (!response.ok) {
       const conflict = response.status === 409
-        ? '別の画面で話者管理が更新されています。未保存内容を控えてから再読み込みしてください。'
+        ? '別の画面で話者管理が更新されています。未保存内容をJSONで退避してから再読み込みしてください。'
         : '話者管理データを保存できませんでした。';
+      if (response.status === 409) { speakerSaveConflict = true; showDraftRecovery('speakers'); }
       throw new Error(response.status === 409 ? conflict : (data.error || conflict));
     }
     speakerRegistryRevision = Number(data.registry_revision || speakerRegistryRevision);
     if (speakerRegistryMutationGeneration === saveGeneration) {
       speakerRegistry = data.speakers || [];
+      speakerRegistryBaseline = deepCopy(speakerRegistry);
+      speakerSaveConflict = false;
+      document.querySelector('#speaker-draft-recovery').hidden = true;
       speakerRegistryDeletedIds.clear();
       setSpeakerRegistryDirty(false);
       renderSpeakerRegistry();
@@ -2118,45 +2268,75 @@ listen(document.querySelector('#speaker-registry-clear-filters'), 'click', () =>
   if (showInactive) showInactive.checked = true;
   renderSpeakerRegistry();
 });
+function cancelSpeakerImport() {
+  pendingSpeakerImport = null;
+  document.querySelector('#speaker-import-preview').hidden = true;
+  document.querySelector('#speaker-csv-input').value = '';
+}
+listen(document.querySelector('#cancel-speaker-import'), 'click', cancelSpeakerImport);
+listen(document.querySelector('#apply-speaker-import'), 'click', () => {
+  if (!pendingSpeakerImport) return;
+  if (speakerRegistryMutationGeneration !== pendingSpeakerImport.generation || speakerRegistryRevision !== pendingSpeakerImport.revision) {
+    setAlert(document.querySelector('#speaker-registry-message'), 'プレビュー後に編集されました。現在の変更を保存してからCSVを読み直してください。', true);
+    cancelSpeakerImport(); return;
+  }
+  speakerRegistry = pendingSpeakerImport.speakers;
+  setSpeakerRegistryDirty(); renderSpeakerRegistry(); cancelSpeakerImport();
+  setAlert(document.querySelector('#speaker-registry-message'), 'CSVを未保存の編集内容に反映しました。内容を確認して「変更を保存」を押してください。');
+  speakerRegistrySaveButton?.focus();
+});
 listen(document.querySelector('#import-speakers-button'), 'click', () => {
-  if (speakerRegistryDirty && !window.confirm('未保存の変更があります。CSVを読み込むと現在の編集内容は置き換わります。続けますか？')) return;
-  const input = document.querySelector('#speaker-csv-input');
-  if (input) input.click();
+  if (speakerRegistrySaveInProgress) return;
+  if (speakerRegistryDirty) {
+    setAlert(document.querySelector('#speaker-registry-message'), '先に現在の編集を保存してください。保存できない場合は未保存内容を退避できます。CSVで編集を上書きしません。', true);
+    showDraftRecovery('speakers'); return;
+  }
+  document.querySelector('#speaker-csv-input')?.click();
 });
 listen(document.querySelector('#speaker-csv-input'), 'change', async event => {
   const file = event.target.files && event.target.files[0];
-  if (!file) return;
+  if (!file || speakerRegistrySaveInProgress) return;
+  if (speakerRegistryDirty) {
+    setAlert(document.querySelector('#speaker-registry-message'), '現在の編集を先に保存してください。CSV取込では未保存編集を置き換えません。', true);
+    event.target.value = ''; return;
+  }
+  cancelSpeakerImport();
   const body = new FormData();
   body.append('csv_file', file);
   body.append('registry_revision', String(speakerRegistryRevision));
-  const importGeneration = speakerRegistryMutationGeneration;
+  body.append('preview', '1');
+  const generation = speakerRegistryMutationGeneration;
   speakerRegistrySaveInProgress = true;
-  setSpeakerRegistryDirty(speakerRegistryDirty, false);
+  const importButton = document.querySelector('#import-speakers-button');
+  importButton.disabled = true;
+  setAlert(document.querySelector('#speaker-registry-message'), 'CSVを検証しています。まだ保存していません');
   try {
     const response = await apiFetch('/api/speakers/import', {method: 'POST', body});
     const data = await readJsonResponse(response);
     if (!response.ok) {
-      const conflict = response.status === 409
-        ? '別の画面で話者管理が更新されています。再読み込みしてからCSVを取り込んでください。'
-        : 'CSVを取り込めませんでした。';
-      throw new Error(response.status === 409 ? conflict : (data.error || conflict));
+      if (response.status === 409) showDraftRecovery('speakers');
+      throw new Error(response.status === 409 ? '話者管理が更新されています。編集を退避し、再読み込みしてからCSVを読み込んでください。' : (data.error || 'CSVを読み込めませんでした。'));
     }
-    speakerRegistryRevision = Number(data.registry_revision || speakerRegistryRevision);
-    if (speakerRegistryMutationGeneration === importGeneration) {
-      speakerRegistry = data.speakers || [];
-      speakerRegistryLoaded = true;
-      speakerRegistryDeletedIds.clear();
-      setSpeakerRegistryDirty(false);
-      renderSpeakerRegistry();
-      setAlert(document.querySelector('#speaker-registry-message'), `${data.imported_count}行を取り込み、話者管理へ保存しました。未知の列は追加属性として保持しています。`);
-    } else {
-      setSpeakerRegistryDirty(true, false);
-      setAlert(document.querySelector('#speaker-registry-message'), 'CSVは保存されましたが、取込開始後の追加変更が画面に残っています。再度保存してから一覧を再読み込みしてください。', true);
-    }
+    if (generation !== speakerRegistryMutationGeneration) throw new Error('CSV確認中に編集されました。編集を保存してからCSVを読み直してください。');
+    if (!data.preview) throw new Error('このサーバーはCSVプレビューに対応していません。画面を再読み込みしてください。');
+    pendingSpeakerImport = {speakers: data.speakers || [], revision: data.registry_revision, generation};
+    const summary = data.summary || {};
+    document.querySelector('#speaker-import-summary').textContent = `${file.name}: ${data.imported_count}行 / 追加 ${summary.added || 0}人 / 更新 ${summary.updated || 0}人。まだ保存していません`;
+    const columns = document.querySelector('#speaker-import-columns');
+    columns.replaceChildren();
+    (summary.columns || []).forEach(column => {
+      const item = document.createElement('li');
+      item.textContent = `${column.column} → ${column.field === 'attributes' ? '追加属性（事前アンケート回答）' : column.field === 'ignored' ? '取込対象外' : column.field}`;
+      columns.append(item);
+    });
+    document.querySelector('#speaker-import-preview').hidden = false;
+    setAlert(document.querySelector('#speaker-registry-message'), '列対応と追加・更新件数を確認してください。キャンセルしても保存状態は変わりません。');
+    document.querySelector('#apply-speaker-import').focus();
   } catch (error) {
     setAlert(document.querySelector('#speaker-registry-message'), error.message, true);
   } finally {
     speakerRegistrySaveInProgress = false;
+    importButton.disabled = false;
     if (speakerRegistrySaveButton) speakerRegistrySaveButton.disabled = !speakerRegistryDirty;
     event.target.value = '';
   }
@@ -2243,7 +2423,7 @@ function handleInputFileSelection() {
     sourcePath.value = '';
     pathDetail.textContent = browserFilePickerOnly
       ? `${file.name} / ${formatBytes(file.size)} — Colabへ一時アップロードして処理します`
-      : `${file.name} / ${formatBytes(file.size)} — このPC内だけで一時コピーして処理します`;
+      : `${file.name} / ${formatBytes(file.size)} — Gurumoji実行環境へ一時コピーして処理します`;
     hideSourcePreview();
   } else if (!sourcePath.value.trim()) {
     pathDetail.textContent = 'ファイルが選択されていません';
@@ -2298,8 +2478,11 @@ function setHardwareLights(kind, available, availableText, unavailableText, titl
   });
 }
 
-function applyMachineProfile(machine) {
+function applyMachineProfile(machine, {reset = false} = {}) {
   if (!machine) return;
+  lastMachineProfile = machine;
+  if (reset) manuallySelectedMachineFields.clear();
+  const changes = [];
   const cpu = machine.cpu || {};
   const gpu = machine.gpu || {};
   const recommended = machine.recommended || {};
@@ -2340,18 +2523,21 @@ function applyMachineProfile(machine) {
     if (!select) return;
     const cudaOption = select.querySelector('option[value="cuda"]');
     if (cudaOption) cudaOption.disabled = !gpu.cuda_available;
-    if (!gpu.cuda_available && select.value === 'cuda') select.value = 'cpu';
+    if (!gpu.cuda_available && select.value === 'cuda') {
+      select.value = 'cpu';
+      changes.push('選択したGPUを利用できないためCPUに変更しました');
+    }
   });
 
-  if (modelSelect && [...modelSelect.options].some(option => option.value === recommended.model_name)) {
+  if (modelSelect && !manuallySelectedMachineFields.has(modelSelect.id) && [...modelSelect.options].some(option => option.value === recommended.model_name)) {
     modelSelect.value = recommended.model_name;
   }
-  if (transcriptionDevice && [...transcriptionDevice.options].some(option => (
+  if (transcriptionDevice && !manuallySelectedMachineFields.has(transcriptionDevice.id) && [...transcriptionDevice.options].some(option => (
     option.value === recommended.device && !option.disabled
   ))) {
     transcriptionDevice.value = recommended.device;
   }
-  if (diarizationDevice && [...diarizationDevice.options].some(option => (
+  if (diarizationDevice && !manuallySelectedMachineFields.has(diarizationDevice.id) && [...diarizationDevice.options].some(option => (
     option.value === recommended.diarization_device && !option.disabled
   ))) {
     diarizationDevice.value = recommended.diarization_device;
@@ -2361,21 +2547,34 @@ function applyMachineProfile(machine) {
     const deviceLabel = recommended.device === 'cuda' ? 'GPU' : 'CPU';
     const diarizationLabel = recommended.diarization_device === 'cuda' ? 'GPU' : 'CPU';
     recommendation.textContent = recommended.model_name
-      ? `自動設定: ${recommended.model_name} / 文字起こし ${deviceLabel} / 話者分離 ${diarizationLabel}。${recommended.reason || ''}`
+      ? `推奨設定（手動選択を保持）: ${recommended.model_name} / 文字起こし ${deviceLabel} / 話者分離 ${diarizationLabel}。${recommended.reason || ''}`
       : '';
   }
+  setAlert(document.querySelector('#machine-selection-message'), [...new Set(changes)].join('。'), Boolean(changes.length));
   updateCreateSummary();
 }
+
+['model-name', 'transcription-device', 'diarization-device'].forEach(id => {
+  listen(document.getElementById(id), 'change', () => manuallySelectedMachineFields.add(id));
+});
+listen(document.querySelector('#machine-reset-button'), 'click', () => applyMachineProfile(lastMachineProfile, {reset: true}));
+listen(document.querySelector('#setup-open-connections'), 'click', () => document.querySelector('#connection-button')?.click());
+listen(document.querySelector('#setup-recheck'), 'click', loadConfig);
+listen(document.querySelector('#model-readiness-ack'), 'change', updateCreateSummary);
 
 async function loadConfig() {
   const message = document.querySelector('#token-message');
   if (!message) return;
+  configLoadState = 'loading';
+  updateCreateSummary();
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 15000);
   try {
     const response = await apiFetch('/api/config', {cache: 'no-store', signal: controller.signal});
     const data = await readJsonResponse(response);
+    if (!response.ok || !data.ok) throw new Error(data.error || '設定を取得できません');
     tokenConfigSnapshot = data && typeof data === 'object' ? data : {};
+    configLoadState = 'loaded';
     applyMachineProfile(data.machine);
     applyObsidianWatcherStatus(data.obsidian_watcher);
     const runtime = data.runtime || {};
@@ -2432,12 +2631,14 @@ async function loadConfig() {
     syncAiFields();
     updateCreateSummary();
   } catch (error) {
+    configLoadState = 'error';
     message.textContent = error.name === 'AbortError'
       ? '設定確認がタイムアウトしました。アプリを再起動して http://127.0.0.1:7860 を開き直してください。'
       : error.message;
     message.style.color = '#913733';
   } finally {
     window.clearTimeout(timeoutId);
+    updateCreateSummary();
   }
 }
 
@@ -2638,13 +2839,31 @@ function selectedTranscriptFinishingMode() {
   return selected ? selected.value : 'recommended';
 }
 
+// Remember optional choices per finishing mode. A mode's mandated execution
+// is modeled separately by aiEffortStagePlan, not by rewriting another mode's
+// preferences. This is transient form state, never a second effort store.
+const transcriptFinishingPreferences = new Map();
+let lastTranscriptFinishingMode = selectedTranscriptFinishingMode();
+
+function applyTranscriptFinishingModeChange() {
+  const mode = selectedTranscriptFinishingMode();
+  if (mode === lastTranscriptFinishingMode) return;
+  const controls = [cleanTranscript, detectNames, createOutline, jevCompare, finishInObsidian];
+  transcriptFinishingPreferences.set(lastTranscriptFinishingMode, controls.map(input => Boolean(input?.checked)));
+  const saved = transcriptFinishingPreferences.get(mode);
+  applyTranscriptFinishingPreset();
+  if (saved) controls.forEach((input, index) => { if (input) input.checked = saved[index]; });
+  lastTranscriptFinishingMode = mode;
+}
+
 function applyTranscriptFinishingPreset() {
   const mode = selectedTranscriptFinishingMode();
   const hasAi = Boolean(aiProvider && aiProvider.value !== 'none');
   if (cleanTranscript) cleanTranscript.checked = mode === 'advanced' && hasAi;
   if (detectNames) detectNames.checked = mode !== 'off' && hasAi;
   if (createOutline) createOutline.checked = mode === 'advanced' && hasAi;
-  if (jevCompare) jevCompare.checked = mode === 'advanced' && hasAi && Boolean(tokenConfigSnapshot.typesafe);
+  // An additional external destination must be an explicit choice.
+  if (jevCompare && (mode !== 'advanced' || !hasAi)) jevCompare.checked = false;
   if (finishInObsidian && mode !== 'recommended') finishInObsidian.checked = false;
   document.querySelectorAll('[data-advanced-finishing-only]').forEach(row => {
     row.hidden = mode !== 'advanced';
@@ -2710,7 +2929,7 @@ listen(finishInObsidian, 'change', () => {
 applyTranscriptFinishingPreset();
 syncFinishingMode();
 transcriptFinishingModeInputs.forEach(input => listen(input, 'change', () => {
-  applyTranscriptFinishingPreset();
+  applyTranscriptFinishingModeChange();
   syncAiFields();
   updateCreateSummary();
 }));
@@ -3024,6 +3243,12 @@ listen(form, 'submit', async event => {
     setAlert(formError, '処理する音声・動画ファイルを選択してください。', true);
     const sourceSection = document.querySelector('#setup-source');
     if (sourceSection) sourceSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+    return;
+  }
+  const readiness = createReadiness();
+  if (!readiness.ready) {
+    setAlert(formError, readiness.blockers.join('。') || 'モデル取得・接続確認の注意事項を確認してください。', true);
+    setMobileStep(3);
     return;
   }
   const provider = aiProvider ? aiProvider.value : 'none';
@@ -3399,7 +3624,11 @@ function renderLibraryLoading() {
 }
 
 function renderLibraryOverview(items) {
-  const duration = items.reduce((sum, item) => sum + Number(item.duration || 0), 0);
+  const hasTime = item => item.duration !== null && item.duration !== undefined && item.duration !== ''
+    && typeof item.duration !== 'boolean' && Number.isFinite(Number(item.duration)) && Number(item.duration) >= 0;
+  const known = items.filter(hasTime);
+  const duration = known.reduce((sum, item) => sum + Number(item.duration), 0);
+  const missing = items.filter(item => !hasTime(item) || item.missing_time_turn_count > 0).length;
   const speakers = new Set(items.flatMap(item => item.speakers || []));
   const latest = items.reduce((value, item) => {
     const updated = String(item.updated_at || '');
@@ -3407,7 +3636,8 @@ function renderLibraryOverview(items) {
   }, '');
   const values = {
     '#library-total-metric': String(items.length),
-    '#library-duration-metric': items.length ? formatTime(duration) : '00:00',
+    '#library-duration-metric': !items.length ? '—' : !known.length ? '時刻不明'
+      : missing ? `時刻あり計 ${formatTime(duration)} / 欠測あり${missing}件` : formatTime(duration),
     '#library-speaker-metric': String(speakers.size),
     '#library-updated-metric': latest ? formatDate(latest) : '—'
   };
@@ -3597,7 +3827,7 @@ function renderLibraryItems(items) {
     const mediaLabel = item.media_url ? (item.media_kind === 'video' ? '動画あり' : '音声あり') : '元メディアなし';
     [
       `発話 ${item.segment_count}件`,
-      formatTime(item.duration),
+      `最終時刻 ${analysisEndpointText(item.duration, item.timed_turn_count, item.missing_time_turn_count)}`,
       mediaLabel,
       `修正 ${item.revision_count}回`
     ].forEach(value => {
@@ -3985,13 +4215,21 @@ function deleteRecoveryNote(data) {
 }
 
 async function deleteLibraryItem(itemId, name) {
+  if (deletingLibraryItems.has(itemId)) return;
   if (!window.confirm(`「${name}」を処理済みデータから削除しますか？\n会話と保存メディアはゴミ箱に移り、保持期間を過ぎると自動で完全に削除されます。それまではゴミ箱から復元できます。出力ファイルと学習履歴は残ります。`)) return;
+  deletingLibraryItems.add(itemId);
+  const fromResult = currentJobId === itemId && !resultCard.hidden;
+  const message = document.querySelector(fromResult ? '#save-message' : '#library-message');
+  const suspendedPlayer = currentJobId === itemId ? mediaPlayer : null;
+  const suspendedTime = suspendedPlayer?.currentTime || 0;
+  const suspendedSource = suspendedPlayer?.getAttribute('src');
+  if (fromResult && deleteRecordButton) deleteRecordButton.disabled = true;
+  setAlert(message, 'ゴミ箱へ移動しています…');
   try {
-    if (currentJobId === itemId && mediaPlayer) {
-      mediaPlayer.pause();
-      mediaPlayer.removeAttribute('src');
-      mediaPlayer.load();
-      mediaPlayer = null;
+    if (suspendedPlayer) {
+      suspendedPlayer.pause();
+      suspendedPlayer.removeAttribute('src');
+      suspendedPlayer.load();
     }
     const response = await apiFetch(`/api/library/${itemId}`, {method: 'DELETE'});
     const data = await readJsonResponse(response);
@@ -4023,7 +4261,15 @@ async function deleteLibraryItem(itemId, name) {
       Boolean(cleanupWarning || recoveryNote)
     );
   } catch (error) {
-    setAlert(document.querySelector('#library-message'), error.message, true);
+    if (suspendedPlayer && suspendedSource && currentJobId === itemId) {
+      suspendedPlayer.src = suspendedSource;
+      suspendedPlayer.addEventListener('loadedmetadata', () => { suspendedPlayer.currentTime = suspendedTime; }, {once: true});
+      suspendedPlayer.load();
+    }
+    setAlert(message, error.message, true);
+  } finally {
+    deletingLibraryItems.delete(itemId);
+    if (fromResult && deleteRecordButton) deleteRecordButton.disabled = false;
   }
 }
 
@@ -4577,6 +4823,12 @@ function renderResult(job) {
   analysisCatalogLoaded = false;
   analysisCatalog = [];
   currentJob = deepCopy(job);
+  currentJobBaseline = deepCopy(job);
+  resultSaveConflict = false;
+  deletedSegmentUndo = [];
+  document.querySelector('#result-draft-recovery').hidden = true;
+  document.querySelector('#undo-segment-delete').hidden = true;
+  setAlert(document.querySelector('#segment-delete-status'), '');
   currentJob.segments = Array.isArray(currentJob.segments) ? currentJob.segments : [];
   currentJob.speaker_names = currentJob.speaker_names || {};
   currentJob.session_profile = currentJob.session_profile || {};
@@ -4597,7 +4849,7 @@ function renderResult(job) {
   document.querySelector('#result-title').textContent = job.source_name || '確認・手動編集';
   const outputDirectory = document.querySelector('#result-output-dir');
   if (outputDirectory) {
-    outputDirectory.textContent = job.output_dir ? `実行フォルダー　${job.output_dir}` : '';
+    outputDirectory.textContent = job.output_dir ? `Gurumoji実行環境の出力フォルダー　${job.output_dir}（閲覧端末への保存はダウンロード操作で行います）` : '';
     outputDirectory.hidden = !job.output_dir;
   }
   renderDownloads(job.files);
@@ -4636,8 +4888,10 @@ function speakerLabels() {
 
 function displaySpeakerName(label) {
   const speakerLabel = String(label || 'UNKNOWN');
-  const profile = (currentJob && currentJob.speaker_profiles || {})[speakerLabel] || {};
-  return profile.display_name || (currentJob && currentJob.speaker_names || {})[speakerLabel] || fallbackSpeaker(speakerLabel);
+  const profiles = currentJob?.speaker_profiles || {}, names = currentJob?.speaker_names || {};
+  const profile = Object.hasOwn(profiles, speakerLabel) ? profiles[speakerLabel] : {};
+  const name = Object.hasOwn(names, speakerLabel) ? names[speakerLabel] : '';
+  return profile?.display_name || name || fallbackSpeaker(speakerLabel);
 }
 
 function renderSessionProfile() {
@@ -4708,26 +4962,66 @@ function captureSessionProfile() {
 }
 
 function speakerMetrics() {
-  const metrics = {};
-  let totalSeconds = 0;
-  (currentJob.segments || []).forEach(segment => {
+  const metrics = Object.create(null);
+  let totalSeconds = 0, missingTimeCount = 0;
+  const segments = currentJob.segments || [], timing = currentJob.segment_timings;
+  const ids = segments.map(segment => segment.id);
+  const timingBound = Array.isArray(timing) && timing.length === segments.length
+    && ids.every(id => typeof id === 'string' && id) && new Set(ids).size === ids.length
+    && timing.every((row, index) => row && typeof row === 'object' && !Array.isArray(row)
+      && ['segment_id', 'source_start', 'source_end', 'source_time_unknown', 'valid', 'start', 'end'].every(key => Object.hasOwn(row, key))
+      && row.segment_id === ids[index]);
+  // Python's existing false markers include empty JSON containers. Keep this
+  // finite compatibility rule local to measurement; the audio/evidence guard is separate.
+  const emptyMarkerKind = value => Array.isArray(value) && value.length === 0 ? 'array'
+    : value && Object.prototype.toString.call(value) === '[object Object]' && Object.keys(value).length === 0 ? 'object' : '';
+  const markerKnown = value => value == null || value === false || value === 0 || value === '' || Boolean(emptyMarkerKind(value));
+  const markerMatches = (left, right) => Object.is(left, right)
+    || Boolean(emptyMarkerKind(left) && emptyMarkerKind(left) === emptyMarkerKind(right));
+  const valid = row => row && markerKnown(row.time_unknown)
+    && analysisEvidenceTimeValid({start: row.start, end: row.end})
+    && row.start <= 31 * 86400 && row.end <= 31 * 86400;
+  segments.forEach((segment, index) => {
     const label = segment.speaker || 'UNKNOWN';
-    const duration = Math.max(0, Number(segment.end || 0) - Number(segment.start || 0));
-    const data = metrics[label] || {count: 0, seconds: 0, characters: 0};
+    const data = metrics[label] || {count: 0, timedCount: 0, missingTimeCount: 0, timedSeconds: 0, seconds: null, characters: 0};
     data.count += 1;
-    data.seconds += duration;
+    // Use the backend's Python-compatible conversion only while its raw binding matches.
+    // A local edit or malformed/stale projection falls back to the numeric measurement guard.
+    const projection = timingBound ? timing[index] : null;
+    const projected = projection && {start: projection.start, end: projection.end, time_unknown: segment.time_unknown};
+    const useProjection = projection?.valid === true
+      && Object.is(projection.source_start, segment.start ?? null)
+      && Object.is(projection.source_end, segment.end ?? null)
+      && markerMatches(projection.source_time_unknown, segment.time_unknown ?? null)
+      && (typeof segment.start !== 'number' || Object.is(segment.start, projection.start))
+      && (typeof segment.end !== 'number' || Object.is(segment.end, projection.end)) && valid(projected);
+    const measured = useProjection ? projected : segment;
+    // Participation's 31-day bound does not change the separate evidence/audio seek guard.
+    if (valid(measured)) {
+      const duration = measured.end - measured.start;
+      data.timedCount += 1;
+      data.timedSeconds += duration;
+      totalSeconds += duration;
+    } else {
+      data.missingTimeCount += 1;
+      missingTimeCount += 1;
+    }
     data.characters += String(segment.text || '').length;
     metrics[label] = data;
-    totalSeconds += duration;
   });
   Object.values(metrics).forEach(data => {
-    data.share = totalSeconds > 0 ? data.seconds / totalSeconds : 0;
+    data.seconds = data.timedCount && Number.isFinite(data.timedSeconds) ? data.timedSeconds : null;
+    data.share = missingTimeCount === 0 && Number.isFinite(totalSeconds) && totalSeconds > 0
+      ? data.seconds / totalSeconds : null;
   });
   return metrics;
 }
 
 function ensureConversationSpeakerProfiles() {
-  currentJob.speaker_profiles = currentJob.speaker_profiles || {};
+  // Speaker labels are literal user data, including Object prototype property names.
+  // Copy only own entries, preserving JSON keys while making subsequent writes safe.
+  currentJob.speaker_names = Object.assign(Object.create(null), currentJob.speaker_names || {});
+  currentJob.speaker_profiles = Object.assign(Object.create(null), currentJob.speaker_profiles || {});
   speakerLabels().forEach((label, index) => {
     currentJob.speaker_profiles[label] = {
       speaker_label: label,
@@ -4748,23 +5042,74 @@ function ensureConversationSpeakerProfiles() {
 }
 
 function conversationControl(type, value, options, onChange) {
+  const owner = currentJob, itemId = currentJobId;
+  const apply = () => {
+    if (!control.isConnected || currentJob !== owner || currentJobId !== itemId) return;
+    if (onChange(control.value) !== false) setCurrentJobDirty();
+  };
   const control = document.createElement(type === 'textarea' ? 'textarea' : type === 'select' ? 'select' : 'input');
   if (type === 'select') {
     Object.entries(options || {}).forEach(([optionValue, label]) => control.add(new Option(label, optionValue)));
     control.value = value || Object.keys(options || {})[0];
-    control.addEventListener('change', () => {
-      onChange(control.value);
-      setCurrentJobDirty();
-    });
+    control.addEventListener('change', apply);
   } else {
     if (type !== 'textarea') control.type = type === 'color' ? 'color' : 'text';
     control.value = value || '';
-    control.addEventListener('input', () => {
-      onChange(control.value);
-      setCurrentJobDirty();
-    });
+    control.addEventListener('input', apply);
   }
   return control;
+}
+
+function conversationRoleControl(profile, label, metrics, index) {
+  const owner = currentJob, itemId = currentJobId;
+  const container = document.createElement('div');
+  container.className = 'conversation-role-control';
+  const select = document.createElement('select');
+  Object.entries(speakerRoleLabels).forEach(([value, text]) => select.add(new Option(text, value)));
+  select.value = profile.session_role || 'participant';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = 'この会話の役割として設定';
+  const status = document.createElement('span');
+  status.className = 'conversation-role-status';
+  status.id = `conversation-role-status-${index}`;
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.textContent = ({
+    __proto__: null,
+    default: 'この会話では未設定（初期表示）',
+    legacy_unknown: '旧データ等：設定元不明',
+    registry: '話者管理から設定',
+    explicit: 'この会話で明示設定'
+  })[profile.session_role_source] || '旧データ等：設定元不明';
+  const describe = () => {
+    const displayName = (owner.speaker_profiles[label] || profile).display_name || fallbackSpeaker(label);
+    const name = `${displayName}（話者ID ${label}）`;
+    select.setAttribute('aria-label', `${name}の会話役割`);
+    button.setAttribute('aria-label', `${name}の役割を「${speakerRoleLabels[select.value] || select.value}」としてこの会話に設定`);
+  };
+  for (const control of [select, button]) control.setAttribute('aria-describedby', `${status.id} conversation-role-help`);
+  const applyRole = () => {
+    // Detached controls and responses from an older editor cannot edit another item.
+    if (!container.isConnected || currentJob !== owner || currentJobId !== itemId) return;
+    // Normal save normalization replaces profiles while this editor stays mounted.
+    const activeProfile = currentJob.speaker_profiles[label];
+    if (!activeProfile) return;
+    describe();
+    if (activeProfile.session_role === select.value && activeProfile.session_role_source === 'explicit') return;
+    activeProfile.session_role = select.value;
+    activeProfile.session_role_source = 'explicit';
+    setCurrentJobDirty();
+    status.textContent = `「${speakerRoleLabels[select.value] || select.value}」をこの会話の役割に設定しました。まだ保存されていません`;
+    renderSpeakerInsights(metrics);
+  };
+  select.addEventListener('change', applyRole);
+  button.addEventListener('click', applyRole);
+  describe();
+  // Rename labels without dispatching a role change or certifying its provenance.
+  container.refreshAccessibleName = describe;
+  container.append(select, button, status);
+  return container;
 }
 
 function renderSpeakerInsights(metrics) {
@@ -4782,26 +5127,43 @@ function renderSpeakerInsights(metrics) {
     container.append(chip);
   };
   add(`話者 ${profiles.length}人`);
+  const uncertainRoleCount = profiles.filter(profile => !['explicit', 'registry'].includes(profile.session_role_source)).length;
+  const provisional = uncertainRoleCount > 0;
+  if (provisional) add(`役割未設定・記録元不明 ${uncertainRoleCount}人（役割別人数は仮集計）`, 'warning');
+  if (!Object.keys(metrics).length) add('発話なし');
   if (sessionType === 'focus_group') {
     const participants = profiles.filter(profile => profile.session_role === 'participant');
     const moderators = profiles.filter(profile => ['moderator', 'facilitator', 'assistant_moderator'].includes(profile.session_role));
     const observers = profiles.filter(profile => ['observer', 'note_taker'].includes(profile.session_role));
-    add(`参加者 ${participants.length}人`, participants.length >= 6 && participants.length <= 8 ? '' : 'warning');
-    add(moderatorCountText(moderators.length), moderators.length ? '' : 'error');
-    add(`観察・記録 ${observers.length}人`, observers.length ? '' : 'warning');
+    add(`参加者${provisional ? '（仮）' : ''} ${participants.length}人`, !provisional && participants.length >= 6 && participants.length <= 8 ? '' : 'warning');
+    add(provisional ? `司会・進行（仮） ${moderators.length}人` : moderatorCountText(moderators.length), provisional ? 'warning' : moderators.length ? '' : 'error');
+    add(`観察・記録${provisional ? '（仮）' : ''} ${observers.length}人`, observers.length ? '' : 'warning');
+    const participantTimeMissing = participants.some(profile => (metrics[profile.speaker_label]?.missingTimeCount || 0) > 0);
     const participantSeconds = participants.reduce((sum, profile) => (
-      sum + Number((metrics[profile.speaker_label] || {}).seconds || 0)
+      sum + (metrics[profile.speaker_label]?.timedSeconds || 0)
     ), 0);
-    const dominant = participants.find(profile => (
-      participantSeconds > 0
-      && Number((metrics[profile.speaker_label] || {}).seconds || 0) / participantSeconds >= 0.5
-    ));
-    if (dominant) add(`${dominant.display_name || dominant.speaker_label} の発言が参加者内50%以上`, 'warning');
+    const participantTurnCount = participants.reduce((sum, profile) => sum + (metrics[profile.speaker_label]?.count || 0), 0);
+    if (provisional) {
+      add('役割未設定・記録元不明の話者がいるため、参加者内の割合は判定できません', 'warning');
+    } else if (participants.length && !participantTurnCount) {
+      add('参加者の発話なし');
+    } else if (participantTimeMissing) {
+      add('参加者の時刻不明があるため、発言時間の割合は判定できません', 'warning');
+    } else if (participants.length && participantSeconds === 0) {
+      add('参加者の総時間が0秒のため、発言時間の割合は判定できません');
+    } else if (!Number.isFinite(participantSeconds)) {
+      add('参加者の総時間を算出できないため、発言時間の割合は判定できません', 'warning');
+    } else {
+      const dominant = participants.find(profile => (
+        participantSeconds > 0 && (metrics[profile.speaker_label]?.seconds || 0) / participantSeconds >= 0.5
+      ));
+      if (dominant) add(`${dominant.display_name || dominant.speaker_label} の発言が参加者内50%以上`, 'warning');
+    }
   } else if (sessionType === 'meeting') {
     const leaders = profiles.filter(profile => ['chair', 'facilitator', 'moderator'].includes(profile.session_role));
-    add(`進行・議長 ${leaders.length}人`, leaders.length ? '' : 'warning');
+    add(`進行・議長${provisional ? '（仮）' : ''} ${leaders.length}人`, leaders.length ? '' : 'warning');
     const decisionMakers = profiles.filter(profile => profile.session_role === 'decision_maker');
-    if (decisionMakers.length) add(`意思決定者 ${decisionMakers.length}人`);
+    if (decisionMakers.length) add(`意思決定者${provisional ? '（仮）' : ''} ${decisionMakers.length}人`);
   }
 }
 
@@ -4809,9 +5171,11 @@ function moderatorCountText(count) {
   return `司会・進行 ${count}人`;
 }
 
-function renderSpeakerEditor() {
+function renderSpeakerEditor({focusSpeakerLabel = '', focusField = ''} = {}) {
   speakerEditor.replaceChildren();
   if (!currentJob) return;
+  const owner = currentJob, itemId = currentJobId;
+  let focusTarget = null;
   captureSessionProfile();
   ensureConversationSpeakerProfiles();
   const labels = speakerLabels();
@@ -4824,34 +5188,60 @@ function renderSpeakerEditor() {
     speakerEditor.append(note);
     return;
   }
+  const roleHelp = document.createElement('p');
+  roleHelp.id = 'conversation-role-help';
+  roleHelp.className = 'muted';
+  roleHelp.textContent = '変更は「保存」で反映します。分析準備で記録した発話別の役割がある場合は、そちらを優先します。「登録済み」は人物の登録状態で、会話役割の設定状態とは別です。';
+  speakerEditor.append(roleHelp);
   const table = document.createElement('table');
   table.className = 'conversation-speaker-sheet';
   const head = document.createElement('thead');
   head.innerHTML = '<tr><th>音声話者</th><th>表示名</th><th>テーマカラー</th><th>話者登録</th><th>グローバル話者</th><th>会話役割</th><th>組織</th><th>部署</th><th>役職</th><th>参加状態</th><th>会話固有条件</th><th>メモ</th><th>発言量</th></tr>';
   table.append(head);
   const body = document.createElement('tbody');
-  labels.forEach(label => {
+  labels.forEach((label, index) => {
     const profile = currentJob.speaker_profiles[label];
     const row = document.createElement('tr');
+    const activeProfile = () => currentJob === owner && currentJobId === itemId && row.isConnected
+      ? currentJob.speaker_profiles[label] : null;
+    const fieldNames = {display_name: '表示名', theme_color: 'テーマカラー', global_speaker_id: 'グローバル話者',
+      organization: '組織', department: '部署', job_title: '役職', attendance_status: '参加状態', conditions: '会話固有条件', notes: 'メモ'};
+    const namedControls = [];
+    const nameControl = (control, field) => {
+      control.dataset.speakerLabel = label;
+      control.dataset.speakerField = field;
+      namedControls.push([control, field]);
+      if (label === focusSpeakerLabel && field === focusField) focusTarget = control;
+      return control;
+    };
+    const refreshNames = () => {
+      const name = (owner.speaker_profiles[label] || profile).display_name || fallbackSpeaker(label);
+      namedControls.forEach(([control, field]) => control.setAttribute('aria-label', `${name}（話者ID ${label}）の${fieldNames[field]}`));
+      roleControl.refreshAccessibleName();
+    };
     const labelCell = document.createElement('td');
     labelCell.className = 'speaker-label-cell';
     labelCell.textContent = displaySpeakerName(label);
     labelCell.title = `話者ID: ${label}`;
     row.append(labelCell);
     const displayName = conversationControl('input', profile.display_name || currentJob.speaker_names[label], null, value => {
-      profile.display_name = value.trim();
+      const targetProfile = activeProfile();
+      if (!targetProfile) return false;
+      targetProfile.display_name = value.trim();
       currentJob.speaker_names[label] = value.trim();
+      refreshNames();
       updateSpeakerBadges();
     });
     displayName.placeholder = fallbackSpeaker(label);
-    appendSheetCell(row, displayName);
+    appendSheetCell(row, nameControl(displayName, 'display_name'));
     const themeColor = conversationControl('color', profile.theme_color, null, value => {
-      profile.theme_color = value.toUpperCase();
+      const targetProfile = activeProfile();
+      if (!targetProfile) return false;
+      targetProfile.theme_color = value.toUpperCase();
       updateSpeakerBadges();
     });
     themeColor.className = 'speaker-theme-color';
-    themeColor.setAttribute('aria-label', `${displayName.value || fallbackSpeaker(label)}のテーマカラー`);
-    appendSheetCell(row, themeColor);
+    appendSheetCell(row, nameControl(themeColor, 'theme_color'));
 
     const globalSelect = document.createElement('select');
     globalSelect.add(new Option('未連携', ''));
@@ -4865,12 +5255,16 @@ function renderSpeakerEditor() {
     }
     globalSelect.value = profile.global_speaker_id || '';
     globalSelect.addEventListener('change', () => {
+      const profile = activeProfile();
+      if (!profile) return;
+      const restoreFocus = document.activeElement === globalSelect;
       profile.global_speaker_id = globalSelect.value;
       const record = speakerRegistry.find(item => item.id === globalSelect.value);
       if (record) {
         profile.registration_status = 'registered';
         profile.display_name = record.pseudonym || record.display_name || record.participant_code;
         profile.session_role = record.default_role || 'participant';
+        profile.session_role_source = 'registry';
         profile.organization = record.organization || '';
         profile.department = record.department || '';
         profile.job_title = record.job_title || '';
@@ -4879,7 +5273,7 @@ function renderSpeakerEditor() {
       } else {
         profile.registration_status = profile.display_name ? 'temporary_single_group' : 'unidentified';
       }
-      renderSpeakerEditor();
+      renderSpeakerEditor(restoreFocus ? {focusSpeakerLabel: label, focusField: 'global_speaker_id'} : {});
       updateSpeakerBadges();
       setCurrentJobDirty();
     });
@@ -4894,26 +5288,37 @@ function renderSpeakerEditor() {
         ? '一時話者（この会話のみ）'
         : '未特定';
     appendSheetCell(row, registration);
-    appendSheetCell(row, globalSelect);
-    appendSheetCell(row, conversationControl('select', profile.session_role, speakerRoleLabels, value => {
-      profile.session_role = value;
-      renderSpeakerInsights(metrics);
-    }));
-    ['organization', 'department', 'job_title'].forEach(key => {
-      appendSheetCell(row, conversationControl('input', profile[key], null, value => { profile[key] = value; }));
-    });
-    appendSheetCell(row, conversationControl('select', profile.attendance_status, attendanceLabels, value => { profile.attendance_status = value; }));
-    appendSheetCell(row, conversationControl('textarea', profile.conditions, null, value => { profile.conditions = value; }));
-    appendSheetCell(row, conversationControl('textarea', profile.notes, null, value => { profile.notes = value; }));
-    const metric = metrics[label] || {count: 0, seconds: 0, share: 0};
+    appendSheetCell(row, nameControl(globalSelect, 'global_speaker_id'));
+    const roleControl = conversationRoleControl(profile, label, metrics, index);
+    appendSheetCell(row, roleControl);
+    const addProfileControl = (type, key, options = null) => {
+      const control = conversationControl(type, profile[key], options, value => {
+        const targetProfile = activeProfile();
+        if (!targetProfile) return false;
+        targetProfile[key] = value;
+      });
+      appendSheetCell(row, nameControl(control, key));
+    };
+    ['organization', 'department', 'job_title'].forEach(key => addProfileControl('input', key));
+    addProfileControl('select', 'attendance_status', attendanceLabels);
+    addProfileControl('textarea', 'conditions');
+    addProfileControl('textarea', 'notes');
+    refreshNames();
+    const metric = metrics[label];
     const metricCell = document.createElement('td');
     metricCell.className = 'speaker-metric-cell';
-    metricCell.textContent = `${metric.count}回 / ${formatTime(metric.seconds)} / ${(metric.share * 100).toFixed(1)}%`;
+    const timeText = !metric.timedCount ? `時刻不明${metric.missingTimeCount}件`
+      : metric.seconds === null ? '時間を算出できません'
+      : metric.missingTimeCount ? `時刻あり${formatTime(metric.seconds)}（${metric.timedCount}/${metric.count}発話、時刻不明${metric.missingTimeCount}発話）`
+      : formatTime(metric.seconds);
+    const shareText = metric.share === null ? '割合は算出不可' : `${(metric.share * 100).toFixed(1)}%`;
+    metricCell.textContent = `${metric.count}回 / ${timeText} / ${shareText}`;
     row.append(metricCell);
     body.append(row);
   });
   table.append(body);
   speakerEditor.append(table);
+  if (currentJob === owner && currentJobId === itemId && focusTarget?.isConnected) focusTarget.focus();
 }
 
 [
@@ -5047,7 +5452,33 @@ function createField(labelText, control) {
   return label;
 }
 
+function selectSegmentForEdit(segmentId, {focus = false} = {}) {
+  selectedSegmentId = segmentId;
+  document.querySelectorAll('.segment').forEach(row => {
+    const selected = row.dataset.segmentId === segmentId;
+    row.classList.toggle('selected', selected);
+    row.querySelector('.segment-edit')?.setAttribute('aria-expanded', String(selected));
+    if (selected && focus) row.querySelector('textarea')?.focus();
+  });
+}
+
+function undoSegmentDeletion() {
+  const undo = deletedSegmentUndo.pop();
+  if (!undo || undo.itemId !== currentJobId) return;
+  currentJob.segments.splice(Math.min(undo.index, currentJob.segments.length), 0, undo.segment);
+  selectedSegmentId = undo.segment.id;
+  setCurrentJobDirty(); renderSpeakerEditor(); updateSegmentFilterOptions(); renderSegments();
+  selectSegmentForEdit(undo.segment.id, {focus: true});
+  setAlert(document.querySelector('#segment-delete-status'), '削除した発話を元に戻しました');
+  document.querySelector('#undo-segment-delete').hidden = !deletedSegmentUndo.length;
+}
+listen(document.querySelector('#undo-segment-delete'), 'click', undoSegmentDeletion);
+
 function renderSegments() {
+  const active = document.activeElement;
+  const focusId = active?.closest?.('.segment')?.dataset.segmentId;
+  const focusField = active?.dataset.segmentField;
+  const selection = typeof active?.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   renderJevComparisonSummary();
   segmentEditor.replaceChildren();
   const values = visibleSegments();
@@ -5059,7 +5490,7 @@ function renderSegments() {
     segmentEditor.append(empty);
     return;
   }
-  values.forEach(segment => {
+  values.forEach((segment, index) => {
     const row = document.createElement('article');
     row.className = `segment${segment.id === selectedSegmentId ? ' selected' : ''}`;
     row.dataset.segmentId = segment.id;
@@ -5100,11 +5531,20 @@ function renderSegments() {
     play.textContent = currentJob.media_url ? '▶ 前後を再生' : '元メディアなし';
     play.disabled = !currentJob.media_url;
     play.addEventListener('click', () => playSegment(segment.id));
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'segment-edit';
+    edit.textContent = '発話を編集';
+    edit.setAttribute('aria-label', `${speaker.textContent} ${formatTime(segment.start)}の発話を編集`);
+    edit.setAttribute('aria-expanded', String(segment.id === selectedSegmentId));
+    edit.setAttribute('aria-controls', `segment-edit-body-${index}`);
+    edit.addEventListener('click', () => selectSegmentForEdit(segment.id, {focus: true}));
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'segment-delete';
     remove.textContent = '発話を削除';
     remove.addEventListener('click', () => {
+      deletedSegmentUndo.push({itemId: currentJobId, index: currentJob.segments.findIndex(item => item.id === segment.id), segment: deepCopy(segment)});
       currentJob.segments = currentJob.segments.filter(item => item.id !== segment.id);
       if (selectedSegmentId === segment.id) selectedSegmentId = null;
       setCurrentJobDirty();
@@ -5112,27 +5552,38 @@ function renderSegments() {
       updateSegmentFilterOptions();
       renderSegments();
     });
-    meta.append(play, remove);
+    remove.addEventListener('click', () => {
+      setAlert(document.querySelector('#segment-delete-status'), '発話を削除しました。保存するまでは元に戻せます');
+      const undo = document.querySelector('#undo-segment-delete');
+      undo.hidden = false; undo.focus();
+    });
+    meta.append(edit, play, remove);
 
     const body = document.createElement('div');
     body.className = 'segment-body';
+    body.id = `segment-edit-body-${index}`;
     const fields = document.createElement('div');
     fields.className = 'segment-fields';
     const start = document.createElement('input');
+    start.dataset.segmentField = 'start';
     start.type = 'number'; start.min = '0'; start.step = '0.01'; start.value = Number(segment.start || 0).toFixed(2);
     start.addEventListener('change', () => {
       segment.start = Math.max(0, Number(start.value) || 0);
       setCurrentJobDirty();
+      renderSpeakerEditor();
       renderSegments();
     });
     const end = document.createElement('input');
+    end.dataset.segmentField = 'end';
     end.type = 'number'; end.min = '0'; end.step = '0.01'; end.value = Number(segment.end || 0).toFixed(2);
     end.addEventListener('change', () => {
       segment.end = Math.max(0, Number(end.value) || 0);
       setCurrentJobDirty();
+      renderSpeakerEditor();
       renderSegments();
     });
     const speakerInput = document.createElement('select');
+    speakerInput.dataset.segmentField = 'speaker';
     speakerLabels().forEach(label => speakerInput.add(new Option(displaySpeakerName(label), label)));
     speakerInput.value = segment.speaker || 'UNKNOWN';
     speakerInput.addEventListener('change', () => {
@@ -5143,6 +5594,7 @@ function renderSegments() {
       renderSegments();
     });
     const emotionSelect = document.createElement('select');
+    emotionSelect.dataset.segmentField = 'emotion';
     [['', '未設定'], ['neu', '平常'], ['hap', '喜び'], ['ang', '怒り'], ['sad', '悲しみ']].forEach(([value, label]) => emotionSelect.add(new Option(label, value)));
     emotionSelect.value = kushinadaEmotion(segment);
     emotionSelect.addEventListener('change', () => {
@@ -5159,6 +5611,7 @@ function renderSegments() {
     });
     fields.append(createField('開始（秒）', start), createField('話者', speakerInput), createField('終了（秒）', end), createField('くしなだ感情', emotionSelect));
     const textarea = document.createElement('textarea');
+    textarea.dataset.segmentField = 'text';
     textarea.value = segment.text || '';
     textarea.setAttribute('aria-label', `${speaker.textContent}の発話`);
     const textPreview = document.createElement('p');
@@ -5220,10 +5673,7 @@ function renderSegments() {
 
       // 行またはテキストエリアをクリックしたら選択行として展開
       if (selectedSegmentId !== segment.id) {
-        selectedSegmentId = segment.id;
-        document.querySelectorAll('.segment').forEach(item => {
-          item.classList.toggle('selected', item.dataset.segmentId === segment.id);
-        });
+        selectSegmentForEdit(segment.id);
       }
       // テキストエリア・入力欄自体のクリックでなければメディア再生も連動
       if (!event.target.closest('textarea, input') && currentJob.media_url) {
@@ -5232,6 +5682,11 @@ function renderSegments() {
     });
     segmentEditor.append(row);
   });
+  if (focusId && focusField) {
+    const row = [...segmentEditor.querySelectorAll('.segment')].find(item => item.dataset.segmentId === focusId);
+    const control = row?.querySelector(`[data-segment-field="${focusField}"]`);
+    if (control) { control.focus(); if (selection && control.setSelectionRange) control.setSelectionRange(...selection); }
+  }
 }
 
 function updateSpeakerBadges() {
@@ -5310,6 +5765,7 @@ listen(document.querySelector('#add-segment-button'), 'click', () => {
   if (!currentJob) return;
   const lastEnd = currentJob.segments.reduce((value, segment) => Math.max(value, Number(segment.end || 0)), 0);
   const id = self.crypto && self.crypto.randomUUID ? self.crypto.randomUUID().replaceAll('-', '') : `new_${Date.now()}`;
+  selectedSegmentId = id;
   currentJob.segments.push({id, start: lastEnd, end: lastEnd + 1, speaker: speakerLabels()[0] || 'SPEAKER_00', text: '', emotions: {}, kushinada_label: ''});
   setCurrentJobDirty();
   document.querySelector('#segment-keyword').value = '';
@@ -5337,7 +5793,7 @@ function playSegment(segmentId) {
   mediaPlayer.currentTime = start;
   const promise = mediaPlayer.play();
   if (promise) promise.catch(() => {});
-  document.querySelectorAll('.segment').forEach(row => row.classList.toggle('selected', row.dataset.segmentId === segmentId));
+  selectSegmentForEdit(segmentId);
   mediaReview.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
@@ -5378,7 +5834,7 @@ listen(document.querySelector('#obsidian-finishing-button'), 'click', async () =
     });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '作業ノートを開けませんでした。');
-    setAlert(message, '作業ノートを用意しました。Gurumojiを起動したまま操作してください。 ');
+    setAlert(message, 'Gurumoji実行環境に作業ノートを用意しました。リンクは閲覧端末のObsidianで開きます。同じVaultへアクセスできる端末で利用してください。開けない場合は『ファイル・管理』から出力をダウンロードできます。Gurumojiは起動したままにしてください。 ');
     const link = document.createElement('a');
     link.href = data.uri;
     link.textContent = 'Obsidianで操作ノートを開く';
@@ -5391,7 +5847,7 @@ listen(document.querySelector('#obsidian-finishing-button'), 'click', async () =
 });
 
 listen(saveButton, 'click', async () => {
-  if (!currentJobId || !currentJob) return;
+  if (!currentJobId || !currentJob || saveButton.disabled) return;
   const message = document.querySelector('#save-message');
   setAlert(message, '');
   saveButton.disabled = true;
@@ -5402,6 +5858,9 @@ listen(saveButton, 'click', async () => {
   captureSessionProfile();
   ensureConversationSpeakerProfiles();
   const savedItemId = currentJobId;
+  const savedJob = currentJob, savedNavigation = resultRequestSequence;
+  const ownsSave = () => currentJob === savedJob && currentJobId === savedItemId
+    && resultRequestSequence === savedNavigation;
   const saveGeneration = currentJobMutationGeneration;
   try {
     const response = await apiFetch(`/api/library/${savedItemId}`, {
@@ -5416,14 +5875,16 @@ listen(saveButton, 'click', async () => {
       })
     });
     const data = await readJsonResponse(response);
+    if (!ownsSave()) return;
     if (!response.ok) {
       const fallback = response.status === 409
-        ? '別の画面または処理でデータが更新されています。未保存内容を控えてから再読み込みしてください。'
+        ? '別の画面または処理でデータが更新されています。未保存内容をJSONで退避してから再読み込みしてください。'
         : '保存できませんでした。';
       const revisionDetail = response.status === 409 && Number.isFinite(Number(data.current_revision))
         ? `（現在のリビジョン: ${Number(data.current_revision)}）`
         : '';
-      throw new Error(`${data.error || fallback}${revisionDetail}`);
+      if (response.status === 409) { resultSaveConflict = true; showDraftRecovery('transcript'); }
+      throw new Error(`${response.status === 409 ? fallback : (data.error || fallback)}${revisionDetail}`);
     }
     const hasLaterChanges = currentJobId === savedItemId
       && currentJobMutationGeneration !== saveGeneration;
@@ -5445,10 +5906,11 @@ listen(saveButton, 'click', async () => {
     setAlert(document.querySelector('#save-message'), `編集内容と出力ファイルを保存しました。${learning}${warning}${laterChangeNotice}`, Boolean(warning || hasLaterChanges));
     loadTrainingStatus();
   } catch (error) {
+    if (!ownsSave()) return;
     setCurrentJobDirty(true, false);
     setAlert(message, error.message, true);
   } finally {
-    saveButton.disabled = false;
+    if (ownsSave()) saveButton.disabled = false;
   }
 });
 
@@ -5483,8 +5945,32 @@ function boundedAnalysisPercent(value) {
 }
 
 function analysisNumberText(value, digits = 1, suffix = '') {
+  if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : '—';
+}
+
+function analysisEndpointText(value, timed, missing) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean'
+      || !Number.isFinite(Number(value)) || Number(value) < 0) {
+    return missing > 0 ? `時刻不明${missing}発話` : '時刻不明';
+  }
+  const coverage = Number.isInteger(timed) && Number.isInteger(missing)
+    ? `（時刻あり${timed}/${timed + missing}発話${missing ? `、時刻不明${missing}発話` : ''}）` : '';
+  return `${formatTime(value)}${coverage}`;
+}
+
+function analysisObservedTimeText(metric, key = 'speaking_seconds', formatter = formatTime) {
+  const value = metric?.[key];
+  const missing = Number.isInteger(metric?.missing_time_turn_count) ? metric.missing_time_turn_count : null;
+  const timed = Number.isInteger(metric?.timed_turn_count) ? metric.timed_turn_count : null;
+  if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) || Number(value) < 0) {
+    if (metric?.role_aggregation_status === 'mixed') return '役割混在で算出不可';
+    return missing > 0 ? `時刻不明${missing}発話` : '時刻不明';
+  }
+  const text = formatter(value);
+  return missing > 0 && timed !== null
+    ? `時刻あり${text}（${timed}/${timed + missing}発話、時刻不明${missing}発話）` : text;
 }
 
 function analysisExportLink(label, dataset, className = 'analysis-export-link') {
@@ -5557,7 +6043,7 @@ function updateAnalysisTarget() {
   if (openButton) openButton.hidden = !selected;
   if (meta) {
     meta.textContent = selected
-      ? `発話 ${selected.segment_count || 0}件 / ${formatTime(selected.duration || 0)} / 更新 ${formatDate(selected.updated_at)}`
+      ? `発話 ${selected.segment_count || 0}件 / 最終時刻 ${analysisEndpointText(selected.duration, selected.timed_turn_count, selected.missing_time_turn_count)} / 更新 ${formatDate(selected.updated_at)}`
       : '処理済みデータを選択してください';
   }
   const exportLink = document.querySelector('#analysis-json-export');
@@ -5635,9 +6121,19 @@ async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} 
       return;
     }
   }
+  const closedFixedViewer = typeof closeFixedAnalysisViewer === 'function' && closeFixedAnalysisViewer();
+  const closedAnalysisDialog = typeof closeAnalysisExecutionDialog === 'function' && closeAnalysisExecutionDialog();
+  if ((closedFixedViewer || closedAnalysisDialog) && analysisItemSelect?.isConnected && !analysisItemSelect.closest('[hidden]')) analysisItemSelect.focus();
   if (analysisRequestController) analysisRequestController.abort();
   analysisRequestController = new AbortController();
+  analysisNavigationGeneration += 1;
+  // The former view's request may finish, but it no longer owns these controls.
+  analysisSaveOwner = null;
+  analysisSaveInProgress = false;
+  analysisTermRunRequested = false;
   const requestId = ++analysisRequestSequence;
+  const executionView = document.querySelector('#analysis-execution-view');
+  if (executionView) executionView.hidden = true;
   analysisState.itemId = nextId;
   analysisState.data = null;
   if (analysisItemSelect) analysisItemSelect.value = nextId;
@@ -5868,14 +6364,16 @@ function appendResearchAnalysis(grid, compact) {
     const table = analysisElement('table', 'analysis-table');
     const head = analysisElement('thead');
     const headRow = analysisElement('tr');
-    ['変数', 'N', '平均', '標準偏差', '中央値', '最小', '最大'].forEach(value => headRow.append(analysisElement('th', '', value)));
+    ['変数', '分析単位・測定単位', 'N', '欠測', '平均', '標準偏差', '中央値', '最小', '最大'].forEach(value => headRow.append(analysisElement('th', '', value)));
     head.append(headRow);
     const body = analysisElement('tbody');
     descriptives.forEach(item => {
       const row = analysisElement('tr');
       row.append(
         analysisElement('td', '', item.label || item.variable),
+        analysisElement('td', '', `${item.analysis_unit || statistics.analysis_unit || '発話'} / ${item.unit || '—'}`),
         analysisElement('td', '', item.n || 0),
+        analysisElement('td', '', item.missing ?? '—'),
         analysisElement('td', '', analysisNumberText(item.mean, 3)),
         analysisElement('td', '', analysisNumberText(item.standard_deviation, 3)),
         analysisElement('td', '', analysisNumberText(item.median, 3)),
@@ -5909,9 +6407,17 @@ function appendResearchAnalysis(grid, compact) {
     selectedTerms.slice(0, compact ? 8 : 20).forEach(term => {
       const columnVariable = `selected_term:${term}`;
       const rows = crosstabs.filter(item => item.column_variable === columnVariable);
-      const test = tests.find(item => item.family === 'クロス集計' && item.outcome_label === `単語「${term}」`);
+      const test = tests.find(item => item.family === 'クロス集計' && (item.term === term || item.outcome === rows[0]?.table_id || item.outcome === columnVariable));
+      const matchMode = rows[0]?.match_mode || statistics.crosstab_match_mode || 'normalized';
       const article = analysisElement('article', 'analysis-selected-term-result');
-      article.append(analysisElement('h4', '', `「${term}」 × ${statistics.group_variable === 'role' ? '役割' : '話者'}`));
+      article.append(analysisElement('h4', '', `「${term}」 × ${statistics.group_variable === 'role' ? '役割' : '話者'} / ${analysisMatchModeLabel(matchMode)}`));
+      const evidence = analysisElement('button', 'secondary-button', '同じ一致条件で文脈を確認');
+      evidence.type = 'button';
+      evidence.addEventListener('click', () => {
+        selectAnalysisPage('content');
+        if (typeof runKwicSearch === 'function') runKwicSearch({query: term, matchMode, offset: 0});
+      });
+      article.append(evidence);
       if (rows.length) {
         const wrap = analysisElement('div', 'analysis-table-wrap');
         const table = analysisElement('table', 'analysis-table');
@@ -5938,8 +6444,8 @@ function appendResearchAnalysis(grid, compact) {
       if (test && test.status === 'computed') {
         article.append(analysisElement(
           'p',
-          test.significant_0_05 ? 'analysis-term-test-summary significant' : 'analysis-term-test-summary',
-          `Pearson χ²(${test.df1}) = ${analysisNumberText(test.statistic, 3)}, p ${analysisPValueText(test.p_value)}, Cramér's V = ${analysisNumberText(test.effect_size, 3)}, N = ${test.n || 0}`
+          'analysis-term-test-summary',
+          `Pearson χ²(${test.df1}) = ${analysisNumberText(test.statistic, 3)}, ${analysisPValueText(test.p_value)}, Cramér's V = ${analysisNumberText(test.effect_size, 3)}, N = ${test.n || 0}`
         ));
       } else {
         article.append(analysisElement('p', 'analysis-term-test-summary unavailable', '比較群または「あり／なし」の一方が不足しているため検定は未計算です。'));
@@ -5962,15 +6468,17 @@ function appendResearchAnalysis(grid, compact) {
     const table = analysisElement('table', 'analysis-table analysis-stat-table');
     const head = analysisElement('thead');
     const headRow = analysisElement('tr');
-    ['検定', '対象', 'N', '統計量', 'p値', '効果量'].forEach(value => headRow.append(analysisElement('th', '', value)));
+    ['検定', '対象', '分析単位・測定単位', 'N', '欠測', '統計量', 'p値（未補正）', '効果量'].forEach(value => headRow.append(analysisElement('th', '', value)));
     head.append(headRow);
     const body = analysisElement('tbody');
     computedTests.slice(0, compact ? 10 : 24).forEach(item => {
-      const row = analysisElement('tr', item.significant_0_05 ? 'analysis-stat-significant' : '');
+      const row = analysisElement('tr');
       row.append(
         analysisElement('td', '', item.test),
         analysisElement('td', '', item.outcome_label || item.outcome),
+        analysisElement('td', '', `${item.analysis_unit || '発話'} / ${item.unit || '—'}`),
         analysisElement('td', '', item.n || 0),
+        analysisElement('td', '', item.missing ?? '—'),
         analysisElement('td', '', analysisNumberText(item.statistic, 3)),
         analysisElement('td', '', analysisPValueText(item.p_value)),
         analysisElement('td', '', item.effect_name ? `${item.effect_name} = ${analysisNumberText(item.effect_size, 3)}` : '—')
@@ -5983,7 +6491,7 @@ function appendResearchAnalysis(grid, compact) {
     testsPanel.body.append(details);
   } else testsPanel.body.append(analysisElement('p', 'analysis-no-data', '比較群または標本数が不足しているため、推測統計を計算していません。'));
   const unavailableCount = tests.filter(item => item.status !== 'computed').length;
-  testsPanel.body.append(analysisElement('p', 'analysis-caption', `発話の独立性を仮定しにくいため探索的な値です。p値だけで結論を出さず、効果量・標本数・前提条件を確認してください。未計算 ${unavailableCount}件。`));
+  testsPanel.body.append(analysisElement('p', 'analysis-caption', `発話単位の探索的検定・p値は多重検定未補正です。同じ話者の発話は独立ではない可能性があります。p値だけで結論を出さず、効果量・標本数・欠測と前提条件を確認してください。未計算 ${unavailableCount}件。`));
   grid.append(testsPanel.panel);
 
   const crosstabsPanel = analysisCardPanel('項目の組み合わせ比較（クロス集計）', 'automatic', 'crosstabs', true, 'group_statistics');
@@ -6022,6 +6530,10 @@ function appendResearchAnalysis(grid, compact) {
     '標準出力のExcel、再分析用CSV、手法と限界をまとめています。論文利用前に原文・欠損・解析器の状態を確認してください。'
   ));
 
+  const rowLimits = (analysisState.data?.research || {}).row_limits || {};
+  const truncatedRows = Object.entries(rowLimits).filter(([, value]) => value.truncated);
+  if (truncatedRows.length) grid.append(analysisElement('p', 'analysis-limit-note', `画面用プレビュー: ${truncatedRows.map(([key, value]) => `${key} ${value.returned_rows}/${value.total_rows}行`).join('、')}。全件はCSV/Excel出力で確認してください。`));
+  if (coverage.cooccurrence_truncated) grid.append(analysisElement('p', 'analysis-limit-note', `共起の候補集合: 上位${coverage.cooccurrence_top_terms}語 / 最小${coverage.cooccurrence_min_count}発話。共起行 ${coverage.cooccurrence_returned_rows}/${coverage.cooccurrence_total_rows}件。候補制限により会話全体の全関係を表しません。`));
   grid.append(analysisExportDirectory('研究分析データの出力', 'automatic', [
     ['xlsx', 'Excelブック（標準出力）'],
     ['transformer_topics', 'Transformerテーマ CSV'],
@@ -6093,9 +6605,18 @@ function buildAnalysisScopeSwitch() {
   return switcher;
 }
 
+function analysisSpeakerRoleText(metric) {
+  const label = role => Object.hasOwn(speakerRoleLabels, role) ? speakerRoleLabels[role] : String(role || '役割未設定');
+  if (metric?.role_status === 'mixed') {
+    const roles = Array.isArray(metric.observed_roles) ? metric.observed_roles.map(label).join('・') : '';
+    return roles ? `役割混在（${roles}）` : '役割混在';
+  }
+  return label(metric?.role);
+}
+
 function analysisSpeakerAttributeValue(metric, key) {
   const profile = metric && typeof metric.profile === 'object' ? metric.profile : {};
-  if (key === 'role') return speakerRoleLabels[metric.role] || metric.role || '';
+  if (key === 'role') return analysisSpeakerRoleText(metric);
   if (key === 'tags') return (Array.isArray(profile.tags) ? profile.tags : []).join('・');
   if (key.startsWith('custom:')) {
     const attributes = profile.attributes && typeof profile.attributes === 'object' ? profile.attributes : {};
@@ -6152,7 +6673,8 @@ function sortedAnalysisSpeakers(speakers, sortKey) {
       return valueA.localeCompare(valueB, 'ja', {numeric: true, sensitivity: 'base'}) || nameCompare(a, b);
     });
   }
-  return values.sort((a, b) => Number(b.speaking_seconds || 0) - Number(a.speaking_seconds || 0) || nameCompare(a, b));
+  return values.sort((a, b) => Number(a.speaking_seconds == null) - Number(b.speaking_seconds == null)
+    || Number(b.speaking_seconds || 0) - Number(a.speaking_seconds || 0) || nameCompare(a, b));
 }
 
 function buildAnalysisSpeakerTimelineChart(metric, bins) {
@@ -6162,6 +6684,10 @@ function buildAnalysisSpeakerTimelineChart(metric, bins) {
     analysisElement('strong', '', `${metric.speaker_name || metric.speaker}の発話タイミング`),
     analysisElement('span', '', '各時間帯にこの話者が発話した秒数を示します。')
   );
+  if (metric.timed_turn_count === 0 && metric.missing_time_turn_count > 0) {
+    module.append(explanation, analysisElement('p', 'analysis-no-data', '時刻付きの発話がないため、この話者の時間推移は表示できません。'));
+    return module;
+  }
   const stage = analysisElement('div', 'analysis-chart-stage');
   stage.append(buildAnalysisLineSvg([{
     id: metric.speaker,
@@ -6175,7 +6701,7 @@ function buildAnalysisSpeakerTimelineChart(metric, bins) {
   marker.style.backgroundColor = safeAnalysisColor(metric.color);
   entry.append(marker, document.createTextNode(metric.speaker_name || metric.speaker));
   legend.append(entry);
-  module.append(explanation, stage, legend, analysisElement('p', 'analysis-chart-note', '折れ線が0の時間帯は、この話者の発話が記録されていない区間です。'));
+  module.append(explanation, stage, legend, analysisElement('p', 'analysis-chart-note', `${analysisObservedTimeText(metric)}。時刻あり発話だけを集計しています。時刻不明の発話は時間帯へ配置できません。`));
   return module;
 }
 
@@ -6184,6 +6710,17 @@ function analysisMedian(values) {
   if (!sorted.length) return null;
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function analysisDurationSummary(segments) {
+  const durations = segments
+    .filter(item => item.valid_time === true && item.duration != null && item.duration !== '')
+    .map(item => Number(item.duration))
+    .filter(value => Number.isFinite(value) && value >= 0);
+  return {
+    median: analysisMedian(durations),
+    longest: durations.length ? Math.max(...durations) : null
+  };
 }
 
 function renderSpeakerAnalysis(compact) {
@@ -6288,8 +6825,8 @@ function renderSpeakerAnalysis(compact) {
       analysisElement('strong', '', metric.speaker_name || metric.speaker)
     );
     const detail = activeDimension
-      ? `${groupValue} / ${formatTime(metric.speaking_seconds || 0)}`
-      : `${speakerRoleLabels[metric.role] || metric.role || '役割未設定'} / ${formatTime(metric.speaking_seconds || 0)}`;
+      ? `${groupValue} / ${analysisObservedTimeText(metric)}`
+      : `${analysisSpeakerRoleText(metric)} / ${analysisObservedTimeText(metric)}`;
     button.append(identity, analysisElement('small', '', detail));
     list.append(button);
   });
@@ -6311,7 +6848,7 @@ function renderSpeakerAnalysis(compact) {
   titleGroup.append(
     analysisElement('span', '', selected.speaker),
     analysisElement('h2', '', selected.speaker_name || selected.speaker),
-    analysisElement('p', '', `${speakerRoleLabels[selected.role] || selected.role || '役割未設定'}の発話を、インタビュー全体との比率を保ったまま表示しています。`)
+    analysisElement('p', '', `${analysisSpeakerRoleText(selected)}の発話を、インタビュー全体との比率を保ったまま表示しています。`)
   );
   const profileAttributes = analysisElement('div', 'analysis-speaker-attributes');
   dimensions.forEach(dimension => {
@@ -6326,12 +6863,12 @@ function renderSpeakerAnalysis(compact) {
   detail.append(detailHeader);
 
   const metrics = analysisElement('div', 'analysis-overview analysis-speaker-overview');
-  appendAnalysisMetric(metrics, '発話時間', formatTime(selected.speaking_seconds || 0), analysisNumberText(selected.speaking_percent, 1, '%'));
+  appendAnalysisMetric(metrics, '発話時間', analysisObservedTimeText(selected), analysisNumberText(selected.speaking_percent, 1, '%'));
   appendAnalysisMetric(metrics, '発話回数', `${selected.turn_count || 0}回`, `平均 ${analysisNumberText(selected.average_turn_seconds, 1, '秒')}`);
   appendAnalysisMetric(metrics, '文字数', `${selected.characters || 0}字`, `${analysisNumberText(selected.characters_per_minute, 1)}字/分`);
   appendAnalysisMetric(metrics, '質問候補', `${selected.question_candidates || 0}件`);
-  appendAnalysisMetric(metrics, '最初の発話', formatTime(selected.first_start || 0));
-  appendAnalysisMetric(metrics, '最後の発話', formatTime(selected.last_end || 0));
+  appendAnalysisMetric(metrics, '最初の発話', selected.first_start == null ? '—' : formatTime(selected.first_start));
+  appendAnalysisMetric(metrics, '最後の発話', selected.last_end == null ? '—' : formatTime(selected.last_end));
   detail.append(metrics);
 
   const detailGrid = analysisElement('div', 'analysis-grid analysis-speaker-detail-grid');
@@ -6363,10 +6900,10 @@ function renderSpeakerAnalysis(compact) {
   const distributionPanel = analysisCardPanel('話者内の発話分布', 'automatic');
   const speakerSegments = (Array.isArray(data.segments) ? data.segments : [])
     .filter(item => String(item.speaker) === String(selected.speaker) && !item.excluded);
-  const durations = speakerSegments.map(item => Number(item.duration) || 0);
+  const durationSummary = analysisDurationSummary(speakerSegments);
   const distributionMetrics = analysisElement('div', 'analysis-mini-metrics');
-  appendAnalysisMetric(distributionMetrics, '中央値', analysisNumberText(analysisMedian(durations), 2, '秒'));
-  appendAnalysisMetric(distributionMetrics, '最長発話', analysisNumberText(Math.max(0, ...durations), 2, '秒'));
+  appendAnalysisMetric(distributionMetrics, '中央値', analysisNumberText(durationSummary.median, 2, '秒'));
+  appendAnalysisMetric(distributionMetrics, '最長発話', analysisNumberText(durationSummary.longest, 2, '秒'));
   appendAnalysisMetric(distributionMetrics, '質問候補率', analysisNumberText(100 * speakerSegments.filter(item => item.question_candidate).length / Math.max(1, speakerSegments.length), 1, '%'));
   appendAnalysisMetric(distributionMetrics, '内容語多様性', speakerTerms.content_token_count
     ? analysisNumberText(100 * Number(speakerTerms.unique_term_count || 0) / Number(speakerTerms.content_token_count), 1, '%') : '—');
@@ -6470,11 +7007,12 @@ function renderAutomaticAnalysis(compact) {
   }
 
   const metrics = analysisElement('div', 'analysis-overview');
-  appendAnalysisMetric(metrics, '会話時間', formatTime(overview.session_duration || 0));
+  appendAnalysisMetric(metrics, '時刻ありの最終終了位置', analysisEndpointText(overview.session_duration, overview.session_timed_turn_count, overview.session_missing_time_turn_count), '除外を含む全発話の時刻。録音ファイルの全長ではありません');
   appendAnalysisMetric(metrics, '対象発話', `${overview.included_segment_count || 0}件`, `全${overview.segment_count || 0}件`);
   appendAnalysisMetric(metrics, '話者', `${overview.speaker_count || 0}人`);
-  appendAnalysisMetric(metrics, '参加者', `${overview.participant_count || 0}人`, '司会除外設定を反映');
-  appendAnalysisMetric(metrics, '総発話時間', formatTime(overview.total_speaking_seconds || 0));
+  appendAnalysisMetric(metrics, '実際の参加者', overview.participant_count === null || overview.participant_count === undefined ? '未登録' : `${overview.participant_count}人`, '研究者が準備画面で登録した人数');
+  appendAnalysisMetric(metrics, '観測された参加発言者', overview.observed_participant_count == null ? '不明' : `${overview.observed_participant_count}人`, overview.mixed_role_speaker_count > 0 ? '同じ話者の役割が混在するため人数を確定できません' : 'UNKNOWNを除外・実参加人数とは別');
+  appendAnalysisMetric(metrics, '発話時間（時刻あり）', analysisObservedTimeText(overview, 'total_speaking_seconds'));
   fragment.append(metrics);
 
   const observations = Array.isArray(automatic.observations) ? automatic.observations : [];
@@ -6509,12 +7047,14 @@ function renderAutomaticAnalysis(compact) {
   const speakers = Array.isArray(automatic.speaker_metrics) ? automatic.speaker_metrics : [];
   const timelinePanel = analysisCardPanel('発話量の変化（時間別）', 'automatic', 'timeline', true, 'participation');
   const bins = Array.isArray(automatic.time_bins) ? automatic.time_bins : [];
-  if (bins.length) timelinePanel.body.append(buildAnalysisTimelineChart(bins, speakers));
-  else timelinePanel.body.append(analysisElement('p', 'analysis-no-data', '時間推移を表示できる発話がありません。'));
+  const allTimeMissing = overview.timed_turn_count === 0 && overview.missing_time_turn_count > 0;
+  if (bins.length && !allTimeMissing) timelinePanel.body.append(buildAnalysisTimelineChart(bins, speakers));
+  else timelinePanel.body.append(analysisElement('p', 'analysis-no-data', '時刻付きの発話がないため、時間推移を表示できません。'));
   grid.append(timelinePanel.panel);
 
   const excitementPanel = analysisCardPanel('盛り上がりと議題・話題（時間別）', 'automatic', '', true, 'conversation_dynamics');
-  excitementPanel.body.append(buildAnalysisExcitementChart(bins, data.session_outline));
+  if (allTimeMissing) excitementPanel.body.append(analysisElement('p', 'analysis-no-data', '時刻付きの発話がないため、活発度は算出できません。'));
+  else excitementPanel.body.append(buildAnalysisExcitementChart(bins, data.session_outline));
   grid.append(excitementPanel.panel);
 
   const speakerPanel = analysisCardPanel('話者ごとの発話量', 'automatic', 'speakers', true, 'participation');
@@ -6526,27 +7066,28 @@ function renderAutomaticAnalysis(compact) {
         speakerPanel.body,
         item.speaker_name || item.speaker || '話者',
         item.speaking_percent,
-        `${analysisNumberText(item.speaking_percent, 1, '%')} / ${formatTime(item.speaking_seconds || 0)} / ${item.turn_count || 0}回`,
+        `${analysisNumberText(item.speaking_percent, 1, '%')} / ${analysisObservedTimeText(item)} / ${item.turn_count || 0}回`,
         item.color
       );
     });
   }
   grid.append(speakerPanel.panel);
 
-  const balancePanel = analysisCardPanel('参加者の発言バランス', 'automatic', '', false, 'participation');
   const balance = automatic.balance || {};
+  const balancePanel = analysisCardPanel(balance.denominator === 'observed_speakers' ? '全観測話者の発言バランス' : '参加者の発言バランス', 'automatic', '', false, 'participation');
   const balanceMetrics = analysisElement('div', 'analysis-mini-metrics');
-  appendAnalysisMetric(balanceMetrics, '均等度', analysisNumberText((Number(balance.normalized_evenness) || 0) * 100, 1, '%'), '100%に近いほど均等');
+  appendAnalysisMetric(balanceMetrics, '均等度', balance.normalized_evenness == null ? '未計算' : analysisNumberText(Number(balance.normalized_evenness) * 100, 1, '%'), '観測発言者内で100%に近いほど均等');
   appendAnalysisMetric(balanceMetrics, '最大比率', analysisNumberText(balance.max_participant_percent, 1, '%'), balance.max_participant_name || '—');
   appendAnalysisMetric(balanceMetrics, 'Gini係数', analysisNumberText(balance.gini, 3), '0に近いほど均等');
-  balancePanel.body.append(balanceMetrics, analysisElement('p', 'analysis-caption', '発言量の偏りを示す記述値です。発言の重要性や場への影響力は表しません。'));
+  balancePanel.body.append(balanceMetrics, analysisElement('p', 'analysis-caption', `${balance.denominator_label || '観測された発言者内'} / 分母 ${balance.balance_speaker_count ?? '—'}人。${balance.denominator_note || ''} 時刻欠測 ${balance.missing_time_turn_count ?? '—'}発話。発言量の偏りを示す記述値で、発言の重要性や影響力ではありません。`));
+  if (balance.unavailable_reason === 'mixed_roles') balancePanel.body.append(analysisElement('p', 'content-inline-notice', '同じ話者の役割が混在するため、参加者内の割合・均等度は算出できません。全体時間は保持しています。'));
   grid.append(balancePanel.panel);
 
   const moderatorPanel = analysisCardPanel('司会者と参加者の発言関係', 'automatic', '', false, 'participation');
   const moderator = automatic.moderator || {};
   const moderatorMetrics = analysisElement('div', 'analysis-mini-metrics');
-  appendAnalysisMetric(moderatorMetrics, '司会発話比率', moderator.assigned ? analysisNumberText(moderator.speaking_percent, 1, '%') : '役割未設定');
-  appendAnalysisMetric(moderatorMetrics, '質問候補', `${moderator.question_candidates || 0}件`);
+  appendAnalysisMetric(moderatorMetrics, '司会発話比率', moderator.role_aggregation_status === 'mixed' ? '役割混在で算出不可' : moderator.assigned ? analysisNumberText(moderator.speaking_percent, 1, '%') : '役割未設定');
+  appendAnalysisMetric(moderatorMetrics, '質問候補', moderator.role_aggregation_status === 'mixed' ? '役割混在で算出不可' : analysisNumberText(moderator.question_candidates, 0, '件'));
   appendAnalysisMetric(moderatorMetrics, '参加者応答', `${moderator.participant_responses || 0}件`);
   appendAnalysisMetric(moderatorMetrics, '参加者間遷移', `${moderator.participant_to_participant_transitions || 0}件`);
   moderatorPanel.body.append(moderatorMetrics, analysisElement('p', 'analysis-caption', '質問・応答は表記と話者遷移からの候補です。進行品質の評価ではありません。'));
@@ -6603,7 +7144,7 @@ function renderAutomaticAnalysis(compact) {
       ].filter(Boolean).join(' / ');
       row.append(
         analysisElement('strong', '', emotionLabel),
-        analysisElement('span', '', `${item.count || 0}件 / ${formatTime(item.seconds || 0)}`)
+        analysisElement('span', '', `${item.count || 0}件 / ${analysisObservedTimeText(item, 'seconds')}`)
       );
       emotionPanel.body.append(row);
     });
@@ -6616,7 +7157,7 @@ function renderAutomaticAnalysis(compact) {
     const groupsPanel = analysisCardPanel('話者グループの比較', 'configured', 'groups', false, 'participation');
     groups.forEach(item => appendAnalysisBar(
       groupsPanel.body, item.group || '未設定', item.speaking_percent,
-      `${item.speaker_count || 0}人 / ${item.turn_count || 0}回 / ${formatTime(item.speaking_seconds || 0)}`,
+      `${item.speaker_count || 0}人 / ${item.turn_count || 0}回 / ${analysisObservedTimeText(item)}`,
       '#9B51E0'
     ));
     grid.append(groupsPanel.panel);
@@ -6746,6 +7287,10 @@ function analysisConfigControl(field, type = 'text', options = null) {
   return control;
 }
 
+function analysisMatchModeLabel(mode) {
+  return ({normalized: '正規化語の完全一致', surface: '表層語の完全一致', literal: '本文の部分一致（大文字小文字を区別）'})[mode] || '一致条件未確認';
+}
+
 function analysisTermCrosstabSelector(compact) {
   const container = analysisElement('div', 'analysis-term-selector');
   const selected = Array.isArray(analysisState.config.crosstab_terms)
@@ -6761,6 +7306,7 @@ function analysisTermCrosstabSelector(compact) {
     )
   );
 
+  container.append(analysisField('語の一致条件（文脈検索と共通）', analysisConfigControl('crosstab_match_mode', 'select', {normalized: analysisMatchModeLabel('normalized'), surface: analysisMatchModeLabel('surface'), literal: analysisMatchModeLabel('literal')})));
   const candidates = (((analysisState.data || {}).research || {}).linguistics || {}).term_frequency || [];
   const candidateWrap = analysisElement('div', 'analysis-term-candidates');
   candidateWrap.append(analysisElement('span', '', '頻出語から選択'));
@@ -7209,6 +7755,7 @@ function renderTranscriptPreparation() {
         : field === 'participant_count' ? (input.value === '' ? null : Number(input.value))
         : field === 'source_segment_ids' ? input.value.split(',').map(v => v.trim()).filter(Boolean) : input.value;
       preparationDirty = true;
+      analysisMutationGeneration += 1;
       document.querySelectorAll('[data-preparation-key]').forEach(peer => {
         if (peer === input || peer.dataset.preparationKey !== input.dataset.preparationKey) return;
         if (input.type === 'checkbox') peer.checked = input.checked;
@@ -7477,7 +8024,7 @@ function renderManualSummary(container, compact) {
       codeMetrics.forEach(item => {
         const value = qualitativeCount(item.segment_count);
         const row = appendAnalysisBar(summary.body, item.label, maximum ? 100 * value / maximum : 0,
-          `${value}発言 / ${qualitativeCount(item.speaker_count)}話者ラベル / ${item.group_count ?? '不明'}グループ / 重要引用 ${qualitativeCount(item.important_count)}件`, item.color);
+          `${value}発言 / ${qualitativeCount(item.speaker_count)}話者ラベル / ${item.group_count ?? '不明'}グループ / 重要引用 ${qualitativeCount(item.important_count)}件 / ${analysisObservedTimeText(item)}`, item.color);
         row.dataset.qualitativeCode = item.id;
         row.querySelector('.analysis-bar-track').setAttribute('aria-label', `${item.label}: ${value}発言。共通尺度0～${maximum}発言`);
         row.querySelector('.analysis-bar-track i').style.minWidth = '0';
@@ -7782,6 +8329,11 @@ function refreshAnalysisSegmentLists() {
 
 async function saveAnalysis() {
   if (!analysisState.itemId || !analysisState.data || analysisSaveInProgress) return;
+  const saveContext = captureAnalysisContext();
+  analysisSaveOwner = saveContext;
+  // Preserve later edits only within this same data/navigation/revision owner.
+  const ownsSave = () => analysisSaveOwner === saveContext
+    && isAnalysisContextCurrent({...saveContext, mutation: analysisMutationGeneration});
   analysisSaveInProgress = true;
   setAnalysisDirty(true, false);
   setAlert(document.querySelector('#analysis-message'), '');
@@ -7800,6 +8352,7 @@ async function saveAnalysis() {
       })
     });
     const payload = await readJsonResponse(response);
+    if (!ownsSave()) return;
     if (!response.ok) throw new Error(payload.error || '分析設定を保存できませんでした。');
     const data = payload.analysis && typeof payload.analysis === 'object' ? payload.analysis : payload;
     analysisSaveInProgress = false;
@@ -7825,11 +8378,21 @@ async function saveAnalysis() {
       setAnalysisDirty(true, false);
       setAlert(document.querySelector('#analysis-message'), '保存開始後の追加変更が残っています。内容を確認して、もう一度保存してください。', true);
     }
+    if (typeof analysisMeasurementRefreshContext === 'function') analysisMeasurementRefreshContext();
   } catch (error) {
+    if (!ownsSave()) return;
     analysisSaveInProgress = false;
     analysisTermRunRequested = false;
     setAnalysisDirty(true, false);
     setAlert(document.querySelector('#analysis-message'), error.message, true);
+  } finally {
+    // An old completion must not release a newer view's save operation.
+    if (analysisSaveOwner === saveContext) {
+      analysisSaveOwner = null;
+      analysisSaveInProgress = false;
+      analysisTermRunRequested = false;
+      setAnalysisDirty(analysisState.dirty, false);
+    }
   }
 }
 
@@ -8076,7 +8639,11 @@ function applyRouteFromLocation({fromHistory = false, initial = false} = {}) {
       if (fromHistory) syncRouteHash(currentRouteHash);
       return;
     }
-    openLibraryItem(route.itemId).then(() => {
+    const opening = openLibraryItem(route.itemId);
+    const requestSequence = resultRequestSequence;
+    opening.then(() => {
+      // A stale route must not hide newer content or cancel its in-flight request.
+      if (requestSequence !== resultRequestSequence) return;
       if (!currentJob || String(currentJob.id) !== route.itemId) showView('library', {replace: true});
     });
     return;

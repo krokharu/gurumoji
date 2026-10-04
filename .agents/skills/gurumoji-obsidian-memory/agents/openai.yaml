@@ -1,0 +1,3 @@
+interface:
+  display_name: "Gurumoji Obsidian Memory"
+  short_description: "Gurumoji専用のVault保存構造・検索・同期を管理する"

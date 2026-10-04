@@ -7,7 +7,7 @@
         </div>
         <div class="registry-actions">
           <button id="import-speakers-button" class="secondary-button" type="button">CSVを読み込む</button>
-          <a class="secondary-button registry-export" href="/api/speakers/export.csv" download>CSVを書き出す</a>
+          <a class="secondary-button registry-export" href="/api/speakers/export.csv" download>保存済みCSVを書き出す</a>
           <button id="add-speaker-button" class="primary-button small" type="button">＋ 新しい話者</button>
           <input id="speaker-csv-input" class="visually-hidden" type="file" accept=".csv,text/csv">
         </div>
@@ -36,6 +36,16 @@
       </div>
 
       <div id="speaker-registry-message" class="alert" role="alert" hidden></div>
+      <section id="speaker-draft-recovery" class="draft-recovery" aria-label="未保存内容の退避" hidden>
+        <p data-draft-count></p><button id="export-speaker-draft" class="secondary-button" type="button">未保存内容をJSONで退避</button>
+      </section>
+      <section id="speaker-import-preview" class="draft-recovery" aria-labelledby="speaker-import-title" hidden>
+        <h3 id="speaker-import-title">CSV取込プレビュー（未保存）</h3>
+        <p id="speaker-import-summary"></p><ul id="speaker-import-columns"></ul>
+        <p>編集に反映した後も保存前に内容を確認できます。「変更を保存」で確定します。</p>
+        <button id="apply-speaker-import" class="secondary-button" type="button">未保存の編集へ反映</button>
+        <button id="cancel-speaker-import" class="secondary-button" type="button">キャンセル</button>
+      </section>
       <div class="spreadsheet-shell">
         <table class="speaker-sheet" aria-label="話者管理表">
           <thead>
@@ -64,7 +74,7 @@
       <div class="registry-save-bar">
         <div>
           <strong id="registry-save-state">保存済み</strong>
-          <span>変更内容は「変更を保存」でこのPCに反映されます。</span>
+          <span>CSV取込も含め、変更内容は「変更を保存」でGurumoji実行環境に反映されます。</span>
         </div>
         <button id="save-speakers-button" class="primary-button small" type="button" disabled>変更を保存</button>
       </div>

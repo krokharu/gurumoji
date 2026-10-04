@@ -1,0 +1,45 @@
+{
+  "method": "original M0-M7 engine with deterministic paused scheduling; synthetic adapters and temporary SQLite, not browser/real methods",
+  "pipeline_status": "completed",
+  "milestones": [
+    {
+      "id": "M0",
+      "status": "committed"
+    },
+    {
+      "id": "M1",
+      "status": "committed"
+    },
+    {
+      "id": "M2",
+      "status": "committed"
+    },
+    {
+      "id": "M3",
+      "status": "committed"
+    },
+    {
+      "id": "M4",
+      "status": "committed"
+    },
+    {
+      "id": "M5",
+      "status": "committed"
+    },
+    {
+      "id": "M6",
+      "status": "committed"
+    },
+    {
+      "id": "M7",
+      "status": "committed"
+    }
+  ],
+  "save_adapter_package_binding_definition_version": 1,
+  "save_adapter_package_definition_version": 2,
+  "save_adapter_package_measurement_rule": "duration",
+  "original_expected_character_count": 3,
+  "actual_measurement_value": 60.0,
+  "external_calls": 0,
+  "real_runtime_or_source_mutation": false
+}

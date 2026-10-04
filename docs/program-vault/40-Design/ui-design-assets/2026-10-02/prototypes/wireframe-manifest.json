@@ -1,0 +1,63 @@
+{
+  "kind": "nonfunctional low-fidelity proposed mockups",
+  "source_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "all_content": "synthetic",
+  "screens": [
+    {
+      "id": "a-measurement-desktop",
+      "title": "A案 測定定義・試行・採用 desktop",
+      "width": 1280,
+      "height": 1324,
+      "description": "低忠実度・非機能の提案。合成のduration測定を、定義、4発話の試行、明示採用、別の全件実行確認へ進める。0と欠測を分離し、個票APIと定義固定の前提を注記する。"
+    },
+    {
+      "id": "a-evidence-desktop",
+      "title": "A案 結果と根拠 desktop",
+      "width": 1280,
+      "height": 1464,
+      "description": "低忠実度・非機能の提案。AI下書き、原資料、研究者メモを分け、固定runの生成時引用と現在版の相違を表示。音声へ誤接続せず同じ結果の位置とfocusへ戻る。"
+    },
+    {
+      "id": "a-measurement-390",
+      "title": "A案 測定定義・試行・採用 390px",
+      "width": 390,
+      "height": 2529,
+      "description": "低忠実度・非機能の提案。合成のduration測定を、定義、4発話の試行、明示採用、別の全件実行確認へ進める。0と欠測を分離し、個票APIと定義固定の前提を注記する。"
+    },
+    {
+      "id": "a-evidence-390",
+      "title": "A案 結果と根拠 390px",
+      "width": 390,
+      "height": 1659,
+      "description": "低忠実度・非機能の提案。AI下書き、原資料、研究者メモを分け、固定runの生成時引用と現在版の相違を表示。音声へ誤接続せず同じ結果の位置とfocusへ戻る。"
+    },
+    {
+      "id": "b-measurement-desktop",
+      "title": "B案 測定定義・試行・採用 desktop",
+      "width": 1280,
+      "height": 1602,
+      "description": "低忠実度・非機能の提案。合成のduration測定を、定義、4発話の試行、明示採用、別の全件実行確認へ進める。0と欠測を分離し、個票APIと定義固定の前提を注記する。"
+    },
+    {
+      "id": "b-evidence-desktop",
+      "title": "B案 結果と根拠 desktop",
+      "width": 1280,
+      "height": 1162,
+      "description": "低忠実度・非機能の提案。AI下書き、原資料、研究者メモを分け、固定runの生成時引用と現在版の相違を表示。音声へ誤接続せず同じ結果の位置とfocusへ戻る。"
+    },
+    {
+      "id": "b-measurement-390",
+      "title": "B案 測定定義・試行・採用 390px",
+      "width": 390,
+      "height": 2675,
+      "description": "低忠実度・非機能の提案。合成のduration測定を、定義、4発話の試行、明示採用、別の全件実行確認へ進める。0と欠測を分離し、個票APIと定義固定の前提を注記する。"
+    },
+    {
+      "id": "b-evidence-390",
+      "title": "B案 結果と根拠 390px",
+      "width": 390,
+      "height": 1530,
+      "description": "低忠実度・非機能の提案。AI下書き、原資料、研究者メモを分け、固定runの生成時引用と現在版の相違を表示。音声へ誤接続せず同じ結果の位置とfocusへ戻る。"
+    }
+  ]
+}

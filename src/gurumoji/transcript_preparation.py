@@ -109,7 +109,7 @@ def valid_time(segment):
     try:
         start, end = map(float, values)
         return math.isfinite(start) and math.isfinite(end) and 0 <= start <= end
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
 
 

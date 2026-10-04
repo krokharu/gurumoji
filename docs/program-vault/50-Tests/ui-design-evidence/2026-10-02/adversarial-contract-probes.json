@@ -1,0 +1,27 @@
+{
+  "verification_level": "isolated Python contract execution and HTML parsing; NOT live UI",
+  "missing_template_ids": [
+    "analysis-definition-source",
+    "analysis-definition-rule",
+    "analysis-definition-type",
+    "analysis-definition-level",
+    "analysis-definition-method"
+  ],
+  "synthetic_prose_description": "各発話の持続時間を秒数で測る",
+  "same_payload_measurement_rule": "text_length",
+  "actual_values_from_default_rule": [
+    3,
+    10
+  ],
+  "source_durations": [
+    60,
+    2
+  ],
+  "api_explicit_duration_rule_supported": 60.0,
+  "adopt_without_trial_in_memory": {
+    "status": "adopted",
+    "last_trial_json": "{}"
+  },
+  "external_ai_calls": 0,
+  "real_app_or_runtime_data_access": false
+}

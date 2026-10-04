@@ -1,5 +1,4 @@
 import json
-import subprocess
 import threading
 import unittest
 import wave
@@ -10,10 +9,11 @@ from werkzeug.serving import make_server
 
 import app
 from gurumoji.web import system_routes
-import test_browser_e2e as browser_support
+import browser_support
 import test_content_analysis as content_support
 
 
+@browser_support.ui_browser_test
 class ContentBrowserTests(unittest.TestCase):
     def setUp(self):
         self.fixture = content_support.ContentApiTests("test_generated_result_persists_and_becomes_stale_on_edit")
@@ -35,9 +35,7 @@ class ContentBrowserTests(unittest.TestCase):
         self.fixture.run_worker(args, response=content_support.finding(["E0001"], text="保存済みAI見解。<img src=x onerror=window.injected=1>"))
 
     def exercise_browser(self, mobile=False, reload_only=False, generate=False, linked='', unified_execution=False):
-        browser = browser_support.browser_executable()
-        if not browser:
-            self.skipTest("Edge, Chrome or Chromium is required")
+        browser_support.require_browser_executable()
         original_render = system_routes.render_template
         original_static = app.app.send_static_file
         original_worker = app.run_analysis_insight_job
@@ -242,14 +240,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                  patch.object(app, "load_token_config", return_value=app.TokenConfig(openai_api_key="test-key")), \
                  patch.object(app, "run_analysis_insight_job", side_effect=tracked_worker), \
                  patch.object(app, "call_ai_json", side_effect=fake_ai):
-                result = subprocess.run([
-                    browser, "--headless=new", "--disable-gpu", "--disable-background-networking",
-                    "--disable-extensions", "--no-first-run", "--no-default-browser-check", "--no-sandbox",
-                    "--autoplay-policy=no-user-gesture-required", "--force-device-scale-factor=1",
-                    "--window-size=390,844" if mobile else "--window-size=1440,1000",
-                    f"--user-data-dir={profile}", "--virtual-time-budget=70000", "--dump-dom",
+                result = browser_support.run_browser_dom(
                     f"http://127.0.0.1:{server.server_port}/?{urlencode(query)}",
-                ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
+                    profile=profile, viewport=(390, 844) if mobile else (1440, 1000),
+                    virtual_time_budget_ms=70000, timeout_seconds=40,
+                    device_scale_factor_one=True, allow_media_autoplay=True,
+                )
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr[-1500:])

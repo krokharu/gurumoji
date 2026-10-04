@@ -18,7 +18,9 @@ from importlib import metadata
 from typing import Any, Callable
 
 
-TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-8"
+TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-9"
+EMBEDDING_INPUT_VERSION = "contextual-e5-input-1"
+MAX_EMBEDDING_TOKENS = 512
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_MAX_TOPICS = 8
 DEFAULT_MIN_TOPIC_SIZE = 2
@@ -32,6 +34,13 @@ DEFAULT_MANUAL_MIN_SIMILARITY = 0.0
 LOW_MARGIN_LIMIT = 0.01
 
 TRANSFORMER_CSV_FIELDS = {
+    "transformer_input_coverage": [
+        "segment_id", "context_segment_ids", "contextual_character_count", "target_character_start",
+        "target_character_end", "character_truncated", "character_limit", "token_count_after_character_limit",
+        "used_token_count", "token_limit", "token_truncated", "token_measurement_status",
+        "retained_character_start", "retained_character_end", "retained_range_status", "target_retention_status",
+        "truncation_side",
+    ],
     "transformer_topics": [
         "topic_id", "label", "origin", "keywords", "segment_count", "speaker_count",
         "participant_segment_count", "facilitator_segment_count",
@@ -79,7 +88,8 @@ TRANSFORMER_CSV_FIELDS = {
     ],
     "transformer_speaker_results": [
         "speaker", "speaker_name", "speaker_group", "result_code", "result_label",
-        "topic_id", "topic_label", "confidence", "basis", "matched_cues",
+        "topic_id", "topic_label", "confidence", "review_status", "researcher_review_required",
+        "registered_role", "role_source", "basis", "matched_cues",
         "evidence_segment_ids", "evidence_texts", "first_segment_id", "last_segment_id",
     ],
 }
@@ -127,7 +137,7 @@ _SPEAKER_RESULT_DEFINITIONS = (
     (
         "opinion_changed", "意見・認識が変わった", "explicit",
         (
-            re.compile(r"(?:意見|考え|印象|見方|認識|気持ち)(?:が|は|も)?(?:かなり|大きく|少し)?変わ(?!らな|りません|っていな)"),
+            re.compile(r"(?:意見|考え|印象|見方|認識|気持ち)(?:が|は|も)?(?:かなり|大きく|少し)?変わ(?!らな|りません|っていな|っていません|らず|らぬ)"),
             re.compile(r"(?:考え直|見直)(?:した|しました|す|すこと|すよう)"),
             re.compile(r"(?:話|説明|意見).{0,24}(?:聞いて|聴いて).{0,24}(?:思う|考える|感じる)ようにな"),
             re.compile(r"(?:最初|初め|以前|もともと|元々).{0,32}(?:でしたが|だったが|だけど|でしたけど|ものの|一方で).{0,32}(?:今|現在|最終的|むしろ|こちら|こっち)"),
@@ -202,10 +212,12 @@ def _is_meaningful_text(value: Any) -> bool:
     return True
 
 
-def _contextual_texts(source_segments: list[dict], source_indices: list[int]) -> tuple[list[str], int]:
+def _contextual_texts(source_segments: list[dict], source_indices: list[int], *,
+                      include_manifest: bool = False) -> Any:
     """Add nearby same-speaker text only when the target utterance is fragmentary."""
     values: list[str] = []
     expanded = 0
+    manifest = []
     for source_index in source_indices:
         segment = source_segments[source_index]
         current = str(segment.get("text") or "").strip()
@@ -229,7 +241,20 @@ def _contextual_texts(source_segments: list[dict], source_indices: list[int]) ->
         if len(pieces) > 1:
             expanded += 1
         values.append(value)
-    return values, expanded
+        cursor = 0
+        target_start = 0
+        for piece_index, text in pieces:
+            if piece_index == source_index:
+                target_start = cursor
+            cursor += len(text) + 1
+        manifest.append({
+            "segment_id": str(segment.get("id") or ""),
+            "context_segment_ids": [str(source_segments[index].get("id") or "") for index, _ in pieces],
+            "target_character_start": target_start,
+            "target_character_end": target_start + len(current),
+            "contextual_character_count": len(value),
+        })
+    return (values, expanded, manifest) if include_manifest else (values, expanded)
 
 
 def _speaker_weights(segments: list[dict]) -> Any:
@@ -260,9 +285,6 @@ def _speaker_group(segment: dict, dominant_speaker: str | None) -> str:
     role = str(segment.get("role") or "").strip().lower()
     if role in {"moderator", "facilitator", "interviewer", "host", "司会", "進行"}:
         return "facilitator"
-    speaker = str(segment.get("speaker") or "UNKNOWN")
-    if dominant_speaker and speaker == dominant_speaker:
-        return "facilitator_candidate"
     if role in {"participant", "interviewee", "guest", "参加者", "回答者"}:
         return "participant"
     return "participant"
@@ -380,7 +402,7 @@ def _backchannel_test(
         sparse = low_expected / max(1, len(expected_values)) > 0.2
         result.update({
             "statistic": round(float(statistic), 6), "df": int(dof),
-            "p_value": round(float(p_value), 8), "effect_size": round(effect_size, 6),
+            "p_value": float(p_value), "effect_size": round(effect_size, 6),
             "low_expected_cells": low_expected, "expected_cell_count": len(expected_values),
             "status": "computed_sparse" if sparse else "computed",
             "interpretation": (
@@ -497,23 +519,41 @@ def _backchannel_statistics(
 
 
 def _detect_speaker_results(value: Any) -> list[dict[str, str]]:
-    """Find only explicit self-reported changes, learning, and preferences."""
+    """Find unverified wording candidates; lexical matches never establish personal outcomes."""
     text = re.sub(r"\s+", "", str(value or ""))
-    if text.rstrip().endswith(("?", "？")):
-        return []
-    detected: list[dict[str, str]] = []
-    for code, label, confidence, patterns in _SPEAKER_RESULT_DEFINITIONS:
-        matches = []
-        for pattern in patterns:
-            match = pattern.search(text)
-            if match:
-                matches.append(match.group(0))
-        if matches:
-            detected.append({
-                "result_code": code, "result_label": label, "confidence": confidence,
-                "matched_cue": matches[0],
-            })
-    return detected
+    detected: dict[str, dict[str, str]] = {}
+    for sentence in re.split(r"(?<=[。！？!?])", text):
+        # Conservative lexical guards. These are exclusions, not a semantic validator:
+        # an omitted subject still needs researcher review, as do all retained matches.
+        if not sentence or re.search(r'[「」『』“”"?？]', sentence):
+            continue
+        if re.search(r"(?:彼女?|他の人|その人|参加者|先生|上司|友人)(?:たち)?(?:は|が)|"
+                     r"(?:と言|と話|と聞|らしい|そうです|そうだ|とのこと)|"
+                     r"(?:もし|仮に)|(?:なら|たら|れば)", sentence):
+            continue
+        for code, label, _confidence, patterns in _SPEAKER_RESULT_DEFINITIONS:
+            for pattern in patterns:
+                for match in pattern.finditer(sentence):
+                    suffix = sentence[match.end():match.end() + 28]
+                    negated = re.search(
+                        r"^(?:(?![。！？!?、]).){0,24}(?:ない|なかった|ません|ぬ|ず|なく|否定|反対)", suffix)
+                    # The unchanged cue includes its own negation. A later negation
+                    # still blocks it (e.g. '変わらないとは言えません').
+                    if negated:
+                        continue
+                    detected.setdefault(code, {
+                        "result_code": code, "result_label": label + "（表現候補）",
+                        "confidence": "unverified_candidate", "matched_cue": match.group(0),
+                    })
+    if {"opinion_changed", "opinion_maintained"} <= detected.keys():
+        changed = detected.pop("opinion_changed")
+        maintained = detected.pop("opinion_maintained")
+        detected["outcome_ambiguous"] = {
+            "result_code": "outcome_ambiguous", "result_label": "変化・維持の表現が混在（要確認）",
+            "confidence": "unverified_candidate",
+            "matched_cue": changed["matched_cue"] + " / " + maintained["matched_cue"],
+        }
+    return list(detected.values())
 
 
 def _speaker_results(
@@ -552,7 +592,10 @@ def _speaker_results(
                     "topic_id": str(assignment.get("topic_id") or ""),
                     "topic_label": str(assignment.get("topic_label") or "紐付けなし"),
                     "confidence": detected["confidence"],
-                    "basis": "本人の発話に結果を示す明示表現があります。",
+                    "review_status": "unreviewed", "researcher_review_required": True,
+                    "registered_role": str(source_rows[0].get("role") or "unknown"),
+                    "role_source": str(source_rows[0].get("role_source") or ("registered" if source_rows[0].get("role") else "unknown")),
+                    "basis": "語句に一致した未確認の表現候補です。否定・引用・主語・前後文脈を研究者が照合し、本人の変化と解釈できるか確認してください。",
                     "matched_cues": [], "evidence_segment_ids": [], "evidence_texts": [],
                     "first_segment_id": first_segment_id, "last_segment_id": last_segment_id,
                 })
@@ -572,7 +615,7 @@ def _speaker_results(
         topic_sample = next((row for row in reversed(speaker_assignments)
                              if str(row.get("topic_id") or "") == main_topic_id), None)
         evidence_row = speaker_assignments[-1] if speaker_assignments else None
-        not_applicable = speaker_group in {"facilitator", "facilitator_candidate"}
+        not_applicable = speaker_group == "facilitator"
         results.append({
             "speaker": speaker,
             "speaker_name": str(sample.get("speaker_name") or speaker),
@@ -582,7 +625,11 @@ def _speaker_results(
             "topic_id": main_topic_id,
             "topic_label": str((topic_sample or {}).get("topic_label") or "紐付けなし"),
             "confidence": "not_applicable" if not_applicable else "insufficient_evidence",
-            "basis": ("進行役・司会者候補のため、参加者の態度変化としては判定しません。"
+            "review_status": "not_applicable" if not_applicable else "unreviewed",
+            "researcher_review_required": not not_applicable,
+            "registered_role": str(source_rows[0].get("role") or "unknown"),
+            "role_source": str(source_rows[0].get("role_source") or ("registered" if source_rows[0].get("role") else "unknown")),
+            "basis": ("登録された進行役・司会者のため、参加者の態度変化としては判定しません。"
                       if not_applicable else
                       "意見の変化・維持、新しい気づき、支持・選好を示す明示表現を検出できませんでした。"),
             "matched_cues": [],
@@ -593,23 +640,58 @@ def _speaker_results(
     return results
 
 
-def transformer_input_fingerprint(analysis: dict, *, model: str = DEFAULT_MODEL) -> str:
-    """Hash only inputs that affect semantic analysis."""
+def _fingerprint(payload: dict) -> str:
     import hashlib
     import json
 
-    segments = [
-        {key: row.get(key) for key in ("id", "speaker", "speaker_name", "role", "start", "end", "text", "excluded")}
-        for row in analysis.get("segments", [])
-    ]
-    payload = {
-        "algorithm": TRANSFORMER_ANALYSIS_VERSION,
-        "model": model,
-        "segments": segments,
-    }
     return hashlib.sha256(json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
+
+
+def transformer_embedding_fingerprint(analysis: dict, *, model: str = DEFAULT_MODEL,
+                                      revision: str = "") -> str:
+    """Only dependencies of contextual input vectors, separate from analysis settings."""
+    return _fingerprint({
+        "embedding_input_version": EMBEDDING_INPUT_VERSION, "model": model, "revision": revision,
+        "max_characters": MAX_TEXT_CHARACTERS, "max_tokens": MAX_EMBEDDING_TOKENS,
+        "segments": [{key: row.get(key) for key in
+                      ("id", "speaker", "start", "end", "text", "excluded")}
+                     for row in analysis.get("segments", [])],
+    })
+
+
+def transformer_input_fingerprint(analysis: dict, *, model: str = DEFAULT_MODEL,
+                                  parameters: dict | None = None) -> str:
+    """Fingerprint all result dependencies, including settings and theme definitions."""
+    prepared = analysis.get("manual", {}).get("preparation", {})
+    return _fingerprint({
+        "algorithm": TRANSFORMER_ANALYSIS_VERSION, "model": model,
+        "parameters": parameters or {}, "config": analysis.get("config", {}),
+        "input_version": prepared.get("input_version"), "source_hash": prepared.get("source_hash"),
+        "source_revision": analysis.get("item", {}).get("revision_count"),
+        "analysis_revision": analysis.get("item", {}).get("analysis_revision"),
+        "segments": [{key: row.get(key) for key in
+                      ("id", "speaker", "speaker_name", "role", "role_source", "start", "end",
+                       "valid_time", "time_unknown", "text", "excluded")}
+                     for row in analysis.get("segments", [])],
+    })
+
+
+def transformer_source_provenance(analysis: dict) -> dict[str, Any]:
+    """Immutable generation input identity. Unknown legacy fields must remain unknown."""
+    from copy import deepcopy
+
+    item = analysis.get("item", {})
+    prepared = analysis.get("manual", {}).get("preparation", {})
+    return {
+        "status": "recorded", "item_id": item.get("id"), "source_name": item.get("source_name"),
+        "source_revision": item.get("revision_count"), "analysis_revision": item.get("analysis_revision"),
+        "analysis_updated_at": item.get("analysis_updated_at"),
+        "input_version": prepared.get("input_version"), "source_hash": prepared.get("source_hash"),
+        "analysis_needs_review": prepared.get("analysis_needs_review", True),
+        "config": deepcopy(analysis.get("config", {})),
+    }
 
 
 def _package_version(name: str) -> str:
@@ -633,8 +715,11 @@ def _load_model(model_name: str, revision: str = "") -> tuple[Any, Any, str]:
                 "Transformer本文分析の実行環境がありません。run.batを再実行して依存関係を更新してください。"
             ) from error
         kwargs = {"revision": revision} if revision else {}
-        tokenizer = AutoTokenizer.from_pretrained(model_name, **kwargs)
         model = AutoModel.from_pretrained(model_name, **kwargs)
+        resolved = str(getattr(getattr(model, "config", None), "_commit_hash", "") or revision)
+        if revision and resolved != revision:
+            raise ValueError("要求したモデルrevisionと読み込んだモデルrevisionが一致しません。")
+        tokenizer = AutoTokenizer.from_pretrained(model_name, **({"revision": resolved} if resolved else kwargs))
         requested_device = os.environ.get("MOJIOKOSI_TRANSFORMER_DEVICE", "cpu").strip().lower()
         if requested_device not in {"cpu", "cuda", "auto"}:
             raise RuntimeError("MOJIOKOSI_TRANSFORMER_DEVICEはcpu、cuda、autoのいずれかで指定してください。")
@@ -663,12 +748,42 @@ def encode_texts(
     tokenizer, model, device = _load_model(model_name, revision)
     batch_size = 24 if device == "cuda" else 8
     vectors = []
+    input_diagnostics = []
     prefix = "query: " if kind == "query" else "passage: "
     for offset in range(0, len(texts), batch_size):
         if check_cancelled:
             check_cancelled()
         batch = [prefix + value[:MAX_TEXT_CHARACTERS] for value in texts[offset:offset + batch_size]]
-        inputs = tokenizer(batch, max_length=512, padding=True, truncation=True, return_tensors="pt")
+        full_inputs = tokenizer(batch, padding=False, truncation=False)
+        try:
+            inputs = tokenizer(batch, max_length=MAX_EMBEDDING_TOKENS, padding=True,
+                               truncation=True, return_tensors="pt", return_offsets_mapping=True)
+        except (NotImplementedError, TypeError):
+            inputs = tokenizer(batch, max_length=MAX_EMBEDDING_TOKENS, padding=True,
+                               truncation=True, return_tensors="pt")
+        offsets = inputs.pop("offset_mapping", None)
+        for index, original in enumerate(texts[offset:offset + batch_size]):
+            token_count = len(full_inputs["input_ids"][index])
+            used_tokens = int(inputs["attention_mask"][index].sum().item())
+            retained_start, retained_end = None, None
+            if offsets is not None:
+                positions = offsets[index].tolist() if hasattr(offsets[index], "tolist") else offsets[index]
+                positions = [(int(start), int(end)) for start, end in positions if int(end) > len(prefix)]
+                if positions:
+                    retained_start = max(0, min(start for start, _ in positions) - len(prefix))
+                    retained_end = max(0, max(end for _, end in positions) - len(prefix))
+            elif token_count <= used_tokens:
+                retained_start, retained_end = 0, min(len(original), MAX_TEXT_CHARACTERS)
+            input_diagnostics.append({
+                "input_index": offset + index, "character_count": len(original),
+                "character_limit": MAX_TEXT_CHARACTERS,
+                "character_truncated": len(original) > MAX_TEXT_CHARACTERS,
+                "token_count_after_character_limit": token_count, "used_token_count": used_tokens,
+                "token_limit": MAX_EMBEDDING_TOKENS, "token_truncated": token_count > used_tokens,
+                "retained_character_start": retained_start, "retained_character_end": retained_end,
+                "retained_range_status": "measured" if retained_end is not None else "unavailable",
+                "truncation_side": str(getattr(tokenizer, "truncation_side", "right")),
+            })
         inputs = {key: value.to(device) for key, value in inputs.items()}
         with torch.inference_mode():
             hidden = model(**inputs).last_hidden_state
@@ -688,6 +803,7 @@ def encode_texts(
         "framework_version": _package_version("transformers"),
         "device": device,
         "dimensions": int(matrix.shape[1]) if matrix.ndim == 2 and matrix.size else 0,
+        "revision_pinned": bool(commit), "input_diagnostics": input_diagnostics,
     }
 
 
@@ -717,12 +833,17 @@ def _choose_labels(
         estimator = KMeans(n_clusters=clusters, random_state=42, n_init=10)
         estimator.fit(vectors, sample_weight=sample_weights)
         labels = estimator.labels_
-        if len(set(int(value) for value in labels)) < 2:
+        actual_count = len(set(int(value) for value in labels))
+        if actual_count != clusters:
+            scores.append({"topic_count": int(clusters), "actual_topic_count": actual_count,
+                           "silhouette_cosine": None, "status": "invalid_topic_count",
+                           "reason": "指定テーマ数に必要な異なるクラスタが成立しませんでした。"})
             continue
         score = float(silhouette_score(
             vectors, labels, metric="cosine", sample_size=min(1000, count), random_state=42,
         ))
-        scores.append({"topic_count": int(clusters), "silhouette_cosine": round(score, 6)})
+        scores.append({"topic_count": int(clusters), "actual_topic_count": actual_count,
+                       "silhouette_cosine": round(score, 6), "status": "valid"})
         if clusters == topic_count:
             chosen_labels, chosen_score = labels, score
         # Prefer the simpler solution when scores are effectively equal.
@@ -758,10 +879,14 @@ def _manual_theme_vectors(
             descriptors.append(text)
     descriptor_vectors, engine = None, None
     if descriptors:
+        if not revision:
+            raise ValueError("発話ベクトルのモデルrevisionが不明です。再計算してください。")
         descriptor_vectors, engine = encode_texts(
             descriptors, model_name=model_name, revision=revision, kind="query",
             progress=progress, check_cancelled=check_cancelled,
         )
+        if not revision or str(engine.get("revision") or "") != revision or str(engine.get("name") or "") != model_name:
+            raise ValueError("テーマと発話のモデルrevisionが一致しません。保存済みベクトルを再計算してください。")
         if descriptor_vectors.shape[1] != vectors.shape[1]:
             raise ValueError("テーマの説明文と発話の意味ベクトルの次元が一致しません。")
     theme_vectors = np.zeros((len(manual_topics), vectors.shape[1]), dtype="float32")
@@ -853,7 +978,7 @@ def _representative_indices(
         length_bonus = min(content_length, 120) / 2000
         role = str(segment.get("role") or "").lower()
         participant_bonus = 0.025 if role in {"participant", "interviewee", "guest"} else 0.0
-        dominant_penalty = 0.04 if dominant_speaker and speaker == dominant_speaker else 0.0
+        dominant_penalty = 0.04 if _speaker_group(segment, dominant_speaker) == "facilitator" else 0.0
         candidates.append((similarities[index] + length_bonus + participant_bonus - dominant_penalty,
                            similarities[index], index, speaker))
     candidates.sort(key=lambda row: (-row[0], -row[1], row[2]))
@@ -915,7 +1040,11 @@ def saved_embeddings(
     engine = saved.get("engine") if isinstance(saved.get("engine"), dict) else {}
     if str(engine.get("name") or model) != model:
         return None
-    if str(saved.get("fingerprint") or "") != transformer_input_fingerprint(analysis, model=model):
+    revision = str(engine.get("revision") or "")
+    if not revision:
+        return None
+    if str(saved.get("embedding_fingerprint") or "") != transformer_embedding_fingerprint(
+            analysis, model=model, revision=revision):
         return None
     try:
         vectors = _unpack_vectors(saved["vectors"])
@@ -983,7 +1112,8 @@ def analyze_transformer_topics(
         raise ValueError("相づちや空文字を除くと、Transformer分析に利用できる発話が不足しています。")
     if topic_count is not None and topic_count >= len(segments):
         raise ValueError("固定するテーマ数は分析対象発話数より少なくしてください。")
-    texts, context_expanded_count = _contextual_texts(source_segments, source_indices)
+    texts, context_expanded_count, context_manifest = _contextual_texts(
+        source_segments, source_indices, include_manifest=True)
     reused_embeddings = embeddings is not None
     if embedding_segment_ids is not None:
         if list(embedding_segment_ids) != [str(row["id"]) for row in segments]:
@@ -1003,13 +1133,17 @@ def analyze_transformer_topics(
     if np.any(norms <= 1e-9) or not np.all(np.isfinite(vectors)):
         raise ValueError("意味ベクトルに解析できない値があります。")
     vectors = vectors / norms
+    engine = engine or {"name": model_name, "framework": "test", "dimensions": int(vectors.shape[1])}
+    vector_revision = str(engine.get("revision") or "")
+    if revision and vector_revision != revision:
+        raise ValueError("発話ベクトルのモデルrevisionが要求と一致しません。")
     theme_vectors = None
     seed_counts: list[int] = []
     if mode == "manual":
         if progress:
             progress(65, "研究者が定義したテーマへ発話を割り当てています。")
         theme_vectors, seed_counts, descriptor_engine = _manual_theme_vectors(
-            manual_topics, segments, vectors, model_name=model_name, revision=revision,
+            manual_topics, segments, vectors, model_name=model_name, revision=vector_revision,
             check_cancelled=check_cancelled,
         )
         engine = engine or descriptor_engine
@@ -1046,8 +1180,7 @@ def analyze_transformer_topics(
         segment_ids = {str(segments[index]["id"]) for index in indices}
         participant_segment_ids = {
             str(segments[index]["id"]) for index in indices
-            if not dominant_speaker
-            or str(segments[index].get("speaker") or "UNKNOWN") != dominant_speaker
+            if _speaker_group(segments[index], dominant_speaker) == "participant"
         }
         keyword_segment_ids = (participant_segment_ids
                                if len(participant_segment_ids) >= min(3, len(segment_ids))
@@ -1177,23 +1310,26 @@ def analyze_transformer_topics(
     for topic in topic_rows:
         topic["backchannel_count"] = backchannel_counts[topic["topic_id"]]
 
-    duration = max((float(row.get("end") or 0) for row in segments), default=0)
+    duration = max((float(row.get("end") or 0) for row in source_segments), default=0)
     bin_seconds = max(60, int(analysis.get("config", {}).get("time_bin_seconds") or 300))
     bins: dict[tuple[int, str], dict[str, Any]] = {}
     topic_label_by_id = {row["topic_id"]: row["label"] for row in topic_rows}
     for row in assignments:
         if not row["topic_id"]:
             continue
-        index = int(float(row["start"]) // bin_seconds)
-        key = (index, row["topic_id"])
-        target = bins.setdefault(key, {
-            "bin_index": index, "start": index * bin_seconds,
-            "end": min((index + 1) * bin_seconds, duration), "topic_id": row["topic_id"],
-            "topic_label": topic_label_by_id[row["topic_id"]], "segment_count": 0,
-            "backchannel_count": 0, "speaking_seconds": 0.0,
-        })
-        target["segment_count"] += 1
-        target["speaking_seconds"] += float(row["duration"])
+        start, end = float(row["start"]), float(row["end"])
+        first = int(start // bin_seconds)
+        last = max(first, int(math.ceil(end / bin_seconds)) - 1)
+        for index in range(first, last + 1):
+            key = (index, row["topic_id"])
+            target = bins.setdefault(key, {
+                "bin_index": index, "start": index * bin_seconds,
+                "end": min((index + 1) * bin_seconds, duration), "topic_id": row["topic_id"],
+                "topic_label": topic_label_by_id[row["topic_id"]], "segment_count": 0,
+                "backchannel_count": 0, "speaking_seconds": 0.0,
+            })
+            target["segment_count"] += int(index == first)
+            target["speaking_seconds"] += max(0.0, min(end, target["end"]) - max(start, target["start"]))
     for row in backchannels:
         if not row["topic_id"]:
             continue
@@ -1218,11 +1354,13 @@ def analyze_transformer_topics(
         "相づちの対象テーマは時系列上で近い別話者の発話から推定し、賛同とは断定しません。",
         "相づち応答率の分母は他者の有意味発話数であり、実際に聞いていた機会を完全には表しません。",
         "相づちの検定は同一話者内の反復と期待度数の小ささを伴うため探索的に扱います。",
-        "話者別リザルトは本人が明示した変化・維持・気づき・支持表現だけを抽出し、表現がない場合は未判定とします。",
-        "話者別リザルトは会議前調査との比較ではなく、会議中の発話に基づく観察結果です。",
+        "話者別リザルトは語句に基づく未確認の候補です。否定・引用・主語の検出は限定的であり、本人の変化・支持の確定には研究者の原文照合が必要です。",
+        "話者別リザルトは会議前調査との比較ではありません。発話時間の多さだけで進行役とみなしたり参加者分析から除外したりしません。",
+        "時間推移の件数は発話の開始bin、秒数は各binと発話区間の重なりへ分配します。",
+        "相づちの種類は辞書上の表現分類であり、賛同・進行品質を確定するものではありません。",
         "意味的な近さは賛成・反対、合意、因果関係、重要性を意味しません。",
         "例外候補は他の発話との埋め込み類似度が低い発話であり、少数意見とは限りません。",
-        f"1発話が{MAX_TEXT_CHARACTERS}文字を超える場合、埋め込み入力は先頭部分に制限します。",
+        f"文脈付き入力は先頭{MAX_TEXT_CHARACTERS}文字、その後{MAX_EMBEDDING_TOKENS}token（接頭辞・特殊tokenを含む）までです。切詰めと対象発話の保持範囲はinput_manifestに記録します。",
     ]
     if mode == "manual":
         limitations[1:1] = [
@@ -1240,19 +1378,50 @@ def analyze_transformer_topics(
     if reused_embeddings:
         limitations.append(
             "この実行は保存済みの意味ベクトル（int8で量子化）を再利用しており、埋め込みの再計算は行っていません。")
+    diagnostics = {int(row["input_index"]): row for row in engine.get("input_diagnostics", [])}
+    input_manifest = []
+    for index, context in enumerate(context_manifest):
+        measured = diagnostics.get(index)
+        entry = {**context, **(measured or {}), "token_measurement_status": "measured" if measured else "unavailable"}
+        entry["character_truncated"] = len(texts[index]) > MAX_TEXT_CHARACTERS
+        start, end = entry.get("retained_character_start"), entry.get("retained_character_end")
+        target_start, target_end = context["target_character_start"], context["target_character_end"]
+        if target_start >= MAX_TEXT_CHARACTERS:
+            retained = "omitted"
+        elif start is None or end is None:
+            retained = "unknown"
+        elif start <= target_start and end >= target_end:
+            retained = "fully_retained"
+        elif end <= target_start or start >= target_end:
+            retained = "omitted"
+        else:
+            retained = "partially_retained"
+        entry["target_retention_status"] = retained
+        input_manifest.append(entry)
+    character_truncated_ids = [row["segment_id"] for row in input_manifest if row["character_truncated"]]
+    token_truncated_ids = [row["segment_id"] for row in input_manifest if row.get("token_truncated")]
+    truncated_ids = sorted(set(character_truncated_ids + token_truncated_ids))
+    measured_all = len(diagnostics) == len(segments)
+    if not measured_all:
+        limitations.append("token切詰めは未計測です。注入ベクトルまたは旧キャッシュのため、切詰めなしと解釈しないでください。")
+    parameters = {"mode": mode, "max_topics": max_topics, "min_topic_size": min_topic_size,
+                  "topic_count": topic_count, "time_bin_seconds": bin_seconds,
+                  "speaker_balancing": mode != "manual", "model_revision": vector_revision,
+                  "timeline_count_unit": "utterance_start", "timeline_duration_unit": "interval_overlap",
+                  "manual_min_similarity": manual_min_similarity if mode == "manual" else None,
+                  "manual_topics": [
+                      {"id": str(row.get("id") or ""), "label": str(row.get("label") or ""),
+                       "cues": [str(value) for value in (row.get("cues") or [])],
+                       "seed_segment_ids": [str(value) for value in (row.get("seed_segment_ids") or [])]}
+                      for row in manual_topics]}
     return {
-        "schema_version": 5, "algorithm_version": TRANSFORMER_ANALYSIS_VERSION,
-        "analysis_unit": "文脈付き発話", "fingerprint": transformer_input_fingerprint(analysis, model=model_name),
-        "engine": engine or {"name": model_name, "framework": "test", "dimensions": int(vectors.shape[1])},
-        "parameters": {"mode": mode, "max_topics": max_topics, "min_topic_size": min_topic_size,
-                       "topic_count": topic_count, "time_bin_seconds": bin_seconds,
-                       "speaker_balancing": mode != "manual",
-                       "manual_min_similarity": manual_min_similarity if mode == "manual" else None,
-                       "manual_topics": [
-                           {"id": str(row.get("id") or ""), "label": str(row.get("label") or ""),
-                            "cues": [str(value) for value in (row.get("cues") or [])],
-                            "seed_segment_ids": [str(value) for value in (row.get("seed_segment_ids") or [])]}
-                           for row in manual_topics]},
+        "schema_version": 6, "algorithm_version": TRANSFORMER_ANALYSIS_VERSION,
+        "analysis_unit": "文脈付き発話", "fingerprint": transformer_input_fingerprint(
+            analysis, model=model_name, parameters=parameters),
+        "embedding_fingerprint": transformer_embedding_fingerprint(analysis, model=model_name, revision=vector_revision),
+        "source_provenance": transformer_source_provenance(analysis),
+        "interpretation_status": "unverified_candidate", "researcher_review_required": True,
+        "engine": engine, "parameters": parameters, "input_manifest": input_manifest,
         "coverage": {"segment_count": len(segments), "source_segment_count": len(source_segments),
                      "ignored_noise_segment_count": len(ignored_segments),
                      "backchannel_segment_count": len(backchannel_segments),
@@ -1260,9 +1429,19 @@ def analyze_transformer_topics(
                      "speaker_result_count": len({row["speaker"] for row in speaker_results}),
                      "explicit_speaker_result_count": len({row["speaker"] for row in speaker_results
                                                             if row["confidence"] == "explicit"}),
+                     "candidate_speaker_result_count": len({row["speaker"] for row in speaker_results
+                                                             if row["confidence"] == "unverified_candidate"}),
                      "context_expanded_segment_count": context_expanded_count,
                      "topic_count": len(topic_rows),
-                     "truncated_segment_count": sum(len(value) > MAX_TEXT_CHARACTERS for value in texts),
+                     "truncated_segment_count": len(truncated_ids) if measured_all else None,
+                     "truncated_segment_ids": truncated_ids,
+                     "character_truncated_segment_count": len(character_truncated_ids),
+                     "character_truncated_segment_ids": character_truncated_ids,
+                     "token_truncated_segment_count": len(token_truncated_ids) if measured_all else None,
+                     "token_truncated_segment_ids": token_truncated_ids,
+                     "token_measurement_status": "measured" if measured_all else "unavailable",
+                     "target_truncated_segment_ids": [row["segment_id"] for row in input_manifest
+                                                      if row["target_retention_status"] in {"omitted", "partially_retained"}],
                      "small_cluster_segment_count": sum(1 for row in assignments if not row["topic_id"]),
                      "unassigned_segment_count": (sum(1 for row in assignments if not row["topic_id"])
                                                   if mode == "manual" else 0),
@@ -1270,7 +1449,9 @@ def analyze_transformer_topics(
                      "reused_embeddings": bool(reused_embeddings)},
         "quality": {"silhouette_cosine": round(float(silhouette), 6) if silhouette is not None else None,
                     "cluster_candidates": cluster_candidates,
-                    "topic_mode": mode,
+                    "topic_mode": mode, "requested_topic_count": topic_count,
+                    "actual_topic_count": len(topic_rows),
+                    "topic_count_status": "satisfied" if topic_count is not None else "not_fixed",
                     "dominant_speaker": dominant_speaker,
                     "dominant_speaker_percent": round(100 * dominant_share, 3)},
         "topics": topic_rows, "assignments": assignments, "speaker_topics": speaker_rows,
@@ -1299,8 +1480,12 @@ def semantic_search(
     if query_embedding is None:
         model = str(saved.get("engine", {}).get("name") or DEFAULT_MODEL)
         revision = str(saved.get("engine", {}).get("revision") or "")
-        query_vectors, _ = encode_texts([query], model_name=model, revision=revision,
-                                        kind="query", check_cancelled=check_cancelled)
+        if not revision:
+            raise ValueError("保存済みベクトルのモデルrevisionが不明です。テーマ分析を再実行してください。")
+        query_vectors, query_engine = encode_texts([query], model_name=model, revision=revision,
+                                                   kind="query", check_cancelled=check_cancelled)
+        if str(query_engine.get("revision") or "") != revision or str(query_engine.get("name") or "") != model:
+            raise ValueError("検索語と保存済みベクトルのモデルrevisionが一致しません。")
         query_vector = query_vectors[0]
     else:
         query_vector = np.asarray(query_embedding, dtype="float32").reshape(-1)
@@ -1323,6 +1508,7 @@ def semantic_search(
 def transformer_csv_sources(saved: dict | None) -> dict[str, list[dict[str, Any]]]:
     value = saved if isinstance(saved, dict) else {}
     return {
+        "transformer_input_coverage": list(value.get("input_manifest") or []),
         "transformer_topics": list(value.get("topics") or []),
         "transformer_assignments": list(value.get("assignments") or []),
         "transformer_speakers": list(value.get("speaker_topics") or []),

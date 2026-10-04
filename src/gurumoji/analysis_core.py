@@ -148,10 +148,12 @@ def validate_transition(machine: str, current: str, target: str, guard_id: str) 
         )
 
 
-def validate_definition(value: Any) -> dict[str, Any]:
+def validate_definition(value: Any, *, require_version: bool = False) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AnalysisContractError("定義はJSONオブジェクトで指定してください。", field="definition")
-    result = dict(value)
+    result = {key: item for key, item in value.items() if key not in {
+        "status", "revision", "updated_at", "last_trial", "expected_revision", "expected_trial",
+    }}
     required_text = ("definition_id", "name", "description", "unit_of_analysis",
                      "output_column", "data_type", "measurement_level", "measurement_rule")
     for key in required_text:
@@ -162,9 +164,13 @@ def validate_definition(value: Any) -> dict[str, Any]:
         raise AnalysisContractError("definition_idが正しくありません。", field="definition_id")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{1,62}", result["output_column"]):
         raise AnalysisContractError("出力列名は英数字と_で指定してください。", field="output_column")
+    if result["output_column"] in {"segment_id", "speaker", "speaker_name"} or "__missing_reason" in result["output_column"]:
+        raise AnalysisContractError("根拠列・欠測理由列は出力列に使えません。", code="output_column_conflict", field="output_column")
     columns = result.get("source_columns")
-    if not isinstance(columns, list) or not columns or any(column not in SOURCE_COLUMNS for column in columns):
+    if not isinstance(columns, list) or not columns or any(not isinstance(column, str) or column not in SOURCE_COLUMNS for column in columns):
         raise AnalysisContractError("対応していない入力列が含まれています。", field="source_columns")
+    if len(set(columns)) != 1:
+        raise AnalysisContractError("現在の測定規則は1種類の入力列だけを扱います。", code="source_columns_unsupported", field="source_columns")
     if result["data_type"] not in DEFINITION_TYPES:
         raise AnalysisContractError("data_typeが正しくありません。", field="data_type")
     if result["measurement_level"] not in MEASUREMENT_LEVELS:
@@ -172,8 +178,12 @@ def validate_definition(value: Any) -> dict[str, Any]:
     if result["measurement_rule"] not in MEASUREMENT_RULES:
         raise AnalysisContractError("測定規則が正しくありません。", field="measurement_rule")
     method = result.get("method", "frequency")
-    if method not in SUPPORTED_METHODS:
+    if not isinstance(method, str) or method not in SUPPORTED_METHODS:
         raise AnalysisContractError("初回範囲で利用できない分析手法です。", code="method_unavailable", field="method")
+    if method == "descriptive" and result["data_type"] != "number":
+        raise AnalysisContractError("記述統計にはnumber型が必要です。", code="incompatible_type", field="data_type")
+    if result["data_type"] in {"string", "category", "boolean"} and result["measurement_level"] not in {"nominal", "ordinal"}:
+        raise AnalysisContractError("文字・カテゴリ・真偽値には名義または順序尺度を指定してください。", code="incompatible_scale", field="measurement_level")
     if method == "descriptive" and result["measurement_level"] not in {"interval", "ratio"}:
         raise AnalysisContractError(
             "名義・順序尺度へ記述統計の平均を適用できません。frequencyを選択してください。",
@@ -185,6 +195,18 @@ def validate_definition(value: Any) -> dict[str, Any]:
         raise AnalysisContractError("duration規則にはduration列が必要です。", field="source_columns")
     if result["measurement_rule"] == "text_length" and "text" not in columns:
         raise AnalysisContractError("text_length規則にはtext列が必要です。", field="source_columns")
+    if result["measurement_rule"] in {"nonempty", "boolean_true"} and result["data_type"] != "boolean":
+        raise AnalysisContractError("この測定規則のdata_typeはbooleanです。", code="incompatible_type", field="data_type")
+    if result["measurement_rule"] == "nonempty" and columns[0] not in {"text", "speaker", "speaker_name", "role"}:
+        raise AnalysisContractError("nonempty規則は文字列の入力列に対応しています。", code="source_columns_unsupported", field="source_columns")
+    if result["measurement_rule"] == "boolean_true" and columns[0] != "question_candidate":
+        raise AnalysisContractError("boolean_true規則にはquestion_candidate列が必要です。", code="source_columns_unsupported", field="source_columns")
+    supported_behavior = {"unit_of_analysis": "segment", "missing_rule": "null_with_reason",
+                          "aggregation": "none", "denominator": "all_included_segments"}
+    for field, supported in supported_behavior.items():
+        if result.get(field, supported) != supported:
+            raise AnalysisContractError(f"現在対応している{field}は{supported}です。", code="definition_behavior_unsupported", field=field)
+        result[field] = supported
     levels = result.get("levels", [])
     if levels is not None and not isinstance(levels, list):
         raise AnalysisContractError("levelsは配列で指定してください。", field="levels")
@@ -194,8 +216,26 @@ def validate_definition(value: Any) -> dict[str, Any]:
     result["missing_rule"] = str(result.get("missing_rule") or "null_with_reason")
     result["aggregation"] = str(result.get("aggregation") or "none")
     result["denominator"] = str(result.get("denominator") or "all_included_segments")
-    result["version"] = int(result.get("version") or 1)
+    version = result.get("version") if require_version else result.get("version", 1)
+    if type(version) is not int or version < 1:
+        raise AnalysisContractError("定義versionは1以上の整数で指定してください。", code="definition_version_invalid", field="version")
+    result["version"] = version
     return result
+
+
+def validate_definitions(values: list[dict[str, Any]], *, require_version: bool = True) -> list[dict[str, Any]]:
+    """Protect evidence IDs, missingness columns, and every output namespace."""
+    normalized = [validate_definition(value, require_version=require_version) for value in values]
+    ids: set[str] = set()
+    columns: set[str] = set()
+    for value in normalized:
+        identifier, column = value["definition_id"], value["output_column"]
+        names = {column, column + "__missing_reason"}
+        if identifier in ids or names & columns:
+            raise AnalysisContractError("定義IDまたは出力列が重複しています。", code="output_column_conflict", field="definition_ids")
+        ids.add(identifier)
+        columns.update(names)
+    return normalized
 
 
 def eligibility_assessment(definitions: list[dict[str, Any]], *, segment_count: int) -> dict[str, Any]:
@@ -269,6 +309,18 @@ def validate_planning_proposal(
     }
 
 
+PUBLICATION_TARGETS = ("input", "orchestrator", "visualization")
+EFFECTIVE_PUBLICATION_WRITERS = ("research", *PUBLICATION_TARGETS)
+
+
+def validate_publication_targets(value: Any) -> list[str]:
+    # The existing publisher is one four-Vault operation, not independent writers.
+    if (not isinstance(value, list) or any(not isinstance(target, str) for target in value)
+            or value and (len(value) != len(PUBLICATION_TARGETS) or set(value) != set(PUBLICATION_TARGETS))):
+        raise AnalysisContractError("公開先は空配列またはinput・orchestrator・visualizationの全3件を指定してください。", field="publication_targets")
+    return list(PUBLICATION_TARGETS) if value else []
+
+
 def build_plan_envelope(
     *, item_id: str, source_revision: int, analysis_revision: int,
     input_fingerprint: str, payload: dict[str, Any], definitions: list[dict[str, Any]],
@@ -287,9 +339,7 @@ def build_plan_envelope(
             "検証的分析には事前固定した仮説・規則が必要です。",
             code="confirmatory_not_predefined", field="research_protocol",
         )
-    targets = payload.get("publication_targets", ["input", "orchestrator", "visualization"])
-    if not isinstance(targets, list) or any(t not in {"input", "orchestrator", "visualization"} for t in targets):
-        raise AnalysisContractError("公開先が正しくありません。", field="publication_targets")
+    targets = validate_publication_targets(payload.get("publication_targets", list(PUBLICATION_TARGETS)))
     provider_policy = payload.get("provider_policy", "local_only")
     if not isinstance(provider_policy, str) or provider_policy not in {"local_only", "cloud_allowed"}:
         raise AnalysisContractError(
@@ -306,7 +356,7 @@ def build_plan_envelope(
         proposal is None or proposal["provider"] not in {"openai", "google"}
     ):
         raise AnalysisContractError("local_only が既定です。クラウド送信方針には選択したLLMの計画候補が必要です。", code="provider_unavailable")
-    normalized_definitions = [validate_definition(value) for value in definitions]
+    normalized_definitions = validate_definitions(definitions)
     assessment = eligibility_assessment(normalized_definitions, segment_count=segment_count)
     steps = [
         {"step_id": "freeze_input", "milestone": "M0", "required": True, "parents": []},
@@ -325,7 +375,8 @@ def build_plan_envelope(
         "item_id": item_id, "source_revision": int(source_revision),
         "analysis_revision": int(analysis_revision), "input_hash": input_fingerprint,
         "mode": mode, "provider_policy": provider_policy,
-        "research_protocol": research, "publication_targets": list(dict.fromkeys(targets)),
+        "research_protocol": research, "publication_targets": targets,
+        "effective_publication_writers": list(EFFECTIVE_PUBLICATION_WRITERS) if targets else [],
         "capability_scope": {
             "selected": ["participation", "conversation_dynamics", "manual_measurement"],
             "catalog_version": CONTRACT_VERSION,
@@ -344,9 +395,11 @@ def build_plan_envelope(
 
 
 def build_execution_binding(envelope: dict[str, Any], definitions: list[dict[str, Any]]) -> dict[str, Any]:
-    values = [validate_definition(value) for value in definitions]
+    values = validate_definitions(definitions)
     by_id = {value["definition_id"]: value for value in values}
+    revisions = {value["definition_id"]: value.get("revision") for value in definitions}
     resolved = []
+    snapshots = {}
     for slot in envelope.get("binding_slots", []):
         definition_id = str(slot["slot_id"]).split(":", 1)[-1]
         definition = by_id.get(definition_id)
@@ -357,16 +410,23 @@ def build_execution_binding(envelope: dict[str, Any], definitions: list[dict[str
             )
         if definition["method"] not in slot["allowed_methods"]:
             raise AnalysisContractError("M0の許容範囲外の手法です。", code="binding_out_of_scope")
+        revision = revisions[definition_id]
+        if revision is not None and (type(revision) is not int or revision < 1):
+            raise AnalysisContractError("定義revisionが正しくありません。", code="revision_conflict")
+        snapshots[definition_id] = {"payload": definition, "definition_hash": fingerprint(definition),
+                                    "revision": revision, "status": "adopted"}
         resolved.append({
             "slot_id": slot["slot_id"], "definition_id": definition_id,
-            "definition_version": definition["version"], "method": definition["method"],
+            "definition_version": definition["version"], "definition_revision": revision,
+            "definition_hash": fingerprint(definition), "method": definition["method"],
             "output_column": definition["output_column"],
         })
     return {
-        "contract": "ExecutionBinding", "contract_version": CONTRACT_VERSION,
+        "contract": "ExecutionBinding", "contract_version": "analysis-binding-2",
         "plan_hash": envelope["plan_hash"], "resolved": resolved,
         "research_classification": envelope["research_protocol"]["classification"],
-        "binding_hash": fingerprint(resolved),
+        "definition_snapshots": snapshots,
+        "binding_hash": fingerprint({"resolved": resolved, "definition_snapshots": snapshots}),
     }
 
 

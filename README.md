@@ -272,6 +272,14 @@ Google Formsの「回答をダウンロード（.csv）」で取得したCSVは�
 
 各可視化には対応するCSV出力があり、画面上部の「全分析JSON」には計算条件、元データrevision、自動集計、手動設定・注釈、根拠発話を含めます。生のJSONは画面には表示せず、ダウンロード時に必ず生成します。
 
+### 保存済み分析の履歴とスライド
+
+「分析の履歴と根拠」から会話の自律runを選び、Core判断、専門担当の結果、ラベル提案と採用・棄却・削除、固定した原発話を確認できます。初期／最新／過去のラベル版を区別し、担当・操作・状態・日付で絞り込めます。旧履歴の欠けた理由や時刻は「未記録」です。閲覧では分析やAIを再実行しません。
+
+「スライド」では、採用テンプレートと対象版を確認し、設計とプロンプトをVisualizationVaultへ明示保存してからプレビュー・編集可能PPTXを出力します。保存済み分析だけを用い、追加AIは呼びません。設計ノートが削除・変更された場合やrunの版が変わった場合は出力を止めます。PPTX出力は`python-pptx`が必要です。出力したファイルはPowerPoint等で編集でき、アプリ内の原稿編集とPDF出力は初版では提供しません。
+
+詳しい境界と互換性は[履歴閲覧の設計](docs/program-vault/40-Design/analysis-history-viewer.md)、採用根拠とプロンプトは[スライド設計](docs/program-vault/40-Design/slide-generation-design-and-prompts.md)を参照してください。PPTXには分析の引用が含まれ得るため、共有前に内容と公開範囲を確認してください。
+
 ### 形態素・構文・計量テキスト分析
 
 - **形態素解析**: GiNZAが読み込める場合は、そのSudachi情報から表層形、原形、正規形、読み、Universal POS、詳細品詞、活用を形態素単位で保存します。GiNZAが利用できない場合はSudachiPy単独へ切り替えます。
@@ -440,7 +448,7 @@ $env:PYTHONPATH="$PWD\src"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-テストには、実際のEdge、Chrome、またはChromiumをヘッドレス起動し、進行中ジョブの復元を確認するブラウザースモークテストも含まれます。対応ブラウザーがPATHまたは一般的なWindowsのインストール先に見つからない場合に限り、このテストは自動的にスキップされます。FFmpegを使う一部のメディアテストも、FFmpegが見つからない環境ではスキップされます。
+実ブラウザーテストは既定では未実行（skipped）です。GURUMOJI_RUN_UI_BROWSER=1を明示した場合だけ、対応するEdge、Chrome、またはChromiumをsandboxを維持して起動します。依存不足や確認された環境制約によるblocked／未実行は合格を意味しません。通常のassertion・JavaScript error・timeoutは失敗のまま扱います。設定と検証範囲は[ブラウザーテスト手順](tests/BROWSER_TESTS.md)を参照してください。FFmpegを使う一部のメディアテストも、FFmpegが見つからない環境ではスキップされます。
 
 ## Google Colabで使う
 

@@ -46,10 +46,14 @@ def make_analysis_archive(
     row_segments: Any,
     row_session_profile: Any,
 ) -> tuple[Callable[..., Any], ...]:
-    def archive_source_stamp(row) -> str:
-        with database_connection() as connection:
-            registry = connection.execute("SELECT value FROM application_metadata WHERE key='speaker_registry_revision'").fetchone()
-            prep_revision, _ = preparation.load_state(connection, row["id"])
+    def archive_source_stamp(row, *, connection=None) -> str:
+        # Publication guards supply their existing transaction so source,
+        # preparation and registry revisions come from one SQLite snapshot.
+        if connection is None:
+            with database_connection() as current:
+                return archive_source_stamp(row, connection=current)
+        registry = connection.execute("SELECT value FROM application_metadata WHERE key='speaker_registry_revision'").fetchone()
+        prep_revision, _ = preparation.load_state(connection, row["id"])
         keys = ("id", "source_name", "segments_json", "speaker_names_json", "speaker_profiles_json",
                 "session_profile_json", "outline_json", "emotion_analysis_json", "revision_count",
                 "analysis_revision", "analysis_config_json", "analysis_annotations_json")
@@ -254,7 +258,8 @@ def make_analysis_archive(
             "comparison_interviews": (["item_id", "source_name", "comparison_label", "comparison_source", "session_type",
                                        "session_date", "objective", "included_segment_count", "speaker_count",
                                        "participant_count", "session_duration", "total_speaking_seconds", "term_count",
-                                       "excluded_segment_count"], comparison.get("interviews", [])),
+                                       "excluded_segment_count", "timed_turn_count", "missing_time_turn_count",
+                                       "session_timed_turn_count", "session_missing_time_turn_count"], comparison.get("interviews", [])),
             "comparison_common_terms": (["term", "minimum_count", "item_id", "count", "rate_per_1000_terms"],
                                         spread(comparison.get("common_terms", []), "term", "minimum_count")),
             "comparison_characteristic_terms": (["item_id", "source_name", "term", "count", "rate_per_1000_terms",

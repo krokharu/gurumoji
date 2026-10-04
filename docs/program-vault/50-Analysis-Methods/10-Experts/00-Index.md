@@ -84,7 +84,7 @@ tags:
 - 形態素解析と係り受けは、同じGiNZAの解析結果を後段の分析に渡す前処理で、確認すべき事項（解析器・版・簡易解析への切り替え・書き言葉で評価された精度）も共通のため、1人の専門家にまとめた。
 - 語彙頻度、共起、話者別特徴語、文脈検索（KWIC）は、計量テキスト分析の方法論（[[50-Analysis-Methods/20-Literature/LIT-higuchi-2017-khcoder|樋口 2017]]）の中で、探索と原文への往復に使う道具として扱うため、計量テキスト分析の専門家1人が担当する。
 - 手動コード・重要引用（`qualitative_coding`）は、質的分析の各専門家が共通に使う記録の道具で、手法ではないため専門家を置かない。
-- 専門家を置かない機能：`local_insights`（アプリ固有の入口の要約）、`ai_insights`（方法論の専門家の手順を実行する手段）、`outline`・`ai_finishing`・`meeting_minutes`（研究手法ではない補助・編集の機能）。
+- 専門家を置かない機能：`local_insights`（アプリ固有の入口の要約）、`ai_insights`（方法論の専門家の手順を実行する手段）、`autonomous_analysis`（Core／Handlerの実行・保存経路で、単独の研究手法ではない）、`outline`・`ai_finishing`・`meeting_minutes`（研究手法ではない補助・編集の機能）。
 - 計画中の手法（[[40-Design/quantification-statistics-plan]]）は、実装されるまで専門家を置かない。
 
 ## 各専門家のフォルダーの構成

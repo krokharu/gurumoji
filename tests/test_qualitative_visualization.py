@@ -1,6 +1,5 @@
 """Browser regression checks for counts, evidence, and interpretation boundaries."""
 import re
-import subprocess
 import threading
 import unittest
 from unittest.mock import patch
@@ -10,12 +9,14 @@ from werkzeug.serving import make_server
 import app
 from gurumoji.web import system_routes
 import test_analysis as fixtures
-import test_browser_e2e as browser_support
+import browser_support
 
 
+@browser_support.ui_browser_test
 class QualitativeVisualizationTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.AnalysisApiTests()
+        self.addCleanup(self.fixture.doCleanups)
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
         self.item_id = 'visual_fixture'
@@ -35,9 +36,7 @@ class QualitativeVisualizationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.data)
 
     def exercise_browser(self, size):
-        browser = browser_support.browser_executable()
-        if not browser:
-            self.skipTest('Chromium browser required')
+        browser_support.require_browser_executable()
         original_render = system_routes.render_template
         original_static = app.app.send_static_file
         driver = r'''
@@ -132,13 +131,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         thread.start()
         try:
             with patch.object(system_routes, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
-                result = subprocess.run([browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
-                    '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-                    '--force-device-scale-factor=1', f'--window-size={size}',
-                    f'--user-data-dir={self.fixture.temporary.name}/visual-browser',
-                    '--virtual-time-budget=60000', '--dump-dom',
-                    f'http://127.0.0.1:{server.server_port}/?view=analysis&item={self.item_id}'],
-                    capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=45)
+                result = browser_support.run_browser_dom(
+                    f'http://127.0.0.1:{server.server_port}/?view=analysis&item={self.item_id}',
+                    profile=app.Path(self.fixture.temporary.name) / "visual-browser",
+                    viewport=tuple(map(int, size.split(","))),
+                    virtual_time_budget_ms=60000, timeout_seconds=45,
+                    device_scale_factor_one=True,
+                )
         finally:
             server.shutdown()
             server.server_close()

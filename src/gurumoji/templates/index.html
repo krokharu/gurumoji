@@ -6,6 +6,8 @@
   <title>{{ app_name }}</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='analysis-orchestration.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='analysis-history.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='ai-effort.css') }}">
 </head>
 <body class="booting">
@@ -58,6 +60,7 @@
           <i class="job-chip-dot" aria-hidden="true"></i>
           <span id="analysis-job-chip-label">分析中</span>
         </button>
+        <button id="orchestration-chip" class="job-chip" type="button" hidden><i class="job-chip-dot" aria-hidden="true"></i><span id="orchestration-chip-label">自律分析</span></button>
         <div class="app-status desktop-only" aria-label="トークン設定状況">
           <span id="status-hf" class="status-pill loading">Hugging Face</span>
           <button id="status-openai" class="status-pill loading" type="button" data-model-provider="openai">OpenAI</button>
@@ -235,26 +238,52 @@
         <h2 id="analysis-run-dialog-title">基礎分析の実行設定</h2>
         <p>発話量・会話の時間構造を集計します。Transformerテーマ分析とAI見解は「内容・文脈検索」から個別に実行します。</p>
       </div>
+      <div class="orchestration-entry"><div><strong>Core / Handler 自律分析</strong><p>問いに合わせて解釈・検証・批判を反復。AIとタスクの動きを確認できます。</p></div><button id="orchestration-open" class="secondary-button" type="button">自律分析を設定</button></div>
       <div id="analysis-run-dialog-message" class="alert" hidden></div>
       <div class="analysis-run-mode-picker">
         <label><input name="analysis_run_mode" type="radio" value="automatic" checked><span>自動実行</span></label>
         <label><input name="analysis_run_mode" type="radio" value="manual"><span>手動実行</span></label>
       </div>
-        <div id="analysis-manual-definition" class="analysis-manual-definition" hidden>
-        <label class="field"><span>定義名</span><input id="analysis-definition-name" type="text"></label>
-        <label class="field"><span>定義ID</span><input id="analysis-definition-id" type="text"></label>
-        <label class="field"><span>説明</span><input id="analysis-definition-description" type="text"></label>
-        <label class="field"><span>出力列</span><input id="analysis-definition-output" type="text"></label>
-          <p id="analysis-definition-trial-result" role="status"></p>
+      <fieldset class="analysis-display-mode">
+        <legend>表示する詳しさ</legend>
+        <label><input name="analysis_display_mode" type="radio" value="simple" checked>簡単</label>
+        <label><input name="analysis_display_mode" type="radio" value="detail">詳細</label>
+      </fieldset>
+      <div id="analysis-manual-definition" class="analysis-manual-definition" hidden>
+        <h3>測定を少数で確かめて採用</h3>
+        <label class="field"><span>測定プリセット</span><select id="analysis-definition-preset">
+          <option value="text_length">文字数（発話ごと）</option>
+          <option value="duration">発話時間（秒）</option>
+          <option value="speaker_frequency">話者ID別の度数</option>
+          <option value="role_frequency">役割別の度数</option>
+        </select></label>
+        <p id="analysis-definition-summary"></p>
+        <div data-analysis-detail hidden>
+          <label class="field"><span>定義名</span><input id="analysis-definition-name" type="text"></label>
+          <label class="field"><span>定義ID</span><input id="analysis-definition-id" type="text"></label>
+          <label class="field"><span>説明</span><input id="analysis-definition-description" type="text"></label>
+          <label class="field"><span>出力列</span><input id="analysis-definition-output" type="text"></label>
+          <p id="analysis-definition-conditions"></p>
         </div>
+        <p id="analysis-definition-limits"></p>
+        <div class="analysis-definition-actions">
+          <button id="analysis-definition-save" type="button" class="secondary-button">1. 下書きを保存</button>
+          <button id="analysis-definition-trial" type="button" class="secondary-button" disabled>2. 最大20件を試す</button>
+        </div>
+        <div id="analysis-definition-trial-result" role="status" aria-live="polite"></div>
+        <label class="check-row"><input id="analysis-definition-confirm" type="checkbox" disabled><span>固定された試行行・欠測・測定の限界を確認しました</span></label>
+        <button id="analysis-definition-adopt" type="button" class="secondary-button" disabled>3. 確認した定義を採用</button>
+        <p id="analysis-definition-state" role="status"></p>
+        <button id="analysis-definition-inspect" type="button" class="secondary-button" hidden>保存状態を再確認</button>
+      </div>
         <div class="analysis-manual-definition" aria-labelledby="analysis-advisor-heading">
           <h3 id="analysis-advisor-heading">計画担当 O01</h3>
-          <p>分析目的から、既存の発話量・会話の時間構造のうち優先して確認する手法と確認事項を提案します。原文は送信しません。クラウドを選ぶと分析目的・集計件数・手法カードを送ります。</p>
+          <p>分析目的から、既存の発話量・会話の時間構造のうち優先して確認する手法と確認事項を提案します。クラウドを選ぶと分析目的（貼り付けた本文を含む）・集計件数・手法カードを送ります。発話本文を自動では追加しません。</p>
           <label class="field" for="analysis-advisor-objective"><span>分析目的</span><input id="analysis-advisor-objective" type="text" maxlength="500" placeholder="例：参加の偏りと話者交替を確認したい"></label>
           <label class="field" for="analysis-advisor-engine"><span>判断に使うモデル</span>
             <select id="analysis-advisor-engine">
-              <option value="transformer">Transformer（このPC）</option>
-              <option value="lmstudio">LM Studio（このPC）</option>
+              <option value="transformer">Transformer（実行環境）</option>
+              <option value="lmstudio">LM Studio（設定された接続先）</option>
               <option value="openai">OpenAI（クラウド）</option>
               <option value="google">Google Gemini（クラウド）</option>
             </select>
@@ -265,14 +294,18 @@
           <div id="analysis-advisor-result" role="status" aria-live="polite"></div>
         </div>
         <p id="analysis-run-plan-summary" class="field-note"></p>
-        <label class="check-row"><input id="analysis-run-publish" type="checkbox"><span>結果を公開する</span></label>
+        <label class="check-row"><input id="analysis-run-publish" type="checkbox"><span>実行環境の4つのVault（Research・Input・Orchestrator・Visualization）へ保存する。OFFでは本体成果物のみ保存</span></label>
       <div class="app-dialog-actions">
         <button id="close-analysis-run-dialog" class="secondary-button" type="button">閉じる</button>
-        <button id="analysis-run-start" class="primary-button small" type="submit">開始</button>
+        <button id="analysis-run-start" class="primary-button small" type="submit">全件分析を開始</button>
       </div>
     </form>
   </dialog>
 
   <script src="{{ url_for('static', filename='analysis-execution.js') }}" defer></script>
+  {% include 'views/analysis-orchestration.html' %}
+  {% include 'views/analysis-history.html' %}
+  <script src="{{ url_for('static', filename='analysis-orchestration.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='analysis-history.js') }}" defer></script>
 </body>
 </html>

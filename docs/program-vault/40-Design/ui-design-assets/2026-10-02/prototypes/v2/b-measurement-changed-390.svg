@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="929" viewBox="0 0 390 929" role="img" aria-labelledby="title desc"><title id="title">B案 補助状態：定義変更後 390px</title><desc id="desc">非機能の提案。定義を秒から文字数へ変更した後。前の秒数試行は採用に使えず、再試行するまで採用は無効。</desc><rect width="390" height="929" fill="#f4f5f0"/><rect x="0" y="0" width="390" height="35" rx="0" fill="#1c6b50" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="16" y="23" fill="#fffef9" font-family="Noto Sans CJK JP, sans-serif" font-size="12" font-weight="700">提案モックアップ / 非機能 / 合成データ</text>
+<text x="16" y="72" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="23" font-weight="700">Gurumoji</text>
+<text x="16" y="106" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">文字起こし　 結果一覧　 分析　 話者</text>
+<path d="M16 121 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="150" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="21" font-weight="700">相談会サンプル</text>
+<text x="16" y="181" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">現在の入力：12版</text>
+<text x="16" y="210" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">全5発話・除外1 → 試行4</text>
+<rect x="16" y="230" width="358" height="44" rx="6" fill="#e9f2e6" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="28" y="258" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">分析を組む</text>
+<text x="350" y="258" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="400">▾</text>
+<text x="16" y="313" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="21" font-weight="700">発話の長さ（文字）</text>
+<rect x="16" y="337" width="135.609375" height="26" rx="4" fill="#fff1df" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="25" y="355" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="700">定義を変更 · 未保存</text>
+<text x="16" y="382" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">発話本文の文字を数える / 数値 / 比率尺度</text>
+<rect x="16" y="414.1" width="358" height="101.20000000000005" rx="6" fill="#fff1df" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="30" y="438.1" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="15" font-weight="700">定義が変わったため、再試行が必要です</text>
+<text x="30" y="461.1" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">前の試行は秒数の結果です。この定義の採用には使</text>
+<text x="30" y="484.20000000000005" fill="#794415" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">えません。</text>
+<rect x="16" y="530.3000000000001" width="240" height="44" rx="7" fill="#1c6b50" stroke="#1c6b50" stroke-width="1.2"/>
+<text x="28" y="558.3000000000001" fill="#fffef9" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">変更した定義で再試行する</text>
+<path d="M16 598.3000000000001 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="630.3000000000001" fill="#18211d" font-family="Noto Sans CJK JP, sans-serif" font-size="19" font-weight="700">前の試行結果（秒）</text>
+<text x="16" y="658.3000000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">定義1版 · 入力12版 / 有効3 · 欠測1</text>
+<text x="16" y="692.3000000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="21" font-weight="700">平均 20.7 秒</text>
+<path d="M16 723.3000000000001 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="752.3000000000001" fill="#1c6b50" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">▸ 前の4発話の個票を見る</text>
+<rect x="16" y="771.3000000000001" width="224" height="44" rx="7" fill="#e9f2e6" stroke="#bac6bb" stroke-width="1.2"/>
+<text x="28" y="799.3000000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="700">この定義を採用</text>
+<text x="16" y="839.3000000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="14" font-weight="400">再試行して値を確認すると、採用に進めます。</text>
+<path d="M16 870.4000000000001 h358" stroke="#bac6bb" fill="none"/>
+<text x="16" y="898.4000000000001" fill="#53625a" font-family="Noto Sans CJK JP, sans-serif" font-size="13" font-weight="400">この測定では外部AIへ送信しません</text></svg>

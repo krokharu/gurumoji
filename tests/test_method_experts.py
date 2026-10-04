@@ -26,7 +26,7 @@ EXPECTED_REGISTRY_EXPERTS = {
 }
 # Tools, AI vehicles and editing aids: not research methods, so no expert (see 10-Experts/00-Index).
 METHODS_WITHOUT_EXPERT = {"local_insights", "qualitative_coding", "ai_insights", "outline", "ai_finishing",
-                          "meeting_minutes", "segment_classification"}
+                          "meeting_minutes", "segment_classification", "autonomous_analysis"}
 LITERATURE_FIELDS = {"note_id", "note_type", "literature_id", "title", "authors", "year", "venue", "source_type",
                      "peer_review", "peer_review_basis", "doi", "url", "accessed", "access_scope",
                      "access_detail", "correction_status", "related_experts", "status", "updated", "tags"}

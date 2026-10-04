@@ -1,0 +1,55 @@
+{
+  "recorded_at_utc": "2026-10-02T19:05:00Z",
+  "head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "code_commit": "59ebd24f88a86415c3cb122c11ece9b03c9111fc",
+  "source_files": [
+    {
+      "path": "src/gurumoji/analysis_pipeline.py",
+      "sha256": "d14c64127e65a5a0b3bf255298bf38270920a34430a3685bc077d520ea28c9e6"
+    },
+    {
+      "path": "src/gurumoji/analysis_core.py",
+      "sha256": "54ea3182553c23e169ae22a74d23da66e94a83a553b4ae1605f37aac35085829"
+    },
+    {
+      "path": "src/gurumoji/static/analysis-execution.js",
+      "sha256": "9616e145a1829fe487bc6320d565203752ed36102b6679afcbfc9e7b1965b16c"
+    },
+    {
+      "path": "src/gurumoji/templates/index.html",
+      "sha256": "8df16767ce16375a07eb17056df7143b1f55152aca2ca2592270e91b906ae7eb"
+    }
+  ],
+  "evidence_files": [
+    {
+      "path": "definition-lifecycle-probe.py",
+      "sha256": "c8cb0c233c009e7252b31c1a5eb982f8afadf3a291766460fc6d285abec35d94"
+    },
+    {
+      "path": "definition-lifecycle-probe.json",
+      "sha256": "5f058659b1db0e5bd72645db294244153a49497503f892ecc1c48a0e54d96cb4"
+    },
+    {
+      "path": "definition-full-pipeline-probe.py",
+      "sha256": "ab77000c07fbf9afa9d6b30ae49b0ecdc93e6ca0ae95b51ebdb9844b4ffa1e97"
+    },
+    {
+      "path": "definition-full-pipeline-probe.json",
+      "sha256": "b47735a9c669affa6e5768387718ce289fd5d4f9a753aff4dcf44a0a21dff521"
+    }
+  ],
+  "auditor_confirmation": {
+    "rerun_at_utc": "2026-10-02T19:03:10Z",
+    "command": "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python ../artifacts/design-sprint-20261003/definition-lifecycle-probe.py",
+    "exit_code": 0,
+    "same_findings_confirmed": true
+  },
+  "proof_scope": "Two levels: (1) synthetic in-memory SQLite original worker prefix/manual step; (2) original M0-M7 orchestration with deterministic paused scheduling and synthetic method/save/publication adapters in temporary SQLite. Both show definition binding mismatch. Not browser, real method, real artifact file, or Vault acceptance.",
+  "no_real_data_or_source_changes": true,
+  "counting": "DG-02 technical dependencies T1/T2/T3; T2 and T3 separately evidenced P1 findings; no extra top-level UI ID and no change to original25 accounting",
+  "supplemental_review": {
+    "reviewed_at_utc": "2026-10-02T19:05:50Z",
+    "original_full_orchestrator_probe": "read source and result; independent verifier executed it",
+    "result": "completed M0-M7 with binding v1, loaded definitions v2 and value60 instead of original3"
+  }
+}

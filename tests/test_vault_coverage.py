@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -218,6 +219,11 @@ class LibraryVaultTests(unittest.TestCase):
 
 class LegacyRunVaultTests(unittest.TestCase):
     def setUp(self):
+        # The lost-catalog recovery must also work when rendered bytes match
+        # exactly; do not let a wall-clock second hide this regression.
+        clock = patch("gurumoji.vault_registry.datetime")
+        clock.start().now.return_value = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+        self.addCleanup(clock.stop)
         self.fixture = support.ContentApiTests("test_generated_result_persists_and_becomes_stale_on_edit")
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)

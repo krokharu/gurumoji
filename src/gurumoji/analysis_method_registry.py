@@ -1,7 +1,7 @@
 """Versioned output contracts for saved text-analysis results."""
 from __future__ import annotations
 
-REGISTRY_VERSION = "text-analysis-store-8"
+REGISTRY_VERSION = "text-analysis-store-12"
 
 COMMON_EXPORT_FIELDS = {
     "schema_version", "item_id", "source_name", "revision_count", "analysis_revision",
@@ -52,6 +52,7 @@ def preview_fields(dataset: str, fields: list[str]) -> list[str]:
 
 
 METHODS = [
+    ("autonomous_analysis", "自律探索分析・Core／Handler", ["autonomous_summary"]),
     ("local_insights", "ローカル見解", ["insights"]),
     ("speaker_characteristics", "話者別特徴語", ["characteristic_terms"]),
     ("transformer_topics", "Transformerテーマ分析", ["transformer_topics", "transformer_assignments", "transformer_speakers", "transformer_timeline", "transformer_outliers", "transformer_backchannels", "transformer_backchannel_speakers", "transformer_backchannel_rates", "transformer_backchannel_tests", "transformer_speaker_results"]),
@@ -75,7 +76,7 @@ METHODS = [
     ("meeting_minutes", "会議議事録・タスク候補", ["meeting_tasks", "meeting_decisions", "meeting_speaker_activity"]),
     ("interview_comparison", "グループインタビュー比較", ["comparison_interviews", "comparison_common_terms", "comparison_characteristic_terms", "comparison_codes", "comparison_emotions"]),
 ]
-SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_classification"}
+SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_classification", "autonomous_analysis"}
 
 # Navigation categories describe the implemented methods, not external engines.
 METHOD_GROUPS = [
@@ -87,7 +88,7 @@ METHOD_GROUPS = [
      ("transformer_topics", "audio_emotion")),
     ("ai", "生成AI・アウトライン・仕上げ",
      "AI見解、議題・アウトライン、文字起こしの仕上げ記録を確認します。",
-     ("ai_insights", "outline", "ai_finishing")),
+     ("ai_insights", "outline", "ai_finishing", "autonomous_analysis")),
     ("statistics", "統計・群間比較",
      "記述統計、クロス集計、群間比較、相関を確認します。",
      ("descriptive_statistics", "group_statistics", "correlation")),
@@ -208,7 +209,7 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
     engine = research.get("linguistics", {}).get("engine", {})
     insights = analysis.get("insights", {})
     results = []
-    optional = {"kwic": kwic, "ai_finishing": finishing, "meeting_minutes": meeting,
+    optional = {"autonomous_analysis": None, "kwic": kwic, "ai_finishing": finishing, "meeting_minutes": meeting,
                 "interview_comparison": comparison, "segment_classification": classification}
     for key, title, tables in METHODS:
         if key in optional and optional[key] is None:
@@ -248,6 +249,11 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
         selected = [name for name in tables if name in datasets]
         count = sum(len(datasets[name][1]) for name in selected)
         state = "completed" if count or findings or details else "empty"
+        if key in {"participation", "conversation_dynamics"} and not any(
+            not segment.get("excluded") for segment in analysis.get("segments", [])
+        ):
+            # Fixed summary rows describe the schema, not observed input.
+            state = "empty"
         if key in {"ai_insights", "outline"} and not details: state = "not_run"
         if key == "transformer_topics":
             details = analysis.get("transformer", {})
@@ -271,6 +277,18 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
         if key == "ai_finishing" and "failed" in details.get("stages", {}).values(): state = "partial"
         method_engine = engine if key in {"morphology", "syntax", "lexical_frequency", "cooccurrence", "speaker_characteristics"} else {}
         limitations = research.get("limitations", analysis.get("cautions", []))
+        if key == "participation":
+            # The snapshot's computation version wins, including pre-upgrade snapshots.
+            method_engine = {"name": "local-participation", "version": analysis.get("algorithm_version")}
+            overview = analysis.get("automatic", {}).get("overview", {})
+            timed, missing = overview.get("timed_turn_count"), overview.get("missing_time_turn_count")
+            if timed is not None and missing is not None:
+                summaries = [{"title": "時刻の範囲", "text": (
+                    f"時刻あり{timed}発話、時刻不明{missing}発話。時間は時刻あり発話の小計。"
+                    "割合・均等度は対象集合に時刻欠測がなく、総時間が正のときだけ算出します。"
+                )}]
+        if key == "participation" and analysis.get("automatic", {}).get("overview", {}).get("mixed_role_speaker_count"):
+            summaries.append({"title": "役割混在", "text": "役割混在: 同じ話者に複数の役割があります。全体時間は保持し、役割に依存する参加者・司会・役割別集計は算出しません。"})
         if key == "transformer_topics" and details.get("result"):
             method_engine = details["result"].get("engine", {})
             limitations = details["result"].get("limitations", limitations)

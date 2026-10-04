@@ -1,6 +1,6 @@
 ---
 name: gurumoji-obsidian-memory
-description: Gurumoji の Obsidian データ構造を変更するときに使う。VaultRegistry、Vault 間の保存契約、同期・移行、または AnalysisStore の Vault公開・成果物契約を変更する依頼で適用する。通常の文書編集、Obsidianと無関係なDB変更、一般的なアプリ修正、利用者としてのノート操作には使わない。
+description: Gurumojiと確認できるリポジトリで、VaultRegistry・Vault保存契約・検索・同期／移行・AnalysisStore公開を調査または変更するときに使う。Obsidianという語だけでは適用しない。ADC等の別プロジェクト、単発の文章編集、利用者としての研究ノート操作は対象外。
 ---
 
 # Gurumoji Obsidian Memory
@@ -8,6 +8,12 @@ description: Gurumoji の Obsidian データ構造を変更するときに使う
 Gurumoji の人が読む知識は Obsidian Markdown に、機械的な検索・整合性・大きな構造化データは SQLite、JSON、CSV に置く。詳細な開発上の安全策は `docs/program-vault/40-Design/ai-development-rules.md` を参照する。現在のコードと設定で、保存先・正本・IDを確認する。
 
 パスの基準は2つある。`docs/` と `src/` はリポジトリルート基準、`references/` と `scripts/` はこのスキル配下（`.claude/skills/gurumoji-obsidian-memory/`）を指す。
+
+## 適用範囲
+
+依頼内容とリポジトリの入口（README／AGENTS.md）・対象実装を照合し、Gurumoji の保存・検索・同期の作業だと確認してから適用する。`docs/program-vault` というパスや Obsidian という語だけでは判定しない。
+
+ADC／ADC08 など別プロジェクトにはそのプロジェクトのルールを使い、Gurumoji の Vault 分類・保存先・クラスを持ち込まない。単発の文章編集、利用者として既存の研究ノートを読む・直す操作、Obsidian と無関係な DB／一般アプリ修正には適用しない。
 
 ## 作業の入口
 
@@ -32,5 +38,3 @@ python .claude/skills/gurumoji-obsidian-memory/scripts/retrieve_memory.py \
 - 人が所有するノート（全文・操作・研究メモ・仕上げ結果・テーマ）の本文、タグ、別名は置換しない。アプリの生成ノートは、Input／Visualization／Orchestrator なら `VaultRegistry`、ResearchVault なら `AnalysisStore`、`ObsidianLayout`、`ObsidianFinishing` の既存経路を使う。どれも共通判定 `vault_note_policy` を通り、研究者が編集した生成ノートは履歴に写してから最新版で上書きする。
 - 同期は AI 再実行、重い再分析、外部送信を暗黙に起動しない。古い派生物は stale として示す。
 - AI入力と検索インデックスに資格情報、個人情報、不要な原文・CSV・JSONを入れない。実 Vault ではなく一時Vaultで検証する。
-
-このスキルはGurumoji固有の記憶アーキテクチャ用である。単発の文章編集や、既存の研究ノートを利用者として操作するだけの依頼には適用しない。

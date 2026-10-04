@@ -77,7 +77,7 @@ class ContentAnalysisTests(unittest.TestCase):
 
     def test_kwic_multiple_hits_normalization_context_and_paging(self):
         analysis, tokens = fixture()
-        result = content.search_kwic(analysis, tokens, "価格", limit=1, offset=1)
+        result = content.search_kwic(analysis, tokens, "価格", mode="literal", limit=1, offset=1)
         self.assertEqual(result["total"], 3)
         self.assertEqual(result["hits"][0]["begin"], 3)
         self.assertEqual(result["hits"][0]["context_ids"], ["a1", "a2"])

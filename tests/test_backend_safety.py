@@ -15,7 +15,7 @@ import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import app
 from support import use_temporary_library
@@ -1128,33 +1128,81 @@ class JobLifecycleTests(unittest.TestCase):
         app.release_instance_lock()
         with tempfile.TemporaryDirectory(prefix="gurumoji-instance-lock-") as temporary:
             lock_path = Path(temporary) / "instance.lock"
-            code = (
-                "import sys; from pathlib import Path; import app; "
-                "app.INSTANCE_LOCK_FILE=Path(sys.argv[1]); "
-                "app.DATA_INSTANCE_LOCK_FILE=Path(sys.argv[1]); "
-                "print(int(app.acquire_instance_lock()), flush=True); "
-                "sys.stdin.readline(); app.release_instance_lock()"
-            )
+            # pytest's pythonpath setting affects only this interpreter. Bind the
+            # child to the exact source under test, independent of cwd/PYTHONPATH.
+            app_source = Path(app.__file__).resolve()
+            code = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+import app
+if Path(app.__file__).resolve() != Path(sys.argv[3]):
+    raise RuntimeError("Child imported a different app source")
+app.INSTANCE_LOCK_FILE = Path(sys.argv[1])
+app.DATA_INSTANCE_LOCK_FILE = Path(sys.argv[1])
+print(int(app.acquire_instance_lock()), flush=True)
+sys.stdin.readline()
+app.release_instance_lock()
+"""
             child = subprocess.Popen(
-                [sys.executable, "-c", code, str(lock_path)],
+                [sys.executable, "-c", code, str(lock_path), str(app_source.parents[1]), str(app_source)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                cwd=temporary,
             )
+            cleanup_timed_out = False
             try:
-                self.assertEqual(child.stdout.readline().strip(), "1")
-                with (
-                    patch.object(app, "INSTANCE_LOCK_FILE", lock_path),
-                    patch.object(app, "DATA_INSTANCE_LOCK_FILE", lock_path),
-                ):
-                    self.assertFalse(app.acquire_instance_lock())
+                ready = child.stdout.readline().strip()
+                if ready == "1":
+                    with (
+                        patch.object(app, "INSTANCE_LOCK_FILE", lock_path),
+                        patch.object(app, "DATA_INSTANCE_LOCK_FILE", lock_path),
+                    ):
+                        self.assertFalse(app.acquire_instance_lock())
             finally:
-                if child.stdin:
-                    child.stdin.write("\n")
-                    child.stdin.flush()
-                child.communicate(timeout=5)
-                app.release_instance_lock()
+                try:
+                    try:
+                        # communicate tolerates an already-closed child stdin;
+                        # manual write/flush could hide its startup traceback.
+                        _, stderr = child.communicate(input="\n", timeout=5)
+                    except subprocess.TimeoutExpired:
+                        cleanup_timed_out = True
+                        child.kill()
+                        _, stderr = child.communicate()
+                finally:
+                    app.release_instance_lock()
+            diagnostic = f"Child exit={child.returncode}, cleanup_timeout={cleanup_timed_out}; stderr:\n{stderr}"
+            self.assertEqual(ready, "1", diagnostic)
+            self.assertFalse(cleanup_timed_out, diagnostic)
+            self.assertEqual(child.returncode, 0, diagnostic)
+
+    def test_instance_lock_child_startup_failure_reports_stderr(self):
+        child = Mock()
+        child.stdout.readline.return_value = ""
+        child.communicate.return_value = ("", "ModuleNotFoundError: No module named 'app'")
+        child.returncode = 1
+        with patch.object(subprocess, "Popen", return_value=child) as launch, \
+                patch.object(app, "acquire_instance_lock") as acquire:
+            with self.assertRaisesRegex(AssertionError, "ModuleNotFoundError: No module named 'app'"):
+                self.test_instance_lock_rejects_a_second_process()
+        acquire.assert_not_called()
+        child.communicate.assert_called_once_with(input="\n", timeout=5)
+        child.stdin.write.assert_not_called()
+        child.stdin.flush.assert_not_called()
+        self.assertEqual(launch.call_args.args[0][-2:], [str(Path(app.__file__).resolve().parents[1]), str(Path(app.__file__).resolve())])
+
+    def test_instance_lock_cleanup_timeout_preserves_the_primary_assertion(self):
+        child = Mock()
+        child.stdout.readline.return_value = "1\n"
+        child.communicate.side_effect = [subprocess.TimeoutExpired("child", 5), ("", "cleanup timed out")]
+        with patch.object(subprocess, "Popen", return_value=child), \
+                patch.object(app, "acquire_instance_lock", return_value=True):
+            with self.assertRaisesRegex(AssertionError, "True is not false"):
+                self.test_instance_lock_rejects_a_second_process()
+        child.kill.assert_called_once_with()
+        self.assertEqual(child.communicate.call_count, 2)
 
     def test_worker_records_terminal_time_when_it_finishes(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-finished-at-") as temporary:
@@ -1596,10 +1644,21 @@ class TranscriptCasTests(unittest.TestCase):
         self.assertEqual(len(payload["recovery_paths"]), 1)
         self.assertTrue(Path(payload["recovery_paths"][0]).is_dir())
         self.assertIsNone(app.library_row(self.item_id))
-        # The trash entry still holds the rows, so the conversation can be restored without its media.
+        # Keep the row snapshot and retry the media move; never finalize a partial trash entry.
         trash = app.list_library_trash()["entries"]
         self.assertEqual([entry["item_id"] for entry in trash], [self.item_id])
         self.assertEqual(trash[0]["media_files"], 0)
+        with (
+            patch.object(app, "MEDIA_DIRECTORY", media_root),
+            patch.object(app, "THUMBNAIL_DIRECTORY", thumbnail_root),
+        ):
+            with patch.object(app, "durable_move", side_effect=fail_move_into_trash):
+                self.assertTrue(app.recover_delete_quarantines())
+            self.assertTrue((Path(payload["recovery_paths"][0]) / self.item_id / "meeting.wav").is_file())
+            self.assertEqual(app.recover_delete_quarantines(), [])
+            restored = self.client.post(f"/api/library/trash/{trash[0]['id']}/restore")
+            self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual((media_dir / "meeting.wav").read_bytes(), b"media")
 
     def test_startup_recovers_delete_quarantine_when_database_row_remains(self):
         media_root = self.root / "media"

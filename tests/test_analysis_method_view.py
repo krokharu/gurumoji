@@ -1,6 +1,5 @@
 """The method view: one page per analysis method, with its result state and the expert's judgement."""
 import re
-import subprocess
 import tempfile
 import threading
 import unittest
@@ -13,7 +12,7 @@ import app
 from gurumoji.web import system_routes
 import research_analysis
 from gurumoji.analysis_method_registry import METHODS, SEPARATE_RUN_METHODS
-from test_browser_e2e import browser_executable
+import browser_support
 from test_method_expert_samples import LINES, NAMES, PROFILE, QUESTION
 
 PANEL_METHODS = ("participation", "conversation_dynamics", "morphology", "syntax", "lexical_frequency",
@@ -118,11 +117,10 @@ class MethodOverviewApiTests(MethodViewFixture):
                 self.assertTrue(f", '{method_id}')" in script or f", '{method_id}')" in content, method_id)
 
 
+@browser_support.ui_browser_test
 class MethodViewBrowserTests(MethodViewFixture):
     def test_real_browser_shows_each_method_with_its_expert_and_panels(self):
-        browser = browser_executable()
-        if browser is None:
-            self.skipTest("Chrome, Edge, or Chromium is required for the browser smoke test")
+        browser_support.require_browser_executable()
         driver = r"""
 window.addEventListener('DOMContentLoaded', async () => {
   const waitFor = async (check, label) => {
@@ -181,13 +179,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     patch.object(app.app, "send_static_file", side_effect=static), \
                     patch.object(app, "get_machine_profile", return_value={}), \
                     patch.object(app, "load_token_config", return_value=app.TokenConfig()):
-                result = subprocess.run([
-                    browser, "--headless=new", "--disable-gpu", "--disable-background-networking",
-                    "--disable-extensions", "--no-first-run", "--no-default-browser-check", "--no-sandbox",
-                    "--window-size=1440,1000", f"--user-data-dir={self.root / 'method-view-profile'}",
-                    "--virtual-time-budget=20000", "--dump-dom",
+                result = browser_support.run_browser_dom(
                     f"http://127.0.0.1:{server.server_port}/#/analysis/{self.item_id}",
-                ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
+                    profile=self.root / "method-view-profile", viewport=(1440, 1000),
+                    virtual_time_budget_ms=20000, timeout_seconds=90,
+                )
         finally:
             server.shutdown()
             server.server_close()

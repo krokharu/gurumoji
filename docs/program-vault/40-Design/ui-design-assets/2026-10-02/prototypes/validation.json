@@ -1,0 +1,85 @@
+{
+  "validation_kind": "static_artifact_only_not_app_acceptance",
+  "source_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "screens": [
+    {
+      "file": "a-evidence-390.svg",
+      "width": 390.0,
+      "height": 1659.0
+    },
+    {
+      "file": "a-evidence-desktop.svg",
+      "width": 1280.0,
+      "height": 1464.0
+    },
+    {
+      "file": "a-measurement-390.svg",
+      "width": 390.0,
+      "height": 2529.0
+    },
+    {
+      "file": "a-measurement-desktop.svg",
+      "width": 1280.0,
+      "height": 1324.0
+    },
+    {
+      "file": "b-evidence-390.svg",
+      "width": 390.0,
+      "height": 1530.0
+    },
+    {
+      "file": "b-evidence-desktop.svg",
+      "width": 1280.0,
+      "height": 1162.0
+    },
+    {
+      "file": "b-measurement-390.svg",
+      "width": 390.0,
+      "height": 2675.0
+    },
+    {
+      "file": "b-measurement-desktop.svg",
+      "width": 1280.0,
+      "height": 1602.0
+    }
+  ],
+  "image_count": 8,
+  "text_alternative_count": 8,
+  "horizontal_text_bounds": "passed",
+  "app_git_status": "",
+  "issues": [],
+  "not_run": [
+    "live application browser",
+    "assistive technology",
+    "user testing",
+    "production CSS reflow",
+    "API behavior"
+  ],
+  "sha256": {
+    "a-evidence-390.svg": "2ef65406b08da4e56c9121b226e938a1e81b074b4d56ea8c02575303fdceef41",
+    "a-evidence-desktop.svg": "5da0a6ff6ba2a6a8896c6fdb428dcf5030ee6c54e32d006478d78683b8c80d4a",
+    "a-measurement-390.svg": "eb3e36bfad58504171c4901c083037e571ac3b4d955a2a9e449a8a59c9199167",
+    "a-measurement-desktop.svg": "e2e7800fd0dbb56556555b57a730da297fc07abce25f94b0159ee33587e5387e",
+    "b-evidence-390.svg": "e87289af000b082e4a368129264a7a2c488bfd87d00afab35d3f2a90e8ff824b",
+    "b-evidence-desktop.svg": "937245ef001132dd0284c28eed0c40be22ea5cb01e1fd9cd99403df990ca2422",
+    "b-measurement-390.svg": "cbbfee775fc63f46ea42b1915585c0873b21616d03ee4b56944f47ca254723e4",
+    "b-measurement-desktop.svg": "a1684401398302a5241a145f410a8fd800d846c93fefd17a4c3f7b863195c0ed",
+    "build-index.py": "4dba00c2419dd00dab5c81aa87a5e0d14def2eac2d69257da66cb416ac3cba32",
+    "build-wireframes.py": "2224f017cc6b971573c8f6974e1574dd0bd305c17dd8821775f9a2a946ee4f1a",
+    "comparison.md": "b1907a6ff344edf3a5d747e7d2cc05ed41f920a69d8463e8c99fc472ac434d28",
+    "index.html": "1c4efeb3af48277d6bb1391cfd3c15c878609090c07e87a6a2b3d66eb4d7d0e8",
+    "render-log.txt": "ebbc4113bc67a4a2dd16309d390c1656a6be6d2f0ef1d5d21789c3dc35377e44",
+    "rendered/a-evidence-390.png": "cd7281c37fda89424a3c82f35768b47b456b7f6acefd87726a68ad54025ed20d",
+    "rendered/a-evidence-desktop.png": "ace7d532972cd84233fd845bd01d7d8ea2c6f5899d45db62f85e312f68cc318c",
+    "rendered/a-measurement-390.png": "c35c29512f33cfafaa85a9fbb0431f92dca381ba9ee9a7cdb119d98999be7330",
+    "rendered/a-measurement-desktop.png": "de84fc7438701206edeb107473a6672e6e7fbe252bfe34c3f8c2e8ed612e7e4e",
+    "rendered/b-evidence-390.png": "14d8df81a040e1af2423fc0724e0d183a91cccfdc5ac0bfe9ccb4f0d8e9fdf56",
+    "rendered/b-evidence-desktop.png": "b423f9054a7d1f858e454425452ecc68cc422099e2ed93309d6ccdc926363914",
+    "rendered/b-measurement-390.png": "b96d8cac1d3289224245178b6d309e56d4ed4abab619a8d4354d7044ddba28a1",
+    "rendered/b-measurement-desktop.png": "48c0ba47502d674592da23af90011c9daffb8210a38a1de98840da14ebed9d21",
+    "synthetic-fixture.json": "2ffebd324cf2bb2707c8b53053647b224a3eab4dc10f45befc6114367d43d6ce",
+    "validate-wireframes.py": "b6f14ce048527e1396fed032001047103f6357cea09786b77665ac72e99675a6",
+    "verification.md": "16f77c14c75ba480b0b1b4410aff22b1ef3c99f84a80a67fe0c0ac98ff97e065",
+    "wireframe-manifest.json": "dbec4bebb16a658cd16472583431dc8bd5ec4897803701a945bd9b51b011a26d"
+  }
+}

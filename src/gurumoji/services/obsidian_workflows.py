@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from ..ai_effort import cleanup_enabled
 from .ai.transcript_finishing import run_full_cleanup
 
 
@@ -172,7 +173,8 @@ class ObsidianWorkflowService:
             segments,
             check_cancelled=check,
             create_context_outline=create_context_outline,
-            clean_with_outline=clean_with_outline,
+            clean_with_outline=(clean_with_outline
+                                if cleanup_enabled(state.get("ai_efforts")) else None),
             review_with_jev=review_source_with_jev if state.get("jev_compare") else None,
             attach_jev=d.attach_jev_comparison,
             outline=context,

@@ -1,6 +1,6 @@
 ---
 name: gurumoji-obsidian-memory
-description: GurumojiのObsidianデータ構造（VaultRegistry、4+1 Vault、保存契約、同期・移行、AnalysisStore成果物）を参照・変更・検証するときに使う。Obsidian連携の設計書や契約、最小限のノート抽出が必要な場合に適用する。
+description: Gurumojiと確認できるリポジトリで、VaultRegistry・Vault保存契約・検索・同期／移行・AnalysisStore公開を調査または変更するときに使う。Obsidianという語だけでは適用しない。ADC等の別プロジェクト、単発の文章編集、利用者としての研究ノート操作は対象外。
 ---
 
 # Gurumoji Obsidian Memory
@@ -10,6 +10,12 @@ Gurumoji の人が読む知識は Obsidian Markdown に、機械的な検索・�
 パスの基準:
 - `docs/` と `src/` はリポジトリルート基準
 - `references/` と `scripts/` は本スキル配下（`.agents/skills/gurumoji-obsidian-memory/`）を指す
+
+## 適用範囲
+
+依頼内容とリポジトリの入口（README／AGENTS.md）・対象実装を照合し、Gurumoji の保存・検索・同期の作業だと確認してから適用する。`docs/program-vault` というパスや Obsidian という語だけでは判定しない。
+
+ADC／ADC08 など別プロジェクトにはそのプロジェクトのルールを使い、Gurumoji の Vault 分類・保存先・クラスを持ち込まない。単発の文章編集、利用者として既存の研究ノートを読む・直す操作、Obsidian と無関係な DB／一般アプリ修正には適用しない。
 
 ## 作業の入口
 
@@ -31,6 +37,6 @@ python .agents/skills/gurumoji-obsidian-memory/scripts/retrieve_memory.py \
 ## 常に守る境界
 
 - Vault 間の関連は stable ID とカタログ／manifest で解決し、表示名や Vault をまたぐ Wikilink に依存しない。
-- 人が所有する本文、タグ、別名は置換しない。Input／Visualization／Orchestrator の生成ノートは `VaultRegistry` の競合処理を通す。ResearchVault は `AnalysisStore`、`ObsidianLayout`、`ObsidianFinishing` の既存経路と、それぞれの競合処理を使う。
+- 人が所有するノート（全文・操作・研究メモ・仕上げ結果・テーマ）の本文、タグ、別名は置換しない。アプリの生成ノートは、Input／Visualization／Orchestrator なら `VaultRegistry`、ResearchVault なら `AnalysisStore`、`ObsidianLayout`、`ObsidianFinishing` の既存経路を使う。どれも共通判定 `vault_note_policy` を通り、研究者が編集した生成ノートは履歴に写してから最新版で上書きする。
 - 同期は AI 再実行、重い再分析、外部送信を暗黙に起動しない。古い派生物は stale として示す。
 - AI入力と検索インデックスに資格情報、個人情報、不要な原文・CSV・JSONを入れない。実 Vault ではなく一時Vaultで検証する。

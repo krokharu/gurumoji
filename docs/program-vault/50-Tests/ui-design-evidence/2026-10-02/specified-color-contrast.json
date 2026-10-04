@@ -1,0 +1,112 @@
+[
+  {
+    "label": "drop-zone small on gradient start",
+    "foreground": "#8a948f",
+    "background": "#f2f8ec",
+    "ratio": 2.892,
+    "scope": "base declaration only; superseded by .create-form .file-drop-zone white background at style.css1635/2274; not current UI contrast"
+  },
+  {
+    "label": "drop-zone small on gradient end",
+    "foreground": "#8a948f",
+    "background": "#fafcf7",
+    "ratio": 3.029,
+    "scope": "base declaration only; superseded by .create-form .file-drop-zone white background at style.css1635/2274; not current UI contrast"
+  },
+  {
+    "label": "muted on card",
+    "foreground": "#68736e",
+    "background": "#fffef9",
+    "ratio": 4.875,
+    "scope": "specified CSS pair, not computed browser screenshot"
+  },
+  {
+    "label": "analysis muted on card",
+    "foreground": "#526159",
+    "background": "#fffef9",
+    "ratio": 6.473,
+    "scope": "specified CSS pair, not computed browser screenshot"
+  },
+  {
+    "label": "green on white",
+    "foreground": "#1c6b50",
+    "background": "#ffffff",
+    "ratio": 6.425,
+    "scope": "specified CSS pair, not computed browser screenshot"
+  },
+  {
+    "label": "orange unsaved on card",
+    "foreground": "#e87941",
+    "background": "#fffef9",
+    "ratio": 2.871,
+    "scope": "reference color pair only; actual registry overview gradient and alpha save-bar backgrounds differ"
+  },
+  {
+    "label": "35% green focus outline on background",
+    "foreground_rgba": "rgba(28,107,80,.35)",
+    "background": "#fffef9",
+    "composite_rgb": [
+      175.55,
+      202.54999999999998,
+      189.85
+    ],
+    "ratio": 1.722,
+    "scope": "mathematical alpha composite; does not inspect alternative focus border"
+  },
+  {
+    "label": "35% green focus outline on background",
+    "foreground_rgba": "rgba(28,107,80,.35)",
+    "background": "#f4f5f0",
+    "composite_rgb": [
+      168.4,
+      196.7,
+      184.0
+    ],
+    "ratio": 1.692,
+    "scope": "mathematical alpha composite; does not inspect alternative focus border"
+  },
+  {
+    "label": "35% green focus outline on background",
+    "foreground_rgba": "rgba(28,107,80,.35)",
+    "background": "#ffffff",
+    "composite_rgb": [
+      175.55,
+      203.2,
+      193.75
+    ],
+    "ratio": 1.725,
+    "scope": "mathematical alpha composite; does not inspect alternative focus border"
+  },
+  {
+    "label": "normal drop-zone after current media overrides",
+    "foreground": "#8a948f",
+    "background": "#ffffff",
+    "ratio": 3.12814,
+    "source": "style.css:535,1635,2274",
+    "scope": "cascade-aware specified CSS pair; browser computed style not measured"
+  },
+  {
+    "label": "registry overview unsaved on gradient start",
+    "foreground": "#e87941",
+    "background": "#f8faf5",
+    "ratio": 2.7593,
+    "source": "style.css:941,945",
+    "scope": "cascade-aware specified CSS pair; browser computed style not measured"
+  },
+  {
+    "label": "registry overview unsaved on gradient end",
+    "foreground": "#e87941",
+    "background": "#f1f5ed",
+    "ratio": 2.62674,
+    "source": "style.css:941,945",
+    "scope": "cascade-aware specified CSS pair; browser computed style not measured"
+  },
+  {
+    "label": "analysis sidebar unsaved passing counterexample",
+    "foreground": "#97451d",
+    "background": "#f2f5ef",
+    "ratio": 5.99174,
+    "source": "style.css:2307,2313",
+    "scope": "cascade-aware specified CSS pair; browser computed style not measured"
+  }
+]

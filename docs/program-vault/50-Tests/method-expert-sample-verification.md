@@ -101,3 +101,7 @@ tags:
 - GiNZAを使う「満たす」の結果（計量テキスト分析・記述統計・相関・前処理）は、同じサンプルを実際のGiNZAで通した一回限りの実行で確かめた。実行に使った作業用スクリプトはリポジトリに含めていない。
 
 再実行：リポジトリルートで環境変数 `PYTHONPATH=src` を設定し、`python -m unittest discover -s tests -p "test_method_expert*.py"` を実行する。
+
+## 2026-10-04: 全時刻欠測の空結果契約
+
+計算版`focus-group-local-7`では、時刻が全欠測のtimelineに仮の0行を作らない。このため`no_times`の時間構造4表は空、保存手法は`empty`となり、結果への`expert_review`は付かない。未実行Transformerの`not_run`とは区別する。現在の手法別APIでは`produced=false`／`verdict=none`／`expert_scope=preconditions`となり、時間構造専門家の`valid_time_ratio_min`不足による`blocked`理由を引き続き示す。旧サンプルテストの「仮の0行が結果にある」前提を、この空表・固定CSV・適用条件・固定run不変の明示確認へ置換した。専門家判定のproduction契約や過去固定runは変更しない。

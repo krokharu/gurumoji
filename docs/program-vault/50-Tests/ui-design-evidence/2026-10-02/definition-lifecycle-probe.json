@@ -1,0 +1,22 @@
+{
+  "method": "source-isolated worker prefix + original service/step methods with synthetic in-memory SQLite; scheduled worker disabled",
+  "existing_adoption_after_draft_save": {
+    "before_status": "adopted",
+    "after_trial_preparation_status": "draft",
+    "row_count": 1,
+    "adopted_lookup_error": "definition_not_adopted",
+    "previous_payload_preserved_as_versioned_row": false
+  },
+  "definition_version_race": {
+    "binding_definition_version": 1,
+    "worker_loaded_definition_version": 2,
+    "binding_expected_measurement": "text_length",
+    "worker_measurement": "duration",
+    "expected_original_value": 3,
+    "actual_isolated_manual_step_value": 60.0,
+    "step_status": "committed",
+    "full_pipeline_executed": false
+  },
+  "external_calls": 0,
+  "real_runtime_or_source_mutation": false
+}

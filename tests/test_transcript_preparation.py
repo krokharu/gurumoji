@@ -3,20 +3,20 @@ import io
 import json
 import unittest
 import re
-import subprocess
 import threading
 from unittest.mock import patch
 
 import app
 from gurumoji.web import system_routes
 import test_analysis as fixtures
-import test_browser_e2e as browser_support
+import browser_support
 from gurumoji import transcript_preparation as preparation
 
 
 class TranscriptPreparationTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.AnalysisApiTests()
+        self.addCleanup(self.fixture.doCleanups)
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
         self.client = self.fixture.client
@@ -249,11 +249,10 @@ class TranscriptPreparationTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_REVIEW_MEMO', notes)
         self.assertNotIn(p['rows'][1]['text'], notes)
 
+    @browser_support.ui_browser_test
     def test_browser_preparation_save_desktop_and_mobile(self):
         from werkzeug.serving import make_server
-        browser = browser_support.browser_executable()
-        if not browser:
-            self.skipTest('Chromium browser required')
+        browser_support.require_browser_executable()
         original_render = app.render_template
         original_static = app.app.send_static_file
         driver = r'''
@@ -313,13 +312,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             with patch.object(system_routes, 'render_template', side_effect=render), patch.object(app.app, 'send_static_file', side_effect=static):
                 for size in ('1360,900', '390,844'):
                     with self.subTest(size=size):
-                        result = subprocess.run([browser, '--headless=new', '--disable-gpu', '--disable-background-networking',
-                            '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
-                            '--force-device-scale-factor=1', f'--window-size={size}',
-                            f'--user-data-dir={self.fixture.temporary.name}/browser-{size.split(",")[0]}',
-                            '--virtual-time-budget=40000', '--dump-dom',
-                            f'http://127.0.0.1:{server.server_port}/?view=analysis&item=analysis_fixture'],
-                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+                        result = browser_support.run_browser_dom(
+                            f'http://127.0.0.1:{server.server_port}/?view=analysis&item=analysis_fixture',
+                            profile=app.Path(self.fixture.temporary.name) / ("browser-" + size.split(",")[0]),
+                            viewport=tuple(map(int, size.split(","))),
+                            virtual_time_budget_ms=40000, timeout_seconds=40,
+                            device_scale_factor_one=True,
+                        )
                         match = re.search(r'data-preparation-test="([^"]+)"', result.stdout)
                         error = re.search(r'data-preparation-error="([^"]+)"', result.stdout)
                         self.assertIsNotNone(match, error.group(0) if error else result.stderr[-2000:])

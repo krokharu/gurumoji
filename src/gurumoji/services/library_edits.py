@@ -304,6 +304,7 @@ def make_library_update(
                 bool(row["write_srt"]), True, outline, emotion_analysis, speaker_profiles,
                 meeting_minutes, check_cancelled,
                 formatting_result=formatting_result,
+                session_profile=session_profile,
             )
             write_edit_preparation_marker(
                 staging_dir,

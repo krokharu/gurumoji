@@ -55,14 +55,19 @@ def make_analysis_pipeline_adapters(
 ) -> tuple[Callable[..., Any], ...]:
     def build_analysis_pipeline_snapshot(row: sqlite3.Row) -> dict[str, Any]:
         """Capture one immutable input and its existing-analysis adapter view."""
+        before = archive_source_stamp(row)
         analysis = group_analysis_for_row(row, include_research_rows=True)
+        archived = archive_snapshot(row, analysis)
+        after = archive_source_stamp(row)
+        if before != after:
+            raise AnalysisContractError("入力固定中に準備状態または話者台帳が更新されました。再確認してください。", code="revision_conflict")
         return {
             "schema_version": 1,
-            "input_hash": archive_source_stamp(row),
+            "input_hash": before,
             "source_revision": int(row["revision_count"] or 0),
             "analysis_revision": int(row["analysis_revision"] or 0),
             "analysis": analysis,
-            "archive_snapshot": archive_snapshot(row, analysis),
+            "archive_snapshot": archived,
         }
 
     def advise_analysis_plan(snapshot: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -120,3 +125,92 @@ def make_analysis_pipeline_adapters(
         }
 
     return (build_analysis_pipeline_snapshot, advise_analysis_plan)
+
+
+def make_staged_initial_builder(*, archive_snapshot, archive_source_stamp, group_analysis_for_row):
+    """Use the same calculation/serialization functions with durable boundaries.
+
+    Only ``base`` reads preparation/registry state; the runtime verifies the
+    source stamp before and after every stage. Later stages consume the frozen
+    row and committed outputs, never the UI/process research cache.
+    """
+    import copy
+    import json
+    from .. import method_experts
+    from ..analysis_insights import INSIGHT_VERSION, build_content_analysis
+    from ..orchestration_initial import InitialStage
+    from ..research_analysis import (
+        RESEARCH_ALGORITHM_VERSION, assemble_research_analysis,
+        build_research_linguistics, build_research_statistics, enrich_research_analysis,
+    )
+    from .group_analysis import GROUP_ANALYSIS_ALGORITHM_VERSION, finish_group_analysis
+
+    class FrozenExpertCatalog(method_experts.ExpertCatalog):
+        def __init__(self, frozen):
+            self.frozen = frozen
+
+        def index(self):
+            return self.frozen["index"]
+
+        def definition(self, expert_id):
+            value = self.frozen["entries"][expert_id]
+            if "error" in value:
+                raise method_experts.ExpertDefinitionError(value["error"])
+            return value["definition"]
+
+        def knowledge(self, expert_id, definition):
+            return self.frozen["entries"][expert_id]["knowledge"]
+
+    def freeze_experts(analysis):
+        catalog = method_experts.default_catalog()
+        index = catalog.index()
+        entries = {}
+        for method in analysis.get("manual", {}).get("focus_group_plan", {}).get("methods", []):
+            expert_id = next((key for key, entry in index.items()
+                              if method.get("method_id") in entry["analysis_method_ids"]), None)
+            if expert_id and expert_id not in entries:
+                try:
+                    definition = catalog.definition(expert_id)
+                    entries[expert_id] = {"definition": definition, "knowledge": catalog.knowledge(expert_id, definition)}
+                except (method_experts.ExpertDefinitionError, OSError) as exc:
+                    entries[expert_id] = {"error": str(exc)}
+        # YAML dates are represented as their unchanged ISO text on persistence.
+        return json.loads(json.dumps({"index": index, "entries": entries}, ensure_ascii=False, default=str))
+
+    class StagedInitialBuilder:
+        version = f"initial-stages-1:{GROUP_ANALYSIS_ALGORITHM_VERSION}:{RESEARCH_ALGORITHM_VERSION}:{INSIGHT_VERSION}"
+        stages = (
+            InitialStage("base", "入力固定・参加量と時間", GROUP_ANALYSIS_ALGORITHM_VERSION),
+            InitialStage("linguistics", "形態素・語彙・共起", str(RESEARCH_ALGORITHM_VERSION)),
+            InitialStage("statistics", "数量・統計", str(RESEARCH_ALGORITHM_VERSION)),
+            InitialStage("content", "内容集計", str(INSIGHT_VERSION)),
+            InitialStage("snapshot", "全結果の固定"),
+        )
+
+        def freeze(self, row):
+            return dict(row)
+
+        def run_stage(self, stage_id, row, outputs):
+            if stage_id == "base":
+                analysis = group_analysis_for_row(row, include_research_rows=True, defer_research=True)
+                return {"analysis": analysis, "experts": freeze_experts(analysis)}
+            analysis = copy.deepcopy(outputs["base"]["analysis"])
+            if stage_id == "linguistics":
+                return build_research_linguistics(analysis)
+            linguistics = outputs["linguistics"]
+            if stage_id == "statistics":
+                return build_research_statistics(analysis, linguistics)
+            if stage_id == "content":
+                return build_content_analysis(analysis, linguistics["morphemes"])
+            if stage_id != "snapshot":
+                raise ValueError("Unknown initial stage")
+            research = assemble_research_analysis(linguistics, outputs["statistics"], outputs["content"])
+            analysis = enrich_research_analysis(analysis, include_rows=True, research_result=research)
+            analysis["executed"] = True
+            analysis = finish_group_analysis(analysis, row, expert_catalog=FrozenExpertCatalog(outputs["base"]["experts"]))
+            return {"schema_version": 1, "input_hash": archive_source_stamp(row),
+                    "source_revision": int(row["revision_count"] or 0),
+                    "analysis_revision": int(row["analysis_revision"] or 0),
+                    "analysis": analysis, "archive_snapshot": archive_snapshot(row, analysis)}
+
+    return StagedInitialBuilder()

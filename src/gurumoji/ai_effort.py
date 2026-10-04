@@ -54,6 +54,31 @@ def effort_payload(provider, model, schema_name, efforts=None):
     return {}
 
 
+class UnsupportedLocalEffort(ValueError):
+    """The advertised capability cannot express the requested reasoning setting."""
+
+
+def cleanup_enabled(efforts=None):
+    """Cleanup OFF disables polishing, independently of model reasoning support."""
+    return normalize_efforts(efforts)["cleanup"] != "off"
+
+
+def local_cleanup_effort_payload(level, capability):
+    """Keep content strength intact; omit only unsupported non-OFF reasoning.
+
+    Cleanup strength controls edits/context, not a promise of extra thinking.
+    Keep existing supported overrides for compatibility. Otherwise use the
+    model default without enabling reasoning or changing the stored strength.
+    OFF remains strict here; finishing entry points skip the entire operation.
+    """
+    try:
+        return local_effort_payload(level, capability)
+    except UnsupportedLocalEffort:
+        if level not in ("low", "medium", "high", "ultra"):
+            raise
+        return {}
+
+
 def local_effort_payload(level, capability):
     """Map UI presets to values the local model actually supports."""
     if level == 'auto':
@@ -84,4 +109,7 @@ def local_effort_payload(level, capability):
             return {'reasoning_effort': value}
     if level in ('low', 'medium', 'high', 'ultra') and 'on' in allowed and capability.get('default') == 'on':
         return {}  # Binary thinking models have no effort distinction.
-    raise ValueError('このローカルモデルでは指定のエフォートを使えません。思考モードをONにするか、対応する設定を選んでください。')
+    raise UnsupportedLocalEffort(
+        'このローカルモデルでは指定の推論設定を適用できません。'
+        '対応する設定を選んでください。ON/OFFのみのモデルでは、'
+        'この連携ではON指定の対応を確認できていないため、既定値がONの場合のみ追加推論を利用できます。')

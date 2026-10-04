@@ -119,11 +119,7 @@
             <span class="step">1</span>
             <div>
               <h2>処理するファイルを選ぶ</h2>
-              {% if runtime.colab %}
-              <p>端末からColabへアップロードするか、Google Drive上のパスを指定します</p>
-              {% else %}
-              <p>このPCの動画・音声を選択します</p>
-              {% endif %}
+              <p>閲覧端末から{{ runtime.label }}へアップロードするか、実行環境内のパスを指定します</p>
             </div>
           </div>
           <div id="file-drop-zone" class="file-drop-zone" tabindex="0" role="button" aria-label="音声または動画ファイルを選択">
@@ -156,11 +152,11 @@
             </summary>
             <div class="advanced-settings-body path-settings-grid">
               <label class="field path-input-field">
-                <span>音声・動画のフルパス</span>
-                <input id="source-path" name="source_path" type="text" placeholder="{% if runtime.colab %}/content/drive/MyDrive/...{% else %}C:\... のパスを直接貼り付ける場合はこちら{% endif %}" autocomplete="off">
+                <span>音声・動画のフルパス（Gurumoji実行環境内）</span>
+                <input id="source-path" name="source_path" type="text" placeholder="{{ runtime.source_path_example }}" autocomplete="off">
               </label>
               <label class="field output-path">
-                <span>保存先フォルダー（{% if runtime.colab %}Colab / Google Drive{% else %}このPC{% endif %}）</span>
+                <span>保存先フォルダー（{{ runtime.label }}内）</span>
                 <input id="output-dir" name="output_dir" type="text" placeholder="既定の output フォルダー">
               </label>
             </div>
@@ -252,6 +248,8 @@
               </summary>
               <div id="setup-recognition" class="settings-panel-body">
                 <p id="machine-recommendation" class="machine-recommendation"></p>
+                <button id="machine-reset-button" class="secondary-button" type="button">処理装置・認識モデルを推奨に戻す</button>
+                <div id="machine-selection-message" class="alert" role="status" aria-live="polite" hidden></div>
                 <div class="settings-grid basic-settings-grid">
                   <label class="field">
                     <span>文字起こし方式</span>
@@ -259,7 +257,7 @@
                       <option value="whisperx" selected>WhisperX&#65288;&#27161;&#28310;&#65289;</option>
                       <option value="qwen3_nemotron">Qwen3-ASR + Qwen3 ForcedAligner + Nemotron 3 Diarization</option>
                     </select>
-                    <small id="qwen-backend-note" hidden>Qwenの初回利用前に scripts\setup_qwen_stack.bat を実行してください。モデルは初回起動時にダウンロードされます。</small>
+                    <small id="qwen-backend-note" hidden>{{ runtime.qwen_setup_note }}</small>
                   </label>
                   <label class="field">
                     <span>認識モデル</span>
@@ -365,7 +363,7 @@
                 <div class="custom-vocabulary-heading">
                   <div>
                     <strong>登録語（1行に1語）</strong>
-                    <span>最大100語をこのPCに保存し、次回以降の文字起こしにも使われます</span>
+                    <span>最大100語をGurumoji実行環境に保存し、次回以降の文字起こしにも使われます</span>
                   </div>
                   <small id="custom-vocabulary-status" aria-live="polite">読み込み中…</small>
                 </div>
@@ -419,12 +417,12 @@
                   </label>
                   <div class="check-stack">
                     <label class="check-row" data-app-finishing-only data-advanced-finishing-only hidden>
-                      <input id="clean-transcript" name="clean_transcript" type="checkbox">
-                      <span><strong>全体と前後の文脈で再校正・ノイズ判定</strong><small>参照用アウトラインを先に作成。意味や話し方を保持し、ノイズ候補は理由付きで残します</small></span>
+                      <input aria-describedby="clean-transcript-mode-note" id="clean-transcript" name="clean_transcript" type="checkbox">
+                      <span><strong>全体と前後の文脈で再校正・ノイズ判定</strong><small>参照用アウトラインを先に作成。意味や話し方を保持し、ノイズ候補は理由付きで残します</small><small id="clean-transcript-mode-note" class="effort-mode-note" hidden>全文方式に含まれる処理です。校正を停止するには、文章の仕上げカードで「なし」を選んでください。</small></span>
                     </label>
                     <label class="check-row" data-speaker-finishing-option>
-                      <input id="detect-names" name="detect_speaker_names" type="checkbox" checked>
-                      <span><strong>自己紹介から話者を特定・登録</strong><small>初回の文字起こしで確認できた自己紹介は話者管理へ登録し、以後は番号でなく名前で表示します。候補抽出とリンク再確認を2回処理します</small></span>
+                      <input aria-describedby="detect-names-mode-note" id="detect-names" name="detect_speaker_names" type="checkbox" checked>
+                      <span><strong>自己紹介から話者を特定・登録</strong><small>初回の文字起こしで確認できた自己紹介は話者管理へ登録し、以後は番号でなく名前で表示します。候補抽出とリンク再確認を2回処理します</small><small id="detect-names-mode-note" class="effort-mode-note" hidden>全文方式では話者確認を実行します。任意に選ぶ場合は、おすすめ方式へ切り替えてください。</small></span>
                     </label>
                     <label class="check-row" data-advanced-finishing-only hidden>
                       <input id="create-outline" name="create_outline" type="checkbox">
@@ -438,11 +436,12 @@
                   </div>
                 </div>
                 <p class="privacy-note">AI 機能では文字起こしテキストだけを処理します。{{ local_llm_short_label }} を選ぶとLLM確認はこの実行環境内だけで処理され、音声・動画は送信しません。おすすめの修正要否判定またはJev比較では、文字起こしテキストをTypeSafe APIにも送信します。</p>
-                <details class="effort-details">
-                  <summary><span>AIの調整レベル</span><small>文章の仕上げや各処理の強さを選ぶ</small></summary>
-                  <div class="effort-intro"><p>文章を整える範囲や、各処理でAIが確認する詳しさを選べます。高い設定ほど処理に時間がかかり、使用量が増える場合があります。</p></div>
+                <section class="effort-details" aria-labelledby="effort-heading">
+                  <h3 id="effort-heading">AIの調整</h3>
+                  <div class="effort-intro"><p>カードを開いて4つの設定を個別に選べます。文章の調整と、AIの検討の詳しさは別の設定です。高い設定ほど時間や使用量が増える場合があります。開閉や表示の切替では処理を実行しません。</p></div>
+                  <div class="effort-toolbar"><button type="button" id="effort-detail-toggle" aria-pressed="false" aria-controls="ai-effort-settings">詳細表示</button><button type="button" id="effort-capability-retry" hidden>モデルの対応設定を再確認</button></div>
                   <div id="ai-effort-settings"></div>
-                </details>
+                </section>
               </div>
             </details>
 
@@ -499,6 +498,17 @@
               </div>
             </div>
           </div>
+          <div id="setup-readiness-details" class="alert" role="status" aria-live="polite"></div>
+          <label id="model-readiness-ack-row" class="check-row" hidden><input id="model-readiness-ack" type="checkbox"><span>未取得・未確認のモデルは開始時に取得や接続確認が必要となり、利用許諾・権限・回線によって開始後に失敗する場合があることを確認しました</span></label>
+          <div class="launch-check-actions">
+            <button id="setup-open-connections" class="secondary-button" type="button">接続と処理装置を確認</button>
+            <button id="setup-recheck" class="secondary-button" type="button">設定を再確認</button>
+          </div>
+          <section class="launch-destinations" aria-label="テキスト送信先の最終確認">
+            <strong data-text-destinations>今回のテキスト送信先: 確認中</strong>
+            <p id="deferred-destination-note" hidden>Obsidianの後処理は別途実行します。後処理のAI選択と追加のTypeSafe送信を実行前に確認してください。</p>
+            <button class="secondary-button" type="button" data-open-panel="finishing">送信先・Jev比較を変更</button>
+          </section>
           <div class="launch-mobile-review mobile-only" aria-label="開始前の確認">
             <div><span>入力ファイル</span><strong data-review-source>未選択</strong></div>
             <div><span>文字起こし</span><strong data-review-transcription-compact>認識 base・CPU / 話者分離 CPU</strong></div>

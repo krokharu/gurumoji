@@ -124,7 +124,7 @@
     const table = element('table', 'interview-comparison-table');
     const head = element('thead');
     const headRow = element('tr');
-    ['インタビュー', '対象発話', '参加者', '話者', '発話時間', '抽出語数', '除外発話'].forEach(value => headRow.append(element('th', '', value)));
+    ['インタビュー', '対象発話', '実際の参加者', '観測参加発言者', '話者', '発話時間', '抽出語数', '除外発話'].forEach(value => headRow.append(element('th', '', value)));
     head.append(headRow);
     const body = element('tbody');
     interviews.forEach(item => {
@@ -132,9 +132,10 @@
       [
         item.source_name,
         item.included_segment_count,
-        item.participant_count,
+        item.participant_count == null ? '未登録' : item.participant_count,
+        item.observed_participant_count ?? '—',
         item.speaker_count,
-        timeText(item.total_speaking_seconds),
+        analysisObservedTimeText(item, 'total_speaking_seconds', timeText),
         item.term_count,
         item.excluded_segment_count,
       ].forEach(value => row.append(element('td', '', value)));

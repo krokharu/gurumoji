@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from flask import Flask, jsonify, render_template, request
 
+from ..services.transcription_readiness import transcription_readiness
+
 
 def register_system_routes(
     app: Flask,
@@ -65,6 +67,7 @@ def register_system_routes(
                 "lmstudio_status": lmstudio_status,
                 "default_output_dir": str(default_output_directory()) if local_path_access_allowed() else "",
                 "machine": machine,
+                "transcription_readiness": transcription_readiness(),
                 "runtime": runtime_info(),
                 "obsidian_watcher": watcher_public(),
             })

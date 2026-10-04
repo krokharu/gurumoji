@@ -5,6 +5,7 @@ let contentAnalysisPollSequence = 0;
 let transformerAnalysisPollTimer = null;
 let transformerAnalysisPollSequence = 0;
 let analysisEvidenceReturn = null;
+let analysisEvidenceRequest = 0;
 const insightCategoryLabels = {
   overview: '総合的な見解', themes: '主要テーマ', shared: '共通する意見',
   differences: '異なる意見・少数意見', questions: '追加で確認する点'
@@ -12,15 +13,20 @@ const insightCategoryLabels = {
 
 function contentAnalysisState() {
   const id = analysisState.itemId;
-  if (!contentAnalysisStates.has(id)) {
-    contentAnalysisStates.set(id, {
-      query: '', mode: 'literal', speaker: '', offset: 0, result: null,
+  if (!contentAnalysisStates.has(id) || !isAnalysisContextCurrent(contentAnalysisStates.get(id).context)) {
+    const previous = contentAnalysisStates.get(id);
+    const preferences = {};
+    for (const key of ['query', 'mode', 'speaker', 'provider', 'maxTopics', 'minTopicSize', 'topicCount', 'transformerMode', 'manualMinSimilarity', 'semanticQuery']) {
+      if (previous && Object.prototype.hasOwnProperty.call(previous, key)) preferences[key] = previous[key];
+    }
+    contentAnalysisStates.set(id, {context: captureAnalysisContext(),
+      query: '', mode: 'normalized', speaker: '', offset: 0, result: null,
       loading: false, error: '', sequence: 0, controller: null,
       provider: 'openai', run: null, aiError: '', pollError: '', starting: false, fingerprint: '',
       transformerRun: null, transformerStarting: false, transformerError: '', transformerPollError: '',
       maxTopics: 8, minTopicSize: 2, topicCount: 0, transformerMode: 'auto',
       manualMinSimilarity: 0, semanticQuery: '', semanticHits: null,
-      semanticLoading: false, semanticError: ''
+      semanticLoading: false, semanticError: '', ...preferences
     });
   }
   return contentAnalysisStates.get(id);
@@ -42,6 +48,13 @@ function jumpToContentSearch() {
   currentAnalysisContent()?.querySelector('[data-analysis-anchor="content"]')?.scrollIntoView({block: 'start'});
 }
 
+function analysisEvidenceTimeValid(segment) {
+  return Boolean(segment && !segment.time_unknown
+    && typeof segment.start === 'number' && Number.isFinite(segment.start)
+    && typeof segment.end === 'number' && Number.isFinite(segment.end)
+    && segment.start >= 0 && segment.end >= segment.start);
+}
+
 function evidenceDetails(ids, {snapshot = null, stale = false} = {}) {
   const lookup = snapshot || Object.fromEntries((analysisState.data?.segments || [])
     .filter(s => !s.excluded).map(s => [s.id, s]));
@@ -55,13 +68,14 @@ function evidenceDetails(ids, {snapshot = null, stale = false} = {}) {
     count += next.length;
     next.forEach(id => {
       const segment = lookup[id];
-      if (!segment) return;
+      if (!segment) { body.insertBefore(analysisElement('p', 'content-inline-notice', `根拠発話 ${id} は保存資料にありません。`), more); return; }
       const article = analysisElement('blockquote', 'analysis-important-quote');
       article.append(analysisElement('p', '', segment.text || '（本文なし）'));
       const footer = analysisElement('footer', '',
-        `${segment.speaker_name || segment.speaker} / ${formatTime(segment.start || 0)}–${formatTime(segment.end || 0)}`);
+        `${segment.speaker_name || segment.speaker} / ${analysisEvidenceTimeValid(segment) ? `${formatTime(segment.start)}–${formatTime(segment.end)}` : '時刻不明'}`);
       if (stale) footer.append(analysisElement('span', '', ' / 生成時点の引用'));
-      else footer.append(contentButton('音声で確認', () => openInsightMedia(segment)));
+      else if (analysisEvidenceTimeValid(segment)) footer.append(contentButton('音声で確認', () => openInsightMedia(segment)));
+      else footer.append(analysisElement('span', '', ' / 音声再生不可：有効な開始・終了時刻がありません。'));
       article.append(footer);
       body.insertBefore(article, more);
     });
@@ -75,15 +89,20 @@ function evidenceDetails(ids, {snapshot = null, stale = false} = {}) {
 
 async function openInsightMedia(segment) {
   const itemId = analysisState.itemId;
+  const context = captureAnalysisContext();
+  const request = ++analysisEvidenceRequest;
+  const isCurrent = () => request === analysisEvidenceRequest && isAnalysisContextCurrent(context);
   analysisEvidenceReturn = {itemId, scroll: window.scrollY, mode: analysisState.mode,
     scope: analysisState.automaticScope, selectedSpeaker: analysisState.selectedSpeaker,
     catalog: analysisCatalog.slice()};
   try {
+    if (!analysisEvidenceTimeValid(segment)) throw new Error('音声再生不可：保存された根拠の時刻が不明または不正です。');
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}`);
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '元データを取得できませんでした。');
-    if (analysisState.itemId !== itemId) return;
+    if (!isCurrent()) return;
     const current = (data.segments || []).find(s => s.id === segment.id);
+    if (!analysisEvidenceTimeValid(current)) throw new Error('音声再生不可：現在の発話の時刻が不明または不正です。');
     if (!current || String(current.text || '') !== String(segment.text || '')
       || String(current.speaker || 'UNKNOWN') !== String(segment.speaker || 'UNKNOWN')
       || Math.abs(Number(current.start) - Number(segment.start)) > .001
@@ -105,6 +124,7 @@ async function openInsightMedia(segment) {
       setAlert(document.querySelector('#save-message'), '元の音声・動画が利用できないため、発話本文を表示しています。');
     }
   } catch (error) {
+    if (!isCurrent()) return;
     setAlert(document.querySelector('#analysis-message'), error.message, true);
   }
 }
@@ -191,7 +211,7 @@ function buildInsightSummary() {
   status.setAttribute('role', 'status');
   const output = analysisElement('div', 'content-ai-output');
   output.dataset.insightOutput = 'true';
-  ai.append(toolbar, analysisElement('p', 'analysis-caption', '保存済みの発話・話者名・研究質問を選択したAIへ送信します。LM Studioを選ぶとこのPCのローカルLLMだけで処理します。生成した見解は下書きとして保存します。'));
+  ai.append(toolbar, analysisElement('p', 'analysis-caption', '保存済みの発話本文・話者名／役割・研究質問・コード・重要フラグを選択したAIへ送信します。設定時は専門家の短い説明・手順情報も含みます。LM Studioは設定された接続先で処理します。生成した見解は下書きです。'));
   panel.body.append(ai, status, output);
   // Render after the panel is attached by renderAnalysisWorkspace.
   return panel.panel;
@@ -209,10 +229,22 @@ function buildContentExplorer() {
   query.type = 'search'; query.maxLength = 200; query.value = state.query;
   query.placeholder = '例：改善、使いにくい'; query.dataset.kwicQuery = 'true';
   query.addEventListener('input', () => {
-    state.query = query.value; state.mode = 'literal';
+    state.query = query.value;
     document.querySelectorAll('[data-kwic-query]').forEach(peer => { peer.value = query.value; });
   });
   queryLabel.append(query);
+  const modeLabel = analysisElement('label', 'field');
+  modeLabel.append(analysisElement('span', '', '一致条件'));
+  const matchMode = analysisElement('select');
+  matchMode.dataset.kwicMode = 'true';
+  [['normalized', '正規化語の完全一致'], ['surface', '表層語の完全一致'], ['literal', '部分文字列']]
+    .forEach(([value, label]) => matchMode.add(new Option(label, value)));
+  matchMode.value = state.mode;
+  matchMode.addEventListener('change', () => {
+    state.mode = matchMode.value;
+    document.querySelectorAll('[data-kwic-mode]').forEach(peer => { peer.value = state.mode; });
+  });
+  modeLabel.append(matchMode);
   const speakerLabel = analysisElement('label', 'field');
   speakerLabel.append(analysisElement('span', '', '話者で絞り込む'));
   const speaker = analysisElement('select');
@@ -227,7 +259,7 @@ function buildContentExplorer() {
   speakerLabel.append(speaker);
   const submit = analysisElement('button', 'primary-button small', '文脈を検索');
   submit.type = 'submit';
-  form.append(queryLabel, speakerLabel, submit);
+  form.append(queryLabel, modeLabel, speakerLabel, submit);
   form.addEventListener('submit', event => { event.preventDefault(); state.offset = 0; searchContentKwic(); });
   const results = analysisElement('div', 'content-kwic-results');
   results.dataset.kwicResults = 'true';
@@ -273,6 +305,7 @@ function transformerExportLinks() {
     ['transformer_assignments', '発話分類CSV'],
     ['transformer_speakers', '話者比較CSV'],
     ['transformer_timeline', '時間推移CSV'],
+    ['transformer_input_coverage', '入力・切詰め範囲CSV'],
     ['transformer_outliers', '例外候補CSV'],
     ['transformer_backchannels', '相づち対応CSV'],
     ['transformer_backchannel_speakers', '相づち集計CSV'],
@@ -316,9 +349,10 @@ function buildTransformerCandidateList(result, state) {
       '候補一覧はまだありません。画面上部の「分析を実行」からテーマ分析を行うと、テーマ数ごとのsilhouetteが出ます。候補モードでは、指定した件数で作り直したうえで候補一覧も作ります。'));
     return box;
   }
-  const best = rows.reduce(
-    (left, right) => (Number(right.silhouette_cosine) > Number(left.silhouette_cosine) ? right : left),
-    rows[0]);
+  const validRows = rows.filter(row => row.status !== 'invalid_topic_count' && row.silhouette_cosine != null);
+  const best = validRows.reduce(
+    (left, right) => (!left || Number(right.silhouette_cosine) > Number(left.silhouette_cosine) ? right : left),
+    null);
   box.append(analysisElement('p', 'analysis-caption',
     'テーマ数ごとのsilhouette（cosine）です。まとまりの幾何的な指標であり、テーマの意味の妥当性ではありません。選んで実行すると、保存済みの意味ベクトルを再利用して作り直します。'));
   const wrap = analysisElement('div', 'analysis-table-wrap');
@@ -333,8 +367,9 @@ function buildTransformerCandidateList(result, state) {
     const line = document.createElement('tr');
     line.dataset.transformerCandidate = String(count);
     if (count === Number(state.topicCount)) line.classList.add('selected');
-    const countCell = analysisElement('td', '', `${count}件`);
-    if (count === Number(best.topic_count)) countCell.append(analysisElement('small', '', ' / 自動の選択'));
+    const invalid = row.status === 'invalid_topic_count';
+    const countCell = analysisElement('td', '', `${count}件${invalid ? ` / 不成立（実際${row.actual_topic_count}件）` : ''}`);
+    if (best && count === Number(best.topic_count)) countCell.append(analysisElement('small', '', ' / 自動の選択'));
     const scoreCell = analysisElement('td', '',
       row.silhouette_cosine == null ? '—' : Number(row.silhouette_cosine).toFixed(3));
     const pickCell = analysisElement('td');
@@ -347,6 +382,7 @@ function buildTransformerCandidateList(result, state) {
       refreshTransformerControls();
     });
     pick.dataset.transformerCandidatePick = String(count);
+    pick.disabled = invalid;
     pickCell.append(pick);
     line.append(countCell, scoreCell, pickCell);
     body.append(line);
@@ -360,7 +396,7 @@ function buildTransformerCandidateList(result, state) {
 function buildTransformerManualTopics(state) {
   const box = analysisElement('div', 'transformer-manual-topics');
   box.append(analysisElement('p', 'analysis-caption',
-    '研究者が定義したテーマへ、意味が最も近い発話を割り当てます。テーマ名だけでも実行できますが、手がかり語やシード発話IDを足すほど割り当ては安定します。編集後は「設定とコードを保存」を押してから実行します。割り当ては候補であり、テーマの妥当性を確かめた結果ではありません。'));
+    '研究者が定義したテーマへ、意味が最も近い発話を割り当てます。テーマ名だけでも実行できますが、手がかり語やシード発話IDを使うと、定義した意味に近い発話を探索できます。安定性は別途検証が必要です。編集後は「設定とコードを保存」を押してから実行します。割り当ては候補であり、テーマの妥当性を確かめた結果ではありません。'));
   const topics = manualTransformerTopics();
   if (!topics.length) {
     box.append(analysisElement('p', 'analysis-no-data', 'テーマが定義されていません。2件以上を追加してください。'));
@@ -566,7 +602,7 @@ function buildTransformerAnalysisPanel() {
   output.dataset.transformerOutput = 'true';
   if (result) {
     if (transformer.stale) output.append(analysisElement('p', 'content-inline-notice',
-      '更新が必要：本文・話者・除外設定が変わっています。以下は実行時点の結果です。'));
+      '更新が必要：本文・話者・分析条件または処理版が変わっています。以下は実行時点の入力と設定による結果です。'));
     const engine = result.engine || {};
     const coverage = result.coverage || {};
     const quality = result.quality || {};
@@ -583,6 +619,18 @@ function buildTransformerAnalysisPanel() {
       + ` / ${engine.device || '実行装置不明'} / seed 42`
       + ` / ${analyzedCount}/${sourceCount}発話を分析 / ${coverage.topic_count || 0}テーマ`
       + `${quality.silhouette_cosine == null ? '' : ` / silhouette ${Number(quality.silhouette_cosine).toFixed(3)}`}`));
+    output.append(analysisElement('p', 'content-inline-notice',
+      '自動結果は未確認の候補です。意味の近さ・語句の一致・根拠IDの存在は、主張の真偽や本人の変化を保証しません。研究者による原文・前後文脈の照合が必要です。'));
+    if (coverage.token_measurement_status !== 'measured') {
+      output.append(analysisElement('p', 'analysis-caption', 'token切詰めは未計測です。切詰めなしを意味しません。'));
+    } else {
+      output.append(analysisElement('p', 'analysis-caption',
+        `文字上限で切詰め ${coverage.character_truncated_segment_count || 0}件 / token上限で切詰め ${coverage.token_truncated_segment_count || 0}件。`));
+    }
+    const truncatedIds = coverage.truncated_segment_ids || [];
+    if (truncatedIds.length) output.append(evidenceDetails(truncatedIds, {snapshot: result.evidence, stale: Boolean(transformer.stale)}));
+    if ((coverage.target_truncated_segment_ids || []).length) output.append(analysisElement('p', 'content-inline-notice',
+      `文脈追加後、対象発話の本文が一部または全部落ちた発話ID: ${coverage.target_truncated_segment_ids.join('、')}`));
     if (coverage.reused_embeddings) output.append(analysisElement('p', 'analysis-caption',
       '保存済みの意味ベクトル（int8）を再利用しました。埋め込みの再計算はしていません。'));
     if (resultMode === 'manual') {
@@ -605,14 +653,14 @@ function buildTransformerAnalysisPanel() {
     if (coverage.backchannel_segment_count) output.append(analysisElement('p', 'analysis-caption',
       `相づち ${coverage.backchannel_segment_count}件を別集計し、${coverage.linked_backchannel_segment_count || 0}件を応答対象のテーマへ紐付けました。`));
     if (coverage.speaker_result_count) output.append(analysisElement('p', 'analysis-caption',
-      `話者別リザルトは${coverage.speaker_result_count}話者分を作成し、うち${coverage.explicit_speaker_result_count || 0}話者で明示的な変化・気づき・選好を検出しました。`));
+      `話者別リザルトは${coverage.speaker_result_count}話者分を作成し、うち${coverage.candidate_speaker_result_count ?? coverage.explicit_speaker_result_count ?? 0}話者に変化・気づき・選好の未確認表現候補があります。`));
     if (quality.silhouette_cosine != null && Number(quality.silhouette_cosine) < 0.25) {
       output.append(analysisElement('p', 'content-inline-notice',
         'テーマ間の分離は弱めです。固定テーマ数も試し、代表発言を確認して解釈してください。'));
     }
     if (quality.dominant_speaker && Number(quality.dominant_speaker_percent) >= 35) {
       output.append(analysisElement('p', 'analysis-caption',
-        `発話時間が多い話者（${Number(quality.dominant_speaker_percent).toFixed(1)}%）を検出し、話者バランス補正を適用しました。`));
+        `発話時間が多い話者（${Number(quality.dominant_speaker_percent).toFixed(1)}%）があります。発話量だけで進行役扱い・参加者除外はしません。${result.parameters?.speaker_balancing ? " 話者別の発話件数による重み付けを適用しています。" : ""}`));
     }
     const overallBackchannelRates = (Array.isArray(result.backchannel_rates) ? result.backchannel_rates : [])
       .filter(row => row.scope === 'overall' && row.speaker_group === 'participant')
@@ -622,7 +670,7 @@ function buildTransformerAnalysisPanel() {
       const section = analysisElement('section', 'transformer-speaker-results');
       section.append(analysisElement('h3', '', '相づちの統計分析'),
         analysisElement('p', 'analysis-caption',
-          '分母は、本人以外の有意味発話を「反応機会」とした代理値です。応答率は相づちを返した異なる対象発話数÷反応機会数で、参加時間や聞いていた事実を直接測定した値ではありません。'));
+          '分母は、本人以外の有意味発話を「反応機会」とした代理値です。応答率は相づちを返した異なる対象発話数÷反応機会数で、参加時間や聞いていた事実を直接測定した値ではありません。相づちの種類は辞書上の分類であり、同意や進行品質の得点ではありません。'));
       const wrap = analysisElement('div', 'analysis-table-wrap');
       const table = analysisElement('table', 'analysis-table');
       const head = document.createElement('thead');
@@ -649,7 +697,7 @@ function buildTransformerAnalysisPanel() {
           const sparse = row.status === 'computed_sparse' ? ' / 期待度数が小さいためp値から差を判定しない' : '';
           const resultText = row.p_value == null
             ? row.interpretation
-            : `χ²=${Number(row.statistic).toFixed(3)}, df=${row.df}, p=${Number(row.p_value).toFixed(4)}, Cramér\'s V=${Number(row.effect_size).toFixed(3)}${sparse}`;
+            : `χ²=${Number(row.statistic).toFixed(3)}, df=${row.df}, p=${(Number(row.p_value) > 0 && Number(row.p_value) < 0.0001 ? Number(row.p_value).toExponential(2) : Number(row.p_value).toFixed(4))}, Cramér\'s V=${Number(row.effect_size).toFixed(3)}${sparse}`;
           const item = analysisElement('article');
           item.append(analysisElement('strong', '', row.test), analysisElement('p', '', resultText),
             analysisElement('p', 'analysis-caption', row.assumption_note || ''));
@@ -662,9 +710,9 @@ function buildTransformerAnalysisPanel() {
     const speakerResults = Array.isArray(result.speaker_results) ? result.speaker_results : [];
     if (speakerResults.length) {
       const section = analysisElement('section', 'transformer-speaker-results');
-      section.append(analysisElement('h3', '', '話者別の会議リザルト'),
+      section.append(analysisElement('h3', '', '話者別の表現候補（未確認）'),
         analysisElement('p', 'analysis-caption',
-          '本人の発話に明示された「意見の変化・維持」「新しい気づき」「支持・選好」を抽出します。会議前調査との比較ではなく、明示表現がない話者は未判定です。'));
+          '語句から「意見の変化・維持」「新しい気づき」「支持・選好」の候補を探します。否定・引用・主語の検出は限定的です。本人の変化として確定せず、原文と文脈を研究者が確認してください。会議前調査との比較ではありません。'));
       const resultGroups = new Map();
       speakerResults.forEach(row => {
         if (!resultGroups.has(row.speaker)) resultGroups.set(row.speaker, []);
@@ -677,10 +725,11 @@ function buildTransformerAnalysisPanel() {
         details.append(analysisElement('summary', '', `${rows[0].speaker_name} / ${labels.join('・')}`));
         rows.forEach(row => {
           const item = analysisElement('article');
-          const topicPrefix = row.confidence === 'explicit' ? '対象話題' : '主な話題';
+          const candidate = ['unverified_candidate', 'explicit'].includes(row.confidence);
+          const topicPrefix = candidate ? '候補の話題' : '主な話題';
           item.append(analysisElement('strong', '', row.result_label || '未判定'),
             analysisElement('p', 'transformer-topic-meta',
-              `${topicPrefix}: ${row.topic_label || '紐付けなし'}${row.confidence === 'explicit' ? ' / 本人の明示表現あり' : ''}`),
+              `${topicPrefix}: ${row.topic_label || '紐付けなし'}${candidate ? ' / 未確認・研究者の照合が必要' : ''}`),
             analysisElement('p', '', row.basis || ''),
             evidenceDetails(row.evidence_segment_ids || [], {
               snapshot: result.evidence || null, stale: Boolean(transformer.stale)
@@ -751,16 +800,17 @@ function buildTransformerAnalysisPanel() {
     }
     const backchannels = Array.isArray(result.backchannels) ? result.backchannels : [];
     if (backchannels.length) {
-      const kindLabels = {agreement: '同意的応答', continuer: '継続促進', courtesy: '謝意',
-        confirmation: '確認', acknowledgement: '応答'};
+      const kindLabels = {agreement: '同意表現候補（辞書）', continuer: '継続表現候補（辞書）', courtesy: '謝意表現候補（辞書）',
+        confirmation: '確認表現候補（辞書）', acknowledgement: '応答候補（辞書）'};
       const details = analysisElement('details', 'transformer-outliers');
       details.append(analysisElement('summary', '', `相づちの対応関係 ${backchannels.length}件`),
         analysisElement('p', 'analysis-caption',
-          '直前の別話者の発話を優先して対象テーマを推定しています。相づちは賛成を意味するとは限りません。'));
+          '直前の別話者の発話を優先し、ない場合は後続の発話へ対応を推定します。相づちは賛成を意味するとは限りません。'));
       backchannels.forEach(row => {
         const item = analysisElement('article');
         item.append(analysisElement('strong', '',
           `${row.speaker_name} / ${kindLabels[row.kind] || '応答'} / ${row.topic_label || '紐付けなし'}`),
+          analysisElement('p', 'analysis-caption', `対応方法: ${{previous_other_speaker: '前の別話者発話', next_other_speaker: '後の別話者発話', unassigned: '未割当'}[row.link_method] || row.link_method || '不明'}`),
           analysisElement('p', '', row.text), evidenceDetails(
             [row.segment_id, row.responds_to_segment_id].filter(Boolean), {
               snapshot: result.evidence || null, stale: Boolean(transformer.stale)
@@ -807,7 +857,7 @@ function refreshTransformerControls() {
     manual: '定義したテーマへ割り当てる'
   };
   document.querySelectorAll('[data-transformer-run]').forEach(button => {
-    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress || manualBlocked);
+    button.disabled = Boolean(busy || hasUnsavedAnalysisChanges() || analysisSaveInProgress || manualBlocked);
     button.textContent = state.transformerStarting ? '開始しています…' : runLabels[mode];
   });
   document.querySelectorAll('[data-transformer-cancel]').forEach(button => {
@@ -822,12 +872,12 @@ function refreshTransformerControls() {
     select.disabled = Boolean(busy || mode !== 'auto');
   });
   const modeHints = {
-    auto: 'silhouetteが最も高いテーマ数を選びます。ボタンを押したときだけローカルで実行します。会話本文を外部AI APIへ送信しません。',
+    auto: 'silhouetteを目安に、差が小さい場合は少ないテーマ数を選びます。ボタンを押したときだけローカルで実行します。会話本文を外部AI APIへ送信しません。',
     candidate: '選んだテーマ数で作り直します。保存済みの意味ベクトルがあれば再利用し、モデルの再実行はしません。',
     manual: '定義したテーマへ、意味が最も近い発話を割り当てます。テーマの妥当性を確かめた結果ではありません。'
   };
   document.querySelectorAll('[data-transformer-status]').forEach(host => {
-    host.textContent = analysisState.dirty ? '未保存の変更があります。保存してから実行してください。'
+    host.textContent = hasUnsavedAnalysisChanges() ? '未保存の変更があります。保存してから実行してください。'
       : manualBlocked
         ? '手動で割り当てるには、テーマを2件以上定義して保存してください。'
         : state.transformerError || state.transformerPollError
@@ -880,7 +930,12 @@ function refreshTransformerControls() {
 async function startTransformerAnalysis() {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
-  if (state.transformerStarting || transformerRunActive(state.transformerRun) || analysisState.dirty) return;
+  if (state.transformerStarting || transformerRunActive(state.transformerRun) || hasUnsavedAnalysisChanges()) return;
+  const operation = 'startTransformerAnalysis';
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   const item = analysisState.data.item;
   let pending = null;
   try { pending = JSON.parse(sessionStorage.getItem(transformerPendingKey(itemId)) || 'null'); } catch (_) { /* unavailable */ }
@@ -903,12 +958,14 @@ async function startTransformerAnalysis() {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pending)
     });
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (data.run) state.transformerRun = data.run;
     if (!response.ok && !data.run) throw new Error(data.error || 'Transformer分析を開始できませんでした。');
     try { sessionStorage.removeItem(transformerPendingKey(itemId)); } catch (_) { /* unavailable */ }
-  } catch (error) {
+  } catch (error) { if (!owns()) return;
     state.transformerError = `${error.message} 必要な場合はもう一度実行してください。`;
   } finally {
+    if (!owns()) return;
     state.transformerStarting = false;
     if (itemId === analysisState.itemId) { refreshTransformerControls(); pollTransformerAnalysis(); }
   }
@@ -917,16 +974,27 @@ async function startTransformerAnalysis() {
 async function cancelTransformerAnalysis() {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
+  const operation = 'cancelTransformerAnalysis';
   if (!state.transformerRun) return;
+  const runId = state.transformerRun.request_id;
+  state.cancellations ||= new Set();
+  const key = `${operation}:${runId}`;
+  if (state.cancellations.has(key)) return;
+  state.cancellations.add(key);
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token && state.transformerRun?.request_id === runId;
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/transformer/cancel`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({request_id: state.transformerRun.request_id})
+      body: JSON.stringify({request_id: runId})
     });
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (!response.ok) throw new Error(data.error || '中止できませんでした。');
     pollTransformerAnalysis();
-  } catch (error) { state.transformerError = error.message; refreshTransformerControls(); }
+  } catch (error) { if (!owns()) return; state.transformerError = error.message; refreshTransformerControls(); } finally { state.cancellations.delete(key); }
 }
 
 async function pollTransformerAnalysis() {
@@ -934,10 +1002,16 @@ async function pollTransformerAnalysis() {
   if (!analysisState.data) return;
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
+  const operation = 'pollTransformerAnalysis';
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   const sequence = ++transformerAnalysisPollSequence;
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/transformer`, {cache: 'no-store'});
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (sequence !== transformerAnalysisPollSequence || itemId !== analysisState.itemId || !analysisState.data) return;
     if (!response.ok) throw new Error(data.error || 'Transformer分析の状態を取得できませんでした。');
     const previousRequest = analysisState.data.transformer?.result?.request_id;
@@ -951,7 +1025,7 @@ async function pollTransformerAnalysis() {
     if (transformerRunActive(state.transformerRun)) {
       transformerAnalysisPollTimer = setTimeout(pollTransformerAnalysis, 1800);
     }
-  } catch (error) {
+  } catch (error) { if (!owns()) return;
     if (sequence !== transformerAnalysisPollSequence || itemId !== analysisState.itemId) return;
     state.transformerPollError = error.message; refreshTransformerControls();
     if (transformerRunActive(state.transformerRun)) transformerAnalysisPollTimer = setTimeout(pollTransformerAnalysis, 5000);
@@ -980,17 +1054,25 @@ async function searchTransformerSemantics() {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
   if (!state.semanticQuery.trim() || state.semanticLoading) return;
+  const operation = 'searchTransformerSemantics';
+  const requestedQuery = state.semanticQuery;
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   state.semanticLoading = true; state.semanticError = ''; state.semanticHits = null;
   renderTransformerSearchResults();
   try {
     const params = new URLSearchParams({q: state.semanticQuery, limit: '20'});
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/semantic-search?${params}`);
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (!response.ok) throw new Error(data.error || '意味検索を実行できませんでした。');
     if (itemId !== analysisState.itemId) return;
+    if (requestedQuery !== state.semanticQuery) return;
     state.semanticHits = data.hits || [];
-  } catch (error) { state.semanticError = error.message; }
-  finally { state.semanticLoading = false; if (itemId === analysisState.itemId) renderTransformerSearchResults(); }
+  } catch (error) { if (!owns() || requestedQuery !== state.semanticQuery) return; state.semanticError = error.message; }
+  finally { if (!owns()) return; state.semanticLoading = false; if (itemId === analysisState.itemId) renderTransformerSearchResults(); }
 }
 
 function renderKwicResults() {
@@ -1006,7 +1088,7 @@ function renderKwicResults() {
       return;
     }
     const header = analysisElement('div', 'content-kwic-heading');
-    header.append(analysisElement('p', '', `「${result.query}」${result.mode === 'normalized' ? '（正規化語）' : '（文字列）'}：${result.total}件 / ${result.total ? result.offset + 1 : 0}–${result.offset + result.hits.length}件を表示`));
+    header.append(analysisElement('p', '', `「${result.query}」${({normalized: '（正規化語の完全一致）', surface: '（表層語の完全一致）', literal: '（部分文字列）'})[result.mode] || ''}：${result.total}件 / ${result.total ? result.offset + 1 : 0}–${result.offset + result.hits.length}件を表示`));
     const link = analysisElement('a', 'analysis-export-link', '検索結果すべてをCSV出力');
     const params = new URLSearchParams({q: result.query, mode: result.mode, speaker: result.speaker, format: 'csv'});
     link.href = `/api/library/${encodeURIComponent(analysisState.itemId)}/analysis/kwic?${params}`;
@@ -1032,30 +1114,50 @@ function renderKwicResults() {
   });
 }
 
+function runKwicSearch({query, matchMode = 'normalized', speaker = '', offset = 0} = {}) {
+  const state = contentAnalysisState();
+  state.query = String(query || ''); state.mode = matchMode; state.speaker = speaker; state.offset = offset;
+  jumpToContentSearch();
+  document.querySelectorAll('[data-kwic-query]').forEach(input => { input.value = state.query; });
+  document.querySelectorAll('[data-kwic-mode]').forEach(select => { select.value = state.mode; });
+  document.querySelectorAll('[data-kwic-speaker]').forEach(select => { select.value = state.speaker; });
+  return searchContentKwic();
+}
+
 async function searchContentKwic(page = false) {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
+  const operation = 'searchContentKwic';
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   if (page && state.result) {
     state.query = state.result.query; state.mode = state.result.mode; state.speaker = state.result.speaker;
+    document.querySelectorAll('[data-kwic-mode]').forEach(select => { select.value = state.mode; });
     document.querySelectorAll('[data-kwic-query]').forEach(input => { input.value = state.query; });
     document.querySelectorAll('[data-kwic-speaker]').forEach(select => { select.value = state.speaker; });
   }
   state.controller?.abort();
   const controller = new AbortController(); state.controller = controller;
   const sequence = ++state.sequence;
+  const requestedQuery = JSON.stringify([state.query, state.mode, state.speaker, state.offset]);
   state.loading = true; state.error = ''; state.result = null;
   renderKwicResults();
   try {
     const params = new URLSearchParams({q: state.query, mode: state.mode, speaker: state.speaker, offset: String(state.offset), limit: '50'});
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/kwic?${params}`, {signal: controller.signal});
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (!response.ok) throw new Error(data.error || '文脈検索に失敗しました。');
     if (sequence !== state.sequence || itemId !== analysisState.itemId) return;
     if (data.fingerprint !== analysisState.data?.insights?.fingerprint) throw new Error('分析対象が更新されています。「再集計」を押してから検索してください。');
+    if (requestedQuery !== JSON.stringify([state.query, state.mode, state.speaker, state.offset])) return;
     state.result = data;
-  } catch (error) {
-    if (error.name !== 'AbortError' && sequence === state.sequence) state.error = error.message;
+  } catch (error) { if (!owns()) return;
+    if (error.name !== 'AbortError' && sequence === state.sequence && requestedQuery === JSON.stringify([state.query, state.mode, state.speaker, state.offset])) state.error = error.message;
   } finally {
+    if (!owns()) return;
     if (sequence === state.sequence) state.loading = false;
     if (itemId === analysisState.itemId) renderKwicResults();
   }
@@ -1070,7 +1172,7 @@ function refreshInsightControls() {
   const state = contentAnalysisState();
   const busy = state.starting || insightRunActive(state.run);
   document.querySelectorAll('[data-insight-generate]').forEach(button => {
-    button.disabled = Boolean(busy || analysisState.dirty || analysisSaveInProgress);
+    button.disabled = Boolean(busy || hasUnsavedAnalysisChanges() || analysisSaveInProgress);
     button.textContent = state.starting ? '開始しています…' : analysisState.data.insights?.ai ? 'AI見解を再生成' : 'AIで見解を作成';
   });
   document.querySelectorAll('[data-insight-cancel]').forEach(button => {
@@ -1081,7 +1183,7 @@ function refreshInsightControls() {
   document.querySelectorAll('[data-insight-status]').forEach(host => {
     const usage = state.run?.usage;
     const tokenText = usage?.request_count ? ` / ${usage.request_count}回・${Number(usage.total_tokens || 0).toLocaleString()}トークン` : '';
-    host.textContent = analysisState.dirty ? '未保存の変更があります。設定・コードを保存してから生成してください。'
+    host.textContent = hasUnsavedAnalysisChanges() ? '未保存の変更があります。設定・コード・準備記録を保存してから生成してください。'
       : state.aiError || state.pollError || (state.run ? `${state.run.message} ${state.run.progress}%${tokenText}` : 'AI見解は「内容・文脈検索」の「AIで内容・意見を整理」から個別に生成します。');
   });
   document.querySelectorAll('[data-insight-output]').forEach(host => {
@@ -1095,12 +1197,15 @@ function refreshInsightControls() {
       openai: 'OpenAI', google: 'Google Gemini', lmstudio: 'LM Studio（ローカル）'
     }[ai.provider] || 'AI';
     host.append(analysisElement('p', 'content-ai-meta', `AI見解・下書き / ${providerLabel} / ${ai.model} / ${formatDate(ai.generated_at)}`));
+    host.append(analysisElement('p', 'content-inline-notice',
+      '未確認の解釈候補です。根拠IDの検査は、本文が主張を支持するか、真偽や「全員」の範囲を検証するものではありません。研究者が原文と対象者集合を照合してください。'));
     if (insights.stale) host.append(analysisElement('p', 'content-inline-notice', '更新が必要：元データまたは分析条件が変わっています。以下は生成時点の見解です。'));
     if (!(ai.findings || []).length) host.append(analysisElement('p', 'analysis-no-data', '根拠付きでまとめられる見解は見つかりませんでした。'));
     (ai.findings || []).forEach(finding => {
       const article = analysisElement('article', 'content-finding ai');
       article.append(analysisElement('small', 'content-finding-meta', insightCategoryLabels[finding.category] || ''),
         analysisElement('h4', '', finding.title), analysisElement('p', '', finding.text),
+        analysisElement('p', 'analysis-caption', finding.validation_note || '未確認の候補・研究者レビューが必要'),
         evidenceDetails(finding.segment_ids || [], {snapshot: ai.evidence, stale: insights.stale}));
       host.append(article);
     });
@@ -1112,7 +1217,12 @@ function insightPendingKey(itemId) { return `gurumoji.insightRequest.${itemId}`;
 async function startContentInsights() {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
-  if (state.starting || insightRunActive(state.run) || analysisState.dirty) return;
+  if (state.starting || insightRunActive(state.run) || hasUnsavedAnalysisChanges()) return;
+  const operation = 'startContentInsights';
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   const item = analysisState.data.item;
   let pending = state.pending || null;
   try { pending = JSON.parse(sessionStorage.getItem(insightPendingKey(itemId)) || 'null') || pending; } catch (_) { /* storage unavailable */ }
@@ -1130,6 +1240,7 @@ async function startContentInsights() {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pending)
     });
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (data.run) state.run = data.run;
     if (!response.ok && !data.run) {
       try { sessionStorage.removeItem(insightPendingKey(itemId)); } catch (_) { /* storage unavailable */ }
@@ -1138,9 +1249,10 @@ async function startContentInsights() {
     }
     try { sessionStorage.removeItem(insightPendingKey(itemId)); } catch (_) { /* storage unavailable */ }
     state.pending = null;
-  } catch (error) {
+  } catch (error) { if (!owns()) return;
     state.aiError = `${error.message} 必要な場合はもう一度生成ボタンを押してください。`;
   } finally {
+    if (!owns()) return;
     state.starting = false;
     if (itemId === analysisState.itemId) {
       refreshInsightControls(); pollContentInsights();
@@ -1151,16 +1263,27 @@ async function startContentInsights() {
 async function cancelContentInsights() {
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
+  const operation = 'cancelContentInsights';
   if (!state.run) return;
+  const runId = state.run.request_id;
+  state.cancellations ||= new Set();
+  const key = `${operation}:${runId}`;
+  if (state.cancellations.has(key)) return;
+  state.cancellations.add(key);
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token && state.run?.request_id === runId;
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/insights/cancel`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({request_id: state.run.request_id})
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({request_id: runId})
     });
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (!response.ok) throw new Error(data.error || '中止できませんでした。');
     state.aiError = '';
     if (itemId === analysisState.itemId) pollContentInsights();
-  } catch (error) { state.aiError = error.message; refreshInsightControls(); }
+  } catch (error) { if (!owns()) return; state.aiError = error.message; refreshInsightControls(); } finally { state.cancellations.delete(key); }
 }
 
 async function pollContentInsights() {
@@ -1168,10 +1291,16 @@ async function pollContentInsights() {
   if (!analysisState.data) return;
   const itemId = analysisState.itemId;
   const state = contentAnalysisState();
+  const operation = 'pollContentInsights';
+  const token = {};
+  state.operations ||= {};
+  state.operations[operation] = token;
+  const owns = () => isAnalysisContextCurrent(state.context) && state.operations[operation] === token;
   const sequence = ++contentAnalysisPollSequence;
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/insights`, {cache: 'no-store'});
     const data = await readJsonResponse(response);
+    if (!owns()) return;
     if (sequence !== contentAnalysisPollSequence || itemId !== analysisState.itemId || !analysisState.data) return;
     if (!response.ok) throw new Error(data.error || '生成状態を取得できませんでした。');
     state.pollError = '';
@@ -1188,7 +1317,7 @@ async function pollContentInsights() {
     refreshInsightControls();
     if (analysisState.data.insights?.ai?.archive_id !== previousArchive) loadAnalysisStorage();
     if (insightRunActive(state.run)) contentAnalysisPollTimer = setTimeout(pollContentInsights, 1800);
-  } catch (error) {
+  } catch (error) { if (!owns()) return;
     if (sequence !== contentAnalysisPollSequence || itemId !== analysisState.itemId) return;
     state.pollError = error.message; refreshInsightControls();
     if (insightRunActive(state.run)) contentAnalysisPollTimer = setTimeout(pollContentInsights, 5000);
@@ -1196,6 +1325,8 @@ async function pollContentInsights() {
 }
 
 function onContentAnalysisLoaded() {
+  ++contentAnalysisPollSequence; ++transformerAnalysisPollSequence;
+  clearTimeout(contentAnalysisPollTimer); clearTimeout(transformerAnalysisPollTimer);
   if (analysisState.data?.executed === false) return;
   loadAnalysisStorage();
   openLinkedAnalysisEvidence();

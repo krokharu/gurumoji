@@ -203,6 +203,13 @@ class AnalysisCommands:
             return {"version": "unavailable", "capabilities": {}}
         return self._pipeline.capabilities()
 
+    def get_definition(self, item_id: str, definition_id: str) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        if self._find_item(item_id) is None:
+            raise AnalysisCommandNotFound("対象の会話が見つかりません。")
+        return self._pipeline.get_definition(item_id, definition_id)
+
     def save_definition(
         self, item_id: str, definition_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:

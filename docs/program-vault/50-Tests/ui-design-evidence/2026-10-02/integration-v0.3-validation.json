@@ -1,0 +1,1339 @@
+{
+  "checked_at_utc": "2026-10-02T20:34:31.858020+00:00",
+  "baseline_head": "ddc23abe0d747a1e6cfd6d3bc262ce226f4756b0",
+  "scope": "static documentation and source preservation only",
+  "overall": "passed",
+  "changed_files_count": 86,
+  "documented_files_count": 84,
+  "markdown_files_checked": 30,
+  "local_markdown_links_checked": 178,
+  "wikilinks_checked": 69,
+  "fragments_checked": 9,
+  "protected_file_count": 230,
+  "protected_file_changes": [],
+  "protected_baseline_digest": "5a559492e2e99aafcac72792541d38f006d52dd7c2050a45b569f6cfcfdde5a8",
+  "out_of_scope_changed_files": [],
+  "skill_syntax": {
+    "exit_code": 0,
+    "output": "Skill is valid!"
+  },
+  "git_diff_check_exit_code": 0,
+  "html_static": [
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/index.html",
+      "issues": []
+    },
+    {
+      "path": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "issues": []
+    }
+  ],
+  "private_marker_hits": [],
+  "errors": [],
+  "warnings": [],
+  "not_run": [
+    "application tests (documentation-only change)",
+    "current live app browser/AT acceptance",
+    "user testing",
+    "Obsidian app rendering",
+    "platform skill discovery",
+    "external URL rechecking",
+    "commit/push/PC synchronization"
+  ],
+  "clarification": "Source/fixture records remain historical. Passing documentation links or YAML does not validate app behavior. Private five Vaults and runtime were not inspected.",
+  "local_markdown_links": [
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": ".agents/rules/dot-cloud.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": "DESIGN.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/agents/gurumoji-ui-critic.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "DESIGN.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": ".agents/agents/gurumoji-ui-critic.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": ".agents/skills/gurumoji-obsidian-memory/SKILL.md",
+      "fragment": ""
+    },
+    {
+      "source": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "target": "docs/program-vault/90-Templates/ui-design-outcome.example.json",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/rules/dot-cloud.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/rules/windows-local.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": "DESIGN.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/skills/gurumoji-ui-design/SKILL.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/agents/gurumoji-ui-critic.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": "docs/program-vault/00-AI-Entry.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/skills/gurumoji-obsidian-memory/SKILL.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": "docs/program-vault/40-Design/ai-development-rules.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": ".agents/rules/dot-cloud.md",
+      "fragment": ""
+    },
+    {
+      "source": "AGENTS.md",
+      "target": "docs/OBSIDIAN_VAULTS.md",
+      "fragment": "プログラム資料vaultの更新"
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/20-Modules/ui-screens.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/40-Design/analysis-milestone-visualization-design.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": ".agents/agents/gurumoji-ui-critic.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "src/gurumoji/static/style.css",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/40-Design/decisions.md",
+      "fragment": ""
+    },
+    {
+      "source": "DESIGN.md",
+      "target": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/integration-manifest.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/synthetic-fixture.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/verification.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/static/style.css",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/templates/views/analysis.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/templates/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/static/analysis-execution.js",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/static/analysis-content.js",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/analysis_core.py",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/analysis_pipeline.py",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "target": "src/gurumoji/transcript_preparation.py",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/synthetic-fixture.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/validation.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/source-review.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ai-development-rules.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/decisions.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-contract.md",
+      "target": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-source-ledger.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-source-ledger.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prior-25-acceptance-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/classification-late-response-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/integration-validation.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-source-ledger.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-source-ledger.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/source-review.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/README.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": "s01-個別の分析を見つけて実行する"
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": "s02-定義したつもりの測定と実際の値を照合する"
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": "s04-根拠を確認して編集し同じ結果へ戻る"
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/reference-patterns.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prior-25-acceptance-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/integration-manifest.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/README.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prior-25-acceptance-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "src/gurumoji/templates/index.html",
+      "fragment": "L46"
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "src/gurumoji/templates/views/analysis.html",
+      "fragment": "L111"
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "src/gurumoji/static/app.js",
+      "fragment": "L1156"
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "src/gurumoji/static/analysis-visualizations.js",
+      "fragment": "L1014"
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/specified-color-contrast.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-evidence-matrix.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/audit-source-manifest.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/static-design-probes.js",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/static-design-probes.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-evidence-manifest.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/specified-color-contrast.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/ux-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "fragment": "6-再利用できる依頼テンプレート"
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/40-Design/ui-design-knowledge.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/40-Design/ui-design-contract.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/40-Design/ui-design-implementation-plan.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/50-Tests/ui-design-acceptance.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "AGENTS.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/comparison.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/index.html",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/40-Design/ui-design-assets/2026-10-02/prototypes/v2/outside-legend.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/mockup-critique.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-lifecycle-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/definition-full-pipeline-probe.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/adversarial-checks.md",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/integration-manifest.json",
+      "fragment": ""
+    },
+    {
+      "source": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "target": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/integration-validation.json",
+      "fragment": ""
+    }
+  ],
+  "wiki_links": [
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "20-Modules/obsidian-integration",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "30-Data/four-vaults-v1",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "50-Analysis-Methods/00-Index",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/method-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "10-Architecture/system-map",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/ui-design-knowledge",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/ui-design-contract",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "20-Modules/ui-screens",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "50-Tests/ui-design-scenarios",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "50-Tests/ui-design-acceptance",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "20-Modules/module-map",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "20-Modules/ui-screens",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/known-issues",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/convergence-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "00-Index",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "70-Changes/app-py-phase5",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-AI-Entry.md",
+      "target": "40-Design/ai-development-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "00-Home",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "00-AI-Entry",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "00-Home",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "30-Data/four-vaults-v1",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "00-AI-Entry",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "10-Architecture/overview",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "10-Architecture/system-map",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "20-Modules/module-map",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "20-Modules/feature-inventory",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "20-Modules/obsidian-integration",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "20-Modules/ui-screens",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/convergence-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/known-issues",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/decisions",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/ai-development-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "50-Tests/obsidian-safety-test-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "50-Tests/ui-design-scenarios",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "50-Tests/ui-design-acceptance",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "60-Operations/backup-restore",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "60-Operations/dot-cloud-development-handoff",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "30-Data/four-vaults-v1",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "30-Data/analysis-storage-v1",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "30-Data/current-storage",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "30-Data/transcript-preparation-v1",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/obsidian-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/program-vault-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/storage-policy",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/sync-contract",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/method-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/ui-ux-issues",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/video-ui-redesign-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/quantification-statistics-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/core-handler-routing-reorganization-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/analysis-execution-ux-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/ui-design-knowledge",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/ui-design-contract",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "40-Design/ui-design-implementation-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "50-Analysis-Methods/00-Index",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "70-Changes/app-py-phase5",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "90-Templates/method-registration",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "90-Templates/research-result",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/00-Index.md",
+      "target": "90-Templates/research-memo",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/decisions",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/ui-ux-issues",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/core-handler-routing-reorganization-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/analysis-execution-ux-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/analysis-milestone-visualization-design",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/ui-design-implementation-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/20-Modules/ui-screens.md",
+      "target": "40-Design/video-ui-redesign-plan",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "target": "40-Design/program-vault-rules",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "target": "40-Design/ui-design-knowledge",
+      "resolved": true
+    },
+    {
+      "source": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "target": "20-Modules/ui-screens",
+      "resolved": true
+    }
+  ],
+  "fragments": [
+    {
+      "source": "AGENTS.md",
+      "fragment": "プログラム資料vaultの更新",
+      "target": "docs/OBSIDIAN_VAULTS.md",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "fragment": "s01-個別の分析を見つけて実行する",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "fragment": "s02-定義したつもりの測定と実際の値を照合する",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-workflow-task-briefs.md",
+      "fragment": "s04-根拠を確認して編集し同じ結果へ戻る",
+      "target": "docs/program-vault/50-Tests/ui-design-scenarios.md",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": "L46",
+      "target": "src/gurumoji/templates/index.html",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": "L111",
+      "target": "src/gurumoji/templates/views/analysis.html",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": "L1156",
+      "target": "src/gurumoji/static/app.js",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/current-design-audit.md",
+      "fragment": "L1014",
+      "target": "src/gurumoji/static/analysis-visualizations.js",
+      "valid": true
+    },
+    {
+      "source": "docs/program-vault/50-Tests/ui-design-evidence/2026-10-02/prompt-workflow-dry-run.md",
+      "fragment": "6-再利用できる依頼テンプレート",
+      "target": "docs/program-vault/40-Design/ui-design-research/2026-10-02/prompt-research.md",
+      "valid": true
+    }
+  ]
+}

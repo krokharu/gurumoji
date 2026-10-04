@@ -6,6 +6,7 @@ an edited or deleted item's old file is not imported again."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -18,6 +19,7 @@ from ..text_utils import json_load
 from .durable_files import file_sha256
 from .outputs import safe_output_stem
 
+LOGGER = logging.getLogger(__name__)
 
 OUTPUT_ARTIFACT_SUFFIXES = (
     "_話者分離.json",
@@ -220,9 +222,16 @@ def make_output_import(
                 ):
                     continue
                 payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
+                if not isinstance(payload, dict):
+                    raise ValueError("The output JSON must contain an object.")
+                # language is bound directly to SQLite; reject malformed JSON
+                # scalars here rather than treating a binding error as a DB fault.
+                for field in ("language", "source"):
+                    if payload.get(field) is not None and not isinstance(payload[field], str):
+                        raise ValueError(f"The output JSON {field} must be a string or null.")
                 segments = payload.get("segments")
-                if not isinstance(segments, list):
-                    continue
+                if not isinstance(segments, list) or any(not isinstance(segment, dict) for segment in segments):
+                    raise ValueError("The output JSON must contain a list of segment objects.")
                 source_name = Path(str(payload.get("source") or json_path.name.replace("_話者分離.json", ""))).name
                 stem = json_path.name[:-len("_話者分離.json")]
                 files = existing_output_artifacts(json_path.parent, stem)
@@ -233,6 +242,9 @@ def make_output_import(
                         item_id=item_id, source_name=source_name, output_dir=json_path.parent,
                         media_path=None, language=payload.get("language"), segments=segments,
                         speaker_names=payload.get("speaker_names") if isinstance(payload.get("speaker_names"), dict) else {},
+                        speaker_profiles=payload.get("speaker_profiles") if isinstance(payload.get("speaker_profiles"), dict) else None,
+                        session_profile=payload.get("session_profile") if isinstance(payload.get("session_profile"), dict) else None,
+                        meeting_minutes=payload.get("meeting_minutes") if isinstance(payload.get("meeting_minutes"), dict) else None,
                         outline=payload.get("outline") if isinstance(payload.get("outline"), dict) else None,
                         emotion_analysis=payload.get("emotion_analysis") if isinstance(payload.get("emotion_analysis"), dict) else None,
                         formatting_result=(
@@ -253,7 +265,10 @@ def make_output_import(
                     )
                 known.add(item_id)
                 publish_input_vault(library_row(item_id), source_kind="imported")
-            except (OSError, ValueError, json.JSONDecodeError):
+            except (OSError, ValueError, TypeError) as exc:
+                # Never log transcript contents or abort startup for a bad import.
+                LOGGER.warning("出力JSONを取り込めないためスキップしました: %s (%s)",
+                               json_path.name, type(exc).__name__)
                 continue
 
     return (

@@ -1,0 +1,90 @@
+{
+  "ai_payload_capture": {
+    "record_keys": [
+      "id",
+      "speaker",
+      "speaker_name",
+      "role",
+      "offset",
+      "text",
+      "codes",
+      "important"
+    ],
+    "record": {
+      "id": "E0001",
+      "speaker": "speaker-A",
+      "speaker_name": "Synthetic A",
+      "role": "moderator",
+      "offset": 0,
+      "text": "Synthetic statement",
+      "codes": [
+        {
+          "id": "C1",
+          "label": "Synthetic code"
+        }
+      ],
+      "important": true
+    },
+    "research_question_sent": true,
+    "expert_brief_and_allowed_step_title_sent": true,
+    "excluded_text_not_sent": true,
+    "raw_source_id_replaced_with_invocation_alias": true,
+    "expert_note_and_full_literature_not_sent": true,
+    "actual_external_calls": 0
+  },
+  "publication_cases": [
+    {
+      "selected_targets": [
+        "input",
+        "orchestrator",
+        "visualization"
+      ],
+      "pipeline_status": "completed",
+      "ResearchVault_vault_status": "conflict",
+      "publication_records": {
+        "input": "published",
+        "orchestrator": "published",
+        "visualization": "published"
+      },
+      "publisher_attempt_trace": [
+        "InputVault_attempt",
+        "OrchestratorVault_attempt",
+        "VisualizationVault_attempt",
+        "ResearchVault_attempt"
+      ],
+      "real_files_or_vaults_written": false
+    },
+    {
+      "selected_targets": [
+        "input"
+      ],
+      "pipeline_status": "completed",
+      "ResearchVault_vault_status": "conflict",
+      "publication_records": {
+        "input": "published",
+        "orchestrator": "not_selected",
+        "visualization": "not_selected"
+      },
+      "publisher_attempt_trace": [
+        "InputVault_attempt",
+        "OrchestratorVault_attempt",
+        "VisualizationVault_attempt",
+        "ResearchVault_attempt"
+      ],
+      "real_files_or_vaults_written": false
+    },
+    {
+      "selected_targets": [],
+      "pipeline_status": "completed",
+      "ResearchVault_vault_status": "pending",
+      "publication_records": {
+        "input": "not_selected",
+        "orchestrator": "not_selected",
+        "visualization": "not_selected"
+      },
+      "publisher_attempt_trace": [],
+      "real_files_or_vaults_written": false
+    }
+  ],
+  "evidence_scope": "Original contract methods with synthetic adapters. No real AI, runtime, Vault, or GUI."
+}

@@ -112,6 +112,33 @@ class AnalysisSnapshotCommitTests(unittest.TestCase):
         self.assertEqual(result["status"], "cancelled", result)
         self.assertIsNone(result["result_run"])
 
+    def test_cancellation_at_artifact_catalog_commit_keeps_package_uncommitted(self):
+        from gurumoji import analysis_store as store_module
+        original = store_module.write_atomic
+        cancelled = []
+
+        def write_then_cancel(path, data, **kwargs):
+            original(path, data, **kwargs)
+            if path.name == "manifest.json" and not cancelled:
+                with app.database_connection() as connection:
+                    row = connection.execute("SELECT pipeline_id FROM analysis_pipeline_requests WHERE status='running'").fetchone()
+                if row:
+                    cancelled.append(row[0])
+                    app.analysis_pipeline_service().cancel("content", row[0])
+
+        with patch.object(store_module, "write_atomic", side_effect=write_then_cancel):
+            started = self.client.post(self.url + "/pipelines", json=self.payload("cancel-at-catalog-commit-0001"))
+            state = self.wait(started.get_json()["pipeline_id"])
+        self.assertEqual(state["status"], "cancelled", state)
+        self.assertTrue(cancelled)
+        with app.database_connection() as connection:
+            runs = connection.execute("SELECT id,status FROM analysis_runs WHERE kind='milestone_analysis'").fetchall()
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0]["status"], "failed")
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis_artifacts WHERE run_id=?", (runs[0]["id"],)).fetchone()[0], 0)
+        response = self.client.post(f"/api/analysis/runs/{runs[0]['id']}/vault")
+        self.assertEqual(response.status_code, 409, response.get_json())
+
     def test_restart_marks_inflight_attempt_interrupted_without_touching_legacy_runs(self):
         now = app.utc_now_iso()
         with app.database_connection() as connection:

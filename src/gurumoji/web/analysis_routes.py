@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import csv
 import re
 import sqlite3
 import subprocess
@@ -43,6 +44,24 @@ def register_analysis_routes(
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
 
+    @blueprint.get("/api/library/<item_id>/analysis/runs/<run_id>")
+    def get_analysis_run(item_id: str, run_id: str):
+        try:
+            return jsonify(queries().run(item_id, run_id))
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (OSError, ValueError, TypeError, KeyError, LookupError, csv.Error):
+            return jsonify({"error": "固定成果物が欠落・破損しているか、未対応の形式です。再計算せず停止しました。"}), 409
+
+    @blueprint.get("/api/library/<item_id>/analysis/runs/<run_id>/previews/<artifact_id>")
+    def get_analysis_run_preview(item_id: str, run_id: str, artifact_id: str):
+        try:
+            return jsonify(queries().run_preview(item_id, run_id, artifact_id))
+        except AnalysisQueryNotFound as exc:
+            return jsonify({"error": str(exc)}), 404
+        except (OSError, ValueError, TypeError, KeyError, LookupError, csv.Error):
+            return jsonify({"error": "固定成果物を読み取れません。再計算せず停止しました。"}), 409
+
     @blueprint.get("/api/analysis/artifacts/<artifact_id>")
     def get_analysis_artifact(artifact_id: str):
         try:
@@ -68,7 +87,7 @@ def register_analysis_routes(
             )
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
-        except (OSError, ValueError, zipfile.BadZipFile):
+        except (OSError, ValueError, TypeError, KeyError, LookupError, csv.Error, zipfile.BadZipFile):
             return jsonify({"error": "固定成果物のZIPを作成できませんでした。"}), 409
 
     def pipeline_error(exc: AnalysisContractError):
@@ -76,13 +95,26 @@ def register_analysis_routes(
             "revision_conflict", "request_conflict", "definition_not_adopted",
             "unresolved_binding", "binding_out_of_scope", "ineligible",
             "nothing_to_retry", "provider_unavailable", "method_unavailable",
-            "retry_limit_reached",
+            "retry_limit_reached", "trial_conflict", "binding_conflict",
+            "definition_snapshot_missing", "definition_version_invalid",
+            "retry_in_progress", "publication_scope_conflict",
         } else 400
         return jsonify({"error": str(exc), "reason_code": exc.code, "field": exc.field}), status
 
     @blueprint.get("/api/analysis/pipeline-capabilities")
     def get_pipeline_capabilities():
         return jsonify(commands().pipeline_capabilities())
+
+    @blueprint.get("/api/library/<item_id>/analysis/definitions/<definition_id>")
+    def get_analysis_definition(item_id: str, definition_id: str):
+        try:
+            return jsonify({"definition": commands().get_definition(item_id, definition_id)})
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except sqlite3.Error:
+            return jsonify({"error": "定義を取得できませんでした。"}), 500
 
     @blueprint.put("/api/library/<item_id>/analysis/definitions/<definition_id>")
     def put_analysis_definition(item_id: str, definition_id: str):
@@ -105,7 +137,7 @@ def register_analysis_routes(
             return jsonify({"error": "試行条件はJSONオブジェクトで送信してください。"}), 400
         try:
             return jsonify({"trial": commands().trial_definition(
-                item_id, definition_id, limit=int(payload.get("limit", 20))
+                item_id, definition_id, limit=payload.get("limit", 20)
             )})
         except LookupError as exc:
             return jsonify({"error": str(exc)}), 404

@@ -1,0 +1,12 @@
+{
+  "source_commit": "5d5c59456fc24e58e32d3ec278a7beb7dc4f3e13",
+  "source_file": "api-import.json",
+  "source_sha256": "a40d5fba206584e198183ad7541f0bb5bb38181d056bd0a7f8be77911667eea8",
+  "projected_file": "import-timing-markers.json",
+  "projected_sha256": "0e290a0c3be20472410b91ad2b79a3999a3554915e40287f2c0311839f39fdb6",
+  "case_count": 6,
+  "projection": "The complete parsed job DTO is copied unchanged, including separate raw marker and source-binding containers. Expected measurements and original raw-DB hashes are retained. Only unrelated top-level report fields and duplicate raw DB JSON strings are omitted. No fields or execution flags in the job DTO are changed. Nonempty/type-change stale derivatives are explicit in the tests.",
+  "reachability": "Normal output-JSON import and existing edit normalizer admit both empty marker kinds. Raw import files and raw DB JSON remain unchanged; see final-time-invariants/import-reachability.json. Vault publication is mocked; external AI/network are forbidden.",
+  "candidate_ui_commit": "4c319833d948c4b6c0f1ae50251e48b21e4815d9",
+  "limits": "Offline project DOM and synthetic API/Save fixtures, not live browser/native input/audio/AT."
+}

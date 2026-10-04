@@ -123,3 +123,48 @@ DBに再試行用パッケージを登録 → 一時ファイルから各JSON／
 2026-09-21のWindows作業ツリーで `PYTHONPATH=src;tests` を設定し、`.venv\Scripts\python.exe -m unittest discover -s tests` の550件が成功した。手動定義の少数試行からM0〜M7完了までをChromiumでも確認した。実APIによる生成品質・料金の検証は行っていない。
 
 関連：[[current-storage]]、[[40-Design/storage-policy]]、[[20-Modules/module-map]]。
+
+
+## 発話時間の欠測契約（2026-10-04）
+
+`focus-group-local-5`／手法registry `text-analysis-store-9` から、観測済み発話がすべて時刻欠測なら話者・属性群・司会・全体の時間を `null` とする。有効な時刻のある真の0秒は0、空集合の合計も0を維持する。一部欠測時の `speaking_seconds`／`total_speaking_seconds` は時刻あり発話の小計で、`timed_turn_count` と `missing_time_turn_count` を併記する。既存話者CSVのcoverage列を維持し、属性群CSVには同2列を追加する。
+
+全体割合は含めた全発話、参加者割合・Gini・HHI・均等度はその対象話者集合に時刻欠測がある、または総時間0の場合に `null`。除外発話は対象集合へ戻さず、UNKNOWN・未観測話者・欠測のみの話者を0秒の分母として補完しない。従来の有効時刻話者の分母人数は保ち、その対象候補に欠測があることを別coverageで示す。割合を算出できない場合の集中・低比率候補は出力しない。数値文字列の既存Python float互換は維持し、巨大整数の変換overflowは欠測扱いとする。
+
+固定CSVの欠測は空欄、型付きJSONは `null` を保持する。pipelineは受付済みsnapshotの計算版から `result.algorithms.automatic` と手法engine版を記録する。旧snapshot・旧固定packageの値を新仕様へ再計算・書換えせず、旧計算版を保持する。新版の表にはcoverageの要約を添える。実データ移行・DB schema変更はない。
+
+
+## 発話別役割が混在する話者（2026-10-04）
+
+`focus-group-local-6`／registry `text-analysis-store-10` では、含めた発話の同一話者に複数役割がある場合、派生話者行を `role=mixed`、`role_status=mixed` とし、`observed_roles` に元の役割集合を順序固定で保存する。これは表示・集計の状態であり、人が選ぶ役割や原発話・会話プロファイル・準備記録を書き換えない。原因発話を分析から除外すれば残る単一役割へ戻る。
+
+話者総時間・全体時間・全体割合は時間coverageが有効なら保持する。司会等を除く参加者集合は役割配分が不確定なので割合・最大割合・Gini・HHI・均等度を算出せず、`unavailable_reason=mixed_roles` を返す。実参加人数は研究者の登録値を維持し、観測参加発言者人数は混在時 `null` として推測しない。司会時間・司会割合・司会質問候補と `group_by=role` の時間・割合は `null`、`role_aggregation_status=mixed` を添え、時刻欠測とは区別する。
+
+`exclude_moderator=false` の全観測話者集合は役割に依存しないため、時間coverageが完全なら従来名 `participant_percent` を含む割合・均等度を保持し、分母を全観測話者と明示する。UNKNOWNや未観測者を新規分母へ加えない。旧v4/v5のsnapshotや固定packageは保存時の値・元計算版で保持し、v6へ再計算・再ラベルしない。
+
+
+## 固定runの保存版表示（2026-10-04）
+
+read-only要約は保存手法の `engine.version` を「保存した計算版」、`method_version` を「手法registry版」として別々に投影する。`result.algorithms` は独立した「保存した算法一覧」で表示し、手法へ推測で結合しない。保存記録間で値が異なっても両方を残し、現在の定数や別記録で欠落を補完しない。
+
+空・未記録は「記録なし」、bool・複合値等の未対応形式は「表示できない形式」。有限数値の0も保存された版として保持する。要約の共通16 KiB文字budget、最大12手法・20算法、版文字列256文字の上限を使う。元に値がありbudgetで省略された場合は「省略（全ファイルで確認）」とし、未記録へ変換しない。完全な保存JSONとhashは変更しない。
+
+
+## 固定packageの読取整合境界（2026-10-04）
+
+破損・外部復旧等でcatalogとmanifestの内容が変わったpackageを想定し、ZIP member名も検証する。絶対パス・親/現在ディレクトリ要素・空要素・backslash・drive/ADS colon・制御文字・Windows予約名・末尾dot/space等を拒否する。大文字小文字/Unicode正規化後の衝突と、同名ファイル/ディレクトリの衝突も停止する。安全な入れ子・日本語・単独の正規化前Unicode名は元綴りのまま保持する。名前を安全な文字列へ自動改名する処理ではない。
+
+入力JSONは生成時と同じcanonical化（library_idを含む）からsnapshot digestを再計算し、run/manifestのsnapshot IDと照合する。個別artifactとmanifestのhashだけ整合しても、入力とsnapshot IDが異なる場合は固定run取得・preview・ZIPを409で停止する。元bytes・catalog・manifestを再生成/修復しない。ZIPには検証済みcontent集合を使い、検証後に別catalog名を再取得して混ぜない。通常の生成APIから不正名やこの不整合を作成できるとの確認ではなく、既存packageの読取検証の強化である。
+
+
+## 時間系出力の残る欠測境界（2026-10-04）
+
+`focus-group-local-7`／registry `text-analysis-store-11` では、timebin用の集合に真の0秒発話を含める。時刻あり発話が0件ならtimelineは空表、0→0の発話は終端0・開始件数1、10→10は終端10・開始件数1を保持する。従来の正duration集合を使う話者遷移・gap・overlapは変えない。旧v6の仮0行は固定snapshot/CSV内では元値のまま保持する。
+
+感情別`seconds`とコード別`speaking_seconds`は全欠測時null、一部欠測時は既知小計とし、`timed_turn_count`/`missing_time_turn_count`を追加する。コード0件は空集合の合計0のまま。`overview.session_duration`は従来同様に除外を含む全発話の最大終了位置であり、時刻あり0件ならnull。`session_timed_turn_count`/`session_missing_time_turn_count`で、分析に含めた集合のcoverageと区別する。録音ファイルの全長を推測する値ではない。
+
+一覧・個別の`library_public.duration`も既存analysis時刻boundsに基づく非破壊の読取projectionへ統一する。無効な時刻値で一覧全体を500にせず、全欠測null・真0・既存Python float互換の数値文字列を維持し、`timed_turn_count`/`missing_time_turn_count`を併記する。原発話・DBは書き換えない。
+
+個別ライブラリのfull応答には、既存Python float互換の数値文字列を画面計測でも使えるよう、表示専用の`segment_timings`を添える。元発話ID・順序・件数・start/end/time_unknownとの一致、有効性の厳密なtrue、正規化値の有限性・順序・上限を確認した場合だけ利用する。ID重複・構造差・局所時刻編集・不正projectionは通常の数値guardへ戻す。原発話と保存本文へ混ぜず、DB永続化や自動保存はしない。音声seekのguardは別契約のまま。開始/終了時刻の編集は話者時間表示も同時に更新する。
+
+数値時刻の計測では、既存Python契約で偽となる`time_unknown`のnull/false/0/空文字/空JSON配列/空JSON objectを限定的に扱う。空containerのprojection結合は同じ型かつ両方空の場合だけ値一致とし、非空化・型変更は旧投影を失効させる。局所時刻編集後は現在の数値boundsと同じmarker規則を使うため、未変更の空markerだけを理由に不明へ戻さない。一般のdeep equal・数値文字列parserは追加せず、原marker、保存本文、音声/evidenceのguardは変更しない。

@@ -17,12 +17,13 @@ from importlib import metadata
 from itertools import combinations
 from statistics import mean, median, stdev
 from typing import Any, Callable
+from . import transcript_preparation as preparation
 from .analysis_insights import (
-    INSIGHT_CSV_FIELDS, build_content_analysis, input_fingerprint, insight_csv_rows,
+    INSIGHT_CSV_FIELDS, build_content_analysis, input_fingerprint, insight_csv_rows, normalized_term,
 )
 
 
-RESEARCH_ALGORITHM_VERSION = "research-ja-3"
+RESEARCH_ALGORITHM_VERSION = "research-ja-5"
 CONTENT_UPOS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV"}
 CONTENT_POS_JA = {"名詞", "動詞", "形容詞", "副詞"}
 DEFAULT_STOP_WORDS = {
@@ -78,7 +79,7 @@ RESEARCH_CSV_FIELDS: dict[str, list[str]] = {
         "content_token_count", "unique_content_terms", "lexical_diversity",
         "characters_per_minute", "question_candidate", "code_ids",
         "code_labels", "categories", "themes", "interaction_tags", "elicitation", "interaction_links",
-        "important", "excluded",
+        "important", "excluded", "valid_time",
     ],
     "morphemes": [
         "segment_id", "speaker", "speaker_name", "role", "sentence_id",
@@ -104,23 +105,24 @@ RESEARCH_CSV_FIELDS: dict[str, list[str]] = {
     "descriptives": [
         "scope", "group_variable", "group", "variable", "label", "n",
         "missing", "mean", "standard_deviation", "median", "minimum",
-        "q1", "q3", "maximum",
+        "q1", "q3", "maximum", "group_id", "unit", "analysis_unit",
     ],
-    "frequencies": ["variable", "label", "value", "count", "percent"],
+    "frequencies": ["variable", "label", "value", "count", "percent", "value_id"],
     "crosstabs": [
         "table_id", "table_label", "row_variable", "row_value",
         "column_variable", "column_value", "count", "row_percent",
-        "column_percent", "total_percent",
+        "column_percent", "total_percent", "row_id", "segment_ids", "term", "match_mode",
     ],
     "statistical_tests": [
         "family", "test", "outcome", "outcome_label", "group_variable",
         "n", "groups", "statistic", "df1", "df2", "p_value",
         "effect_name", "effect_size", "significant_0_05", "status",
-        "assumption_note",
+        "assumption_note", "analysis_unit", "unit", "missing", "p_value_adjustment", "exploratory",
     ],
     "correlations": [
         "method", "variable_a", "label_a", "variable_b", "label_b", "n",
-        "coefficient", "p_value", "significant_0_05", "status",
+        "coefficient", "p_value", "significant_0_05", "status", "missing",
+        "analysis_unit", "unit_a", "unit_b", "p_value_adjustment", "exploratory", "assumption_note",
     ],
     "analysis_methods": [
         "category", "method", "engine", "engine_version", "status",
@@ -129,6 +131,13 @@ RESEARCH_CSV_FIELDS: dict[str, list[str]] = {
 }
 
 
+DATASET_LIMIT_FIELDS = ["dataset_total_rows", "dataset_returned_rows", "dataset_limit",
+                        "dataset_truncated", "dataset_limit_reason"]
+for _dataset in ("term_frequency", "cooccurrence"):
+    RESEARCH_CSV_FIELDS[_dataset].extend(DATASET_LIMIT_FIELDS)
+RESEARCH_CSV_FIELDS["cooccurrence"].extend([
+    "cooccurrence_top_terms", "cooccurrence_min_count", "eligible_term_count", "total_term_count",
+])
 RESEARCH_CSV_FIELDS.update(INSIGHT_CSV_FIELDS)
 
 _ENGINE_LOCK = threading.RLock()
@@ -154,14 +163,14 @@ def _safe_error(error: BaseException) -> str:
     return text[:300] or error.__class__.__name__
 
 
-def _finite(value: Any, digits: int = 8) -> float | None:
+def _finite(value: Any, digits: int | None = 8) -> float | None:
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
     if not math.isfinite(number):
         return None
-    return round(number, digits)
+    return number if digits is None else round(number, digits)
 
 
 def _percentile(values: list[float], proportion: float) -> float | None:
@@ -553,6 +562,17 @@ def _linguistic_analysis(
     )
     speaker_document_ids: dict[str, set[str]] = defaultdict(set)
     speaker_term_meta: dict[str, dict[str, str]] = {}
+    # DF counts all nonblank included utterances, even when they have no content terms.
+    for segment in segments:
+        if segment.get("excluded") or not str(segment.get("text") or "").strip():
+            continue
+        speaker = str(segment.get("speaker") or "UNKNOWN")
+        speaker_document_ids[speaker].add(str(segment.get("id") or ""))
+        speaker_term_meta.setdefault(speaker, {
+            "speaker": speaker,
+            "speaker_name": str(segment.get("speaker_name") or speaker),
+            "role": str(segment.get("role") or "participant"),
+        })
     for row in included_rows:
         if not row["is_content"] or row["is_stop"]:
             continue
@@ -583,7 +603,7 @@ def _linguistic_analysis(
         speaker_frequency.update(terms)
     document_count = len({
         str(segment.get("id") or "")
-        for segment in segments if not segment.get("excluded") and str(segment.get("text") or "")
+        for segment in segments if not segment.get("excluded") and str(segment.get("text") or "").strip()
     })
     total_terms = sum(term_counts.values())
     term_frequency = []
@@ -610,7 +630,7 @@ def _linguistic_analysis(
 
     speaker_term_frequency = []
     for speaker, counts in sorted(
-        speaker_term_counts.items(),
+        ((speaker, speaker_term_counts[speaker]) for speaker in speaker_document_ids),
         key=lambda item: (
             str(speaker_term_meta.get(item[0], {}).get("speaker_name") or item[0]),
             item[0],
@@ -620,7 +640,7 @@ def _linguistic_analysis(
         speaker_document_count = len(speaker_document_ids[speaker])
         terms = []
         for rank, (term, count) in enumerate(
-            sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:50], 1
+            sorted(counts.items(), key=lambda item: (-item[1], item[0])), 1
         ):
             document_frequency_value = len(speaker_term_documents[speaker][term])
             terms.append({
@@ -677,6 +697,7 @@ def _linguistic_analysis(
     cooccurrence.sort(
         key=lambda row: (-row["jaccard"], -row["cooccurrence_count"], row["term_a"], row["term_b"])
     )
+    cooccurrence_total_rows = len(cooccurrence)
     cooccurrence = [
         {"rank": rank, **row} for rank, row in enumerate(cooccurrence[:500], 1)
     ]
@@ -696,6 +717,17 @@ def _linguistic_analysis(
             "document_unit": "発話",
             "cooccurrence_min_count": minimum_count,
             "cooccurrence_top_terms": top_terms,
+            "document_count": document_count,
+            "document_denominator": "nonblank_included_utterances",
+            "cooccurrence_eligible_term_count": len(eligible),
+            "cooccurrence_total_term_count": len(term_frequency),
+            "cooccurrence_candidate_pair_count": len(pair_counts),
+            "cooccurrence_total_rows": cooccurrence_total_rows,
+            "cooccurrence_returned_rows": len(cooccurrence),
+            "cooccurrence_row_limit": 500,
+            "cooccurrence_truncated": cooccurrence_total_rows > len(cooccurrence),
+            "cooccurrence_limit_reason": "top_jaccard_pairs_after_top_terms_and_min_count_filter",
+
         },
         "morphemes": morphemes,
         "dependencies": dependencies,
@@ -714,6 +746,16 @@ NUMERIC_VARIABLES: dict[str, str] = {
     "lexical_diversity": "語彙多様性（異なり内容語/内容語）",
     "characters_per_minute": "発話速度（文字/分）",
 }
+
+
+NUMERIC_UNITS = {
+    "duration_seconds": "秒", "characters": "文字", "token_count": "形態素",
+    "content_token_count": "内容語", "lexical_diversity": "比率", "characters_per_minute": "文字/分",
+}
+INFERENTIAL_NOTE = (
+    "発話単位の探索的・未補正p値です。参加者/会話内の依存を補正しておらず、"
+    "独立した参加者数ではありません。比較familyは未指定です。効果量・N・欠測と研究デザインを先に確認してください。"
+)
 
 
 def _segment_dataset(
@@ -736,16 +778,14 @@ def _segment_dataset(
             for row in token_rows if row["is_content"] and not row["is_stop"]
         ]
         normalized_terms = {
-            (term.casefold() if term.isascii() else term)
+            normalized_term(row.get("normalized") or row.get("lemma") or row.get("surface"))
             for row in token_rows
-            for term in (
-                str(row.get("normalized") or "").strip(),
-                str(row.get("lemma") or "").strip(),
-                str(row.get("surface") or "").strip(),
-            )
-            if term
         }
-        duration = max(0.0, float(segment.get("duration") or 0))
+        surface_terms = {str(row.get("surface") or "") for row in token_rows}
+        valid_time = bool(segment.get("valid_time", preparation.valid_time(segment)))
+        duration = _finite(segment.get("duration")) if valid_time else None
+        if duration is not None and duration < 0:
+            duration = None
         characters = int(segment.get("characters") or 0)
         annotation = segment.get("annotation") if isinstance(segment.get("annotation"), dict) else {}
         code_ids = [str(value) for value in annotation.get("codes", [])]
@@ -761,9 +801,10 @@ def _segment_dataset(
             "segment_id": segment_id,
             "group_id": segment.get("group_id", "不明"),
             "utterance_order": segment.get("utterance_order", ""),
-            "start": segment.get("start", 0),
-            "end": segment.get("end", 0),
-            "duration_seconds": round(duration, 3),
+            "start": segment.get("start") if valid_time else None,
+            "end": segment.get("end") if valid_time else None,
+            "duration_seconds": round(duration, 3) if duration is not None else None,
+            "valid_time": valid_time,
             "speaker": segment.get("speaker", "UNKNOWN"),
             "speaker_name": segment.get("speaker_name", ""),
             "role": segment.get("role", "participant"),
@@ -780,7 +821,7 @@ def _segment_dataset(
             "lexical_diversity": round(len(set(content_terms)) / len(content_terms), 6)
             if content_terms else None,
             "characters_per_minute": round(60 * characters / duration, 4)
-            if duration > 0 else None,
+            if duration is not None and duration > 0 else None,
             "question_candidate": bool(segment.get("question_candidate")),
             "code_ids": code_ids,
             "code_labels": [str(codebook.get(value, {}).get("label") or value) for value in code_ids],
@@ -792,6 +833,7 @@ def _segment_dataset(
             "important": bool(annotation.get("important")),
             "excluded": bool(segment.get("excluded")),
             "_normalized_terms": normalized_terms,
+            "_surface_terms": surface_terms,
         })
     return rows
 
@@ -811,6 +853,8 @@ def _descriptive_row(
         "group": group,
         "variable": variable,
         "label": NUMERIC_VARIABLES[variable],
+        "unit": NUMERIC_UNITS[variable],
+        "analysis_unit": "発話",
         "n": len(values),
         "missing": missing,
         "mean": _finite(mean(values)) if values else None,
@@ -823,10 +867,30 @@ def _descriptive_row(
     }
 
 
+def _speaker_labels(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Display labels are not identity keys; disambiguate homonyms for charts."""
+    names: dict[str, str] = {}
+    for row in rows:
+        speaker = str(row.get("speaker") or "UNKNOWN")
+        names.setdefault(speaker, str(row.get("speaker_name") or speaker))
+    counts = Counter(names.values())
+    labels: dict[str, str] = {}
+    used: set[str] = set()
+    for speaker, name in sorted(names.items()):
+        label = f"{name} [{speaker}]" if counts[name] > 1 else name
+        # Also handle a name that happens to equal another generated label.
+        while label in used:
+            label += f" [{speaker}]"
+        labels[speaker] = label
+        used.add(label)
+    return labels
+
+
 def _frequency_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
+    speaker_labels = _speaker_labels(rows)
     variables: list[tuple[str, str, Callable[[dict[str, Any]], str]]] = [
-        ("speaker", "話者", lambda row: str(row["speaker_name"] or row["speaker"])),
+        ("speaker", "話者", lambda row: str(row.get("speaker") or "UNKNOWN")),
         ("role", "役割", lambda row: str(row["role"] or "未設定")),
         (
             "question_candidate",
@@ -841,7 +905,8 @@ def _frequency_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             result.append({
                 "variable": variable,
                 "label": label,
-                "value": value,
+                "value": speaker_labels[value] if variable == "speaker" else value,
+                "value_id": value,
                 "count": count,
                 "percent": round(100 * count / total, 5) if total else 0.0,
             })
@@ -857,10 +922,14 @@ def _crosstab_rows(
     group_accessor: Callable[[dict[str, Any]], str],
     column_variable: str,
     column_accessor: Callable[[dict[str, Any]], str],
+    group_labels: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[list[int]]]:
     row_values = sorted({group_accessor(row) for row in rows})
     column_values = sorted({column_accessor(row) for row in rows})
     counts = Counter((group_accessor(row), column_accessor(row)) for row in rows)
+    evidence: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for row in rows:
+        evidence[(group_accessor(row), column_accessor(row))].append(str(row.get("segment_id") or ""))
     row_totals = Counter()
     column_totals = Counter()
     for (row_value, column_value), count in counts.items():
@@ -878,10 +947,12 @@ def _crosstab_rows(
                 "table_id": table_id,
                 "table_label": table_label,
                 "row_variable": group_variable,
-                "row_value": row_value,
+                "row_value": (group_labels or {}).get(row_value, row_value),
+                "row_id": row_value,
                 "column_variable": column_variable,
                 "column_value": column_value,
                 "count": count,
+                "segment_ids": evidence[(row_value, column_value)],
                 "row_percent": round(100 * count / row_totals[row_value], 5)
                 if row_totals[row_value] else 0.0,
                 "column_percent": round(100 * count / column_totals[column_value], 5)
@@ -934,8 +1005,9 @@ def _statistics_analysis(
     def group_value(row: dict[str, Any]) -> str:
         if group_variable == "role":
             return str(row["role"] or "未設定")
-        return str(row["speaker_name"] or row["speaker"] or "話者未判定")
+        return str(row.get("speaker") or "UNKNOWN")
 
+    group_labels = _speaker_labels(included) if group_variable == "speaker" else {}
     descriptives = []
     for variable in NUMERIC_VARIABLES:
         values = [
@@ -963,10 +1035,11 @@ def _statistics_analysis(
                 values,
                 scope="group",
                 group_variable=group_variable,
-                group=group,
+                group=group_labels.get(group, group),
                 variable=variable,
                 missing=len(group_rows) - len(values),
             ))
+            descriptives[-1]["group_id"] = group
 
     frequencies = _frequency_rows(included)
     crosstabs = []
@@ -977,6 +1050,7 @@ def _statistics_analysis(
         table_label=f"{group_variable} × 質問候補",
         group_variable=group_variable,
         group_accessor=group_value,
+        group_labels=group_labels,
         column_variable="question_candidate",
         column_accessor=lambda row: "質問候補" if row["question_candidate"] else "その他",
     )
@@ -1000,6 +1074,7 @@ def _statistics_analysis(
             table_label=f"{group_variable} × コード「{code_label}」",
             group_variable=group_variable,
             group_accessor=group_value,
+            group_labels=group_labels,
             column_variable=f"code:{code_id}",
             column_accessor=lambda row, target=code_id: (
                 "あり" if target in row.get("code_ids", []) else "なし"
@@ -1018,30 +1093,37 @@ def _statistics_analysis(
         if len(selected_terms) >= 30:
             break
 
+    match_mode = str(config.get("crosstab_match_mode") or "normalized")
+    if match_mode not in {"normalized", "surface", "literal"}:
+        match_mode = "normalized"
+    match_labels = {"normalized": "正規化語・完全一致", "surface": "表層語・完全一致", "literal": "部分文字列・大小文字を区別"}
+
     def selected_term_present(row: dict[str, Any], term: str) -> bool:
-        normalized = term.casefold() if term.isascii() else term
-        if normalized in row.get("_normalized_terms", set()):
-            return True
-        text = str(row.get("text") or "")
-        searchable = text.casefold() if term.isascii() else text
-        return normalized in searchable
+        if match_mode == "literal":
+            return term in str(row.get("text") or "")
+        if match_mode == "surface":
+            return term in row.get("_surface_terms", set())
+        return normalized_term(term) in row.get("_normalized_terms", set())
 
     for index, term in enumerate(selected_terms, 1):
         table_id = f"{group_variable}_x_selected_term_{index}"
         table_rows, row_values, column_values, matrix = _crosstab_rows(
             included,
             table_id=table_id,
-            table_label=f"{group_variable} × 単語「{term}」",
+            table_label=f"{group_variable} × {match_labels[match_mode]}「{term}」",
             group_variable=group_variable,
             group_accessor=group_value,
+            group_labels=group_labels,
             column_variable=f"selected_term:{term}",
             column_accessor=lambda row, target=term: (
                 "あり" if selected_term_present(row, target) else "なし"
             ),
         )
+        for table_row in table_rows:
+            table_row.update(term=term, match_mode=match_mode)
         crosstabs.extend(table_rows)
         contingency_inputs.append((
-            table_id, f"単語「{term}」", row_values, column_values, matrix
+            table_id, f"{match_labels[match_mode]}「{term}」", row_values, column_values, matrix
         ))
 
     tests: list[dict[str, Any]] = []
@@ -1091,7 +1173,7 @@ def _statistics_analysis(
                     "statistic": _finite(statistic),
                     "df1": len(samples) - 1,
                     "df2": n - len(samples),
-                    "p_value": _finite(p_value),
+                    "p_value": _finite(p_value, digits=None),
                     "effect_size": _finite(ss_between / ss_total) if ss_total else 0.0,
                     "significant_0_05": bool(math.isfinite(p_value) and p_value < 0.05),
                     "status": "computed",
@@ -1129,7 +1211,7 @@ def _statistics_analysis(
                 kruskal.update({
                     "statistic": _finite(statistic),
                     "df1": len(samples) - 1,
-                    "p_value": _finite(p_value),
+                    "p_value": _finite(p_value, digits=None),
                     "effect_size": _finite(epsilon_squared),
                     "significant_0_05": bool(math.isfinite(p_value) and p_value < 0.05),
                     "status": "computed",
@@ -1176,7 +1258,7 @@ def _statistics_analysis(
                 chi_square.update({
                     "statistic": _finite(statistic),
                     "df1": int(dof),
-                    "p_value": _finite(p_value),
+                    "p_value": _finite(p_value, digits=None),
                     "effect_size": _finite(cramers_v),
                     "significant_0_05": bool(math.isfinite(p_value) and p_value < 0.05),
                     "status": "computed",
@@ -1231,7 +1313,7 @@ def _statistics_analysis(
                     )
                     result.update({
                         "coefficient": _finite(coefficient),
-                        "p_value": _finite(p_value),
+                        "p_value": _finite(p_value, digits=None),
                         "significant_0_05": bool(
                             math.isfinite(float(p_value)) and float(p_value) < 0.05
                         ),
@@ -1241,8 +1323,22 @@ def _statistics_analysis(
                     result["status"] = "error"
             correlations.append(result)
 
+    for result in tests:
+        result.update(analysis_unit="発話", unit=NUMERIC_UNITS.get(result["outcome"], "発話件数"),
+                      missing=len(included) - result["n"], p_value_adjustment="none", exploratory=True)
+        result["assumption_note"] += " " + INFERENTIAL_NOTE
+    for result in correlations:
+        result.update(analysis_unit="発話", missing=len(included) - result["n"],
+                      unit_a=NUMERIC_UNITS[result["variable_a"]], unit_b=NUMERIC_UNITS[result["variable_b"]],
+                      p_value_adjustment="none", exploratory=True,
+                      assumption_note=INFERENTIAL_NOTE + " 定義上関連する指標を含み、因果関係は示しません。")
     return {
         "analysis_unit": "発話",
+        "inference_policy": {"mode": "exploratory", "p_value_adjustment": "none", "comparison_family": None,
+                             "independence_verified": False, "note": INFERENTIAL_NOTE},
+        "included_segment_count": len(included),
+        "excluded_segment_count": len(segment_rows) - len(included),
+        "crosstab_match_mode": match_mode,
         "group_variable": group_variable,
         "group_count": len(groups),
         "selected_terms": selected_terms,
@@ -1357,26 +1453,29 @@ def is_research_analysis_cached(analysis: dict[str, Any]) -> bool:
         return key in _RESEARCH_CACHE
 
 
-def build_research_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
-    key = _cache_key(analysis)
-    with _ENGINE_LOCK:
-        cached = _RESEARCH_CACHE.get(key)
-        if cached is not None:
-            _RESEARCH_CACHE.move_to_end(key)
-            return cached
-    linguistics = _linguistic_analysis(
-        list(analysis.get("segments") or []),
-        dict(analysis.get("config") or {}),
-    )
+def build_research_linguistics(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Pure stage result; a caller may durably checkpoint it without the cache."""
+    return _linguistic_analysis(list(analysis.get("segments") or []), dict(analysis.get("config") or {}))
+
+
+def build_research_statistics(analysis: dict[str, Any], linguistics: dict[str, Any]) -> dict[str, Any]:
+    """Calculate statistics once and return only JSON-safe checkpoint data."""
     segment_rows = _segment_dataset(analysis, linguistics["morphemes"])
     statistics = _statistics_analysis(analysis, segment_rows)
     for row in segment_rows:
         row.pop("_normalized_terms", None)
-    research = {
+        row.pop("_surface_terms", None)
+    return {"statistics": statistics, "segments": segment_rows}
+
+
+def assemble_research_analysis(linguistics: dict[str, Any], statistics_stage: dict[str, Any],
+                               content: dict[str, Any]) -> dict[str, Any]:
+    """Reconstitute the existing research payload without recalculating stages."""
+    return {
         "schema_version": 1,
         "algorithm_version": RESEARCH_ALGORITHM_VERSION,
         "analysis_unit": "発話",
-        "methods": _method_rows(linguistics, statistics),
+        "methods": _method_rows(linguistics, statistics_stage["statistics"]),
         "sources": SOURCE_REFERENCES,
         "limitations": [
             "自動解析には誤りが含まれます。重要語、テーマ、係り受けは原文と音声を確認してください。",
@@ -1386,10 +1485,25 @@ def build_research_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
             "複数の検定に対する補正は行っていません。効果量、標本数、前提条件、研究上の意味を併記してください。",
         ],
         "linguistics": linguistics,
-        "statistics": statistics,
-        "segments": segment_rows,
-        "content": build_content_analysis(analysis, linguistics["morphemes"]),
+        "statistics": statistics_stage["statistics"],
+        "segments": statistics_stage["segments"],
+        "content": content,
     }
+
+
+def build_research_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    key = _cache_key(analysis)
+    with _ENGINE_LOCK:
+        cached = _RESEARCH_CACHE.get(key)
+        if cached is not None:
+            _RESEARCH_CACHE.move_to_end(key)
+            return cached
+    linguistics = build_research_linguistics(analysis)
+    statistics_stage = build_research_statistics(analysis, linguistics)
+    research = assemble_research_analysis(
+        linguistics, statistics_stage,
+        build_content_analysis(analysis, linguistics["morphemes"]),
+    )
     with _ENGINE_LOCK:
         _RESEARCH_CACHE[key] = research
         _RESEARCH_CACHE.move_to_end(key)
@@ -1402,22 +1516,36 @@ def enrich_research_analysis(
     analysis: dict[str, Any],
     *,
     include_rows: bool = False,
+    research_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    research = build_research_analysis(analysis)
+    research = research_result if research_result is not None else build_research_analysis(analysis)
     linguistics = research["linguistics"]
     public_linguistics = {
         "engine": linguistics["engine"],
         "coverage": linguistics["coverage"],
         "pos_frequency": linguistics["pos_frequency"],
-        "term_frequency": linguistics["term_frequency"][:200],
-        "speaker_term_frequency": linguistics["speaker_term_frequency"],
-        "cooccurrence": linguistics["cooccurrence"][:200],
+        "term_frequency": linguistics["term_frequency"] if include_rows else linguistics["term_frequency"][:200],
+        "speaker_term_frequency": [
+            {**row, "terms": row["terms"] if include_rows else row["terms"][:50],
+             "row_limit": None if include_rows else 50, "returned_term_count": len(row["terms"] if include_rows else row["terms"][:50]),
+             "truncated": not include_rows and len(row["terms"]) > 50}
+            for row in linguistics["speaker_term_frequency"]
+        ],
+        "cooccurrence": linguistics["cooccurrence"] if include_rows else linguistics["cooccurrence"][:200],
         "morpheme_preview": linguistics["morphemes"][:100],
         "dependency_preview": linguistics["dependencies"][:100],
     }
     public_research = {
         **research,
         "linguistics": public_linguistics,
+        "row_mode": "complete" if include_rows else "preview",
+        "row_limits": {
+            name: {"total_rows": len(linguistics[name]), "returned_rows": len(public_linguistics[name]),
+                   "limit": None if include_rows else 200,
+                   "truncated": len(public_linguistics[name]) < len(linguistics[name]),
+                   "reason": "" if include_rows else "ui_preview"}
+            for name in ("term_frequency", "cooccurrence")
+        },
         "segments": research["segments"] if include_rows else [],
     }
     if include_rows:
@@ -1458,6 +1586,9 @@ def enrich_research_analysis(
 
 def research_csv_sources(analysis: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     research = analysis.get("research") if isinstance(analysis.get("research"), dict) else {}
+    # Export callers must not accidentally serialize a UI preview as a complete table.
+    if research.get("row_mode") == "preview":
+        research = build_research_analysis(analysis)
     linguistics = (
         research.get("linguistics")
         if isinstance(research.get("linguistics"), dict)
@@ -1468,7 +1599,7 @@ def research_csv_sources(analysis: dict[str, Any]) -> dict[str, list[dict[str, A
         if isinstance(research.get("statistics"), dict)
         else {}
     )
-    return {
+    sources = {
         "insights": insight_csv_rows(analysis),
         "characteristic_terms": list(research.get("content", {}).get("characteristic_terms", [])),
         "segments_all": list(research.get("segments") or []),
@@ -1484,6 +1615,24 @@ def research_csv_sources(analysis: dict[str, Any]) -> dict[str, list[dict[str, A
         "correlations": list(statistics.get("correlations") or []),
         "analysis_methods": list(research.get("methods") or []),
     }
+    coverage = linguistics.get("coverage") or {}
+    for dataset in ("term_frequency", "cooccurrence"):
+        count = len(sources[dataset])
+        is_cooccurrence = dataset == "cooccurrence"
+        total = coverage.get("cooccurrence_total_rows", count) if is_cooccurrence else count
+        row_metadata = {
+            "dataset_total_rows": total, "dataset_returned_rows": count,
+            "dataset_limit": coverage.get("cooccurrence_row_limit", 500) if is_cooccurrence else None,
+            "dataset_truncated": total > count,
+            "dataset_limit_reason": coverage.get("cooccurrence_limit_reason", "") if is_cooccurrence else "",
+        }
+        if is_cooccurrence:
+            row_metadata.update(cooccurrence_top_terms=coverage.get("cooccurrence_top_terms"),
+                                cooccurrence_min_count=coverage.get("cooccurrence_min_count"),
+                                eligible_term_count=coverage.get("cooccurrence_eligible_term_count"),
+                                total_term_count=coverage.get("cooccurrence_total_term_count"))
+        sources[dataset] = [{**row, **row_metadata} for row in sources[dataset]]
+    return sources
 
 
 def _excel_value(value: Any) -> Any:
@@ -1587,6 +1736,9 @@ def build_analysis_workbook(
         ("分析revision", analysis.get("item", {}).get("analysis_revision", "")),
         ("標準分析単位", "発話"),
         ("文字コード", "Excel Open XML (.xlsx)"),
+        ("出力範囲", "全計算済み行。共起は指定上位語・最小頻度の範囲内で最大500組。条件・総数は計算範囲に記録。"),
+        ("計算範囲", analysis.get("research", {}).get("linguistics", {}).get("coverage", {})),
+        ("推測統計方針", analysis.get("research", {}).get("statistics", {}).get("inference_policy", {})),
     ]
     row_index = 3
     for label, value in metadata_rows:
