@@ -12,7 +12,8 @@ import zipfile
 
 import app
 import test_content_analysis as support
-from gurumoji.analysis_store import AnalysisStore, canonical
+from gurumoji.analysis_store import AnalysisStore, StoreConflict, canonical, csv_bytes
+import gurumoji.analysis_store as storage
 from gurumoji.analysis_pipeline import AnalysisPipelineService
 
 
@@ -64,6 +65,182 @@ class FixedRunTests(unittest.TestCase):
             value = json.loads((self.store.root / manifest['path']).read_bytes())
             value['artifacts'] = [artifact if a['name'] == name else a for a in value['artifacts']]
             self.replace_artifact(run, 'manifest.json', canonical(value))
+
+    def make_legacy_package(self, run):
+        """Remove the additive extension from this temporary fixture only."""
+        manifest = json.loads(self.store.read_artifact(self.artifact(run, 'manifest.json')['id'])[1])
+        typed = [a for a in self.store.artifacts(run['id']) if a['name'].startswith('tables/') and a['name'].endswith('.json')]
+        for artifact in typed:
+            (self.store.root / artifact['path']).unlink()
+            with self.store.connect() as conn:
+                conn.execute('DELETE FROM analysis_artifacts WHERE id=?', (artifact['id'],))
+        manifest['artifacts'] = [a for a in manifest['artifacts'] if a['id'] not in {t['id'] for t in typed}]
+        manifest.pop('table_format_version'); manifest.pop('typed_tables')
+        self.replace_artifact(run, 'manifest.json', canonical(manifest))
+
+    def test_typed_full_table_preserves_lossy_csv_pairs_and_provenance(self):
+        values = [None, '', 0, '0', False, 'False', '=A', "'=A", ['x'], '["x"]']
+        rows = [{'utterance_id': f'u{i}', 'value': value, 'reason': 'not_recorded' if value is None else ''}
+                for i, value in enumerate(values)]
+        rows.append({'utterance_id': 'absent', 'extra': {'note': 'comma,quote"\nline', 'ids': ['u1']}})
+        fields = ['utterance_id', 'value', 'reason']
+        run = self.save(datasets={'values': (fields, rows)})
+        table = self.store.read_table(run['id'], 'values')
+        self.assertEqual([row['values'] for row in table['rows']], rows)
+        self.assertEqual([type(row['values']['value']) for row in table['rows'][:-1]], [type(v) for v in values])
+        self.assertEqual(len({row['row_id'] for row in table['rows']}), len(rows))
+        self.assertEqual((table['run_id'], table['input_snapshot_id']), (run['id'], run['snapshot_id']))
+        self.assertEqual((table['source_revision'], table['analysis_revision']), (3, 4))
+        column = next(c for c in table['columns'] if c['name'] == 'value')
+        self.assertEqual((column['null_count'], column['absent_count']), (1, 1))
+        self.assertEqual(column['observed_types'], ['array', 'boolean', 'integer', 'null', 'string'])
+        self.assertEqual(self.store.read_artifact(self.artifact(run, 'tables/values.csv')['id'])[1], csv_bytes(fields, rows))
+        downloaded = self.client.get('/api/analysis/artifacts/' + self.artifact(run, 'tables/values.json')['id'])
+        self.assertEqual(downloaded.status_code, 200)
+        self.assertEqual(json.loads(downloaded.data), table)
+
+    def test_typed_empty_table_and_all_null_column_do_not_invent_types(self):
+        for rows in ([], [{'value': None}, {}]):
+            with self.subTest(rows=rows):
+                run = self.save(datasets={'values': (['value'], rows)})
+                table = self.store.read_table(run['id'], 'values')
+                self.assertEqual(table['row_count'], len(rows))
+                self.assertEqual(table['columns'][0]['observed_types'], ['null'] if rows else [])
+
+    def test_json_compatible_numpy_float_keeps_number_and_string_distinct(self):
+        import numpy as np
+        run = self.save(datasets={'values': (['value'], [{'value': np.float64(0.5)}, {'value': '0.5'}])})
+        table = self.store.read_table(run['id'], 'values')
+        self.assertIs(type(table['rows'][0]['values']['value']), float)
+        self.assertIs(type(table['rows'][1]['values']['value']), str)
+        self.assertEqual(table['columns'][0]['observed_types'], ['number', 'string'])
+
+    def test_legacy_csv_package_is_readable_without_inferred_typed_values(self):
+        run = self.save()
+        self.make_legacy_package(run)
+        before = self.dump()
+        self.assertEqual(self.client.get(self.url(run)).status_code, 200)
+        self.assertEqual(self.client.get(f'/api/analysis/runs/{run["id"]}/export.zip').status_code, 200)
+        with self.assertRaisesRegex(StoreConflict, '型付き全件表は保存されていません'):
+            self.store.read_table(run['id'], 'values')
+        self.assertEqual(before, self.dump())
+
+    def test_hash_consistent_typed_table_corruption_stops_read_preview_and_zip(self):
+        for field, value in [('run_id', 'foreign'), ('input_snapshot_id', 'foreign'),
+                             ('source_revision', 999), ('row_count', 99), ('schema_version', True),
+                             ('columns', []), ('fields', ['id', 'id'])]:
+            with self.subTest(field=field):
+                run = self.save()
+                artifact = self.artifact(run, 'tables/values.json')
+                table = json.loads(self.store.read_artifact(artifact['id'])[1]); table[field] = value
+                self.replace_artifact(run, artifact['name'], canonical(table))
+                before = self.dump()
+                with self.assertRaises((StoreConflict, ValueError)):
+                    self.store.read_table(run['id'], 'values')
+                self.assertEqual(self.client.get(self.url(run)).status_code, 409)
+                self.assertEqual(self.client.get(self.url(run)+'/previews/'+artifact['id']).status_code, 409)
+                self.assertEqual(self.client.get(f'/api/analysis/runs/{run["id"]}/export.zip').status_code, 409)
+                self.assertEqual(before, self.dump())
+
+    def test_typed_csv_mismatch_and_missing_format_marker_cannot_downgrade_to_legacy(self):
+        run = self.save()
+        self.replace_artifact(run, 'tables/values.csv', b'id,value,reason\r\nwrong,0,\r\n')
+        with self.assertRaises(StoreConflict):
+            self.store.read_table(run['id'], 'values')
+        other = self.save()
+        manifest = json.loads(self.store.read_artifact(self.artifact(other, 'manifest.json')['id'])[1])
+        manifest.pop('table_format_version'); manifest.pop('typed_tables')
+        self.replace_artifact(other, 'manifest.json', canonical(manifest))
+        with self.assertRaises(StoreConflict):
+            self.store.read_table(other['id'], 'values')
+
+    def test_duplicate_row_ids_and_nonfinite_values_are_rejected(self):
+        run = self.save()
+        artifact = self.artifact(run, 'tables/values.json')
+        table = self.store.read_table(run['id'], 'values')
+        table['rows'][1]['row_id'] = table['rows'][0]['row_id']
+        self.replace_artifact(run, artifact['name'], canonical(table))
+        with self.assertRaises(StoreConflict):
+            self.store.read_table(run['id'], 'values')
+        with self.assertRaises(ValueError):
+            self.save(datasets={'values': (['value'], [{'value': float('nan')}])})
+        with self.assertRaises(StoreConflict):
+            self.save(datasets={'values': (['value'], [{'value': {1: 'cannot silently stringify'}}])})
+
+    def test_partial_typed_write_retries_from_original_pending_values(self):
+        original_rows = [{'value': None}, {'value': {'z': ['u1'], 'a': 0}}]
+        writer = storage.write_atomic
+        def fail_csv(path, data, **kwargs):
+            if path.suffix == '.csv':
+                raise OSError('synthetic disk full')
+            return writer(path, data, **kwargs)
+        with patch.object(storage, 'write_atomic', side_effect=fail_csv):
+            with self.assertRaises(OSError):
+                self.save(datasets={'values': (['value'], original_rows)})
+        failed = self.store.list('content')[0]
+        partial = {str(p.relative_to(self.store.root)): p.read_bytes()
+                   for p in self.store.root.rglob('*.json')}
+        self.counter = 0
+        saved = self.save(datasets={'values': (['value'], [{'value': 'changed after failure'}])})
+        self.assertEqual(saved['id'], failed['id'])
+        self.assertEqual([r['values'] for r in self.store.read_table(saved['id'], 'values')['rows']], original_rows)
+        for name, data in partial.items():
+            self.assertEqual((self.store.root/name).read_bytes(), data)
+
+    def test_legacy_pending_retry_keeps_original_csv_only_format(self):
+        writer = storage.write_atomic
+        def fail_first_table(path, data, **kwargs):
+            if path.parent.name == 'tables':
+                raise OSError('synthetic interrupted legacy writer')
+            return writer(path, data, **kwargs)
+        with patch.object(storage, 'write_atomic', side_effect=fail_first_table):
+            with self.assertRaises(OSError):
+                self.save()
+        failed = self.store.list('content')[0]
+        with self.store.connect() as db:
+            pending = json.loads(db.execute('SELECT payload_json FROM analysis_pending_packages WHERE run_id=?', (failed['id'],)).fetchone()[0])
+            pending.pop('table_format_version')
+            db.execute('UPDATE analysis_pending_packages SET payload_json=? WHERE run_id=?', (canonical(pending).decode(), failed['id']))
+        self.counter = 0
+        saved = self.save()
+        manifest = json.loads(self.store.read_artifact(self.artifact(saved, 'manifest.json')['id'])[1])
+        self.assertNotIn('table_format_version', manifest)
+        self.assertNotIn('tables/values.json', {a['name'] for a in self.store.artifacts(saved['id'])})
+        self.assertEqual(self.client.get(self.url(saved)).status_code, 200)
+
+    def test_partial_write_retry_keeps_frozen_revision_and_model_metadata(self):
+        writer = storage.write_atomic
+        def fail_csv(path, data, **kwargs):
+            if path.suffix == '.csv':
+                raise OSError('synthetic disk full')
+            return writer(path, data, **kwargs)
+        with patch.object(storage, 'write_atomic', side_effect=fail_csv):
+            with self.assertRaises(OSError):
+                self.save()
+        failed = self.store.list('content')[0]
+        with self.store.connect() as db:
+            pending = json.loads(db.execute(
+                'SELECT payload_json FROM analysis_pending_packages WHERE run_id=?',
+                (failed['id'],)).fetchone()[0])
+        retry = {**pending, 'source_revision': 999, 'analysis_revision': 999,
+                 'provider': 'changed-provider', 'model': 'changed-model'}
+        saved = self.store.save(**retry)
+        table = self.store.read_table(saved['id'], 'values')
+        manifest = self.store.verified_package(saved['id'])[2]
+        self.assertEqual((table['source_revision'], table['analysis_revision']), (3, 4))
+        self.assertEqual((manifest['source_revision'], manifest['analysis_revision']), (3, 4))
+        self.assertEqual((manifest['provider'], manifest['model']), ('', ''))
+        self.assertEqual(self.client.get(self.url(saved)).status_code, 200)
+
+    def test_typed_full_download_is_not_limited_to_preview_rows(self):
+        rows = [{'utterance_id': f'u{i}', 'value': i} for i in range(221)]
+        run = self.save(datasets={'values': (['utterance_id', 'value'], rows)})
+        table = self.store.read_table(run['id'], 'values')
+        self.assertEqual(len(table['rows']), 221)
+        self.assertEqual(table['rows'][-1]['values'], rows[-1])
+        bundle = self.client.get(f'/api/analysis/runs/{run["id"]}/export.zip')
+        with zipfile.ZipFile(io.BytesIO(bundle.data)) as archive:
+            self.assertEqual(json.loads(archive.read('tables/values.json')), table)
 
     def test_exact_run_outside_newest_100_and_ownership(self):
         run = self.save()
@@ -350,6 +527,9 @@ class FixedRunTests(unittest.TestCase):
         for name in ("tables/nested/data.csv", "tables/日本語の表.csv", "tables/.hidden/値 1.csv", "tables/cafe\u0301.csv"):
             with self.subTest(name=name):
                 run = self.save()
+                # Legacy member portability is independent of the new explicit
+                # CSV/typed-table pairing, which rejects a one-sided rename.
+                self.make_legacy_package(run)
                 artifact = self.rename_catalog_artifact(run, "tables/values.csv", name)
                 before = self.dump()
                 self.assertEqual(self.client.get(self.url(run)).status_code, 200)
@@ -424,7 +604,7 @@ class PublicSnapshotTests(unittest.TestCase):
                 connection.execute('INSERT INTO analysis_publication_attempts VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                     ('attempt'+str(number),'run',number,'fp',json.dumps(roles[1:]),json.dumps(roles),json.dumps(roles),
                      json.dumps(outcomes),'incomplete' if number == 1 else 'completed','','saved','saved'))
-            with connect_raw() as connection:
+            with contextlib.closing(connect_raw()) as connection, connection:
                 connection.execute('PRAGMA journal_mode=WAL')
                 connection.execute('CREATE TABLE analysis_artifacts(run_id TEXT,name TEXT)')
                 connection.execute('CREATE TABLE analysis_publication_attempts(attempt_id TEXT,run_id TEXT,sequence INTEGER,package_hash TEXT,requested_json TEXT,effective_json TEXT,executed_json TEXT,outcomes_json TEXT,status TEXT,error TEXT,created_at TEXT,ended_at TEXT)')
@@ -440,7 +620,7 @@ class PublicSnapshotTests(unittest.TestCase):
                 def fetchall(self):
                     rows = self.cursor.fetchall()
                     if 'FROM analysis_publication_attempts' in self.sql:
-                        with connect_raw() as writer:
+                        with contextlib.closing(connect_raw()) as writer, writer:
                             insert(writer,2)
                             writer.execute("UPDATE analysis_pipeline_publications SET status='published'")
                     return rows

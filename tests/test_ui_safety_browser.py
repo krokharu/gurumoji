@@ -120,6 +120,31 @@ class UiSafetyBrowser(unittest.TestCase):
     def assert_no_script_error(self):
         self.assertEqual(self.errors, [])
 
+    def test_autonomous_defaults_minimum_three_and_optional_caps(self):
+        self.page.evaluate("""Object.assign(analysisState, {
+            itemId:'synthetic-analysis', data:{item:{id:'synthetic-analysis',source_name:'Synthetic',
+            revision_count:1,analysis_revision:1},segments:[]}, config:{},annotations:{},dirty:false});
+            analysisCard.hidden=false;document.body.dataset.view='analysis';""")
+        self.page.locator('.analysis-more-actions > summary').click()
+        self.page.locator('#analysis-run-settings-button').click()
+        self.page.locator('#orchestration-open').click()
+        self.page.locator('#orchestration-question').fill('Synthetic evidence review')
+        self.assertTrue(self.page.locator('input[name=orchestration_stop][value=auto]').is_checked())
+        self.assertIn('最低3回', self.page.locator('#orchestration-stop-explanation').inner_text())
+        payload = self.page.evaluate('orchestrationPayload()')
+        self.assertEqual(payload['stop_mode'], 'auto')
+        self.assertIsNone(payload['max_iterations'])
+        self.assertIsNone(payload['time_limit_seconds'])
+        self.page.locator('#orchestration-iterations').fill('2')
+        self.page.locator('#orchestration-start').click()
+        self.assertIn('最低3回', self.page.locator('#orchestration-settings-message').inner_text())
+        self.assertTrue(self.page.locator('#orchestration-settings').is_visible())
+        self.page.locator('#orchestration-iterations').fill('')
+        self.page.locator('input[name=orchestration_stop][value=iterations]').check()
+        self.page.locator('#orchestration-iterations').fill('1')
+        self.assertEqual(self.page.evaluate('orchestrationPayload().max_iterations'), 1)
+        self.assert_no_script_error()
+
     def test_keyboard_edit_save_reload_desktop_and_mobile(self):
         for width in (1440, 390):
             self.show_result(width)

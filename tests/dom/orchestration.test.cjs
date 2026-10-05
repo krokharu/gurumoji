@@ -39,8 +39,10 @@ function initialRun(overrides={}) {
 }
 test('autonomous settings are opt-in, local by default; explicit flat stop contract',async t=>{
  const h=await setup(t);assert.equal(node(h,'settings').open,true);assert.equal(h.document.querySelector('#analysis-run-dialog').open,false);
- let payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.provider_policy,'local_only');assert.equal(payload.cloud_consent,false);assert.equal(payload.max_calls,24);assert.equal(payload.max_tasks,48);assert.equal(payload.stop_mode,'iterations');assert.equal(payload.max_iterations,3);assert.equal(payload.time_limit_seconds,null);
+ let payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.provider_policy,'local_only');assert.equal(payload.cloud_consent,false);assert.equal(payload.max_calls,24);assert.equal(payload.max_tasks,48);assert.equal(payload.stop_mode,'auto');assert.equal(payload.max_iterations,null);assert.equal(payload.time_limit_seconds,null);assert.match(node(h,'stop-explanation').textContent,/最低3回/);
  h.click('input[name="orchestration_stop"][value="auto"]');input(h,'iterations','');input(h,'time','');payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.max_iterations,null);assert.equal(payload.time_limit_seconds,null);
+ input(h,'iterations','2');assert.throws(()=>h.evaluate('orchestrationPayload()'),/最低3回/);input(h,'iterations','');
+ h.click('input[name="orchestration_stop"][value="iterations"]');input(h,'iterations','1');assert.equal(h.evaluate('orchestrationPayload().max_iterations'),1);
  h.click('input[name="orchestration_stop"][value="time"]');assert.throws(()=>h.evaluate('orchestrationPayload()'),/時間上限/);input(h,'time','2');payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.time_limit_seconds,120);
  h.click('input[name="orchestration_stop"][value="importance"]');assert.equal(h.evaluate('orchestrationPayload().importance_threshold'),'medium');assert.match(node(h,'stop-explanation').textContent,/未校正/);assert.equal(posts(h).length,0);
 });

@@ -17,7 +17,18 @@ from ..analysis_method_registry import METHODS, REGISTRY_VERSION
 # Saved artifact bytes are already loaded and hash-verified before parsing.
 # CSV's default 128 KiB field ceiling rejects valid saved cells; previews are bounded separately.
 # Set once at module initialization, never change/restore it across requests.
-csv.field_size_limit(sys.maxsize)
+def _configure_csv_field_limit():
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return limit
+        except OverflowError:
+            # Windows' C long can be narrower than Python's sys.maxsize.
+            limit //= 10
+
+
+_configure_csv_field_limit()
 
 
 def read_saved_json(data):

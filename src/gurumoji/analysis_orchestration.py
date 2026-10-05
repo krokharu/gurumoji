@@ -137,7 +137,7 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
     question = payload.get("question", payload.get("objective", "会話の特徴と代替説明を根拠付きで分析する"))
     if not isinstance(question, str) or not question.strip() or len(question) > 8000:
         raise _error("分析する問いを指定してください。", field="question")
-    mode = payload.get("stop_mode", "iterations")
+    mode = payload.get("stop_mode", "auto")
     if mode not in {"time", "iterations", "importance", "auto"}:
         raise _error("終了モードが正しくありません。", field="stop_mode")
     config = {"question": question.strip(), "stop_mode": mode, "research_mode": "exploratory",
@@ -148,17 +148,24 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "template_version": payload.get("template_version", "existing-analysis-v1"),
               "template_config": payload.get("template_config", {}), "roles": payload.get("roles", {}),
               "importance_threshold": payload.get("importance_threshold", "medium"),
+              "min_iterations": 3 if mode == "auto" else 0,
               "max_iterations": payload.get("max_iterations", None if mode == "auto" else 5),
               "time_limit_seconds": payload.get("time_limit_seconds", None if mode == "auto" else 300),
               "max_calls": payload.get("max_calls", 24), "max_tasks": payload.get("max_tasks", 40),
               "concurrency": payload.get("concurrency", 2),
               "call_timeout_seconds": payload.get("call_timeout_seconds", 120),
               "max_result_bytes": payload.get("max_result_bytes", 2_000_000),
-              "max_cost": payload.get("max_cost"), "context_evidence_limit": 120, "context_text_limit": 60000}
+              "max_cost": payload.get("max_cost"),
+              "context_index_limit": payload.get("context_index_limit", 0),
+              "context_evidence_limit": payload.get("context_evidence_limit", 120),
+              "context_text_limit": payload.get("context_text_limit", 60000)}
     for key, low, high in (("max_calls", 1, 10000), ("max_tasks", 1, 20000), ("concurrency", 1, 4),
-                           ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000)):
+                           ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000),
+                           ("context_evidence_limit", 1, 120), ("context_text_limit", 1, 60000)):
         if type(config[key]) is not int or not low <= config[key] <= high:
             raise _error(f"{key}は{low}〜{high}の整数です。", field=key)
+    if type(config["context_index_limit"]) is not int or not 0 <= config["context_index_limit"] <= 120:
+        raise _error("context_index_limitは0〜120の整数です。0は索引の省略なしです。", field="context_index_limit")
     for key in ("max_iterations", "time_limit_seconds"):
         value = config[key]
         if value is not None and (type(value) is not int or value < 1 or value > 864000):
@@ -167,6 +174,8 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
         raise _error("時間モードには時間上限が必要です。", field="time_limit_seconds")
     if mode == "iterations" and config["max_iterations"] is None:
         raise _error("回数モードには回数上限が必要です。", field="max_iterations")
+    if mode == "auto" and config["max_iterations"] is not None and config["max_iterations"] < config["min_iterations"]:
+        raise _error("AIお任せの回数上限は最低3回以上にしてください。", field="max_iterations")
     if config["importance_threshold"] not in IMPORTANCE:
         raise _error("重要度閾値が正しくありません。", field="importance_threshold")
     if not isinstance(config["template_version"], str) or not config["template_version"]:
@@ -231,11 +240,18 @@ class AnalysisOrchestrationService:
     @contextmanager
     def _db(self):
         with self.lock:
-            with self.connect() as db:
-                db.row_factory = sqlite3.Row
-                if not db.in_transaction:
-                    db.execute("BEGIN IMMEDIATE")
-                yield db
+            connection = self.connect()
+            try:
+                with connection as db:
+                    db.row_factory = sqlite3.Row
+                    if not db.in_transaction:
+                        db.execute("BEGIN IMMEDIATE")
+                    yield db
+            finally:
+                # sqlite3.Connection's context manager commits but does not
+                # close. Factories returning context managers close themselves.
+                if isinstance(connection, sqlite3.Connection):
+                    connection.close()
 
     def _check_version(self, run):
         if run.get("schema_version") != SCHEMA_VERSION:
@@ -775,6 +791,27 @@ class AnalysisOrchestrationService:
             return "budget_limit"
         return None
 
+    def _completed_core_iterations(self, db, run):
+        # Count adopted decisions, never queued attempts or quarantined results.
+        return db.execute("SELECT COUNT(*) FROM orchestration_decisions WHERE run_id=?", (run["run_id"],)).fetchone()[0]
+
+    def _continue_minimum_iterations(self, db, run, reason):
+        minimum = run["config"].get("min_iterations", 0)
+        completed = self._completed_core_iterations(db, run)
+        if completed >= minimum:
+            return False
+        limit = self._limit(db, run, new_round=True)
+        if limit:
+            self._stop(db, run, limit)
+        else:
+            run["phase"] = "core"
+            self._event(db, run["run_id"], "minimum_iterations_continued",
+                        f"Core判断は{completed}/{minimum}回です。根拠・批判・未解決点を再検討して次の判断へ進みます。",
+                        proposed_stop_reason=reason, completed_core_iterations=completed,
+                        min_iterations=minimum)
+            self._write_run(db, run)
+        return True
+
     def _register(self, db, run, intent: dict, *, phase: str, automatic=False) -> dict | None:
         role = intent.get("role")
         if role not in AI_ROLES | {"statistics"}:
@@ -898,9 +935,16 @@ class AnalysisOrchestrationService:
                 break
             bounded.append(evidence); size += len(evidence["text"])
         raw = bounded
+        evidence_index = [{"evidence_id": e["evidence_id"], "utterance_id": e["utterance_id"]}
+                          for e in initial["evidence"] if not e["excluded"]]
+        index_count = len(evidence_index)
+        index_limit = run["config"].get("context_index_limit", 0)
+        if index_limit:
+            evidence_index = evidence_index[:index_limit]
         coverage = {"available_count": available_count, "provided_count": len(raw), "omitted_count": available_count - len(raw),
                     "complete": len(raw) == available_count, "scope": "selected" if selected else "dataset",
-                    "evidence_index": [{"evidence_id": e["evidence_id"], "utterance_id": e["utterance_id"]} for e in initial["evidence"] if not e["excluded"]]}
+                    "evidence_index": evidence_index, "index_available_count": index_count,
+                    "index_provided_count": len(evidence_index), "index_omitted_count": index_count - len(evidence_index)}
         # Deliberately construct the blind packet from an allowlist. Even the
         # Core-written question/success criteria may disclose its expected answer.
         if task["role"] == "verification" and task["intent"].get("kind") == "clarification":
@@ -958,6 +1002,8 @@ class AnalysisOrchestrationService:
                    "budget": {"remaining_calls": run["config"]["max_calls"] - run["calls_started"],
                               "remaining_tasks": run["config"]["max_tasks"] - len(public["tasks"]),
                               "max_iterations": run["config"]["max_iterations"], "iteration": run["iteration"],
+                              "min_iterations": run["config"].get("min_iterations", 0),
+                              "completed_core_iterations": self._completed_core_iterations(db, run),
                               "deadline": run["deadline"]}, "stop_proposal": run["pending_stop"]}
         context["labels"] = json.loads(db.execute("SELECT payload_json FROM orchestration_label_versions WHERE run_id=? AND annotation_version=?",
                                                     (run["run_id"], task["annotation_version"])).fetchone()[0])
@@ -1161,8 +1207,8 @@ class AnalysisOrchestrationService:
             if not isinstance(refs, list) or any(ref not in evidence for ref in refs):
                 raise _error("根拠発話が存在しません。", "evidence_missing")
         if task["role"] == "core":
-            if not isinstance(raw.get("summary", ""), str):
-                raise _error("統合要約が正しくありません。", "invalid_result")
+            if not isinstance(raw.get("summary"), str) or not raw["summary"].strip():
+                raise _error("空でない統合要約が必要です。", "invalid_result")
             if raw.get("stop") is not None and (not isinstance(raw["stop"], dict) or not raw["stop"].get("reason")):
                 raise _error("停止案には理由が必要です。", "invalid_stop")
             for intent in raw.get("intents", []):
@@ -1177,6 +1223,8 @@ class AnalysisOrchestrationService:
                         raise _error("既存コード計算は初期版の全範囲専用です。", "method_scope_unavailable")
                     if method == "label_frequency" and intent.get("label_field", "codes") not in LABEL_FIELDS:
                         raise _error("対応するラベル集計列を指定してください。", "label_field_unavailable")
+                elif intent.get("method_id") == "label_frequency":
+                    raise _error("ラベル集計はstatisticsへ指定してください。", "label_field_unavailable")
                 if not isinstance(intent.get("evidence_ids", []), list) or any(ref not in evidence for ref in intent.get("evidence_ids", [])):
                     raise _error("タスクの根拠が存在しません。", "evidence_missing")
             for response in raw.get("critique_responses", []):
@@ -1396,6 +1444,8 @@ class AnalysisOrchestrationService:
                                     (run["run_id"], run["run_id"])).fetchall()
             if reviewed:
                 run["pending_stop"] = proposal
+                if self._continue_minimum_iterations(db, run, raw["stop"]["reason"]):
+                    return
                 if unanswered:
                     self._stop(db, run, "human_review_required")
                 else:
@@ -1444,7 +1494,9 @@ class AnalysisOrchestrationService:
                         phase="specialists", automatic=True))
             if not registered and run["status"] not in TERMINAL:
                 # No useful new work is a bounded pause, not a fabricated success.
-                self._stop(db, run, "importance_threshold" if run["config"]["stop_mode"] == "importance" else "no_new_tasks")
+                reason = "importance_threshold" if run["config"]["stop_mode"] == "importance" else "no_new_tasks"
+                if not self._continue_minimum_iterations(db, run, reason):
+                    self._stop(db, run, reason)
         self._write_run(db, run)
 
     def _drain_tasks(self, run_id):

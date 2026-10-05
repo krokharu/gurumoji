@@ -28,6 +28,7 @@ from .services.durable_files import write_durably
 LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
 STORE_VERSION = 1
+TABLE_FORMAT_VERSION = 1
 
 
 class StoreConflict(ValueError):
@@ -184,6 +185,57 @@ def csv_bytes(fields: list[str], rows: list[dict]) -> bytes:
             values[key] = value
         writer.writerow(values)
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def _table_value_type(value):
+    if value is None:
+        return "null"
+    for kind, name in ((bool, "boolean"), (int, "integer"), (float, "number"), (str, "string")):
+        if isinstance(value, kind):
+            return name
+    if isinstance(value, (list, tuple)):
+        for child in value:
+            _table_value_type(child)
+        return "array"
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        for child in value.values():
+            _table_value_type(child)
+        return "object"
+    raise StoreConflict("型付き表にJSONで保持できない値があります。")
+
+
+def table_package(name, fields, rows, *, run_id, snapshot_id, source_revision, analysis_revision):
+    """Keep full typed values; absent keys and unknown semantics stay explicit."""
+    if (not isinstance(fields, (list, tuple)) or any(not isinstance(f, str) for f in fields)
+            or len(set(fields)) != len(fields) or not isinstance(rows, (list, tuple))
+            or any(not isinstance(row, dict) or any(not isinstance(k, str) for k in row) for row in rows)):
+        raise StoreConflict("型付き表の列・行形式が正しくありません。")
+    names = list(fields) + sorted({key for row in rows for key in row} - set(fields))
+    columns = []
+    for key in names:
+        columns.append({"name": key,
+                        "observed_types": sorted({_table_value_type(row[key]) for row in rows if key in row}),
+                        "absent_count": sum(key not in row for row in rows),
+                        "null_count": sum(key in row and row[key] is None for row in rows)})
+    return {"format": "gurumoji.analysis-table", "schema_version": TABLE_FORMAT_VERSION,
+            "dataset_id": name, "run_id": run_id, "input_snapshot_id": snapshot_id,
+            "source_revision": source_revision, "analysis_revision": analysis_revision,
+            "fields": list(fields), "columns": columns, "row_count": len(rows),
+            "rows": [{"row_id": f"{name}:{index}", "values": copy.deepcopy(row)}
+                     for index, row in enumerate(rows, 1)]}
+
+
+def _read_typed_json(data):
+    def object_pairs(pairs):
+        value = {}
+        for key, child in pairs:
+            if key in value:
+                raise StoreConflict("型付き表のJSONキーが重複しています。")
+            value[key] = child
+        return value
+    def reject_constant(_value):
+        raise StoreConflict("型付き表に非有限値があります。")
+    return json.loads(data, object_pairs_hook=object_pairs, parse_constant=reject_constant)
 
 
 def frontmatter(note_id: str, title: str, **properties) -> str:
@@ -396,7 +448,7 @@ class AnalysisStore:
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
-             publish: bool = True, commit_guard=None) -> dict:
+             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION) -> dict:
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
@@ -441,7 +493,8 @@ class AnalysisStore:
                        "datasets": datasets, "request_id": request_id, "input_fingerprint": input_fingerprint,
                        "source_revision": source_revision, "analysis_revision": analysis_revision,
                        "app_url": app_url, "provider": provider, "model": model,
-                       "member_ids": list(member_ids or []), "publish": publish}
+                       "member_ids": list(member_ids or []), "publish": publish,
+                       "table_format_version": table_format_version}
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 if commit_guard is not None:
@@ -457,14 +510,37 @@ class AnalysisStore:
                 if existing:
                     pending = json.loads(existing[0])
                     snapshot, result, datasets = pending['snapshot'], pending['result'], pending['datasets']
+                    # A partial package must keep its original provenance as
+                    # well as its values, even when the retry caller changed.
+                    source_revision = pending['source_revision']
+                    analysis_revision = pending['analysis_revision']
+                    app_url, provider, model = pending['app_url'], pending['provider'], pending['model']
                 else:
+                    if table_format_version == TABLE_FORMAT_VERSION:
+                        # Reject non-string object keys before pending JSON can
+                        # silently stringify them on a later retry.
+                        for _fields, rows in datasets.values():
+                            for row in rows:
+                                _table_value_type(row)
                     conn.execute("INSERT INTO analysis_pending_packages(run_id,payload_json) VALUES (?,?)", (run_id, canonical(pending).decode('utf-8')))
             try:
+                table_version = pending.get("table_format_version")
+                if table_version is not None and (type(table_version) is not int or table_version != TABLE_FORMAT_VERSION):
+                    raise StoreConflict("再試行する表の保存形式に対応していません。")
                 files = {"input.json": (canonical(snapshot), "application/json", None),
                          "parameters.json": (canonical(result.get("parameters", {})), "application/json", None),
                          "result.json": (canonical(result), "application/json", None)}
                 for name, (fields, rows) in datasets.items():
                     if not re.fullmatch(r"[a-z_]+", name): raise ValueError("表の名前が正しくありません。")
+                    if table_version == TABLE_FORMAT_VERSION:
+                        table = table_package(name, fields, rows, run_id=run_id, snapshot_id=snapshot_id,
+                                              source_revision=source_revision, analysis_revision=analysis_revision)
+                        table_data = canonical(table)
+                        # Export from the same JSON-compatible values, including
+                        # tuple-to-array normalization, never from a display preview.
+                        exported = json.loads(table_data)
+                        rows = [row["values"] for row in exported["rows"]]
+                        files[f"tables/{name}.json"] = (table_data, "application/json", len(rows))
                     files[f"tables/{name}.csv"] = (csv_bytes(fields, rows), "text/csv", len(rows))
                 artifacts = []
                 for name, (content, media_type, rows) in files.items():
@@ -484,6 +560,10 @@ class AnalysisStore:
                             "kind": kind, "created_at": now, "source_revision": source_revision,
                             "analysis_revision": analysis_revision, "artifacts": artifacts,
                             "method_version": REGISTRY_VERSION, "provider": provider, "model": model}
+                if table_version == TABLE_FORMAT_VERSION:
+                    manifest.update(table_format_version=table_version,
+                                    typed_tables={name: {"data": f"tables/{name}.json", "export": f"tables/{name}.csv"}
+                                                  for name in datasets})
                 content = canonical(manifest)
                 target = safe_path(self.root, f"runs/{run_id}/manifest.json")
                 if target.exists() and target.read_bytes() != content: raise StoreConflict("manifestが変更されています。")
@@ -567,7 +647,53 @@ class AnalysisStore:
             raise StoreConflict("固定packageの条件形式が正しくありません。")
         if parameters != result.get("parameters", {}):
             raise StoreConflict("固定packageの条件が一致しません。")
+        self._verify_typed_tables(run, manifest, by_name, content)
         return snapshot, result, manifest, content
+
+    @staticmethod
+    def _verify_typed_tables(run, manifest, artifacts, content):
+        json_names = {name for name in content if name.startswith("tables/") and name.endswith(".json")}
+        if "table_format_version" not in manifest:
+            if json_names or "typed_tables" in manifest:
+                raise StoreConflict("型付き表の形式版が欠落しています。")
+            return  # Legacy CSV remains readable; no inferred typed reconstruction.
+        if type(manifest["table_format_version"]) is not int or manifest["table_format_version"] != TABLE_FORMAT_VERSION:
+            raise StoreConflict("型付き表の保存形式に対応していません。")
+        mapping = manifest.get("typed_tables")
+        csv_names = {name for name in content if name.startswith("tables/") and name.endswith(".csv")}
+        if (not isinstance(mapping, dict) or any(not re.fullmatch(r"[a-z_]+", name) for name in mapping)
+                or json_names != {f"tables/{name}.json" for name in mapping}
+                or csv_names != {f"tables/{name}.csv" for name in mapping}):
+            raise StoreConflict("型付き表と共有CSVの対応が欠落しています。")
+        for name, references in mapping.items():
+            json_name, csv_name = f"tables/{name}.json", f"tables/{name}.csv"
+            if references != {"data": json_name, "export": csv_name}:
+                raise StoreConflict("型付き表の参照先が一致しません。")
+            table = _read_typed_json(content[json_name])
+            if (not isinstance(table, dict) or not isinstance(table.get("rows"), list)
+                    or any(not isinstance(row, dict) or set(row) != {"row_id", "values"} for row in table["rows"])):
+                raise StoreConflict("型付き表の行形式が正しくありません。")
+            rows = [row["values"] for row in table["rows"]]
+            expected_table = table_package(name, table.get("fields"), rows,
+                                           run_id=run["id"], snapshot_id=run["snapshot_id"],
+                                           source_revision=run["source_revision"], analysis_revision=run["analysis_revision"])
+            if (canonical(table) != canonical(expected_table)
+                    or artifacts[json_name]["media_type"] != "application/json"
+                    or artifacts[csv_name]["media_type"] != "text/csv"
+                    or type(artifacts[json_name]["rows"]) is not int or artifacts[json_name]["rows"] != len(rows)
+                    or type(artifacts[csv_name]["rows"]) is not int or artifacts[csv_name]["rows"] != len(rows)
+                    or csv_bytes(table["fields"], rows) != content[csv_name]):
+                raise StoreConflict("型付き表の版・型・件数またはCSVとの対応が一致しません。")
+
+    def read_table(self, run_id: str, dataset_id: str) -> dict:
+        """Resolve a complete machine table through the verified saved manifest."""
+        if not isinstance(dataset_id, str) or not re.fullmatch(r"[a-z_]+", dataset_id):
+            raise StoreConflict("表の識別子が正しくありません。")
+        _snapshot, _result, manifest, content = self.verified_package(run_id)
+        references = manifest.get("typed_tables", {}).get(dataset_id)
+        if references is None:
+            raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")
+        return _read_typed_json(content[references["data"]])
 
     def _publication_scope(self, run: dict, result: dict, targets: list[str] | None) -> list[str]:
         if run["kind"] in {"milestone_analysis", "autonomous_analysis"}:
@@ -898,8 +1024,9 @@ class AnalysisStore:
                     text += "解析器：" + markdown(json.dumps(method.get("engine", {}), ensure_ascii=False)) + "\n\n"
                     text += links["parameters.json"] + " / " + links["result.json"] + "\n\n"
                     for dataset in method.get("datasets", []):
-                        name = f"tables/{dataset}.csv"
-                        if name in links: text += f"- {links[name]}\n"
+                        for extension, purpose in (("json", "型付き全件データ"), ("csv", "表計算・共有用")):
+                            name = f"tables/{dataset}.{extension}"
+                            if name in links: text += f"- {purpose}：{links[name]}\n"
                     text += "\n## 限界と追加確認\n\n" + "\n".join("- " + markdown(v) for v in method.get("limitations", [])) + "\n"
                     self.write_note(target + ".md", f"analysis-{run_id}-{method_id}", item_id, text,
                                     graph_kind="analysis_result", graph_scope="detail")

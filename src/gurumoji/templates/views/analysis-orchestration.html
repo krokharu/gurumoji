@@ -23,13 +23,13 @@
         <legend>どこで止めるか</legend>
         <div class="orchestration-stop-options">
           <label><input name="orchestration_stop" type="radio" value="time"><span>時間</span></label>
-          <label><input name="orchestration_stop" type="radio" value="iterations" checked><span>繰り返し回数</span></label>
+          <label><input name="orchestration_stop" type="radio" value="iterations"><span>繰り返し回数</span></label>
           <label><input name="orchestration_stop" type="radio" value="importance"><span>重要度</span></label>
-          <label><input name="orchestration_stop" type="radio" value="auto"><span>AIお任せ</span></label>
+          <label><input name="orchestration_stop" type="radio" value="auto" checked><span>AIお任せ（最低3回）</span></label>
         </div>
         <div class="orchestration-form-grid">
-          <label class="field" id="orchestration-time-field"><span>時間上限（分）</span><input id="orchestration-time" type="number" min="1" max="1440" value="10"><small>空欄なら時間の上限なし</small></label>
-          <label class="field" id="orchestration-iterations-field"><span>繰り返し上限（巡）</span><input id="orchestration-iterations" type="number" min="1" max="1000" value="3"><small>空欄なら回数の上限なし</small></label>
+          <label class="field" id="orchestration-time-field"><span>時間上限（分）</span><input id="orchestration-time" type="number" min="1" max="1440"><small>空欄なら時間の上限なし</small></label>
+          <label class="field" id="orchestration-iterations-field"><span>繰り返し上限（巡）</span><input id="orchestration-iterations" type="number" min="1" max="1000"><small>空欄なら回数の上限なし。AIお任せは最低3回後に終了を判断</small></label>
           <label class="field" id="orchestration-importance-field"><span>追加分析の重要度</span><select id="orchestration-importance"><option value="high">高以上</option><option value="medium" selected>中以上</option><option value="low">低以上</option></select></label>
         </div>
         <p id="orchestration-stop-explanation" class="field-note"></p>

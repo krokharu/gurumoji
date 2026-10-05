@@ -1,5 +1,6 @@
 """Synthetic fixed-definition/CAS regression tests; no models or real Vaults."""
 import copy
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sqlite3
@@ -44,10 +45,15 @@ class DefinitionSafetyTests(unittest.TestCase):
         )
         self.service._schedule = lambda *_: None
 
+    @contextmanager
     def connect(self):
         connection = sqlite3.connect(self.db, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def save_result(self, **kwargs):
         self.saved.append(copy.deepcopy(kwargs))

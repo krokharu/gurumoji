@@ -1607,7 +1607,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
 
 def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
-    check_cancelled=None, usage_callback=None, base_url="",
+    check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1617,7 +1617,8 @@ def call_orchestration_ai_json(
     def post_once(url, headers, payload, **kwargs):
         return ai_client.post_json(
             url, headers, payload, worker_file=AI_HTTP_WORKER_FILE,
-            run_subprocess=run_cancellable_subprocess, retry_delays=(), **kwargs,
+            run_subprocess=run_cancellable_subprocess, retry_delays=(),
+            timeout=timeout_seconds, **kwargs,
         )
     return ai_client.call_ai_json(
         provider, api_key, model, system_prompt, user_prompt, schema_name, schema,

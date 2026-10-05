@@ -28,7 +28,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 "provider_policy": "local_only", "stop_mode": "auto", "max_iterations": None,
                 "time_limit_seconds": None, "max_calls": 20, "max_tasks": 40}
 
-    def response(self, provider, key, model, system, prompt, schema_name, schema, check, usage, base):
+    def response(self, provider, key, model, system, prompt, schema_name, schema, check, usage, base, timeout_seconds=240):
         check()
         context = json.loads(prompt)
         role = schema_name.removeprefix("analysis_orchestration_")
@@ -102,6 +102,14 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 app.call_orchestration_ai_json("openai", "synthetic", "synthetic", "s", "p", "analysis_orchestration_core", {})
         self.assertEqual(post.call_count, 1)
         self.assertEqual(post.call_args.kwargs["retry_delays"], ())
+
+    def test_configured_call_timeout_reaches_http_worker(self):
+        with patch.object(app.ai_client, "post_json", side_effect=RuntimeError("synthetic stop")) as post:
+            with self.assertRaisesRegex(RuntimeError, "synthetic stop"):
+                app.call_orchestration_ai_json("openai", "synthetic", "synthetic", "s", "p",
+                                              "analysis_orchestration_core", {}, timeout_seconds=420)
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.kwargs["timeout"], 420)
 
     def test_label_adoption_recomputes_real_code_method_and_preserves_initial(self):
         initial = None

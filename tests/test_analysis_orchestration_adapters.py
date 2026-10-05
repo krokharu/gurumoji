@@ -67,6 +67,37 @@ class OrchestrationAdapterTests(unittest.TestCase):
             self.run("core", {}, self.resolve({}), cancelled, lambda sample: None)
         self.assertEqual(self.calls, [])
 
+    def test_review_schema_uses_current_target_without_leaking_between_calls(self):
+        options = self.resolve({})
+        for version in (2, 3):
+            self.run("critic", {"review_target": {"target_id": "view:synthetic", "target_version": version}},
+                     options, lambda: None, lambda _: None)
+        for args, version in zip(self.calls, (2, 3)):
+            props = args[6]["properties"]["issues"]["items"]["properties"]
+            self.assertEqual(props["target_version"]["enum"], [version])
+            self.assertEqual(props["target_id"]["enum"], ["view:synthetic"])
+        self.assertNotIn("enum", CRITIC_SCHEMA["properties"]["issues"]["items"]["properties"]["target_version"])
+
+    def test_core_cannot_generate_responses_to_nonexistent_issues_or_proposals(self):
+        options = self.resolve({})
+        self.run("core", {}, options, lambda: None, lambda _: None)
+        props = self.calls[-1][6]["properties"]
+        self.assertEqual(props["critique_responses"]["maxItems"], 0)
+        self.assertEqual(props["label_decisions"]["maxItems"], 0)
+        self.run("core", {"issues": [{"issue_id": "issue-current"}],
+                           "label_proposals": [{"proposal_id": "proposal-current"}]},
+                 options, lambda: None, lambda _: None)
+        props = self.calls[-1][6]["properties"]
+        self.assertEqual(props["critique_responses"]["items"]["properties"]["issue_id"]["enum"], ["issue-current"])
+        self.assertEqual(props["label_decisions"]["items"]["properties"]["proposal_id"]["enum"], ["proposal-current"])
+        self.assertEqual(CORE_SCHEMA["properties"]["critique_responses"]["maxItems"], 24)
+
+    def test_handler_timeout_is_forwarded_to_the_transport(self):
+        options = self.resolve({})
+        options["timeout_seconds"] = 420
+        self.run("core", {}, options, lambda: None, lambda sample: None)
+        self.assertEqual(self.calls[0][10], 420)
+
     def test_handler_and_code_statistics_cannot_call_llm(self):
         for role in ("handler", "statistics", "unregistered"):
             with self.subTest(role=role), self.assertRaises(AnalysisContractError):

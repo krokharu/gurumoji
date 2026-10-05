@@ -1,5 +1,6 @@
 """Independent adversarial review: synthetic SQLite/input only, no external AI."""
 import copy
+import contextlib
 import json
 from pathlib import Path
 import sqlite3
@@ -103,7 +104,7 @@ class OrchestrationReviewTests(unittest.TestCase):
             self.service.history('synthetic')
         self.assertEqual(len(self.calls), before)
         self.assertEqual(state['status'], 'completed', state)
-        self.assertEqual([role for role, *_ in self.calls], ['core', 'critic', 'core'])
+        self.assertEqual([role for role, *_ in self.calls], ['core', 'critic', 'core', 'core'])
 
     def test_blind_packet_excludes_initial_and_core_conclusions(self):
         run = self.start()
@@ -199,7 +200,7 @@ class OrchestrationReviewTests(unittest.TestCase):
         task = self.register(run, 'interpretation')
         with patch.object(self.service, '_validate_received', return_value=None):
             self.service._execute(run['run_id'], task['task_id'])
-        with self.connect() as db:
+        with contextlib.closing(self.connect()) as db, db:
             raw = json.loads(db.execute('SELECT raw_json FROM orchestration_results WHERE task_id=?',
                                         (task['task_id'],)).fetchone()[0])
             raw['summary'] = 'modified after raw commit'
@@ -219,7 +220,7 @@ class OrchestrationReviewTests(unittest.TestCase):
             self.service._write_run(db, fixed)
         self.service._execute(run['run_id'], task['task_id'])
         self.assertEqual(len(self.calls), 1)
-        with self.connect() as db:
+        with contextlib.closing(self.connect()) as db, db:
             raw = json.loads(db.execute('SELECT raw_json FROM orchestration_results WHERE task_id=?',
                                         (task['task_id'],)).fetchone()[0])
             raw['summary'] = 'corrupted after validation, before Core adoption'
@@ -271,7 +272,7 @@ class OrchestrationReviewTests(unittest.TestCase):
         self.service.run(run['run_id'])
         final = self.service.status('synthetic', run['run_id'])
         self.assertEqual(final['status'], 'completed', final)
-        self.assertEqual([role for role, *_ in self.calls], ['core', 'critic', 'core'])
+        self.assertEqual([role for role, *_ in self.calls], ['core', 'critic', 'core', 'core'])
         self.assertEqual(final['tasks'][0]['task_id'], task['task_id'])
 
     def test_deleted_source_fences_late_result_and_all_reads(self):
@@ -295,7 +296,7 @@ class OrchestrationReviewTests(unittest.TestCase):
 
     def test_snapshot_hash_corruption_blocks_ai_dispatch(self):
         run = self.start()
-        with self.connect() as db:
+        with contextlib.closing(self.connect()) as db, db:
             value = json.loads(db.execute('SELECT snapshot_json FROM orchestration_initials WHERE initial_id=?',
                                          (run['initial_id'],)).fetchone()[0])
             value['analysis']['segments'][0]['text'] = 'corrupted synthetic bytes'

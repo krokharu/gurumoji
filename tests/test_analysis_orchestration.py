@@ -1,5 +1,6 @@
 """Synthetic-only durable Core/Handler acceptance tests; no external providers."""
 import copy
+import contextlib
 import json
 import sqlite3
 import tempfile
@@ -79,15 +80,132 @@ class RuntimeTests(unittest.TestCase):
         self.service.run(run["run_id"])
         return self.service.status("conversation", run["run_id"])
 
+    def test_configured_context_limit_keeps_omissions_and_full_source_explicit(self):
+        run = self.start(context_evidence_limit=1, context_text_limit=1000, context_index_limit=1)
+        final = self.drive(run)
+        context = next(context for role, context, _ in self.calls if role == "core")
+        self.assertEqual(len(context["raw_evidence"]), 1)
+        self.assertEqual(context["coverage"]["available_count"], 2)
+        self.assertEqual(context["coverage"]["omitted_count"], 1)
+        self.assertFalse(context["coverage"]["complete"])
+        self.assertEqual(len(context["coverage"]["evidence_index"]), 1)
+        self.assertEqual(context["coverage"]["index_available_count"], 2)
+        self.assertEqual(context["coverage"]["index_omitted_count"], 1)
+        with self.service._db() as db:
+            initial = self.service._initial(db, run["initial_id"])
+        self.assertEqual(len(initial["evidence"]), 2)
+        self.assertEqual(final["config"]["context_evidence_limit"], 1)
+
+    def test_raw_sqlite_factory_connections_are_closed_after_commit_and_error(self):
+        connections = []
+        original = self.service.connect
+        def tracked():
+            connection = original()
+            connections.append(connection)
+            return connection
+        self.service.connect = tracked
+        self.start()
+        with self.assertRaisesRegex(RuntimeError, "synthetic rollback"):
+            with self.service._db():
+                raise RuntimeError("synthetic rollback")
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def test_context_limits_reject_boolean_zero_and_values_above_the_cap(self):
+        for key, bad in (("context_evidence_limit", True), ("context_evidence_limit", 0),
+                         ("context_evidence_limit", 121), ("context_text_limit", 60001),
+                         ("context_index_limit", True), ("context_index_limit", -1), ("context_index_limit", 121)):
+            with self.subTest(key=key, bad=bad), self.assertRaises(AnalysisContractError):
+                self.start(**{key: bad})
+
+    def test_empty_core_json_is_quarantined_instead_of_counted_as_success(self):
+        for summary in ("", "  "):
+            with self.subTest(summary=summary):
+                self.agent = lambda *_: core(summary=summary)
+                run = self.start(request_id="empty-core-" + str(len(summary)))
+                final = self.drive(run)
+                self.assertNotEqual(final["status"], "completed")
+                self.assertEqual(final["tasks"][0]["status"], "quarantined")
+                self.assertEqual(final["tasks"][0]["error"], "invalid_result")
+
+    def test_label_frequency_on_interpretation_is_quarantined_before_registration(self):
+        self.agent = lambda *_: core(intents=[{"role": "interpretation", "method_id": "label_frequency",
+            "question": "Check labels", "why_now": "Check evidence", "success_criteria": "Return evidence"}])
+        final = self.drive(self.start())
+        self.assertEqual(final["tasks"][0]["status"], "quarantined")
+        self.assertEqual(final["tasks"][0]["error"], "label_field_unavailable")
+        self.assertEqual(len(final["tasks"]), 1)
+
     def test_complete_real_loop_and_pre_stop_review(self):
         run = self.drive(self.start())
         self.assertEqual(run["status"], "completed", run)
-        self.assertEqual([r for r, _, _ in self.calls], ["core", "critic", "core"])
-        self.assertEqual(run["iteration"], 2)
-        self.assertEqual(run["usage"]["calls"], 3)
+        self.assertEqual([r for r, _, _ in self.calls], ["core", "critic", "core", "core"])
+        self.assertEqual(run["iteration"], 3)
+        self.assertEqual(run["config"]["min_iterations"], 3)
+        self.assertEqual([ctx["budget"]["completed_core_iterations"] for role, ctx, _ in self.calls if role == "core"], [0, 1, 2])
+        context = next(context for role, context, _ in self.calls if role == "core")
+        self.assertEqual(context["coverage"]["index_omitted_count"], 0)
+        self.assertEqual(context["coverage"]["index_provided_count"], 2)
+        self.assertEqual(run["usage"]["calls"], 4)
         self.assertIsNone(run["usage"]["input_tokens"])
         self.assertTrue(all(r["validation_status"] == "valid" for r in run["results"]))
         self.assertEqual(run["review_status"], "reviewed")
+
+    def test_default_mode_and_minimum_cannot_be_silently_lowered(self):
+        config = validate_orchestration_payload({"model": "synthetic-model", "min_iterations": 0})
+        self.assertEqual(config["stop_mode"], "auto")
+        self.assertEqual(config["min_iterations"], 3)
+        self.assertIsNone(config["max_iterations"])
+        self.assertIsNone(config["time_limit_seconds"])
+        for upper in (1, 2):
+            with self.subTest(upper=upper), self.assertRaises(AnalysisContractError):
+                self.start(max_iterations=upper)
+
+    def test_empty_worklist_is_reexamined_three_times_without_fabricating_completion(self):
+        self.agent = lambda *_: core()
+        run = self.drive(self.start())
+        self.assertEqual(run["iteration"], 3)
+        self.assertEqual(run["status"], "stopped")
+        self.assertEqual(run["stop_reason"], "no_new_tasks")
+        self.assertEqual(sum(t["role"] == "core" and t["status"] == "succeeded" for t in run["tasks"]), 3)
+
+    def test_agent_can_continue_beyond_three_then_choose_stop(self):
+        def agent(role, context, *_):
+            if role == "core" and context["budget"]["iteration"] <= 3:
+                return core(intents=[intent("interpretation", question=f"Examine round {context['budget']['iteration']}")])
+            return stop() if role == "core" else critic(context)
+        self.agent = agent
+        run = self.drive(self.start())
+        self.assertEqual(run["status"], "completed", run)
+        self.assertEqual(run["iteration"], 5)
+        self.assertEqual(sum(role == "interpretation" for role, _, _ in self.calls), 3)
+
+    def test_three_round_cap_allows_reviewed_agent_stop_on_third(self):
+        final = self.drive(self.start(max_iterations=3))
+        self.assertEqual(final["iteration"], 3)
+        self.assertEqual(final["status"], "completed")
+        self.assertEqual(final["stop_reason"], "question_satisfied")
+
+    def test_invalid_third_result_interrupts_minimum_without_retry_or_success(self):
+        self.agent = lambda role, ctx, *_: (
+            core(summary="") if ctx["budget"]["iteration"] == 3 else stop()
+        ) if role == "core" else critic(ctx)
+        final = self.drive(self.start())
+        self.assertEqual(final["stop_reason"], "execution_failure")
+        self.assertNotEqual(final["status"], "completed")
+        self.assertEqual(sum(t["role"] == "core" and t["status"] == "succeeded" for t in final["tasks"]), 2)
+        self.assertEqual(sum(role == "core" for role, _, _ in self.calls), 3)
+
+    def test_legacy_run_without_minimum_keeps_recorded_stop_policy(self):
+        run = self.start()
+        with self.service._db() as db:
+            state = self.service._read_run(db, run["run_id"])
+            state["config"].pop("min_iterations")
+            self.service._write_run(db, state)
+        final = self.drive(run)
+        self.assertEqual(final["iteration"], 2)
+        self.assertEqual(final["status"], "completed")
 
     def test_initial_all_results_reused_request_dedup_and_changed_config(self):
         run = self.start(request_id="same")
@@ -155,7 +273,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_time_limit_before_dispatch(self):
         run = self.start(stop_mode="time", time_limit_seconds=1)
-        with self.connect() as db:
+        with contextlib.closing(self.connect()) as db, db:
             state = json.loads(db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?", (run["run_id"],)).fetchone()[0])
             state.update(started_at="old", deadline=time.time() - 1)
             db.execute("UPDATE orchestration_runs SET state_json=? WHERE run_id=?", (json.dumps(state), run["run_id"]))
@@ -232,7 +350,8 @@ class RuntimeTests(unittest.TestCase):
     def test_critique_response_reason_and_no_same_issue_loop(self):
         def agent(role, context, *_):
             if role == "core":
-                responses = [{"issue_id": issue["issue_id"], "disposition": "defer", "reason": "No additional data", "impact": "Keep conclusion exploratory"} for issue in context["issues"]]
+                answered = {r["issue_id"] for r in context["critique_responses"]}
+                responses = [{"issue_id": issue["issue_id"], "disposition": "defer", "reason": "No additional data", "impact": "Keep conclusion exploratory"} for issue in context["issues"] if issue["issue_id"] not in answered]
                 return stop(critique_responses=responses)
             target = context["review_target"]
             issue = {"issue_key": "alternative-explanation", "target_id": target["target_id"], "target_version": target["target_version"],

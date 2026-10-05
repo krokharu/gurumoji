@@ -107,17 +107,23 @@ class OrchestrationPublicationTests(unittest.TestCase):
         self.assertEqual(result["parameters"]["sealed_hash"], fingerprint(original))
         self.assertEqual(result["parameters"]["publication_targets"], TARGETS)
         self.assertIn("tables/autonomous_summary.csv", content)
+        self.assertIn("tables/autonomous_summary.json", content)
+        table = self.store.read_table(value["result_run_id"], "autonomous_summary")
+        self.assertEqual(table["row_count"], 1)
+        self.assertEqual(table["run_id"], value["result_run_id"])
         self.assertTrue(all(a["url"].startswith("/api/analysis/artifacts/") for a in value["result_run"]["artifacts"]))
         methods = result["methods"][0]
         self.assertEqual(methods["findings"][0]["segment_ids"], ["u1"])
         self.assertEqual(methods["details"]["evidence"]["u1"]["text"], "Synthetic ANALYSIS VERSION")
         self.assertTrue(any(p.name == "autonomous_analysis.md" for p in self.store.vaults.roots()["orchestrator"].rglob("*.md")))
         note = next(p for p in self.store.vault.rglob("method-autonomous_analysis.md"))
-        text = note.read_text()
+        text = note.read_text(encoding="utf-8")
         self.assertIn("Synthetic readable summary", text)
         self.assertIn("result.json", text)
+        self.assertIn("型付き全件データ", text)
+        self.assertIn("tables/autonomous_summary.json", text)
         # The evidence-specific source note contains the actual analysis text.
-        quoted = [p.read_text() for p in self.store.vault.rglob("part-*.md")]
+        quoted = [p.read_text(encoding="utf-8") for p in self.store.vault.rglob("part-*.md")]
         self.assertTrue(any("Synthetic ANALYSIS VERSION" in text for text in quoted))
 
     def test_runs_do_not_deduplicate_different_autonomous_ledgers(self):
@@ -241,7 +247,7 @@ class OrchestrationPublicationTests(unittest.TestCase):
             first = self.finalize(rid)
         roots = self.store.vaults.roots()
         edited = roots["orchestrator"] / "10-Methods/autonomous_analysis.md"
-        edited.write_text(edited.read_text() + "\nSynthetic researcher edit to preserve\n")
+        edited.write_text(edited.read_text(encoding="utf-8") + "\nSynthetic researcher edit to preserve\n", encoding="utf-8")
         removed = roots["visualization"] / ("10-Visuals/run-" + first["result_run_id"]) / "autonomous_analysis.md"
         self.assertTrue(removed.exists())
         removed.unlink()
@@ -253,8 +259,8 @@ class OrchestrationPublicationTests(unittest.TestCase):
         note = self.store.vaults.load()["notes"]["visual-" + first["result_run_id"] + "-autonomous_analysis"]
         self.assertEqual(note["sync"], "missing")
         histories = list((roots["orchestrator"] / "99-Archive").rglob("*.md"))
-        self.assertTrue(any("Synthetic researcher edit to preserve" in path.read_text() for path in histories))
-        self.assertNotIn("Synthetic researcher edit to preserve", edited.read_text())
+        self.assertTrue(any("Synthetic researcher edit to preserve" in path.read_text(encoding="utf-8") for path in histories))
+        self.assertNotIn("Synthetic researcher edit to preserve", edited.read_text(encoding="utf-8"))
 
     def test_lost_save_or_publish_acknowledgement_reuses_fixed_success(self):
         for boundary in ("save", "publish"):

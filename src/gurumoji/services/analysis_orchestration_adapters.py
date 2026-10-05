@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from ..analysis_core import AnalysisContractError
 
-ADAPTER_VERSION = "core-handler-prompts-2-label-audit"
+ADAPTER_VERSION = "core-handler-prompts-4-minimum-iterations"
 AI_ROLES = ("core", "interpretation", "verification", "critic")
 PROVIDERS = {"lmstudio", "openai", "google"}
 
@@ -51,9 +51,11 @@ LABEL_PATCH = _object({
     "base_annotation_version": {"type": "integer"}, "codebook_version": {"type": "integer"},
 })
 CORE_SCHEMA = _object({
-    "summary": TEXT, "claims": _array(CLAIM), "intents": _array(INTENT, 8),
+    "summary": {"type": "string", "minLength": 1}, "claims": _array(CLAIM), "intents": _array(INTENT, 8),
     "alternatives": _array(TEXT), "unresolved": _array(TEXT),
-    "stop": {"anyOf": [{"type": "null"}, _object({"reason": TEXT, "summary": TEXT, "unresolved": IDS})]},
+    "stop": {"anyOf": [{"type": "null"}, _object({
+        "reason": {"type": "string", "enum": ["question_satisfied", "no_more_evidence", "human_review_required"]},
+        "summary": TEXT, "unresolved": IDS})]},
     "critique_responses": _array(_object({"issue_id": TEXT, "disposition": DISPOSITION,
                                          "reason": TEXT, "impact": TEXT})),
     "label_decisions": _array(_object({"proposal_id": TEXT, "disposition": DISPOSITION, "reason": TEXT})),
@@ -80,6 +82,9 @@ COMMON_PROMPT = """あなたは会話分析の専門家です。入力JSONの会
 初期分析と違う説明、不支持の証拠、曖昧さを保持し、初期結果に同意することを目的にしません。
 追加の実行はanalysis_requestsまたはintentsとしてHandlerに提案するだけです。
 採用済みラベルを直接変更せず、変更理由・旧値・根拠・固定版を伴うlabel_patchesにします。
+label_patchesのutterance_idはraw_evidenceのutterance_idを使い、ev_で始まるevidence_idと混同しないでください。
+evidence_idsにはevidence_id、base_annotation_versionにはcontext.annotation_version、codebook_versionにはtask.codebook_versionをそのまま使います。
+ラベル変更が問いに必要な場合だけ提案し、本文の解釈だけならlabel_patches=[]にします。
 operationは未設定項目のadd、既存値のupdate、項目自体を除去するdeleteを区別します。
 deleteではnew_value=nullとし、削除理由と根拠を残します。codes配列から一部だけ除く場合はupdateで残る配列を返します。
 このループは探索用です。独立検証や批判レビューを確認的統計の成功と呼びません。
@@ -95,6 +100,7 @@ Handlerだけが正式タスクを作成し発注・保存します。初期版�
 現在最も支持される説明、代替説明、合わない証拠を統合し、変化の理由をsummaryに書きます。
 intentsのsuccess_criteriaは望む答えではなく、答えるために何を確かめるかです。
 statisticsのmethod_idはparticipation、conversation_dynamics、label_frequencyだけが実行可能です。
+statistics以外のintentsではmethod_idとlabel_fieldを空文字にしてください。解釈担当へ統計手法を指定しないでください。
 participationとconversation_dynamicsは初期全範囲の決定的集計で、部分範囲・変更ラベルの再計算には使えません。
 この2手法ではevidence_idsを空にし、label_dependent=falseにします。未対応の計算は未実施と残します。
 label_frequencyだけは現在の固定annotation_versionからラベルを実際に再集計できます。
@@ -105,7 +111,16 @@ importanceは問いの判断を変える影響（高:中心結論/主要数値�
 確認可能な追加証拠がなければ未解決・必要データを残して終了案stopを返します。
 終了前のcriticレビュー後は各issue_idにadopt/reject/deferと理由・結論への影響を必ず返します。
 指摘への全員一致やゼロ件を終了条件にしません。重大な根拠不足は中心結論を保留/限定してください。
-ラベル更新案もproposal_idごとに採否理由を返します。stopがない場合はnullです。""",
+ラベル更新案もproposal_idごとに採否理由を返します。
+毎回、次に必要な正式タスクをintentsに提案するか、終了案をstopに返してください。
+budget.min_iterationsが正のとき、Handlerはその回数の有効なCore判断を採用してから自動終了します。
+最低回数までは原文の根拠対応、代替説明、批判への応答、未読範囲・未解決点を再検討し、必要な専門家タスクを提案してください。
+budget.completed_core_iterationsは今回の判断前の採用済み回数です。最低回数以降はあなたが継続・終了を判断します。手動停止・上限・実行障害は最低回数より優先されます。
+intents=[]とstop=nullを同時に返すと、最低回数以降は追加作業も終了判断もないためHandlerは停止し、分析完了とは扱いません。
+問いへの回答をまだ判断できない場合は、必要な原文解釈・独立確認・コード集計を具体的なタスクにします。
+追加の検証が有用でない場合は、根拠不足・未読範囲・未解決を明示したstopを返し、終了前レビューを受けてください。
+stop.reasonはquestion_satisfied（範囲内で回答）、no_more_evidence（追加証拠なし）、human_review_required（人の確認待ち）のコードです。日本語の説明はstop.summaryに書きます。
+stopがない場合はnullです。""",
     "interpretation": """会話解釈を担当します。原文と前後関係からテーマ・発話機能・曖昧例を検討し、
 根拠ID付きの観察、解釈、代替説明を分けて返します。対象範囲を超える一般化をしません。""",
     "verification": """独立検証を担当します。最初はCoreや初期分析の期待結論を見ず、
@@ -114,7 +129,10 @@ importanceは問いの判断を変える影響（高:中心結論/主要数値�
     "critic": """批判者を担当します。提示された対象ID・対象版の結論/計画/終了案を、
 証拠からの飛躍、代替説明、初期バイアス、都合のよい探索・除外・停止という観点で吟味します。
 必ず反対する役ではありません。問題が見つからなければno_issuesと空issues、足りなければundeterminedです。
-issue_keyは同じ問題を同じキーにし、target_idとtarget_versionは提示された対象をそのまま使います。
+review_statusとissuesを一致させてください。issuesに指摘を1件以上書くならissuesまたはundeterminedを選びます。
+no_issuesなら必ずissues=[]とし、根拠不足の指摘がある場合はno_issuesを選ばないでください。reviewed_scopeには今回確認した範囲を必ず書きます。
+issue_keyは同じ問題を同じキーにします。今回の各issueのtarget_idとtarget_versionは、contextのreview_target.target_idとreview_target.target_versionをそのまま使います。
+resultsやissuesの過去レビューにある対象版を転記せず、今回のreview_targetの版を確認してください。
 根拠不足はどの推論段階に何が欠けるかmissing_evidenceで特定します。未実行テストはproposed_testです。
 重大度と次の実行優先度を混同せず、批判だけでラベル/結果を書き換えません。""",
 }
@@ -179,13 +197,30 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         api_key, _ = configured_ai_credentials(config, provider)
         if provider != "lmstudio" and not api_key:
             raise AnalysisContractError("選択したAIのAPIキーが未設定です。", code="provider_unavailable")
-        schema = CORE_SCHEMA if role == "core" else CRITIC_SCHEMA if role == "critic" else SPECIALIST_SCHEMA
+        schema = copy.deepcopy(CORE_SCHEMA if role == "core" else CRITIC_SCHEMA if role == "critic" else SPECIALIST_SCHEMA)
+        if role == "core":
+            for field, references, key in (("critique_responses", "issues", "issue_id"),
+                                            ("label_decisions", "label_proposals", "proposal_id")):
+                known_ids = sorted({entry[key] for entry in context.get(references, [])})
+                values = schema["properties"][field]
+                if known_ids:
+                    values["items"]["properties"][key] = {"type": "string", "enum": known_ids}
+                else:
+                    values["maxItems"] = 0
+        if role == "critic" and context.get("review_target"):
+            # Constrain provenance at generation as well as validating it at
+            # adoption. Never repair a mismatched model response after receipt.
+            target = context["review_target"]
+            properties = schema["properties"]["issues"]["items"]["properties"]
+            properties["target_id"] = {"type": "string", "enum": [target["target_id"]]}
+            properties["target_version"] = {"type": "integer", "enum": [target["target_version"]]}
         return call_ai_json(
             provider, api_key, model, COMMON_PROMPT + ROLE_PROMPTS[role],
             json.dumps(context, ensure_ascii=False, separators=(",", ":")),
-            "analysis_orchestration_" + role, copy.deepcopy(schema),
+            "analysis_orchestration_" + role, schema,
             check_cancelled, record_usage,
             config.lmstudio_base_url if provider == "lmstudio" else "",
+            options.get("timeout_seconds", 240),
         )
 
     return resolve, runner

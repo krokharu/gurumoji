@@ -40,7 +40,7 @@ function closeAnalysisOrchestrationDialogs() {
   for (const name of ['settings', 'live']) if (orchestrationNode(name)?.open) orchestrationNode(name).close();
   return closed;
 }
-function orchestrationFormMode() { return document.querySelector('input[name="orchestration_stop"]:checked')?.value || 'iterations'; }
+function orchestrationFormMode() { return document.querySelector('input[name="orchestration_stop"]:checked')?.value || 'auto'; }
 function orchestrationRoleOverrides() {
   return Object.fromEntries(orchestrationRoles.filter(role => role.kind === 'ai').flatMap(role => {
     const provider = orchestrationNode(`provider-${role.id}`)?.value;
@@ -65,7 +65,7 @@ function orchestrationSyncForm() {
     time:'開始からの経過時間で新規発注を止めます。進行中の呼出しを必ず期限内に終える保証ではありません。',
     iterations:'Coreの結果統合から次の実行案選択までを1巡と数えます。並列タスク数や再試行回数とは別です。',
     importance:'問いへの影響を高・中・低で暫定評価します。頻度・モデルの自信とは異なり、基準は未校正です。',
-    auto:'Coreが問いの充足・新しい証拠の見込みを判断します。時間・回数は空欄で無上限にできます。重要度は未校正の暫定基準です。'
+    auto:'Coreが最低3回、根拠・批判・未解決点を検討し、その後は継続・終了を判断します。時間・回数は空欄で無上限にできます。手動停止・安全上限・実行障害は最低回数より優先します。'
   }[mode]);
   for (const role of orchestrationRoles.filter(role => role.kind === 'ai')) {
     const provider = orchestrationNode(`provider-${role.id}`)?.value;
@@ -111,6 +111,7 @@ function orchestrationPayload() {
     if (!raw && !required) return null;
     const number = Number(raw);
     if (!Number.isInteger(number) || number < 1 || number > max) throw Error(`${orchestrationNode(id).closest('label').querySelector('span').textContent}を1〜${max}の整数で指定してください。`);
+    if (id === 'iterations' && mode === 'auto' && number < 3) throw Error('AIお任せの回数上限は最低3回以上にしてください。');
     return number;
   };
   const cloud = orchestrationCloudProviders();
@@ -250,7 +251,7 @@ function renderAnalysisOrchestration() {
   const reasons = {question_satisfied:'問いを充足',human_review_required:'人の確認待ち',no_new_tasks:'追加タスクなし',importance_threshold:'重要度しきい値',execution_failure:'実行障害',review_incomplete:'レビュー未完了',call_timeout:'呼出し時間上限',call_budget_limit:'AI呼出し上限',task_budget_limit:'タスク上限',source_deleted:'入力データの削除',user_cancelled:'利用者停止',user_stop:'利用者停止',time_limit:'時間上限',iteration_limit:'回数上限',call_budget:'AI呼出し上限',task_budget:'タスク上限',budget_limit:'予算上限',completed:'問いを充足',no_more_evidence:'追加の証拠なし',error:'実行障害',human_review:'人の確認待ち'};
   orchestrationText('stop-reason',run.stop_reason ? `停止理由: ${reasons[run.stop_reason] || run.stop_reason}。保存済みの部分結果・未実施レビューを含めて確認してください。` : '利用者停止と安全上限を最優先します。研究上の結論は未確定の探索的下書きです。');
   const config = run.config || {};
-  orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
+  orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
   for (const [id, suffix] of [['export-json','export.json'],['export-md','export.md']]) orchestrationNode(id).href = `${orchestrationBase()}/${suffix}`;
   orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
   orchestrationText('conclusion',run.current_view?.summary || '統合結果はまだ保存されていません。');
