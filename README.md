@@ -456,12 +456,18 @@ $env:PYTHONPATH="$PWD\src"
 2. 「ランタイム」→「ランタイムのタイプを変更」で T4 GPU 以上を選択します。
 3. ノートブックを上から順に実行し、Hugging Face tokenを非表示入力します。OpenAI / GoogleのキーはAI仕上げをクラウドで行う場合だけ入力します。
 4. 出力と話者管理データを残す場合は `USE_GOOGLE_DRIVE = True` のままGoogle Driveをマウントします。
-5. 「ColabローカルLLM」セルで `USE_LOCAL_LLM = True` にし、モデルを選択します。既定の `qwen3:4b-instruct` のほか、軽量な `qwen2.5:3b-instruct` と `gemma3:4b` を選べます。初回はOllamaとモデルのダウンロードに時間がかかります。
+5. 「ColabローカルLLM」セルで `USE_LOCAL_LLM = True` にし、モデルを選択します。既定の `qwen3:4b-instruct` のほか、軽量な `qwen2.5:3b-instruct` と `gemma3:4b` を選べます。入力枠は既定32,768（設定範囲4,096〜32,768）です。初回はOllamaとモデルのダウンロード・ロードに時間がかかります。モデル一覧の確認後、合成入力で短いJSON推論を試し、実入力枠とGPU配置を表示します。CPUのみ・GPU配置未取得はGPU推論成功と扱いません。
 6. 最後の起動セルに表示されるWeb UIで「端末からアップロード」を押すか、`/content/drive/MyDrive/...` のパスを入力します。AI仕上げには `Ollama（ColabローカルLLM）` が自動選択されます。
 
 Colab版ではWindowsのファイル選択ダイアログを呼び出さず、ブラウザーアップロードへ自動的に切り替えます。Google Drive保存を有効にすると、`MyDrive/gurumoji/output` に出力、`MyDrive/gurumoji/data` にSQLiteライブラリ・元メディア・話者管理データを保存します。ローカルLLMモデルも保持する場合は `PERSIST_LOCAL_LLM_MODEL = True` にできますが、Google Driveからの読み込みは遅くなる場合があります。AIST感情分析を使う場合だけ、任意セルの `ENABLE_AIST_EMOTION = True` に変更してください。
 
+分析の「AIお任せ」は最低3回の有効なCore判断後、AIが継続・終了を判断します。障害・レビュー失敗・手動停止・設定上限は優先されます。新規の固定分析結果には型付き全件JSONと共有CSVが含まれ、`data/analysis_store`配下に保存します。Google Drive保存が有効ならこの固定結果も保持されます。
+
+既存のColabランタイムを更新するときは、分析の停止・保存状態を確認して終了セルを実行し、上記リンクから最新ノートブックを開き直してください。準備セルは`main`をfast-forwardで更新し、使用するGit commitを表示します。アプリ/Ollamaの実行中、別ブランチ、追跡ファイルのローカル編集がある場合は更新を止めます。
+
 ColabのローカルLLMは `127.0.0.1:11434` だけで待ち受けるOllamaのOpenAI互換APIを使います。会話テキストや音声・動画を外部のAI APIへ送信しません。ただし、セットアップ時にはOllama公式配布元とモデル配布元へ接続してプログラムとモデルを取得します。T4のGPUメモリを文字起こしと共用するため、まず既定の4Bモデルを推奨します。
+
+入力枠を大きくすると使用メモリも増えます。メモリ不足やCPUへの配置が発生する場合は、入力枠を小さくしてローカルLLMセルを再実行してください。設定値をモデルの最大入力枠や実ロード値と同一視しません。[Ollamaの入力枠と配置の説明](https://docs.ollama.com/context-length)、[ロード済みモデルAPI](https://docs.ollama.com/api/ps)
 
 Colabではノートブック側が認証付きポート表示を設定します。`MOJIOKOSI_ALLOW_REMOTE` や `MOJIOKOSI_HOST=0.0.0.0` など、Windows向けの外部bind設定を追加する必要はありません。
 
