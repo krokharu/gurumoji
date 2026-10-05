@@ -4,7 +4,7 @@ note_type: development-session
 title: Gurumoji 改善セッション
 summary: 専用ブランチの復旧根拠、作業分担、課題、検証、受け渡しを管理する。
 status: current
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Gurumoji 改善セッション
@@ -169,3 +169,77 @@ updated: 2026-10-04
 5. 期限で変更を凍結し、最終HEADに対する試験、未実施範囲、復旧可能な成果物を受け渡す
 
 部門への再利用可能な依頼は[依頼テンプレート](gurumoji-department-briefs.md)を使う。既存の詳細契約は複製せず、[設計入口](../../../DESIGN.md)、[運用引継ぎ](dot-cloud-development-handoff.md)、[受入方法](../50-Tests/ui-design-acceptance.md)へ戻る。
+
+## 2026-10-05 Windowsでのマーラータン保存データ確認
+
+- 利用者の依頼で、`main` / `2f2479ca638c569f6978bec47c509646bd92ff67` の既存分析を実行。対象はローカルDB内の唯一のインタビュー `bb5555800e4248d7a401fc97c85c6882`、入力版1、本文revision 0、分析revision 0。過去のResearchVaultのI001ノートは別conversation IDなので、現DBのIDを根拠とした。
+- `.venv/Scripts/python.exe output/malatang-smoke/run.py` は終了コード0。323発話・観測5話者、323/323発話に有効時刻。参加量・会話動態の既存method adapter、GiNZA 5.2.0の形態素／係り受け（7,226 token）、SciPyの統計処理、JSONの非有限値検査、48種のCSV生成／再読込を確認。ゼロ行の表は生成のみの確認で、Transformerや手動コードを実行した証拠ではない。
+- 準備状態はdraft、内容確認済み0/323、相互作用分析の準備済み0/323。5話者は観測数であり、確認済み参加者数ではない。研究者の確定解釈や音声との一致を検証したという意味ではない。
+- SQLiteを`mode=ro`と`query_only`で読み取り、実DB・研究Vaultへの書き込みなし。処理前後の本文hashとrevision一致を確認。入力hash、分母、各出力件数、未実行範囲はローカル成果物 `output/malatang-smoke/result.json` に保存。本体実装の変更なし。
+- 音声からの再文字起こし、話者分離推論、外部AI、Transformer推論、ブラウザー操作、保存・公開は未実行。次にこれらを検証する場合は対象工程を指定し、実Vaultをテスト保存先にしない。
+
+### 同日：AI反復が0回だった理由
+
+- 前回のテスト範囲を基本分析に絞ったため、自律分析は未開始だった。`output/malatang-smoke/run.py` は `group_analysis_for_row` と参加量／会話動態のmethod adapterを呼ぶが、`AnalysisOrchestrationService.start`、`run`、AI runnerは呼ばない。method adapterは既存集計とCSVを結果形式へ変換するだけで、Coreの反復処理ではない。
+- 現行の開始経路は `POST /api/library/<item_id>/analysis/orchestration` → `service.start` → 保存・schedule → `_run_analysis`。Coreタスク登録直前に `iteration` を加算する。通常の基本分析から自動でこの経路へ入る実装ではない。`max_iterations` は指定する場合に1以上を要求し、前回はその設定検証自体を通っていない。
+- 前回と同じローカルDBをSQLite読取専用で照合し、`orchestration_*` テーブルなし、対象itemの旧AI見解request 0件を確認。既存pipeline requestは2件あるが、別の台帳であり自律反復の回数には換算しない。この調査から別DB・別環境の実行履歴までは断定しない。
+- 前回の「AIループ0回」はテストでAI開始処理を呼ばなかったことの説明であり、保存runのiterationを測定した数値ではなかった。接続障害、準備状態draft、回数制限で停止したという根拠はない。調査中もAI推論・実行開始・実DB/Vaultの書き込みは行っていない。本体変更なし。
+
+### 同日：実AI開始・反復試験とWindows修正
+
+- 目的は基本分析だけの確認から、既存POST開始・Core・批判レビュー・次のCoreという実経路を検証すること。基点は引き続き`main / 2f2479ca638c569f6978bec47c509646bd92ff67`、変更は未コミット。再現用に`scripts/test_saved_autonomous_analysis.py`を追加し、元DBは読取専用、SQLite backup先だけに追加台帳を作る。媒体参照をコピーで外し、Vault公開を禁止する。AI応答のmock置換・クラウド送信なし。
+- WindowsでCSVのsys.maxsizeがC long幅を超えてimport失敗したため、受理される幅へ下げる。raw SQLite factoryのconnectionもcommit/rollback後に閉じ、Windowsの一時DB削除失敗を修正した。Handlerのcall_timeout_secondsを実通信workerへ渡す。Coreの空要約・解釈担当へのlabel_frequency指定は登録前に隔離する。モデル用プロンプト・schemaで次の作業/終了判断、終了理由コード、発話IDと根拠IDの使い分けを明示した。
+- 実モデルの初期失敗も保持する。GPT-OSS 20Bの既存8192枠では要求拒否、65536枠/部分GPUでは通信timeout、32768枠では全項目が空のCore応答を得た。空応答を分析成功としない。Qwen3 8Bは推論ONや文字列だけの/no_thinkで長時間生成/timeoutになり、実capabilityのoff設定からreasoning_effort=noneを送る試験へ切り替えた。停止した試験は取消し・timeoutのまま保存する。
+- 原文24件にしても全323件の根拠ID索引が残り、後続criticで入力枠超過のHTTP 400が発生した。context_index_limitを追加し、原文と索引の省略を別々に記録する。既定0は従来の全索引。全量固定snapshotは323件を保持する。索引の外を順次読む処理は追加していない。
+- **反復動作は確認済み、分析完了は未達**。最終の実試験は`output/malatang-autonomous/20261005T003035Z-4120cd7e/result.json`、run `run_cd826f0356f34003993b0e24d7c3c177`。Qwen3 8B、実ロード32768枠、並列1、原文/索引各48件。Core成功2回、critic成功1回、実測AI呼出し3回、input 72,651/output 1,802 token、約67秒。不正/失敗タスク0。criticが根拠不足を指摘し、Coreがその指摘への採否を返さなかったためhuman_review_requiredで停止した。厳格なpassed=falseを保持し、全323発話の解釈完了や固定成果物保存成功とは扱わない。24件の前試験もCore2/critic1が成功し、人の確認待ちで停止した。
+- 元入力hashは前後とも`7dc5067452160de02239ef10a9ee7c2861ccbe49b00c96f197085bea9775d7ef`、revisionも維持。実利用者データは読取りだけ、書込みは試験コピーのみ。config/tokens.jsonを変更せず、試験モデルのロード設定は一時変更とする。GPU実測は生成中99%/VRAM約11GBで、コード調査・unittest・待機時の低使用率と区別する。
+- 最終の関連unittestは128件成功・失敗0（24.415秒）。対象はCSV、実試験の判定、analysis_queries、fixed_run、orchestration本体/adapter/route/integration、review、durable integration。git diff --checkと対象Python compileも成功。保存台帳からの再判定、変更コードhash、試験module一覧は同試験ディレクトリのverification.jsonに記録。厳格な元result.jsonは書き換えない。終了時にGPT-OSS 20B・8192枠・並列4・TTL3600秒を再ロードし、idle/queued 0を確認した。
+- 音声文字起こし、話者分離推論、ブラウザーUI、実Vault公開、研究者による確定解釈は未実行。次の課題は未提示範囲の参照と、モデルの批判応答欠落への対処。反復回数を増やすだけで研究上の根拠不足は解消しない。
+
+### 同日：CSVの保存用途を評価
+
+- 利用者の依頼により、現行`AnalysisStore.save`/`csv_bytes`と固定結果readerを評価。CSVは全件の表計算・共有用として維持し、AI再分析や統計へ渡す正本は型・欠測・版を検証するJSONを優先する判断。現行もCSV単独保存ではなく、SQLite台帳とinput/parameters/result/manifest JSONを併用している。
+- 実データを使わず、現行csv_bytes→csv.DictReaderで合成10値の往復を確認。null/空文字、数値0/文字列0、false/文字列False、数式風=A/元からの'=A、文字列配列/そのJSON風文字列の5組がそれぞれ同じCSVセルになった。前回の48種CSV読取成功は構文と出力件数の確認であり、元の型や欠測を無損失復元できるという確認ではない。長いセルのWindows互換修正も、この区別を解消しない。
+- [既存FLOW-1提案](../40-Design/core-handler-routing-reorganization-plan.md)に沿い、result.jsonで全件を保持できない表だけschema版・列型・安定行ID・欠測理由を持つtables/*.jsonを追加するのが次の候補。JSONにも列の単位・分析対象集合・分母・入力版/発話ID/run ID/hashの契約が必要。[JSON Schemaの型検証](https://json-schema.org/understanding-json-schema/reference/type)を根拠に検証方法を具体化できる。大量表の容量・読取性能が実測で問題になれば、[Parquet](https://parquet.apache.org/docs/overview/)を別途比較する。今回は形式変更・移行・追加実装を行わず、旧成果物のbytes/hashと数式対策を維持する。
+
+### 同日：Software Vaultに記録後、型付き全件表を実装
+
+- 利用者の追加依頼により、[[40-Design/decisions|ADR-124]]を先に記録してからAnalysisStoreを修正。基点main/2f2479ca638c569f6978bec47c509646bd92ff67の未コミット作業ツリー。result内の同名配列の全件性を推測する方式は避け、新規runの各CSVにJSON表を対応させた。保存先/DB schemaは変えず、manifestとpendingへ表形式版1を固定する。詳しい契約は[[30-Data/analysis-storage-v1]]に集約。
+- 全行・型・null/空文字/存在しないキー・根拠を保持し、run内行IDと入力snapshot/revisionを記録。read_tableは既存hash/manifest検証に加え、schema、行数/行ID、観測型、CSVとの一致を照合する。未知の版・欠落・改変時は停止する。意味上の単位/欠測理由を創作せず、汎用の後続分析/変数定義までは追加していない。Researchの手法ノートにはJSON全件表と共有CSVを既存所有権保護経路でリンクする。
+- 旧CSVのみの完了runは閲覧/ZIPを維持し、JSON表を後付けしない。旧pendingの復旧は旧形式、新pendingの復旧は元データと保存時の形式を維持する。新形式の保存中runを旧writerで再試行するrollbackは未対応で、停止/完了後に切替し未完分は新版で復旧する。
+- 検証: 最終関連unittest **160成功・失敗0、115.296秒**。fixed run、storage、queries、自律分析公開、milestones、pipeline regressions、自律分析統合/durable、interview comparison、CSV上限を対象とした。型の衝突5組、221行の全件取得、空表/全null、NumPyのJSON互換float、改変/非有限値/非文字列キーの拒否、新旧保存失敗の復旧、旧形式の安全なUnicodeパス、ノートの編集履歴/削除保護を確認。初回の再試行引数漏れは修正し、WindowsのUTF-8ノート読取をテストで明示した。git diff --checkと対象Python compileも成功。
+- 一時DB/Vault・合成値のみ。実DB/実Vaultの移行・公開、音声/実モデル推論、実ブラウザー操作は未実行。検証metadataと変更コードhashは`output/malatang-storage-final/verification.json`。既存のマーラータン試験結果は上書きしない。
+
+### 同日：最低3回後にCore判断で継続・終了
+
+- 利用者の追加指定を[[40-Design/decisions|ADR-125]]へ記録。新規API/画面の既定はAIお任せ、通常の自動終了を最低3回の採用済みCore判断まで保留する。3回を超えて続行するかはCoreが選ぶ。呼出し/タスク/時間上限、手動停止、障害・レビュー失敗は優先する。明示した別モード、保存済みrunの条件・履歴、adapter版不一致時の復旧停止は維持する。SQL列変更・実データ移行なし。
+- 回数は永続判断台帳から数え、失敗/隔離/未採用を成功へ含めない。contextに最低回数と採用済み回数を渡し、終了保留イベントを記録する。画面の時間/回数上限は既定で空欄、autoの上限1/2はAPIと画面で拒否する。プロンプト版はcore-handler-prompts-4-minimum-iterations。
+- 合成検証は関連unittest **129件成功、23.365秒**、DOM操作26件成功、隔離した実ブラウザー操作1件成功（1.556秒）。通常停止を3回まで保留、3回以降の続行（5回で終了）、上限3での正常終了、3回目の不正応答の拒否、旧条件の保持、停止/予算/復旧/公開を確認。ブラウザーの通信は合成応答だけで実Vaultへ書き込まない。DOMのNode22.19.0は宣言engineより古い警告あり、テストは成功。UTF-8のfixture出力を環境変数で指定した。
+- 実AIはマーラータンの読取専用SQLite backupでQwen3-8b/32768枠/parallel1/GPU全配置/reasoning_effort=noneを使用。5試験の採用済みCore回数は順に **2, 2, 2, 0, 1**。3回成功は未確認、分析完了も未達。失敗結果を保存し、合成検証の成功と混同しない。
+- 初回（20261005T010818Z-2e90555b）は批判者が旧対象版を転記して隔離。次（011044Z-804798dd）は3回目の出力がtoken上限で途中終了。24/323発話へ減らした次（011444Z-9edddeda）はno_issuesと非空issuesの矛盾で隔離。次（011745Z-ceb2b177）はCoreが存在しない批判IDへの応答を生成して隔離。批判者の現在対象ID/版とCoreの実在issue/proposal IDを生成用schemaでも固定し、状態/指摘一覧の整合性をプロンプトで明確化した。採用前検証を弱めず、原応答を補正して成功にしない。
+- 最終（012137Z-3211def1、run_6309cb32393047418bc01f66681ff506）はCore1回を採用したが、alternatives/unresolved各24件の重複を含む20,123文字の応答で、後続criticがHTTP400。依然として局所モデルの出力量/履歴context増大の制約が残る。次の対象は全量原結果を保持したうえでの重複・要約投影とcontext/出力予算。最低回数の制御を品質保証や全323発話の読了へ読み替えない。
+- 元DBのsource hashは全試験で`7dc5067452160de02239ef10a9ee7c2861ccbe49b00c96f197085bea9775d7ef`のまま。コピー以外のruntime台帳・研究Vaultへ書き込まず、音声処理・実Vault公開・移行は未実施。終了後はGPT-OSS20B/8192枠/parallel4/TTL3600秒へ戻し、IDLEを確認。設定ファイルは変更しない。
+- 基点main/2f2479ca638c569f6978bec47c509646bd92ff67の未コミット作業ツリー。各resultは`output/minimum-loops-real/<上記ID>/result.json`、コマンド・コードhash・各台帳の採用回数は`output/minimum-loops-test/verification.json`に保持。Python compile、JS構文、git diff --check成功。
+
+### 同日：利用者指定の再試験で実AIの3回採用を確認
+
+- 実run `run_008cbf3502d7400e94876c47734b1325`、出力`output/minimum-loops-retest/20261005T013659Z-d11dbe3d`。Qwen3-8b/実context32768/GPU全配置/parallel1/reasoning_effort=none。試験用questionに「1回分のJSON、alternatives/unresolved各3件以内、異なる内容、未提供発話は未読」を追加した。製品の既定prompt・停止制御は変更していない。
+- **実AIの有効なCore判断3回、critic1回、verification1回、失敗タスク0**。2回目の終了案をmin_iterations=3により保留したイベントを確認し、3回目でCoreがquestion_satisfiedを選びcompletedとなった。実通信5回、報告された入力125,529/output6,540/total132,069 tokens、試験159.47秒。表示・結果再取得にAIを呼ばないことも確認。
+- 初回の結果collectorはKeyErrorで失敗した。テストスクリプトが通常起動時のinitialize_libraryを省いたため、完成した固定runのstatus取得でanalysis_publication_attemptsテーブル不足/HTTP503になった。スクリプトだけを修正し、コピーDBのパス一致を確認してrepair_provenance=Falseで通常schema初期化を行う。HTTP失敗を未確認のrunとして扱う診断も追加。原本に初期化処理を実行しない。
+- 同じ保存済みrunを正常初期化後に再検証し、status HTTP200、assess_runの全条件成功、固定成果物save_status=saved、6 artifactsのhash/manifest/型付き表検証に成功。再推論や保存の再計算は行わず、元の失敗result.jsonを保持した。最終確認は`output/minimum-loops-retest/verification.json`。通常終了・3回以降続行・上限/障害・旧条件と初期化先の保護の関連15 tests成功、0.664秒。
+- 最初のCPU併用試験（013029Z-8efc9fda）はCore1回採用後、実行時間のため通常cancel経路で停止し、その結果を残した。CLIは65536を指定したがLM Studioの実contextは32768で、64kで成功したとは扱わない。
+- 固定snapshotは323発話を保持するが、各呼出しの原文/索引は48発話。**これは限定範囲の動作試験であり、全323発話の読了・科学的解釈の妥当性を保証しない**。原本のsource hashは`7dc5067452160de02239ef10a9ee7c2861ccbe49b00c96f197085bea9775d7ef`のまま。実Vault公開・音声処理・今回の実ブラウザー操作は未実施。
+- 試験後にGPT-OSS20B/8192枠/parallel4/TTL3600秒へ戻しIDLEを確認。アプリ本体・設定ファイルはこの再試験で変更せず、試験スクリプトと回帰テスト、Software Vaultの検証記録だけを更新。基点はmain/2f2479ca638c569f6978bec47c509646bd92ff67の作業ツリー。
+
+### 同日：最終レビュー・修正・Git受け渡し
+
+- 利用者の修正・push指示により、実装とテストをcommit `55baa9d7ec83f643c871c6680017893924093ef3`へ確定。基点は`2f2479ca638c569f6978bec47c509646bd92ff67`。送信先は既存の`origin/main`で、fetch時に基点との乖離なし。設計判断・各試験の成功/失敗を含むSoftware Vaultの変更は、この実装commitを参照して別commitにまとめる。
+- 部分保存の再試行で呼出し側のrevision/provider/modelが変わると、元のJSON表と異なるbytesを作ろうとして再保存が失敗する問題を合成値で再現。保存開始時のpendingにあるrevision、provider/model、app_urlを使うよう修正した。固定成果物の直接上書き・移行は追加しない。回帰テストは修正前に失敗し、修正後に成功した。
+- 隣接試験の初回38件は、一時SQLiteの接続未closeによりWindowsのcleanupで12件エラー。共有fixtureのcontext managerでcommit/rollback後にcloseするよう修正した。失敗をskipやignoreへ変更せず、当該試験とfixture利用側を再実行した。
+- Windows `.venv/Scripts/python.exe`、`PYTHONPATH=src;tests`、`PYTHONIOENCODING=utf-8`で検証。appの保存先は`output/final-review`配下へ隔離。下記は重複を含む別バッチの結果で、件数を合算した独立テスト数ではない。
+  - 最終レビュー前: `python -m unittest test_analysis_fixed_run test_analysis_storage test_analysis_queries test_analysis_milestones test_pipeline_regressions test_interview_comparison test_csv_field_limit test_analysis_orchestration test_analysis_orchestration_adapters test_analysis_orchestration_integration test_orchestration_review test_orchestration_durable_integration test_orchestration_publication test_orchestration_initial_recovery test_analysis_orchestration_routes test_saved_autonomous_analysis -q` — 264件成功、115.441秒。
+  - 再試行修正後: `python -m unittest test_analysis_fixed_run test_analysis_storage test_analysis_snapshot_commit test_analysis_plan_binding test_orchestration_publication test_analysis_orchestration_integration -q` — 84件成功、97.265秒。
+  - fixture修正後: `python -m unittest test_analysis_definition_safety test_analysis_orchestration_methods test_analysis_orchestrator_regressions test_analysis_publication test_analysis_publication_safety test_analysis_recovery test_analysis_exports test_analysis_research_protocol -q` — 68件成功、27.397秒。`python -m unittest test_analysis_generation_safety -q` — 15件成功、2.437秒。
+  - UI: `GURUMOJI_TEST_PYTHON`を同じvenvへ向け、`node --test tests/dom/orchestration.test.cjs` — 26件成功。`GURUMOJI_RUN_UI_BROWSER=1`で`python -m unittest test_ui_safety_browser.UiSafetyBrowser.test_autonomous_defaults_minimum_three_and_optional_caps -v` — 実ブラウザー1件成功、1.539秒。通信は合成fixtureのみ。
+- Python compile、JS構文、`git diff --check`も成功。全体suite、追加の実AI推論、音声処理、実Vault公開/移行、別環境への反映は未実行。実AI3回採用の証拠と限定範囲は直前の節を参照し、今回の保存再試行修正後に再推論したとは扱わない。
+- commit対象は実装・テスト・再現スクリプトと設計記録だけ。`runtime`、`config/tokens.json`、個人Vault、実DBコピーや`output`の推論成果物は含めない。利用者データへの新たな書込みなし。

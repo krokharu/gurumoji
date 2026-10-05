@@ -4,7 +4,8 @@ note_type: module
 title: Core・Handler自律分析と実行状態UI
 summary: 固定分析を残した自律分析、初期全量保持、批判応答、停止・復旧の契約。
 status: current
-verified: 2026-10-04
+verified: 2026-10-05
+updated: 2026-10-05
 schema_version: 1
 tags:
   - gurumoji/program
@@ -41,13 +42,25 @@ tags:
 
 モデル呼出しとHTML表示は分離する。`app.call_orchestration_ai_json` は1タスクにつき1回のtransport dispatchとし、既存HTTP clientの内部再送をこの経路だけ無効にする。不明な外部実行を勝手に再送しない。既存AI経路の再試行方針は変更しない。
 
+2026-10-05のWindows検証で、CSV上限設定のC long幅による起動失敗と、raw SQLite connection factoryでの未closeを修正した。Coreの要約は空白だけを含む空文字も拒否し、不正な原結果は隔離して成功回数へ数えない。解釈担当へlabel_frequencyを指定した案も、タスク登録前に隔離する。プロンプト版は `core-handler-prompts-3-explicit-decision`。Coreは追加タスクか終了案を明示し、モデル用の終了理由はquestion_satisfied/no_more_evidence/human_review_requiredを区別する。ラベル案ではutterance_idとevidence_idを区別する。既存の `no_new_tasks` は作業案がない場合の停止であり、分析完了に読み替えない。
+
 ## 停止設定
+
+2026-10-05の利用者指定により、新規run/APIと画面の既定はAIお任せ。`config.min_iterations=3`を固定し、採用済みのCore判断が最低3回になるまで通常の自動終了を保留する。3回目以降はCoreが続行または終了を判断し、終了前レビューと批判応答の契約を維持する。プロンプト版は`core-handler-prompts-4-minimum-iterations`。最低回数は「十分な分析品質」の保証ではない。
+
+回数は永続化済み`orchestration_decisions`から数え、登録・通信試行・隔離結果を含めない。Core contextのbudgetへmin_iterations/completed_core_iterationsを渡し、原文の根拠対応・代替説明・未読範囲・批判応答を再検討させる。終了を保留したイベントと元の終了理由も保存する。同じ版のレビューを不要に繰り返さない。版が更新されたレビューは今回の`review_target`を使い、古い版を転記した応答は引き続き隔離する。
+
+AIお任せの時間/回数上限は既定で空欄。任意の回数上限は3以上を要求する。手動停止、時間/呼出し/タスク上限、障害・不正応答・レビュー失敗は最低回数より優先するため、これらの停止時に3回を達成したと扱わない。明示的な時間/回数/重要度モードには最低回数を追加しない。既存runの条件・履歴は書き換えず、min_iterationsがない保存条件は最低回数なしとして扱う。既存のadapter版不一致による復旧停止も維持する。
 
 時間、Core巡回数、重要度、AIお任せの4モード。AIお任せでは時間・巡回数を無上限にできるが、呼出し数・タスク数等の運用上限と手動停止は残る。重要度の高/中/低は未校正の暫定基準であり、確率・LLM自信・p値ではない。実費用を確実に取得できないため金額上限は受理せず、呼出し数・タスク数の上限で制御する。
 
 ブラウザーを閉じても取消しにはしない。再表示は台帳を読み、実行を再発注しない。プロセス中断や応答不明は、完了済み結果を残して復旧判断を待つ。時間上限到達後の外部処理の物理的停止はproviderにも依存する。
 
 ## API
+
+批判者のissue対象ID/版は、今回のreview_targetに一致する単一候補を生成用JSON schemaへ渡す。共有schemaは変更せず呼出しごとにコピーし、別run/別版へ制約が漏れない。返答の対象版・状態と指摘一覧の整合性は採用前にも検証し、不正応答を後から補正して成功扱いにしない。
+
+Coreのcritique_responses/label_decisionsも今回実在するissue_id/proposal_idを生成候補にする。存在しない場合は配列のmaxItems=0。生成時の制約に加え、既存の採用前参照検証を維持する。架空の批判応答やラベル判断を修復して採用しない。
 
 基本パス: `/api/library/<item_id>/analysis/orchestration`
 
@@ -62,6 +75,12 @@ tags:
 - `/<run_id>/export.json` / `export.md` GET: 完全履歴JSON / Obsidian用ノートのダウンロード
 
 画面更新・アニメーションはstatus/eventフラグとCSSのみ。表示のためのLLM呼出しは0回。token数はproviderの実測を受信した場合だけ表示し、未計測や一部不明を0扱いしない。
+
+開始条件に `context_evidence_limit`（1〜120、既定120）と `context_text_limit`（1〜60000文字、既定60000）を指定できる。ローカルモデルの入力枠に合わせて1呼び出しの原文量を減らしても、全量の固定入力は保持する。各contextの `coverage` は利用可能件数・提供件数・省略件数を区別する。未読範囲を既読や確認済みにしない。これらは文字数・発話数の上限であり、根拠索引や結果履歴も含む総token数の保証ではない。
+
+`context_index_limit`（0〜120、既定0）は各呼出しの根拠ID索引を先頭から制限する。0は従来通り省略なし。原文だけを減らしても323件のランダムID索引が入力枠を圧迫したため追加した。coverageのindex_available_count/index_provided_count/index_omitted_countに索引の省略を別記する。固定入力全量は保持するが、索引外の発話を自動で順次読む機能はない。制限した範囲の試験を全発話の分析完了と扱わない。
+
+Handlerの `call_timeout_seconds` は実際のAI通信へ渡す。通信worker側の上限600秒は残る。既定の通信240秒で一律に切る旧動作からの修正であり、内部再送を追加しない。
 
 ## 機密性・限界
 
@@ -85,4 +104,6 @@ Vault公開は新runの既定OFF。選択できる単位は **Input・Orchestrat
 
 ## 検証
 
-合成会話・一時DB・mock providerのみ。対象は `tests/test_analysis_orchestration*.py`、`tests/test_orchestration_review.py` とUI回帰。実際の外部AIの品質・費用・Windows実機は別途検証する。具体的な成功/失敗/未実行は運用引継ぎに記録する。
+合成会話・一時DB・mock providerによる回帰対象は `tests/test_analysis_orchestration*.py`、`tests/test_orchestration_review.py` とUI回帰。Windowsの保存データ確認は `scripts/test_saved_autonomous_analysis.py` を使い、元DBを読取専用でコピーして既存POST開始・実AI・保存台帳の経路を実行する。Vault公開を禁止し、初期分析だけの成功や空結果では合格させない。具体的な成功/失敗/未実行、モデルの実入力枠、実データ検証の限界は [[60-Operations/gurumoji-improvement-session]] に記録する。外部クラウドAIの品質・費用や実Vault公開を確認したという意味ではない。
+
+試験の`--no-think`は対応するQwen3の実capabilityを確認し、既存の推論設定変換からreasoning_effort=noneを実通信へ渡す。応答を代用しない。`loop_execution_verified`は2回以上の有効Core結果・実usage・不正タスクなしと、安全な終状態を確認する。人の確認待ちでも反復動作は確認できるが、`analysis_completed`と厳格な`passed`は成功に変えない。
