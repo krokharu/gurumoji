@@ -922,7 +922,7 @@ def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
             return result("unsupported", "method_capability_unavailable")
         if contracts and (contract is None or not contract["supported"]):
             return result("unsupported", "typed_asset_adapter_unimplemented")
-        if contract and candidate["unit"] != contract["unit"]:
+        if contract and "unit" in contract and candidate["unit"] != contract["unit"]:
             return result("rejected", "typed_meaning_unit")
         if candidate["meaning_status"] == "unknown" or candidate["human_review_state"] == "human_pending":
             return result("human_pending", "meaning_or_human_unconfirmed")
@@ -936,6 +936,9 @@ def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
 def validate_table_pilot_request(method_id, request):
     """Closed opt-in code request. No AI expressions or implicit conversion."""
     from .analysis_method_registry import TABLE_PILOT_METHODS, table_pilot_slot
+    from .analysis_method_registry import CONNECTED_METHODS
+    if method_id in CONNECTED_METHODS:
+        return validate_connected_request(method_id, request)
     def reject(code="table_request_invalid"):
         raise AnalysisContractError("表パイロットの固定契約と一致しません。", code=code)
     if method_id not in TABLE_PILOT_METHODS: reject("table_method_unsupported")
@@ -1001,4 +1004,45 @@ def validate_table_pilot_request(method_id, request):
                 or selector["selection_hash"] != fingerprint({k:v for k,v in selector.items() if k != "selection_hash"})):
             reject("table_selector_unsupported")
     if len(canonical(request)) > TABLE_PILOT_MAX_BYTES: reject("table_request_byte_limit")
+    return json.loads(canonical(request))
+
+
+def validate_connected_request(method_id, request):
+    """Closed deterministic v2 request; no expressions, implicit adoption or latest."""
+    from .analysis_method_registry import CONNECTED_METHODS, connected_slot
+    def require(value, code):
+        if not value: raise AnalysisContractError("固定接続契約と一致しません。", code=code)
+    require(method_id in CONNECTED_METHODS and _connection_object(request, ("version", "actor", "parameters", "bindings")), "connected_request")
+    require(request["version"] == "connected-assets-2" and request["actor"] == "code", "connected_actor_version")
+    require(_connection_object(request["parameters"], CONNECTED_METHODS[method_id]), "connected_parameters")
+    bindings = request["bindings"]
+    require(_connection_object(bindings, ("slot", "inputs", "context")) and canonical(bindings["slot"]) == canonical(connected_slot(method_id)), "connected_slot")
+    context = bindings["context"]
+    require(_connection_object(context, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "purpose", "destination", "scope_id", "scope_manifest_hash", "cancelled")), "connected_context")
+    require(context["purpose"] == "exploratory" and context["destination"] == "local" and context["cancelled"] is False
+            and all(type(context[k]) is int and context[k] >= 1 for k in ("plan_version", "generation"))
+            and all(_connection_id(context[k]) for k in ("plan_id", "consumer_task_id", "scope_id"))
+            and all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash")), "connected_context_identity")
+    refs = bindings["inputs"]; seen = set()
+    require(isinstance(refs, list) and len(refs) == bindings["slot"]["min_items"], "connected_cardinality")
+    for ref in refs:
+        require(_connection_object(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "slot_id", "input_ref_id", "role", "selection", "omission_reason", "source", "selector")), "connected_ref")
+        require(ref["selection"] == "selected" and ref["role"] == "data_input" and ref["omission_reason"] is None and ref["slot_id"] == "table"
+                and _connection_id(ref["input_ref_id"]) and ref["input_ref_id"] not in seen
+                and all(type(ref[k]) is type(context[k]) and ref[k] == context[k] for k in ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id")), "connected_ref_identity")
+        seen.add(ref["input_ref_id"]); source = ref["source"]
+        require(isinstance(source, dict), "connected_source")
+        if source.get("type") == "frozen":
+            require(_connection_object(source, ("type", "asset_key", "content_hash", "content_domain"))
+                and _connection_object(source["asset_key"], ("library_id", "store_run_id", "artifact_id", "output_name"))
+                and all(_connection_id(v) for v in source["asset_key"].values()) and _connection_hash(source["content_hash"])
+                and source["content_domain"] in HASH_DOMAINS, "connected_frozen")
+        else:
+            require(_connection_object(source, ("type", "producer_task_id", "output_name")) and source["type"] == "from_step"
+                and all(_connection_id(source[k]) for k in ("producer_task_id", "output_name")), "connected_from_step")
+        selector = ref["selector"]
+        require(_connection_object(selector, ("row_ids", "column_ids", "range_ref", "selection_hash"))
+                and selector["row_ids"] == [] and selector["column_ids"] == [] and selector["range_ref"] is None
+                and selector["selection_hash"] == fingerprint({k:v for k,v in selector.items() if k != "selection_hash"}), "connected_selector")
+    require(len(canonical(request)) <= TABLE_PILOT_MAX_BYTES, "connected_byte_limit")
     return json.loads(canonical(request))

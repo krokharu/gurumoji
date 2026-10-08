@@ -25,7 +25,8 @@ from .analysis_core import (AnalysisContractError, canonical, fingerprint,
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
     read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
 from .services.analysis_orchestration_methods import STATISTICAL_TOOLS
-from .analysis_method_registry import TABLE_PILOT_METHODS
+from .analysis_method_registry import TABLE_PILOT_METHODS as LEGACY_TABLE_METHODS, CONNECTED_METHODS
+TABLE_PILOT_METHODS = {**LEGACY_TABLE_METHODS, **CONNECTED_METHODS}
 
 SCHEMA_VERSION = 1
 ROLES = {"core": "Core", "handler": "Handler", "interpretation": "会話解釈",
@@ -1255,7 +1256,7 @@ class AnalysisOrchestrationService:
                                     {} if method == "table_projection" else {"status_column": "value_status",
                                     **({"operation": "count", "group_by": "utterance_id", "unit": "utterance"}
                                        if method == "table_aggregate" else {})})}
-                              for method, parameters in TABLE_PILOT_METHODS.items()],
+                              for method, parameters in LEGACY_TABLE_METHODS.items()],
                   "scope_requirements": ["scope_id", "scope_manifest_hash"],
                   "purposes": ["exploratory", "descriptive"], "selector": selector,
                   "inputs": [], "offset": offset, "next_offset": None, "truncated": False}

@@ -90,6 +90,21 @@ def connection_method_descriptor(method_id: str) -> dict | None:
         STATISTICAL_TOOLS, STATISTICAL_TOOL_VERSION,
     )
     from .analysis_core import fingerprint
+    if method_id in CONNECTED_METHODS:
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        table = {"kind": "observation_table", "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                 "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)}, "adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+                 "content_domain": "raw-bytes-v1", "actor_kinds": ["code", "system"], "supported": True}
+        contracts = [connection_kind_contract("claim_set")] if method_id == "theme_evidence_table" else [table]
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "connected-assets-2", "output_names": ["table"],
+                "logical_output_kinds": ["observation_table"], "input_contracts": contracts,
+                "native_input_schema": contracts[0]["schema"], "native_adapter": contracts[0]["adapter"],
+                "original_source_types": [], "units": ["dataset_claim"] if method_id == "theme_evidence_table" else
+                    ["utterance", "conversation_speaker", "conversation", "participant"],
+                "reference_roles": ["data_input"], "input_actor_kinds": ["ai", "code", "system"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial", "purposes": ["exploratory"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": False}
     if method_id == "thematic":
         contracts = [connection_kind_contract(k) for k in
                      ("claim_set", "relation_graph", "event_sequence", "embedding_matrix", "snapshot")]
@@ -194,6 +209,26 @@ TABLE_PILOT_METHODS = {
     "table_frequency": ("value_column", "status_column"),
     "table_crosstab": ("row_column", "column_column", "status_column"),
 }
+
+# Explicit versioned operations; the original five pilot contracts remain fixed.
+CONNECTED_METHODS = {
+    "theme_evidence_table": ("theme_id",),
+    "unit_projection": ("columns", "unit_ids"),
+    "unit_aggregate": ("value_column", "operation", "unit", "participant_mapping"),
+    "unit_join": ("keys",),
+    "unit_correlation": ("x_column", "y_column", "statistic"),
+}
+
+
+def connected_slot(method_id):
+    from .analysis_core import TABLE_PILOT_MAX_BYTES
+    descriptor = connection_method_descriptor(method_id)
+    count = 2 if method_id == "unit_join" else 1
+    return {"slot_id": "table", "required": True, "min_items": count, "max_items": count,
+            "roles": ["data_input"], "accept_kinds": [c["kind"] for c in descriptor["input_contracts"]],
+            "accept_schemas": [c["schema"] for c in descriptor["input_contracts"]], "accept_units": descriptor["units"],
+            "scope_modes": ["dataset"], "actors": descriptor["input_actor_kinds"],
+            "adapter": descriptor["native_adapter"], "purposes": ["exploratory"], "max_bytes": TABLE_PILOT_MAX_BYTES}
 
 
 def table_pilot_slot(method_id):

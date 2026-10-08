@@ -1078,6 +1078,11 @@ class AnalysisStore:
         if artifact is None: raise AssetBindingError("artifact_missing", "needs_input")
         raw = content[key["output_name"]]
         if _asset_hash(raw) != descriptor["raw_byte_hash"]: raise AssetBindingError("raw_hash_mismatch")
+        from .analysis_method_registry import CONNECTED_METHODS
+        if not original and descriptor.get("method_id") in CONNECTED_METHODS:
+            expected = self.connected_output_descriptor(key["store_run_id"])
+            if canonical(expected) != canonical(descriptor): raise AssetBindingError("connected_descriptor_mismatch")
+            return raw, snapshot
         from .analysis_method_registry import connection_kind_contract
         # Fixed Handler source lives alongside the unchanged human-readable
         # archive; it is never reconstructed from a current database item.
@@ -1599,7 +1604,7 @@ class AnalysisStore:
                 key = _asset_key(asset["asset_key"])
                 if key in visiting: raise AssetBindingError("content_cycle")
                 if key in walked: return
-                self._connection_content(asset, original=original)
+                _parent_raw, parent_snapshot = self._connection_content(asset, original=original)
                 history = states.get(key, {})
                 if not history: raise AssetBindingError("parent_state_unknown", "needs_input")
                 state = history[max(history)]
@@ -1609,7 +1614,13 @@ class AnalysisStore:
                 if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
                     self._human_review(asset, state)
                 if (asset["scope"]["scope_id"], asset["scope"]["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
-                    raise AssetBindingError("parent_scope_intersection", "blocked")
+                    from .analysis_method_registry import CONNECTED_METHODS
+                    def population(value):
+                        return sorted((e.get("utterance_id", e.get("evidence_id")), e.get("text"), e.get("excluded")) for e in value.get("evidence", []))
+                    if (method_id not in CONNECTED_METHODS or any(parent_snapshot.get(k) != snapshot.get(k) for k in
+                            ("input_hash", "conversation_id", "source_revision", "analysis_revision"))
+                            or population(parent_snapshot) != population(snapshot)):
+                        raise AssetBindingError("parent_scope_intersection", "blocked")
                 permissions.append(state)
                 base["parent_checks"].append({"asset_key": asset["asset_key"], "target_content_hash": state["target_content_hash"],
                                               "target_domain": state["target_domain"], "state_revision": state["state_revision"],
@@ -1785,9 +1796,138 @@ class AnalysisStore:
         for binding in base["bindings"]: binding.update(decision=base["decision"], reason=base["reason"])
         return base
 
+    def prepare_connected(self, method_id, request, *, expected_snapshot=None):
+        """Resolve the actual registered v2 consumer through shared binding checks."""
+        from .analysis_core import validate_connected_request, fingerprint, AnalysisContractError
+        request = validate_connected_request(method_id, request)
+        receipt = self.bind_asset_inputs(method_id=method_id, **request["bindings"])
+        if receipt["decision"] != "eligible":
+            raise AnalysisContractError("固定資産を利用できません。", code="connected_input_" + receipt["reason"])
+        assets, _originals, states, _links = self._connection_index(); tables = []
+        for binding, delivered in zip(receipt["bindings"], receipt["payloads"]):
+            asset = assets[_asset_key(binding["source"])]; _raw, snapshot = self._connection_content(asset)
+            if expected_snapshot is not None and (any(snapshot.get(k) != expected_snapshot.get(k) for k in
+                    ("input_hash", "conversation_id", "source_revision", "analysis_revision"))
+                    or fingerprint(snapshot.get("evidence")) != fingerprint(expected_snapshot.get("evidence"))):
+                raise AnalysisContractError("固定元入力が異なります。", code="connected_source_mismatch")
+            if method_id == "theme_evidence_table":
+                candidate = delivered["value"]; content = candidate["content"]
+                theme = next((t for t in candidate["themes"] if t["content"]["theme_id"] == request["parameters"]["theme_id"]), None)
+                if theme is None: raise AnalysisContractError("テーマIDがありません。", code="connected_theme")
+                theme = theme["content"]
+                support = {r["utterance_id"] for r in theme["support"]}
+                counter = {r["utterance_id"] for r in theme["counterexamples"]}
+                unread_state = candidate["coverage"]["unread_sets"]["processing"]
+                unread = set(unread_state["ids"] or []) if unread_state["status"] == "measured" else set()
+                refs = states[_asset_key(asset["asset_key"])][binding["checked_state_revision"]]["review_refs"]
+                definition = copy.deepcopy(refs[0])
+                fields = ["unit_id", "conversation_id", "speaker_id", "value_status", "support_count", "counter_count"]
+                variables = [{"variable_id":k,"version":1,"definition_hash":definition["content_hash"],
+                    "definition_ref":definition,"value_type":"integer" if k.endswith("_count") else "string",
+                    "scale":"ratio" if k.endswith("_count") else "nominal", "unit":"utterance",
+                    "value_domain":"explicit_evidence_relation" if k.endswith("_count") else "qualified_identity",
+                    "generation":{"kind":"code","actor_id":"connected-assets-2","step_ids":[method_id]},
+                    "validity":"structural_checked"} for k in fields]
+                by_uid = {str(s["id"]):s for s in snapshot.get("segments", snapshot.get("analysis",{}).get("segments",[]))}
+                rows=[]; sources={}; denominators={}; source_utterances={}
+                for e in snapshot["evidence"]:
+                    utterance = e["utterance_id"]; uid = "utterance:" + fingerprint([self.library_id(),snapshot["conversation_id"],snapshot["input_hash"],utterance]).removeprefix("sha256:")
+                    status = "excluded" if e["excluded"] else "unprocessed" if utterance in unread else "observed" if utterance in support | counter else "unknown"
+                    speaker = by_uid.get(utterance,{}).get("speaker")
+                    rows.append({"unit_id":uid,"conversation_id":snapshot["conversation_id"],"speaker_id":speaker or "",
+                        "value_status":status,"support_count":int(utterance in support) if status == "observed" else None,
+                        "counter_count":int(utterance in counter) if status == "observed" else None})
+                    sources[uid]=[uid]; source_utterances[uid]={"conversation_id":snapshot["conversation_id"],"input_hash":snapshot["input_hash"],"utterance_id":utterance}
+                    denominators[uid]={"included":int(status != "excluded"),"observed":int(status == "observed")}
+                tables.append({"fields":fields,"rows":rows,"unit":"utterance","variables":variables,"sources":sources,
+                    "input_hashes":[snapshot["input_hash"]],"definition_adoption_refs":copy.deepcopy(refs),
+                    "denominators":denominators,"source_utterances":source_utterances,"scope":asset["scope"],"theme_id":theme["theme_id"]})
+            else:
+                _s, result, _m, _c = self.verified_package(asset["asset_key"]["store_run_id"])
+                contract = result.get("unit_contract")
+                table = delivered["value"]
+                if isinstance(contract,dict) and contract.get("version") == "unit-table-2":
+                    tables.append({**copy.deepcopy(contract), "fields":table["fields"], "rows":[r["values"] for r in table["rows"]]})
+                else:
+                    if asset["meaning"]["unit"] != "utterance" or not {"utterance_id","conversation_id","value_status"} <= set(table["fields"]):
+                        raise AnalysisContractError("発話対応を持つ固定表が必要です。",code="connected_unit_contract")
+                    originals={e["utterance_id"]:e for e in snapshot["evidence"]}
+                    seen=set(); rows=[]; sources={}; utterances={}; denominators={}
+                    by_uid={str(s["id"]):s for s in snapshot.get("segments",snapshot.get("analysis",{}).get("segments",[]))}
+                    for wrapped in table["rows"]:
+                        row=copy.deepcopy(wrapped["values"]); old_id=row.pop("utterance_id")
+                        if old_id not in originals or old_id in seen or row["conversation_id"] != snapshot["conversation_id"]:
+                            raise AnalysisContractError("発話対応が曖昧です。",code="connected_unit_identity")
+                        seen.add(old_id); e=originals[old_id]
+                        if e["excluded"] != (row["value_status"] == "excluded"):
+                            raise AnalysisContractError("除外状態が異なります。",code="connected_unit_exclusion")
+                        uid="utterance:"+fingerprint([self.library_id(),snapshot["conversation_id"],snapshot["input_hash"],old_id]).removeprefix("sha256:")
+                        row["unit_id"]=uid; row["speaker_id"]=by_uid.get(old_id,{}).get("speaker") or ""; rows.append(row)
+                        sources[uid]=[uid]; utterances[uid]={"conversation_id":snapshot["conversation_id"],"input_hash":snapshot["input_hash"],"utterance_id":old_id}
+                        denominators[uid]={"included":int(row["value_status"]!="excluded"),"observed":int(row["value_status"]=="observed")}
+                    if seen != originals.keys(): raise AnalysisContractError("未処理行が欠落しています。",code="connected_unit_population")
+                    variables=[{**copy.deepcopy(v),"variable_id":"unit_id" if v["variable_id"]=="utterance_id" else v["variable_id"]} for v in asset["variables"]]
+                    variables.append({**copy.deepcopy(next(v for v in variables if v["variable_id"]=="unit_id")),"variable_id":"speaker_id"})
+                    tables.append({"fields":list(rows[0]),"rows":rows,"unit":"utterance","sources":sources,"source_utterances":utterances,
+                        "variables":variables,"denominators":denominators,"definition_adoption_refs":[],"input_hashes":[snapshot["input_hash"]],"scope":asset["scope"]})
+        mapping = request["parameters"].get("participant_mapping")
+        if mapping is not None:
+            packages, latest = self._human_packages()
+            matching = [p for p in latest.values() if p["ref"] == mapping.get("record_ref") and p["record"]["decision"] == "adopt"
+                and p["record"]["actor"] == mapping.get("actor")]
+            if len(matching) != 1: raise AnalysisContractError("参加者対応の確定記録がありません。",code="connected_participant_record")
+            human_result = self.verified_package(matching[0]["run_id"])[1]
+            try: declared = json.loads(human_result["human_submission"]["source_text"])
+            except (TypeError,ValueError): declared = None
+            if declared != {"participant_mapping":mapping.get("assignments")}:
+                raise AnalysisContractError("参加者対応が保存された研究者原文と異なります。",code="connected_participant_body")
+        from .research_analysis import run_connected_table
+        run_connected_table(method_id,copy.deepcopy(tables),copy.deepcopy(request["parameters"]))
+        return {"method_id":method_id,"request":request,"receipt":receipt,"tables":tables,"content_hash":fingerprint(tables)}
+
+    def connected_output_descriptor(self, run_id):
+        """Fresh immutable bytes and actual Handler validation establish a producer."""
+        from .analysis_core import fingerprint, AnalysisContractError
+        from .analysis_method_registry import CONNECTED_METHODS, connection_output_contract
+        snapshot,result,manifest,content=self.verified_package(run_id)
+        params=result.get("parameters",{}); provenance=params.get("table_pilot_provenance",{})
+        if result.get("method_id") not in CONNECTED_METHODS or result.get("method_id") == "unit_correlation" or provenance.get("version") != "connected-assets-2":
+            raise AnalysisContractError("再利用できる単位表ではありません。",code="connected_output_unsupported")
+        with self.connect() as db:
+            row=db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",(params.get("task_id"),params.get("execution_run_id"))).fetchone()
+            raw=db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE task_id=? AND run_id=?",(params.get("task_id"),params.get("execution_run_id"))).fetchone()
+            run_row=db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",(params.get("execution_run_id"),)).fetchone()
+        task=_read_typed_json(row[0]) if row else {}; metadata=_read_typed_json(raw[1]) if raw else {}
+        run=_read_typed_json(run_row[0]) if run_row else {}
+        if (not run or run.get("cancel_requested") or run.get("status") == "cancelled" or run.get("stale")
+                or task.get("generation") != run.get("generation")
+                or task.get("status") != "succeeded" or task.get("stale") or task.get("table_store_run_id") != run_id
+                or metadata.get("validation_status") != "valid" or metadata.get("stale")
+                or fingerprint(_read_typed_json(raw[0])) != metadata.get("raw_hash")
+                or canonical({k:v for k,v in result.items() if k != "parameters"}) != canonical(_read_typed_json(raw[0]))):
+            raise AnalysisContractError("Handler確定原票が異なります。",code="connected_output_ledger")
+        contract=result["unit_contract"]
+        if canonical(contract) != canonical(provenance.get("unit_contract")):
+            raise AnalysisContractError("単位契約が異なります。",code="connected_output_contract")
+        artifact=next(a for a in manifest["artifacts"] if a["name"] == "tables/table.json")
+        output=connection_output_contract(result["method_id"],"tables/table.json","observation_table")
+        content_hash=_asset_hash(content["tables/table.json"])
+        parents=[{"target_type":"artifact","target_id":b["source"]["artifact_id"],"version":str(b["schema"]["version"]),
+            "content_hash":b["content_hash"],"hash_domain":b["content_domain"],"library_id":b["source"]["library_id"]} for b in provenance["parents"]]
+        return {"asset_key":{"library_id":manifest["library_id"],"store_run_id":run_id,"artifact_id":artifact["id"],"output_name":"tables/table.json"},
+            "raw_byte_hash":content_hash,"schema":output["schema"],"scope":copy.deepcopy(contract["scope"]),
+            "producer":{"kind":"code","actor_id":"connected-assets-2","step_ids":[result["method_id"]]},"adapter":output["adapter"],
+            "meaning":{"definition_refs":copy.deepcopy(contract["definition_adoption_refs"]),"description":"Explicit evidence relations; exploratory structural units only",
+                "status":"declared","unit":contract["unit"]},"contract_id":"gurumoji.analysis-asset-connection","contract_version":1,
+            "content_hash":content_hash,"content_domain":"raw-bytes-v1","kind":"observation_table","source_refs":copy.deepcopy(contract["scope"]["input_refs"]),
+            "method_id":result["method_id"],"method_version":"connected-assets-2","variables":copy.deepcopy(contract["variables"]),"parent_refs":parents}
+
     def prepare_table_pilot(self, method_id, request, *, expected_snapshot=None):
         """Resolve a bounded frozen table; no adoption, scheduler or inferred metadata."""
         from .analysis_core import validate_table_pilot_request, AnalysisContractError, fingerprint
+        from .analysis_method_registry import CONNECTED_METHODS
+        if method_id in CONNECTED_METHODS:
+            return self.prepare_connected(method_id, request, expected_snapshot=expected_snapshot)
         request = validate_table_pilot_request(method_id, request)
         binding = request["bindings"]
         context = binding["context"]
@@ -1869,6 +2009,10 @@ class AnalysisStore:
     def table_pilot_carrier(self, raw, prepared):
         """Persist primitive utterance carriers with explicit projection omissions."""
         from .analysis_core import AnalysisContractError, fingerprint
+        from .analysis_method_registry import CONNECTED_METHODS
+        if raw["method_id"] in CONNECTED_METHODS:
+            return raw["datasets"]["table"], {"version":"connected-assets-2", "unit_contract":raw["unit_contract"],
+                "parents":copy.deepcopy(prepared["receipt"]["bindings"]), "receipt":copy.deepcopy(prepared["receipt"])}
         method = raw["method_id"]
         if method not in {"table_projection", "table_aggregate", "table_join"}:
             return raw["datasets"]["table"], None
@@ -1933,6 +2077,8 @@ class AnalysisStore:
         """Verified technical descriptor only. Caller must explicitly supply state."""
         from .analysis_core import AnalysisContractError, fingerprint
         snapshot, result, manifest, content = self.verified_package(run_id)
+        from .analysis_method_registry import CONNECTED_METHODS
+        if result.get("method_id") in CONNECTED_METHODS: return self.connected_output_descriptor(run_id)
         provenance = result.get("parameters", {}).get("table_pilot_provenance")
         if (not isinstance(provenance, dict) or provenance.get("version") != "table-pilot-1"
                 or result.get("method_id") not in {"table_projection", "table_aggregate", "table_join"}

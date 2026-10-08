@@ -122,6 +122,9 @@ LABEL_FIELDS = frozenset({"codes", "code", "theme", "sentiment", "dialogue_act",
 
 def run_orchestration_method(method_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
     from ..analysis_method_registry import TABLE_PILOT_METHODS
+    from ..analysis_method_registry import CONNECTED_METHODS
+    if method_id in CONNECTED_METHODS:
+        return run_connected_method(method_id, snapshot)
     if method_id in TABLE_PILOT_METHODS:
         return run_table_pilot_method(method_id, snapshot)
     if method_id in STATISTICAL_TOOLS:
@@ -230,6 +233,12 @@ def _table_population(prepared, method_id):
 def validate_table_pilot_result(raw, task, prepared):
     """Check the real Handler result boundary; structural verification only."""
     from ..analysis_core import canonical, TABLE_PILOT_VERSION, TABLE_PILOT_MAX_BYTES
+    from ..analysis_method_registry import CONNECTED_METHODS
+    if task["method_id"] in CONNECTED_METHODS:
+        expected = run_connected_method(task["method_id"], {"table_pilot":prepared, "orchestration_task":task})
+        if canonical(raw) != canonical(expected):
+            raise AnalysisContractError("固定計算結果と異なります。",code="connected_result_mismatch")
+        return
     if (not isinstance(raw, dict) or raw.get("method_id") != task["method_id"]
             or raw.get("method_version") != TABLE_PILOT_VERSION
             or raw.get("dataset_version") != task["dataset_version"]
@@ -358,3 +367,19 @@ def run_table_pilot_method(method_id, snapshot):
                            calculation_denominator=len(calculation_ids))
     validate_table_pilot_result(raw, task, prepared)
     return raw
+
+
+def run_connected_method(method_id, snapshot):
+    from ..research_analysis import run_connected_table
+    import copy
+    prepared = snapshot["table_pilot"]; task=snapshot["orchestration_task"]
+    result = run_connected_table(method_id,copy.deepcopy(prepared["tables"]),copy.deepcopy(prepared["request"]["parameters"]))
+    return {"summary":"固定資産の登録計算。探索用・意味妥当性は未評価。","claims":[],"method_id":method_id,
+        "method_version":"connected-assets-2","dataset_version":task["dataset_version"],"research_mode":"exploratory",
+        "status":"computed","analysis_unit":result["unit_contract"]["unit"],
+        "datasets":{"table":{"fields":result["fields"],"rows":result["rows"]}},
+        "population":result["population"],"unit_contract":result["unit_contract"],
+        "manifest":{"version":"connected-assets-2","input_hash":prepared["content_hash"],
+            "parameters_hash":fingerprint(prepared["request"]["parameters"]),"rows_hash":fingerprint(result["rows"]),
+            "binding_ids":[b["binding_id"] for b in prepared["receipt"]["bindings"]]},
+        "limitations":["採用された質的根拠の構造計算。測定妥当性・独立性・確認的推論を認定しません。"]}

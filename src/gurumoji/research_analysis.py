@@ -1256,6 +1256,143 @@ def run_table_pilot(method_id: str, tables: list[dict], parameters: dict) -> dic
     return _table_pilot_finish(["row_value", "column_value", "count", "source_utterance_ids"], output, population, zero_cells=True)
 
 
+def run_connected_table(method_id, tables, parameters):
+    """Fixed v2 unit transformations. Values and source identities stay separate.
+
+    The Store supplies verified complete rows and adoption references. This pure
+    kernel does not resolve human claims or assign participant identities.
+    """
+    from .analysis_core import fingerprint
+    def require(ok, code):
+        if not ok: _table_pilot_error("v2_" + code)
+    require(isinstance(tables, list) and len(tables) == (2 if method_id == "unit_join" else 1), "cardinality")
+    source = tables[0]; unit = source["unit"]; rows = source["rows"]
+    variables = {v["variable_id"]: v for v in source["variables"]}
+    sources = source["sources"]
+    require(rows and len({r["unit_id"] for r in rows}) == len(rows), "identity")
+    require(all(r["value_status"] in {"observed", "missing", "unprocessed", "unknown", "excluded"} and
+        r["unit_id"] in sources and sources[r["unit_id"]] for r in rows), "status_sources")
+    fields = list(source["fields"])
+    selected = rows
+    if method_id == "theme_evidence_table":
+        require(set(parameters) == {"theme_id"} and parameters["theme_id"] == source["theme_id"], "theme")
+    elif method_id == "unit_projection":
+        columns = parameters["columns"]; ids = parameters["unit_ids"]
+        require(_table_pilot_names(columns, nonempty=True) and {"unit_id", "conversation_id", "value_status"} <= set(columns)
+            and set(columns) <= set(fields) and _table_pilot_names(ids, nonempty=True)
+            and set(ids) <= {r["unit_id"] for r in rows}, "projection")
+        selected = [r for r in rows if r["unit_id"] in set(ids)]
+        # Omitted units remain explicit carriers and cannot silently become zero.
+        rows = [{**{k:r.get(k) for k in columns}, "value_status": r["value_status"] if r in selected else "excluded"} for r in rows]
+        fields = columns; variables = {k:variables[k] for k in fields}
+    elif method_id == "unit_aggregate":
+        column = parameters["value_column"]; operation = parameters["operation"]; target = parameters["unit"]
+        require(column in variables and column not in {"unit_id", "conversation_id", "value_status", "speaker_id"}
+            and operation in {"count", "sum", "mean"} and target in {"conversation_speaker", "conversation", "participant"}, "aggregate")
+        require(unit == "utterance", "aggregate_source_unit")
+        definition = variables[column]
+        if operation != "count":
+            require(definition["value_type"] in {"integer", "number"} and definition["scale"] in {"interval", "ratio"}, "scale")
+        mapping = parameters["participant_mapping"]
+        require(mapping is None if target != "participant" else isinstance(mapping, dict), "participant_mapping")
+        if target == "participant":
+            require(set(mapping) == {"actor", "record_ref", "assignments"} and mapping["actor"].get("kind") == "researcher"
+                and isinstance(mapping["actor"].get("actor_id"), str) and mapping["record_ref"] in source["definition_adoption_refs"], "participant_adoption")
+            require(isinstance(mapping["assignments"], list), "participant_assignments")
+            assigned = {}
+            for a in mapping["assignments"]:
+                require(isinstance(a, dict) and set(a) == {"conversation_id", "speaker_id", "participant_id"}
+                    and all(isinstance(v, str) and v for v in a.values()), "participant_assignment")
+                key = (a["conversation_id"], a["speaker_id"])
+                require(key not in assigned, "participant_ambiguous"); assigned[key] = a["participant_id"]
+        grouped = defaultdict(list)
+        for row in rows:
+            cid = row["conversation_id"]
+            if target != "conversation":
+                speaker = row.get("speaker_id")
+                require(isinstance(speaker, str) and speaker and "|" not in speaker, "speaker_unmapped")
+            if target == "participant":
+                require((cid, speaker) in assigned, "participant_unmapped")
+                key = (assigned[cid, speaker],)
+            else: key = (cid, speaker) if target == "conversation_speaker" else (cid,)
+            grouped[key].append(row)
+        output = []; new_sources = {}; denominators = {}
+        for key, members in sorted(grouped.items()):
+            uid = target + ":" + fingerprint([source["input_hashes"], key]).removeprefix("sha256:")
+            included = [r for r in members if r["value_status"] != "excluded"]
+            observed = [r for r in included if r["value_status"] == "observed"]
+            for r in observed: require(type(r.get(column)) in {int, float} and math.isfinite(r[column]) if operation != "count" else r.get(column) is not None, "observed_value")
+            value = (len(observed) if operation == "count" else sum(r[column] for r in observed)) if observed else None
+            if operation == "mean" and observed: value /= len(observed)
+            status = "observed" if observed else ("excluded" if not included else
+                "unprocessed" if any(r["value_status"] == "unprocessed" for r in included) else
+                "unknown" if any(r["value_status"] == "unknown" for r in included) else "missing")
+            out = {"unit_id": uid, "conversation_id": key[0] if target != "participant" else ",".join(sorted({r["conversation_id"] for r in members})),
+                   "value_status": status, "value": value}
+            if target == "conversation_speaker": out["speaker_id"] = key[1]
+            if target == "participant": out["participant_id"] = key[0]
+            output.append(out); new_sources[uid] = sorted({s for r in members for s in sources[r["unit_id"]]})
+            denominators[uid] = {"included": len(included), "observed": len(observed),
+                **{s:sum(r["value_status"] == s for r in members) for s in ("missing", "unprocessed", "unknown", "excluded")}}
+        rows = output; sources = new_sources; unit = target; fields = list(rows[0])
+        variables = {k:{**definition, "variable_id": k, "unit": unit,
+            "value_type": "integer" if k == "value" and operation == "count" else "number" if k == "value" else "string",
+            "scale": "ratio" if k == "value" and operation == "count" else definition["scale"] if k == "value" else "nominal"} for k in fields}
+    elif method_id == "unit_join":
+        right = tables[1]; keys = parameters["keys"]
+        require(_table_pilot_names(keys, nonempty=True) and "unit_id" in keys and set(keys) <= set(fields)
+            and set(keys) <= set(right["fields"]) and unit == right["unit"] and source["scope"] == right["scope"], "join_scope_keys")
+        def keyed(values):
+            result = {}
+            for row in values:
+                require(all(k in row and row[k] is not None and row[k] != "" for k in keys), "join_null_key")
+                key = tuple(row[k] for k in keys)
+                require(key not in result, "join_ambiguous"); result[key] = row
+            return result
+        left_index = keyed(rows); right_index = keyed(right["rows"])
+        require(left_index.keys() == right_index.keys(), "join_partial")
+        base = {"unit_id", "conversation_id", "speaker_id", "participant_id", "value_status"}
+        require(not (set(fields) & set(right["fields"])) - base, "join_collision")
+        output = []
+        for key, left in left_index.items():
+            other = right_index[key]
+            require(all(left[k] == other[k] for k in base & left.keys() & other.keys())
+                and sources[left["unit_id"]] == right["sources"][other["unit_id"]], "join_identity")
+            output.append({**left, **other})
+        rows = output; fields = list(dict.fromkeys(fields + right["fields"]))
+        variables.update({v["variable_id"]:v for v in right["variables"]})
+    elif method_id == "unit_correlation":
+        x, y = parameters["x_column"], parameters["y_column"]; statistic = parameters["statistic"]
+        require(x != y and x in variables and y in variables and statistic in {"pearson", "spearman"}, "correlation_columns")
+        require(all(variables[k]["value_type"] in {"integer", "number"} and variables[k]["scale"] in
+            ({"interval", "ratio"} if statistic == "pearson" else {"ordinal", "interval", "ratio"}) for k in (x, y)), "correlation_scale")
+        require(all(all(type(r.get(k)) in {int,float} and math.isfinite(r[k]) for k in (x,y))
+                    for r in rows if r["value_status"] == "observed"), "correlation_observed_missing")
+        pairs = [r for r in rows if r["value_status"] == "observed" and all(type(r.get(k)) in {int, float} and math.isfinite(r[k]) for k in (x,y))]
+        coefficient = None; status = "not_computable"
+        if len(pairs) >= 3 and all(len({r[k] for r in pairs}) > 1 for k in (x,y)):
+            try: from scipy import stats
+            except ImportError: status = "unavailable"
+            else:
+                function = stats.pearsonr if statistic == "pearson" else stats.spearmanr
+                coefficient = float(function([r[x] for r in pairs], [r[y] for r in pairs]).statistic); status = "computed"
+        return {"fields": ["statistic", "coefficient", "n", "status", "source_utterance_ids"],
+                "rows": [{"statistic":statistic,"coefficient":coefficient,"n":len(pairs),"status":status,
+                          "source_utterance_ids": sorted({s for r in pairs for s in sources[r["unit_id"]]})}],
+                "unit_contract": {**{k:source[k] for k in ("input_hashes", "definition_adoption_refs", "scope")},
+                    "source_utterances":source.get("source_utterances",{}),
+                    "version":"unit-table-2", "unit":unit, "sources":sources, "variables":list(variables.values()),
+                    "denominators":source["denominators"]}, "population": {"denominator":len(rows),"calculation_denominator":len(pairs)}}
+    else: require(False, "method")
+    return {"fields": fields, "rows":rows, "population": {"denominator":sum(r["value_status"] != "excluded" for r in rows),
+        "calculation_denominator":sum(r["value_status"] == "observed" for r in rows)},
+        "unit_contract": {"version":"unit-table-2", "unit":unit, "input_hashes":source["input_hashes"],
+            "source_utterances":source.get("source_utterances",{}),
+            "definition_adoption_refs":source["definition_adoption_refs"], "sources":sources,
+            "denominators":denominators if method_id == "unit_aggregate" else source["denominators"],
+            "variables":list(variables.values()), "scope":source["scope"]}}
+
+
 def _test_result_base(
     family: str,
     test: str,
