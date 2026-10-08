@@ -662,6 +662,118 @@ class TablePilotHandlerTests(unittest.TestCase):
         self.assertEqual(raw["manifest"]["included_denominator"], 5)
         self.assertEqual(raw["manifest"]["calculation_ids"], ["TEST-u0", "TEST-u1"])
 
+    def crosstab_asset(self, *, row_values=(0, 2, 4), row_type="integer"):
+        values = copy.deepcopy(self.values)
+        values[2].update(value_status="observed", category="A")
+        for index, value in enumerate(row_values):
+            values[index]["n"] = value
+        values[5]["n"] = row_values[1]
+        saved = self.f.store.save(item_id="TEST-conversation", kind="ai_insights", snapshot=self.f.snapshot,
+            result={"schema_version": 1, "parameters": {}, "TEST_fixture_only": True},
+            datasets={"correlations": (self.fields, values)}, request_id="TEST-crosstab-source-" + row_type,
+            input_fingerprint=digest(self.f.snapshot), source_revision=1, analysis_revision=1, publish=False)
+        asset, state = self.f.descriptors(saved)
+        asset["scope"] = copy.deepcopy(self.asset["scope"])
+        asset["variables"] = copy.deepcopy(self.asset["variables"])
+        next(v for v in asset["variables"] if v["variable_id"] == "n").update(value_type=row_type, scale="nominal")
+        self.f.register([asset], states=[state])
+        return asset
+
+    def test_T07b_crosstab_rejects_omitted_zero_cells_with_recomputed_hash(self):
+        from gurumoji.analysis_core import fingerprint
+        asset = self.crosstab_asset()
+        task = self.task("table_crosstab", self.request("table_crosstab", [asset]))
+        def omit_zero_cells(method, snapshot):
+            raw = self.runner(method, snapshot)
+            rows = raw["datasets"]["table"]["rows"]
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(sum(r["count"] == 0 for r in rows), 3)
+            for _ in range(2):
+                rows.remove(next(r for r in rows if r["count"] == 0))
+            self.assertEqual(len(rows), 4)
+            raw["manifest"]["rows_hash"] = fingerprint(rows)
+            return raw
+        self.service.method_runner = omit_zero_cells
+        self.service._execute(self.run["run_id"], task["task_id"])
+        state = self.state_of(task)
+        self.assertEqual(state["status"], "quarantined", state["error"])
+        self.assertEqual(state["error"], "table_output_cells")
+        self.assertNotIn("table_store_run_id", state)
+
+    def test_T07c_complete_crosstab_typed_categories_survive_fresh_store(self):
+        from gurumoji.analysis_core import fingerprint
+        for row_type, values in (("integer", (0, 2, 4)), ("boolean", (False, True, False)),
+                                 ("string", ("0", "2", "4"))):
+            with self.subTest(row_type=row_type):
+                asset = self.crosstab_asset(row_values=values, row_type=row_type)
+                state, raw = self.execute("table_crosstab", self.request("table_crosstab", [asset]))
+                rows = raw["datasets"]["table"]["rows"]
+                expected_cells = {(canonical(v), canonical(c)) for v in values for c in ("A", "B")}
+                self.assertEqual({(canonical(r["row_value"]), canonical(r["column_value"])) for r in rows}, expected_cells)
+                self.assertEqual(len(rows), len(expected_cells))
+                self.assertEqual(sum(r["count"] for r in rows), 3)
+                self.assertEqual(raw["population"]["unprocessed_ids"], ["TEST-u3"])
+                self.assertEqual(raw["population"]["unknown_ids"], ["TEST-u4"])
+                self.assertEqual(raw["population"]["excluded_ids"], ["TEST-u5"])
+                self.assertEqual(raw["population"]["observed_zero_ids"], ["TEST-u0"] if row_type == "integer" else [])
+                fresh = AnalysisStore(self.f.path, self.f.connect)
+                saved = fresh.verified_package(state["table_store_run_id"])[1]
+                self.assertEqual(saved["datasets"], raw["datasets"])
+                self.assertEqual(saved["population"], raw["population"])
+                self.assertEqual(saved["manifest"]["rows_hash"], fingerprint(rows))
+                table = fresh.read_table(state["table_store_run_id"], "table")
+                self.assertEqual(table["row_count"], len(expected_cells))
+                self.assertEqual([r["values"]["row_value"] for r in table["rows"]], [r["row_value"] for r in rows])
+                self.assertEqual([r["values"]["count"] for r in table["rows"]], [r["count"] for r in rows])
+
+    def test_T07d_crosstab_rejects_cells_types_counts_and_source_ids(self):
+        from gurumoji.analysis_core import fingerprint
+        asset = self.crosstab_asset()
+        kinds = ("duplicate_zero", "duplicate_nonzero", "extra_zero", "extra_nonzero",
+                 "bool_category", "string_category", "float_category", "null_category", "column_type",
+                 "wrong_count", "negative_count", "bool_count", "float_count", "wrong_source",
+                 "duplicate_source", "missing_source", "zero_source", "unprocessed_source", "excluded_source")
+        for kind in kinds:
+            with self.subTest(kind=kind):
+                req = self.request("table_crosstab", [asset])
+                req["bindings"]["context"]["consumer_task_id"] += "-" + kind
+                req["bindings"]["inputs"][0]["consumer_task_id"] = req["bindings"]["context"]["consumer_task_id"]
+                task = self.task("table_crosstab", req)
+                def altered(method, snapshot):
+                    raw = self.runner(method, snapshot)
+                    rows = raw["datasets"]["table"]["rows"]
+                    zero = next(r for r in rows if r["row_value"] == 0 and r["count"] == 0)
+                    nonzero = next(r for r in rows if r["source_utterance_ids"] == ["TEST-u0"])
+                    if kind in {"duplicate_zero", "duplicate_nonzero"}:
+                        rows.append(copy.deepcopy(zero if kind == "duplicate_zero" else nonzero))
+                    elif kind.startswith("extra_"):
+                        extra = copy.deepcopy(zero if kind == "extra_zero" else nonzero)
+                        extra["row_value"] = 99
+                        rows.append(extra)
+                    elif kind.endswith("_category"):
+                        zero["row_value"] = {"bool_category": False, "string_category": "0",
+                                             "float_category": 0.0, "null_category": None}[kind]
+                    elif kind == "column_type": zero["column_value"] = False
+                    elif kind.endswith("_count"):
+                        nonzero["count"] = {"wrong_count": 2, "negative_count": -1,
+                                            "bool_count": True, "float_count": 1.0}[kind]
+                    elif kind == "wrong_source": nonzero["source_utterance_ids"] = ["TEST-u1"]
+                    elif kind == "duplicate_source": nonzero["source_utterance_ids"] *= 2
+                    elif kind == "missing_source": nonzero.update(count=0, source_utterance_ids=[])
+                    elif kind == "zero_source": zero.update(count=1, source_utterance_ids=["TEST-u0"])
+                    elif kind == "unprocessed_source": nonzero["source_utterance_ids"] = ["TEST-u3"]
+                    elif kind == "excluded_source": nonzero["source_utterance_ids"] = ["TEST-u5"]
+                    raw["manifest"]["rows_hash"] = fingerprint(rows)
+                    return raw
+                self.service.method_runner = altered
+                self.service._execute(self.run["run_id"], task["task_id"])
+                state = self.state_of(task)
+                self.assertEqual(state["status"], "quarantined", state["error"])
+                self.assertNotIn("table_store_run_id", state)
+                self.assertTrue(state["error"].startswith("table_output_"), state["error"])
+                raw = self.raw_of(task)
+                self.assertEqual(raw["manifest"]["rows_hash"], fingerprint(raw["datasets"]["table"]["rows"]))
+
     def test_T08_source_hash_schema_unit_descriptor_tamper(self):
         for field in ("content_hash", "asset_key", "content_domain"):
             req = self.request("table_frequency"); source = req["bindings"]["inputs"][0]["source"]

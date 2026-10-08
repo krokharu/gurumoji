@@ -306,6 +306,15 @@ def validate_table_pilot_result(raw, task, prepared):
                         raise AnalysisContractError("未観測カテゴリのzeroです。", code="table_output_zero_domain")
         if delivered != observed:
             raise AnalysisContractError("計算対象が欠落しています。", code="table_output_population")
+        if method == "table_crosstab":
+            # Derive the complete typed domains from frozen observed inputs,
+            # independently of the delivered cells (including genuine zeros).
+            domains = [{canonical(originals[i][column]): originals[i][column] for i in observed}
+                       for column in (parameters["row_column"], parameters["column_column"])]
+            expected_cells = {canonical([row_value, column_value])
+                              for row_value in domains[0].values() for column_value in domains[1].values()}
+            if categories != expected_cells:
+                raise AnalysisContractError("クロス集計セルが欠落または余分です。", code="table_output_cells")
     manifest = raw.get("manifest", {})
     expected = {"version": TABLE_PILOT_VERSION, "kind": "deterministic_code", "method_id": task["method_id"],
                 "method_version": TABLE_PILOT_VERSION, "analysis_unit": "utterance",
