@@ -93,10 +93,18 @@ from test_table_pilot_routes import TablePilotRouteTests
 from gurumoji.analysis_store import AnalysisStore
 t=TablePilotRouteTests();t.setUp()
 try:
- task,raw=t.fixture.execute('table_projection');p=t.fixture.reusable(task)
+ task,raw=t.fixture.execute('table_projection');p=t.fixture.reusable(task);seed_projection=task['task_id']
  task,raw=t.fixture.execute('table_aggregate',t.fixture.request('table_aggregate',[p]));t.fixture.reusable(task)
- print(json.dumps(dict(options=t.options(),run=t.run)))
+ calls=[];saves=[];real_method=t.service.method_runner;real_save=t.f.store.save
+ def compute(method,snapshot):
+  calls.append(method);return real_method(method,snapshot)
+ def save(**kwargs):
+  if kwargs.get('request_id','').startswith('table-pilot:'):saves.append(kwargs['request_id'])
+  return real_save(**kwargs)
+ t.service.method_runner=compute;t.f.store.save=save
+ print(json.dumps(dict(options=t.options(),run=t.run,seed_projection=seed_projection)))
  for line in sys.stdin:
+  calls.clear();saves.clear()
   method,body=json.loads(line);response=t.client.post(t.url+'/'+method,json=body);data=response.get_json()
   if response.status_code in (200,202):
    task=data['task'];t.service._execute(t.run['run_id'],task['task_id']);state=t.fixture.state_of(task)
@@ -104,7 +112,7 @@ try:
     raw=t.fixture.raw_of(task);fresh=AnalysisStore(t.f.path,t.f.connect).verified_package(state['table_store_run_id'])[1]
     data.update(saved_ok=fresh['datasets']==raw['datasets'] and fresh['population']==raw['population'],raw=raw)
    data['state']=state['status'];data['state_error']=state.get('error')
-  print(json.dumps(dict(status=response.status_code,data=data)))
+  print(json.dumps(dict(status=response.status_code,data=data,computations=len(calls),saves=len(saves))))
 finally:t.doCleanups()
 `],{cwd:root,env:{...process.env,PYTHONIOENCODING:'utf-8'},stdio:['pipe','pipe','pipe']});
  let stderr='';worker.stderr.on('data',data=>stderr+=data);
@@ -119,10 +127,20 @@ finally:t.doCleanups()
   if(method.method_id==='table_crosstab'){h.change(node(h,'table-param-row_column'),'n');h.change(node(h,'table-param-column_column'),'category');}
   h.click('#orchestration-table-review');h.click('#orchestration-table-execute');const r=pending(h,'/table-pilot/'+method.method_id,'POST');
   worker.stdin.write(JSON.stringify([method.method_id,JSON.parse(r.options.body)])+'\n');const response=await read();
-  assert.equal(response.status,202,JSON.stringify(response.data));assert.equal(response.data.state,'succeeded',response.data.state_error);assert.equal(response.data.saved_ok,true);
+  const duplicate=method.method_id==='table_projection';
+  assert.equal(response.status,duplicate?200:202,JSON.stringify(response.data));assert.equal(response.data.task.registration_duplicate,duplicate);
+  if(duplicate)assert.equal(response.data.task.task_id,live.seed_projection);
+  assert.equal(response.computations,duplicate?0:1);assert.equal(response.saves,duplicate?0:1);
+  assert.equal(response.data.state,'succeeded',response.data.state_error);assert.equal(response.data.saved_ok,true);
   h.reply(r,response.data,response.status);await h.flush();h.reply(pending(h,'/'+live.run.run_id),{run:live.run});await h.flush();
   h.evaluate('void orchestrationReadResults("saved")');h.reply(pending(h,'/results/saved'),{raw:response.data.raw});await h.flush();assert(node(h,'result-content').querySelector('table'));
+  worker.stdin.write(JSON.stringify([method.method_id,JSON.parse(r.options.body)])+'\n');const repeated=await read();
+  assert.equal(repeated.status,200);assert.equal(repeated.data.task.task_id,response.data.task.task_id);assert.equal(repeated.computations,0);assert.equal(repeated.saves,0);
  }
+ h.change(node(h,'table-method'),'table_projection');h.change(node(h,'table-param-row_ids'),'2');h.click('#orchestration-table-review');h.click('#orchestration-table-execute');
+ const distinct=pending(h,'/table-pilot/table_projection','POST');worker.stdin.write(JSON.stringify(['table_projection',JSON.parse(distinct.options.body)])+'\n');const response=await read();
+ assert.equal(response.status,202);assert.notEqual(response.data.task.task_id,live.seed_projection);assert.equal(response.computations,1);assert.equal(response.saves,1);assert.equal(response.data.raw.datasets.table.rows.length,2);
+ h.reply(distinct,response.data,202);await h.flush();h.reply(pending(h,'/'+live.run.run_id),{run:live.run});await h.flush();
 });
 
 test('V3 production CSS at 1440/390: pointer and keyboard review/submit/result', {skip:process.env.GURUMOJI_RUN_UI_BROWSER!=='1'},async()=>{

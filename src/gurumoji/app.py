@@ -1722,6 +1722,33 @@ def analysis_history_service() -> AnalysisHistoryService:
     return AnalysisHistoryService(connect=analysis_history_connection, find_item=analysis_history_item)
 
 
+def analysis_table_pilot_reader() -> AnalysisOrchestrationService:
+    """Fixed table metadata uses the existing viewer connection, without runtime initialization."""
+    if not DATABASE_FILE.is_file():
+        raise LookupError("固定表の選択に必要な保存済み台帳がありません。")
+    def item(item_id):
+        with analysis_history_connection() as connection:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_items'").fetchone():
+                return None
+            return connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+
+    def source_stamp(row):
+        with analysis_history_connection() as connection:
+            return archive_source_stamp(row, connection=connection)
+
+    reader = AnalysisOrchestrationService(connect=analysis_history_connection, find_item=item,
+        source_fingerprint=source_stamp, snapshot_builder=None, agent_runner=None, method_runner=None,
+        schedule=False, adapter_version=ORCHESTRATION_ADAPTER_VERSION,
+        table_store=AnalysisStore(DATABASE_FILE, analysis_history_connection))
+    # A saved execution budget needs its live process clock authority. Inspect
+    # an existing cached driver; never construct or recover one for a GET.
+    with _orchestration_service_lock:
+        driver = _orchestration_services.get(str(DATABASE_FILE.resolve()))
+        if driver is not None:
+            reader._run_budgets, reader._budget_clock = driver._run_budgets, driver._budget_clock
+    return reader
+
+
 def analysis_slides_service() -> AnalysisSlidesService:
     return AnalysisSlidesService(
         export_result=lambda item_id, run_id: analysis_history_service().saved_export(item_id, run_id),
@@ -1985,7 +2012,7 @@ def create_app() -> Flask:
 
     register_orchestration_routes(flask_app, analysis_orchestration_service, prepare_orchestration,
                                   analysis_orchestration_publication_service,
-                                  history_viewer=analysis_history_service)
+                                  history_viewer=analysis_history_service, table_reader=analysis_table_pilot_reader)
     register_analysis_slides_routes(flask_app, analysis_slides_service)
 
     register_speaker_routes(

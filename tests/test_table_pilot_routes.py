@@ -1,18 +1,25 @@
 """Opt-in HTTP/service wiring with private SQLite, no models or network."""
 import ast
 import copy
+import concurrent.futures
+import hashlib
+import sqlite3
+import tempfile
 import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from contextlib import contextmanager, closing
 
 from flask import Flask
 
 import test_analysis_asset_bindings as fixtures
-from gurumoji.analysis_core import fingerprint
+from gurumoji.analysis_core import AnalysisContractError, fingerprint
 from gurumoji.analysis_store import AnalysisStore
+from gurumoji.analysis_orchestration import AnalysisOrchestrationService
 from gurumoji.web.analysis_orchestration_routes import register_orchestration_routes
+from test_analysis_orchestration import stop, critic
 
 
 class TablePilotRouteTests(unittest.TestCase):
@@ -157,6 +164,103 @@ class TablePilotRouteTests(unittest.TestCase):
         with self.f.connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_tasks").fetchone()[0], 0)
 
+    def test_ascii_canonical_bounded_offset_contract(self):
+        for offset in ("²", "１", "١", "9" * 5000, "-1", "1.0", " 1", "1 ", "+1", "01", "", "10001"):
+            with self.subTest(offset=offset[:30]):
+                response = self.client.get(self.url, query_string={"offset": offset})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["reason_code"], "table_selection_offset")
+        for offset in ("0", "1", "10000"):
+            self.assertEqual(self.client.get(self.url, query_string={"offset": offset}).status_code, 200)
+        for offset in (True, 1.0, None, 10**5000):
+            with self.assertRaises(AnalysisContractError) as rejected:
+                self.service.table_pilot_options("TEST-conversation", self.run["run_id"], offset=offset)
+            self.assertEqual(rejected.exception.code, "table_selection_offset")
+
+    def test_consistent_consumer_override_rejected_and_inner_api_normalizes_identity(self):
+        request = self.request("table_projection")
+        forged = copy.deepcopy(request)
+        forged["bindings"]["context"]["consumer_task_id"] = "attacker-chosen-task"
+        for ref in forged["bindings"]["inputs"]:
+            ref["consumer_task_id"] = "attacker-chosen-task"
+        response = self.client.post(self.url + "/table_projection", json=forged)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["reason_code"], "table_plan_mismatch")
+        # The inner code API remains compatible; its cosmetic consumer/ref IDs
+        # cannot change the normalized identity of the same actual computation.
+        inner = self.service.register_table_pilot("TEST-conversation", self.run["run_id"], "table_projection", forged)
+        response = self.client.post(self.url + "/table_projection", json=request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["task"]["task_id"], inner["task_id"])
+        distinct = copy.deepcopy(request)
+        distinct["parameters"]["row_ids"] = distinct["parameters"]["row_ids"][:2]
+        self.assertNotEqual(self.post("table_projection", distinct)["task_id"], inner["task_id"])
+        with self.service._db() as db:
+            run = self.service._read_run(db, self.run["run_id"])
+            run["generation"] += 1
+            self.service._write_run(db, run)
+        next_generation = self.options()["inputs"][0]["projection_request"]
+        self.assertNotEqual(self.post("table_projection", next_generation)["task_id"], inner["task_id"])
+
+    def test_parallel_normalized_posts_use_real_run_thread_and_save_once(self):
+        request = self.request("table_projection")
+        entered, release = threading.Event(), threading.Event()
+        def agent(role, context, *args):
+            if role == "core":
+                entered.set()
+                self.assertTrue(release.wait(15))
+                return stop()
+            return critic(context) if role == "critic" else {"summary": "Synthetic review", "claims": []}
+        self.service.agent_runner = agent
+        self.service.schedule = True
+        self.assertIs(self.service.run.__func__, AnalysisOrchestrationService.run)
+        calls, saves = [], []
+        method, save = self.service.method_runner, self.f.store.save
+        def compute(name, snapshot):
+            calls.append(name)
+            return method(name, snapshot)
+        def persist(**kwargs):
+            if kwargs.get("request_id", "").startswith("table-pilot:"):
+                saves.append(kwargs["request_id"])
+            return save(**kwargs)
+        self.service.method_runner, self.f.store.save = compute, persist
+        barrier = threading.Barrier(8)
+        def submit(index):
+            value = copy.deepcopy(request)
+            value["bindings"]["inputs"][0]["input_ref_id"] = "request-reference-" + str(index)
+            barrier.wait()
+            with self.client.application.test_client() as client:
+                response = client.post(self.url + "/table_projection", json=value)
+                return response.status_code, response.get_json()
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                responses = list(pool.map(submit, range(8)))
+            self.assertTrue(entered.wait(10))
+            self.assertEqual(sorted(r[0] for r in responses), [200] * 7 + [202])
+            self.assertEqual(len({r[1]["task"]["task_id"] for r in responses}), 1)
+        finally:
+            release.set()
+            self.drain_scheduled()
+        task = responses[0][1]["task"]
+        state = self.fixture.state_of(task)
+        self.assertEqual(state["status"], "succeeded", state["error"])
+        self.assertEqual((len(calls), len(saves)), (1, 1))
+        self.assertEqual(self.service.status("TEST-conversation", self.run["run_id"])["status"], "completed")
+        self.assertEqual(self.service._driving, set())
+        with self.f.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_tasks WHERE state_json LIKE '%table_pilot%'").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()[0], 1)
+        fresh = AnalysisStore(self.f.path, self.f.connect)
+        self.assertEqual(fresh.read_table(state["table_store_run_id"], "table")["row_count"], 6)
+
+    def test_genuine_distinct_saved_input_registers_distinct_task(self):
+        state, _ = self.fixture.execute("table_projection")
+        projected = self.fixture.reusable(state)
+        first = self.post("table_frequency", self.request("table_frequency"))
+        second = self.post("table_frequency", self.request("table_frequency", [projected]))
+        self.assertNotEqual(first["task_id"], second["task_id"])
+        self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
+
     def test_stopped_cancelled_stale_recovery_and_foreign_run_reject(self):
         request = self.request("table_frequency")
         for change, code in (({"status": "stopped"}, "table_run_stopped"), ({"cancel_requested": True}, "table_run_stopped"),
@@ -196,7 +300,7 @@ class TablePilotRouteTests(unittest.TestCase):
             run = self.service._read_run(db, self.run["run_id"])
             run["config"]["max_tasks"] = 1
             self.service._write_run(db, run)
-        response = self.client.post(self.url + "/table_crosstab", json=self.fixture.request("table_crosstab"))
+        response = self.client.post(self.url + "/table_crosstab", json=self.request("table_crosstab"))
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json()["reason_code"], "table_task_limit")
         self.service.table_store = SimpleNamespace(database_file=self.f.path.with_name("foreign.sqlite3"))
@@ -217,12 +321,121 @@ class TablePilotRouteTests(unittest.TestCase):
         asset["variables"] = copy.deepcopy(self.fixture.asset["variables"])
         self.f.register([asset], originals=[original], states=[state, original_state])
         self.assertNotIn(asset["asset_key"], [c["source"]["asset_key"] for c in self.options()["inputs"]])
-        response = self.client.post(self.url + "/table_frequency", json=self.fixture.request("table_frequency", [asset]))
+        request = self.fixture.request("table_frequency", [asset])
+        issued_consumer = self.options()["context"]["consumer_task_id"]
+        request["bindings"]["context"]["consumer_task_id"] = issued_consumer
+        for ref in request["bindings"]["inputs"]:
+            ref["consumer_task_id"] = issued_consumer
+        response = self.client.post(self.url + "/table_frequency", json=request)
         self.assertEqual(response.status_code, 400, response.get_json())
         self.assertEqual(response.get_json()["reason_code"], "table_source_mismatch")
 
 
 class TablePilotFactoryTests(unittest.TestCase):
+    def reader_namespace(self, database_file, *, source_hash="unused", driver=None):
+        path = Path(__file__).resolve().parents[1] / "src/gurumoji/app.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in
+                     {"analysis_history_connection", "analysis_table_pilot_reader"}]
+        traces, connections = [], []
+        def connect(*args, **kwargs):
+            connections.append((args, kwargs))
+            db = sqlite3.connect(*args, **kwargs)
+            db.set_trace_callback(traces.append)
+            return db
+        def stamp(row, *, connection):
+            self.assertEqual(connection.execute("PRAGMA query_only").fetchone()[0], 1)
+            return source_hash
+        namespace = {"DATABASE_FILE": database_file, "contextmanager": contextmanager,
+                     "sqlite3": SimpleNamespace(connect=connect, Row=sqlite3.Row),
+                     "AnalysisOrchestrationService": AnalysisOrchestrationService, "AnalysisStore": AnalysisStore,
+                     "archive_source_stamp": stamp, "ORCHESTRATION_ADAPTER_VERSION": "core-handler-prompts-1",
+                     "_orchestration_service_lock": threading.RLock(),
+                     "_orchestration_services": {} if driver is None else {str(database_file.resolve()): driver}}
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
+        return namespace, traces, connections
+
+    def test_actual_factory_cold_legacy_and_missing_get_is_readonly(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for kind in ("missing", "cold", "legacy"):
+                with self.subTest(kind=kind):
+                    path = root / (kind + ".sqlite")
+                    if kind != "missing":
+                        with closing(sqlite3.connect(path)) as db:
+                            if kind == "legacy":
+                                db.execute("CREATE TABLE library_items(id TEXT PRIMARY KEY, source_name TEXT)")
+                                db.execute("INSERT INTO library_items VALUES ('TEST-conversation','Synthetic')")
+                                db.commit()
+                    before = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+                    files = sorted(p.name for p in root.iterdir())
+                    namespace, traces, connections = self.reader_namespace(path)
+                    execution = Mock(side_effect=AssertionError("GET must not construct an execution driver"))
+                    app = Flask("readonly-" + kind)
+                    register_orchestration_routes(app, execution, Mock(), table_reader=namespace["analysis_table_pilot_reader"])
+                    response = app.test_client().get("/api/library/TEST-conversation/analysis/orchestration/unknown/table-pilot")
+                    self.assertEqual(response.status_code, 404, response.get_json())
+                    self.assertEqual(response.get_json()["reason_code"], "table_selection_unavailable")
+                    execution.assert_not_called()
+                    self.assertEqual(sorted(p.name for p in root.iterdir()), files)
+                    self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None, before)
+                    if path.exists():
+                        with closing(sqlite3.connect(path)) as db:
+                            self.assertEqual(db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0], 1 if kind == "legacy" else 0)
+                    self.assertFalse(any(sql.lstrip().upper().startswith(("CREATE", "INSERT", "UPDATE", "DELETE", "BEGIN IMMEDIATE")) for sql in traces), traces)
+                    self.assertTrue(all(args[0].endswith("?mode=ro") and kwargs["uri"] for args, kwargs in connections))
+
+    def test_actual_readonly_factory_fixed_store_policy_and_source_checks(self):
+        fixture = fixtures.TablePilotHandlerTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        namespace, traces, connections = self.reader_namespace(fixture.f.path, source_hash=fixture.run["input_hash"], driver=fixture.service)
+        driver = fixture.service
+        reader = namespace["analysis_table_pilot_reader"]()
+        self.assertIs(reader._run_budgets, driver._run_budgets)
+        self.assertIs(reader._budget_clock, driver._budget_clock)
+        app = Flask("readonly-existing")
+        execution = Mock(side_effect=AssertionError("Unexpected execution factory"))
+        register_orchestration_routes(app, execution, Mock(), table_reader=namespace["analysis_table_pilot_reader"])
+        url = f"/api/library/TEST-conversation/analysis/orchestration/{fixture.run['run_id']}/table-pilot"
+        client = app.test_client()
+        before = hashlib.sha256(fixture.f.path.read_bytes()).hexdigest()
+        with fixture.f.connect() as db:
+            dump = list(db.iterdump())
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(len(response.get_json()["inputs"]), 1)
+        self.assertEqual(hashlib.sha256(fixture.f.path.read_bytes()).hexdigest(), before)
+        with fixture.f.connect() as db:
+            self.assertEqual(list(db.iterdump()), dump)
+        self.assertFalse(any(sql.lstrip().upper().startswith(("CREATE", "INSERT", "UPDATE", "DELETE", "BEGIN IMMEDIATE")) for sql in traces), traces)
+        self.assertTrue(all(args[0].endswith("?mode=ro") for args, _ in connections))
+        execution.assert_not_called()
+        fixture.revoke()
+        self.assertEqual(client.get(url).get_json()["inputs"], [])
+        namespace["archive_source_stamp"] = lambda *args, **kwargs: "changed-source"
+        self.assertEqual(client.get(url).get_json()["reason_code"], "revision_conflict")
+
+    def test_constructor_initializes_once_only_at_first_execution_transaction(self):
+        from unittest.mock import patch
+        from gurumoji.analysis_orchestration import initialize_orchestration_store
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "lazy.sqlite"
+            connections = []
+            def connect():
+                connections.append(True)
+                return sqlite3.connect(path)
+            with patch("gurumoji.analysis_orchestration.initialize_orchestration_store", wraps=initialize_orchestration_store) as initialize:
+                service = AnalysisOrchestrationService(connect=connect, find_item=lambda _: None,
+                    snapshot_builder=None, agent_runner=None, method_runner=None, schedule=False)
+                self.assertFalse(path.exists())
+                self.assertEqual(connections, [])
+                initialize.assert_not_called()
+                for _ in range(2):
+                    with service._db() as db:
+                        self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name='orchestration_runs'").fetchone())
+                initialize.assert_called_once()
+
     def test_actual_app_factory_passes_existing_archive_store_and_keeps_cache(self):
         # Execute the real factory alone, avoiding the app's global runtime/DB imports.
         path = Path(__file__).resolve().parents[1] / "src/gurumoji/app.py"

@@ -323,8 +323,9 @@ class AnalysisOrchestrationService:
         self.lock = write_lock or threading.RLock()
         self._workers: dict[str, threading.Thread] = {}
         self._worker_lock = threading.Lock()
-        with self._db() as db:
-            initialize_orchestration_store(db)
+        # Construction is inert, including legacy factories used by GET.
+        # Schema initialization belongs to the first execution transaction.
+        self._store_initialized = False
 
     @contextmanager
     def _db(self):
@@ -335,12 +336,45 @@ class AnalysisOrchestrationService:
                     db.row_factory = sqlite3.Row
                     if not db.in_transaction:
                         db.execute("BEGIN IMMEDIATE")
+                    if not self._store_initialized:
+                        initialize_orchestration_store(db)
                     yield db
+                self._store_initialized = True
             finally:
                 # sqlite3.Connection's context manager commits but does not
                 # close. Factories returning context managers close themselves.
                 if isinstance(connection, sqlite3.Connection):
                     connection.close()
+
+    @contextmanager
+    def _table_read(self, item_id):
+        from pathlib import Path
+        from .services.analysis_history import AnalysisHistoryService
+        # Reuse the viewer's query-only deferred read transaction. Production
+        # also supplies its mode=ro connection to both this reader and Store.
+        if self.table_store is None:
+            raise _error("表pilotのStore接続がありません。", "table_pilot_disabled")
+        if not Path(self.table_store.database_file).is_file():
+            raise LookupError("固定表の選択に必要な保存済み台帳がありません。")
+        connection = None
+        def connect():
+            nonlocal connection
+            connection = self.connect()
+            return connection
+        viewer = AnalysisHistoryService(connect=connect, find_item=self.find_item)
+        try:
+            with viewer._read(item_id) as db:
+                if any(not viewer._table(db, name) for name in
+                       ("orchestration_runs", "orchestration_initials", "orchestration_tasks", "orchestration_results", "orchestration_usage")):
+                    raise LookupError("固定表の選択に必要な保存済み台帳がありません。")
+                yield db
+        except sqlite3.OperationalError as exc:
+            if str(exc).startswith(("no such table:", "no such column:")):
+                raise LookupError("固定表の選択に必要な保存済み台帳がありません。") from exc
+            raise
+        finally:
+            if isinstance(connection, sqlite3.Connection):
+                connection.close()
 
     def _check_version(self, run):
         if run["config"].get("expert_hooks", False):
@@ -1133,10 +1167,15 @@ class AnalysisOrchestrationService:
         from .analysis_core import TABLE_PILOT_VERSION, TABLE_PILOT_MAX_BYTES
         from .analysis_method_registry import table_pilot_slot
         from .analysis_store import AssetBindingError
-        if not str(offset).isdigit() or int(offset) > 10000:
+        if type(offset) not in (str, int) or (type(offset) is int and not 0 <= offset <= 10000):
             raise _error("表候補の開始位置が不正です。", "table_selection_offset")
-        offset = int(offset)
-        with self._db() as db:
+        text = str(offset)
+        if (len(text) > 5 or not text
+                or any(c not in "0123456789" for c in text)
+                or (len(text) > 1 and text[0] == "0") or int(text) > 10000):
+            raise _error("表候補の開始位置が不正です。", "table_selection_offset")
+        offset = int(text)
+        with self._table_read(item_id) as db:
             run = self._table_run(db, item_id, run_id)
             initial = self._initial(db, run["initial_id"])
         context = {"plan_id": run_id, "plan_version": 1,
@@ -1201,12 +1240,18 @@ class AnalysisOrchestrationService:
             raise _error("固定表の登録情報を確認してください。", "table_input_" + exc.reason) from exc
         return result
 
-    def register_table_pilot(self, item_id, run_id, method_id, request):
+    def register_table_pilot(self, item_id, run_id, method_id, request, *, server_bound=False):
         """Explicit local code opt-in; normal Core/Pack readers remain unchanged."""
         if not isinstance(method_id, str) or method_id not in TABLE_PILOT_METHODS:
             raise _error("未登録の表計算です。", "table_method_unsupported")
         with self._db() as db:
             run = self._table_run(db, item_id, run_id)
+            from .analysis_core import validate_table_pilot_request
+            request = validate_table_pilot_request(method_id, request)
+            if server_bound and (request["bindings"]["context"]["consumer_task_id"] != "table-selection:" + run_id
+                    or any(ref["consumer_task_id"] != "table-selection:" + run_id for ref in request["bindings"]["inputs"])):
+                raise AnalysisContractError("サーバーが発行した表選択の接続先と一致しません。",
+                                            code="table_plan_mismatch", field="bindings.context.consumer_task_id")
             self.table_store.prepare_table_pilot(method_id, request, expected_snapshot=self._initial(db, run["initial_id"]))
             prior_ids = {t["task_id"] for t in self._tasks(db, run_id)}
             task = self._register(db, run, {"role": "statistics", "method_id": method_id,
@@ -1286,7 +1331,12 @@ class AnalysisOrchestrationService:
                     "round": run["iteration"] if role == "core" else None, "options": run["config"]["roles"].get(role), "kind": intent.get("kind", "analysis"), "result_id": intent.get("result_id"), "initial_sections": intent.get("initial_sections", []),
                     "dependencies": sorted(dependencies)}
         if pilot:
-            identity["table_pilot_hash"] = fingerprint(request)
+            normalized = copy.deepcopy(request)
+            normalized["bindings"]["context"]["consumer_task_id"] = "table-selection:" + run["run_id"]
+            for index, ref in enumerate(normalized["bindings"]["inputs"]):
+                ref["consumer_task_id"] = normalized["bindings"]["context"]["consumer_task_id"]
+                ref["input_ref_id"] = "table-input-" + str(index)
+            identity["table_pilot_hash"] = fingerprint(normalized)
         if expert is not None:
             identity["expert_id"], identity["expert_profile_hash"] = expert["expert_id"], expert["profile_hash"]
         key = fingerprint(identity)

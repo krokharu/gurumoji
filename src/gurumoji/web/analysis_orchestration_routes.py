@@ -14,7 +14,8 @@ from ..analysis_store import StoreConflict
 def register_orchestration_routes(app: Flask, service: Callable[[], Any],
                                   prepare: Callable[[dict], dict],
                                   publication: Callable[[], Any] | None = None,
-                                  history_viewer: Callable[[], Any] | None = None) -> None:
+                                  history_viewer: Callable[[], Any] | None = None,
+                                  table_reader: Callable[[], Any] | None = None) -> None:
     blueprint = Blueprint("analysis_orchestration", __name__)
 
     def payload(max_bytes=64 * 1024) -> dict:
@@ -101,14 +102,20 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot")
     def table_pilot_options(item_id, run_id):
-        response = viewer_response(service().table_pilot_options(item_id, run_id, offset=request.args.get("offset", "0")))
+        # Application wiring uses the viewer's readonly connection, never the
+        # execution factory. The legacy injected Service constructor is inert.
+        try:
+            reader = table_reader() if table_reader is not None else service()
+            response = viewer_response(reader.table_pilot_options(item_id, run_id, offset=request.args.get("offset", "0")))
+        except LookupError as exc:
+            return viewer_response({"error": str(exc), "reason_code": "table_selection_unavailable"}), 404
         if len(response.get_data()) > TABLE_PILOT_MAX_BYTES:
             raise AnalysisContractError("選択用の登録情報が上限を超えています。", code="table_selection_byte_limit")
         return response
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot/<method_id>")
     def table_pilot_register(item_id, run_id, method_id):
-        task = service().register_table_pilot(item_id, run_id, method_id, payload(TABLE_PILOT_MAX_BYTES))
+        task = service().register_table_pilot(item_id, run_id, method_id, payload(TABLE_PILOT_MAX_BYTES), server_bound=True)
         return jsonify(task=task), 200 if task["registration_duplicate"] else 202
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
