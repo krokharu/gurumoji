@@ -94,3 +94,10 @@ src/gurumoji/services/analysis_visuals.py -text
 tests/test_analysis_visuals.py -text
 tests/test_analysis_human_records.py -text
 tests/test_analysis_typed_assets.py -text
+src/gurumoji/services/analysis_visual_package.py -text
+tests/test_analysis_asset_execution.py -text
+tests/test_analysis_human_record_options.py -text
+tests/test_analysis_human_record_ui.cjs -text
+tests/test_analysis_qualitative_assets.py -text
+tests/test_analysis_table_units.py -text
+tests/test_analysis_visual_package.py -text

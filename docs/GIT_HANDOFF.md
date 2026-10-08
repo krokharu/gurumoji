@@ -19,7 +19,24 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 既存の共有checkoutでは `python scripts/check_git_handoff.py --fetch --expected-commit <通知された完全SHA>` を使う。fetchはrefの更新だけで、checkoutを自動更新しない。`received=false` ならcommit・dirty・mismatchesを確認し、成果を退避せずに強制上書きしない。Gitの読取だけ可能なDotはcommitの取得とファイルmanifest照合を報告し、Python未実行を明記する。GitHub Issue/PRが双方の永続的な通知・受領経路であり、ChatGPTの会話は短い通知に使う。バックグラウンドの自動受信や監視は設定していない。
 
-## この共有候補の限界
+## 2026-10-09 05:10 JST の固定候補
+
+現在の共有sourceは `fa69de25b3926eb250b2a85c3548f79df9f1fa6b`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
+
+- 実際に保存された研究者記録を持つTA候補から発話単位・明示対応による参加者単位へ変換し、count/sum/mean、完全な一対一join、探索的相関を既存Handler／Storeで保存してfresh再利用する。無発話の名簿を観測ゼロにしない。現在の実接続は単一会話。複数会話はkernelだけでなく、全保存元／原票／現在の権限を照合する実Store橋を必須後続に残す。
+- 同Handlerの資産依存計画を接続し、選択したfrom_stepの実保存receiptを待つ。重送／順序違い／欠落通知／再開は実台帳から照合する。旧世代resumeの計算・保存を0で拒否し、正常completed後の新run再利用を保持する。独立最終関連11件、独立unittest12件、standalone4probesが成功。初期のP1/P2失敗は履歴として保持し、修正版だけで閉鎖した。通信先の不確定な実LLM結果にexactly-onceを主張しない。
+- 質的対照のsupport/counter/complement/conflict/incomparableと明示理由、元発話／少数・撤回・除外・時刻欠測のパケットを保存し、B1／Q1／原文から新A2へ再利用する。AI提案は未確認のまま、独立検証とはしない。graph／bundleの実HumanRecordは別に保存され、先に採択したHC revisionを利用したA2の訂正で子孫だけstale、独立枝と旧bytesを保つことを確認した。
+- 通常TA判断フォームとreadonly選択GETは実Flask→Handler→Store→freshで確認済み。作者のUI最終46 distinct項目、C0の重送／本人訂正2件が成功、Edge1440／390pxでpointerとTab／Enterを確認した。実app cold root200／missing HumanGET404でDB生成0・通信0を確認した。Node/jsdomの宣言engine差はPARTIAL、AT／利用者理解は未実行。
+- Dot #23の固定 `b4436c6f69186dd69c47960522e187d845f080c3` の2fileをbytes／hash／blobで照合して統合した。Windowsのpackage23件、日本語2slotの並列fresh検証／metadata・PNG改変拒否が成功。helperは既存の閉じた14-field specと固定bindingを照合する。科学的なspec承認と保存PNGhashの信頼はStoreの責務であり、helperだけで保証しない。
+
+利用者の最新指示でPNG Store／Web／Vaultの接続は延期した。描画・検証基盤と候補は保持し、未接続を成功stubにしない。図表以外の通常S3–S5選択API／graph・bundle研究者判断画面と、実複数会話の接続を継続する。この固定候補にはそれらの進行中機能の成功を含めない。
+
+C0が管理・割当・受入を担当し、Orca側LunaはDot応答と作業有無だけを読取確認する。作業者は必要時のみ上限6（C0別枠）、同じファイルの編集ownerは1名、共有indexは直列化する。機能候補・レビュー・引継ぎの安全な区切りで新チャットへ移り、編集中／実行中の処理は中断しない。Dotはクラウド実装、C0はWindows確認とGit選別統合を担当する。GitHub Issueが永続的な通知・受領経路であり、Lunaの稼働セッション監視と永続常駐の自動更新設定を混同しない。
+
+実モデル品質・全323発話・研究者採否・実Vault・AT・非図表の残る接続は未完了。図表延期と残件を明示し、全要求や研究品質の合格にはしない。通常共有はdraftで、main merge・強制push・私有履歴／実DB／研究本文／資格情報の公開は行わない。
+
+
+## 過去の固定候補と検証（当時の状態）
 
 初期sourceは `b932fe11adf0881a3d7093c2761fbee930be0e56`。2026-10-09の継続では、#17のゼロ件セル欠落を `59e48b09625f1b4a5dffed993d4c8e920530f21e` で修正した。作者47成功、別担当の関連71成功・symlink1skipと独立68合成ケースで、固定入力から完全な型付き直積を確認して保存前に欠落を拒否することを検証済み。旧独立21 PASS / 1 FAIL / 2 PARTIAL、作者FAILED、工数UNKNOWNは過去の証拠として保持する。
 
