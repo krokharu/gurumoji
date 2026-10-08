@@ -114,6 +114,39 @@
         </div>
       </form>
     </section>
+    <section class="orchestration-output orchestration-human-record" aria-labelledby="orchestration-human-title">
+      <h3 id="orchestration-human-title">研究者の確認・判断を記録</h3>
+      <p class="field-note">保存済みの候補全体またはテーマについて、一つの段階ずつ原文メモと判断を残します。AIの提案・表示・既読を、研究者の確認や採用とみなしません。</p>
+      <p id="orchestration-human-availability"></p>
+      <button id="orchestration-human-load" type="button" class="secondary-button">保存済み候補と研究者記録を確認</button>
+      <button id="orchestration-human-next" type="button" class="secondary-button" hidden>次の候補・テーマを確認</button>
+      <button id="orchestration-human-evidence" type="button" class="secondary-button">候補の原文・根拠を読む</button>
+      <p id="orchestration-human-message" role="status" aria-live="polite" tabindex="-1"></p>
+      <form id="orchestration-human-form" hidden>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-human-asset-label">保存済み候補</span><select id="orchestration-human-asset" required aria-labelledby="orchestration-human-asset-label"></select></label>
+          <label class="field"><span id="orchestration-human-target-label">判断する対象</span><select id="orchestration-human-target" required aria-labelledby="orchestration-human-target-label"></select></label>
+          <label class="field"><span id="orchestration-human-step-label">今回記録する段階</span><select id="orchestration-human-step" required aria-labelledby="orchestration-human-step-label"></select></label>
+          <label class="field">記録者の名前<input id="orchestration-human-actor" required maxlength="200" autocomplete="off"></label>
+        </div>
+        <p id="orchestration-human-scope" class="field-note"></p>
+        <ol id="orchestration-human-stages" class="orchestration-human-stages" aria-label="段階ごとの研究者記録"></ol>
+        <p id="orchestration-human-existing" class="field-note"></p>
+        <label id="orchestration-human-author-field" class="check-row" hidden><input id="orchestration-human-author-confirm" type="checkbox">私は表示された記録者本人として、この訂正を記録します</label>
+        <label class="field">この段階の確認・判断を記した原文メモ<textarea id="orchestration-human-source" required maxlength="16000" rows="6" aria-describedby="orchestration-human-source-help"></textarea></label>
+        <p id="orchestration-human-source-help" class="field-note">自分が確認した内容を記します。この文章を研究者の原文としてそのまま保存します。別の段階の確認をまとめて代行する記録にはなりません。</p>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-human-decision-label">この対象・段階の判断</span><select id="orchestration-human-decision" required aria-labelledby="orchestration-human-decision-label"><option value="">判断を選択</option><option value="adopt">採用</option><option value="reject">不採用</option><option value="defer">保留</option></select></label>
+          <label class="field">判断の理由<textarea id="orchestration-human-reason" required maxlength="2000" rows="3"></textarea></label>
+        </div>
+        <p class="field-note">候補は探索的な資料です。研究者記録の保存だけで数量分析の入力として利用できるとは限りません。数値入力への接続状態は、別途確認が必要です。</p>
+        <button id="orchestration-human-review" type="submit" class="secondary-button">この段階の記録内容を確認</button>
+        <div id="orchestration-human-confirmation" hidden>
+          <p id="orchestration-human-summary"></p>
+          <button id="orchestration-human-save" type="button" class="primary-button">確認した研究者記録を保存</button>
+        </div>
+      </form>
+    </section>
     <section id="orchestration-memory" class="orchestration-output" aria-labelledby="orchestration-memory-title">
       <h3 id="orchestration-memory-title">Obsidian管理とデータ参照</h3>
       <p id="orchestration-memory-status" role="status" aria-live="polite"></p>

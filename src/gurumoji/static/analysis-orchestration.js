@@ -223,6 +223,7 @@ function renderAnalysisOrchestration() {
   const state = orchestrationState, run = state.run, live = orchestrationNode('live'); if (!live) return;
   const active = orchestrationActiveStatuses.includes(run?.status);
   orchestrationTableAvailability();
+  orchestrationHumanAvailability();
   const draining = !active && orchestrationPendingCompletion(run);
   orchestrationNode('chip').hidden = !state.runId;
   orchestrationNode('chip').classList.toggle('is-active', active || draining);
@@ -447,6 +448,17 @@ async function orchestrationHistory() {
   }catch(error){if(orchestrationSetupCurrent(epoch))host.replaceChildren(orchestrationElement('p',error.message));}
 }
 function bindAnalysisOrchestration() {
+  listen(orchestrationNode('human-load'),'click',()=>orchestrationHumanLoad(orchestrationHumanState.options?.offset||0));
+  listen(orchestrationNode('human-next'),'click',()=>orchestrationHumanLoad(orchestrationHumanState.options?.next_offset,false));
+  listen(orchestrationNode('human-evidence'),'click',()=>orchestrationNode('viewer').click());
+  listen(orchestrationNode('human-asset'),'change',()=>orchestrationHumanSelect('asset'));
+  listen(orchestrationNode('human-target'),'change',()=>orchestrationHumanSelect('target'));
+  listen(orchestrationNode('human-step'),'change',()=>orchestrationHumanSelect('step'));
+  listen(orchestrationNode('human-form'),'input',orchestrationHumanEdit);
+  listen(orchestrationNode('human-decision'),'change',orchestrationHumanEdit);
+  listen(orchestrationNode('human-author-confirm'),'change',orchestrationHumanEdit);
+  listen(orchestrationNode('human-form'),'submit',orchestrationHumanReview);
+  listen(orchestrationNode('human-save'),'click',orchestrationHumanSave);
   listen(orchestrationNode('table-load'),'click',()=>orchestrationTableLoad());
   listen(orchestrationNode('table-next'),'click',()=>orchestrationTableLoad(orchestrationTableState.options?.next_offset));
   listen(orchestrationNode('table-form'),'submit',orchestrationTableReview);
@@ -634,5 +646,192 @@ function orchestrationTableResult(host,raw) {
     tr.append(orchestrationElement('td',text));}body.append(tr);}grid.append(body);wrap.append(grid);host.append(wrap);
   const evidence=orchestrationElement('button','固定入力・発話の根拠を履歴ビューアーで読む','secondary-button');evidence.type='button';evidence.addEventListener('click',()=>orchestrationNode('viewer').click());host.append(evidence);
   host.append(orchestrationElement('p','空セルをゼロとは扱いません。表の値・対象集合・計算対象はこの保存結果の固定版です。研究者による採否は別に確認してください。','field-note'));return true;
+}
+// Researcher drafts stay in memory only. GET supplies immutable targets and
+// revision context; neither viewing nor polling records a human decision.
+const orchestrationHumanState={runKey:'',options:null,selection:null,drafts:new Map(),loading:false,sending:false,request:0};
+const orchestrationHumanDecision={adopt:'採用',reject:'不採用',defer:'保留'};
+const orchestrationHumanFields=['actor','source','decision','reason'];
+const orchestrationHumanCopy=value=>JSON.parse(JSON.stringify(value));
+const orchestrationHumanAssetKey=option=>JSON.stringify(option.asset_key);
+const orchestrationHumanTargetKey=option=>`${orchestrationHumanAssetKey(option)}:${option.target.domain}:${option.target.content_hash}:${option.target.version}`;
+function orchestrationHumanDraftKey(selection=orchestrationHumanState.selection) {
+  return selection?`${orchestrationHumanState.runKey}:${orchestrationHumanTargetKey(selection.option)}:${selection.step?.step_id||''}`:'';
+}
+function orchestrationHumanDraft() { return orchestrationHumanState.drafts.get(orchestrationHumanDraftKey()); }
+function orchestrationHumanCapture() {
+  const draft=orchestrationHumanDraft();if(!draft)return;
+  for(const id of orchestrationHumanFields)draft[id]=orchestrationNode(`human-${id}`).value;
+}
+function orchestrationHumanMessage(text,error=false,focus=false) {
+  const node=orchestrationNode('human-message');node.textContent=text;node.dataset.error=String(error);
+  if(focus)node.focus();
+}
+function orchestrationHumanReason(code) {
+  return ({human_run_cancelled:'この実行は停止されています。',human_producer_stale:'保存候補の作成条件が現在の実行と一致しません。',
+    permission_revoked:'利用許可が失効しています。',parent_permission_revoked:'元資料の利用許可が失効しています。',
+    producer_unavailable:'候補を作成した実行を確認できません。',human_state_unavailable:'保存候補の利用状態が失効・停止しています。',revision_conflict:'保存版が更新されています。',
+    human_pending:'独立した研究者記録がまだ揃っていません。',no_thematic_candidates:'保存済みテーマ候補はありません。'})[code]||'現在の保存状態・利用条件では記録できません。再取得して確認してください。';
+}
+function orchestrationHumanAvailability() {
+  const state=orchestrationHumanState,key=`${orchestrationState.itemId}:${orchestrationState.runId}`;
+  if(state.runKey!==key) {
+    orchestrationHumanCapture();state.runKey=key;state.options=null;state.selection=null;state.loading=false;++state.request;
+    orchestrationNode('human-form').hidden=true;orchestrationNode('human-next').hidden=true;
+    orchestrationNode('human-confirmation').hidden=true;orchestrationHumanMessage('');
+  }
+  const run=orchestrationState.run,option=state.selection?.option,draft=orchestrationHumanDraft();
+  const stale=state.options?.generation!==null&&state.options?.generation!==undefined&&state.options.generation!==run?.generation;
+  const unavailable=option&&state.options&&!state.options.options.some(current=>orchestrationHumanTargetKey(current)===orchestrationHumanTargetKey(option));
+  const blocked=!run||!['accepted','queued','running','completed','succeeded','idle','paused'].includes(run.status)||run.stale||run.cancel_requested||stale;
+  const ready=!blocked&&!unavailable&&state.options?.enabled===true&&option?.enabled===true&&Boolean(state.selection?.step);
+  orchestrationText('human-availability',!run?'保存済み実行を選んでください。':blocked?'実行の停止・入力変更・未対応状態を検出しました。記録内容を保持し、保存候補を再取得してください。':state.options?.enabled===false?orchestrationHumanReason(state.options.reason_code):option?.enabled===false?orchestrationHumanReason(option.reason_code):'四つの段階をそれぞれ独立して記録します。表示の取得は判断を記録しません。');
+  for(const id of ['load','next'])orchestrationNode(`human-${id}`).disabled=!run||state.loading||state.sending||Boolean(draft?.uncertain);
+  orchestrationNode('human-evidence').disabled=!run;
+  orchestrationNode('human-review').disabled=!ready||state.loading||state.sending||Boolean(draft?.uncertain)||Boolean(draft?.refreshRequired);
+  orchestrationNode('human-save').disabled=!ready||state.loading||state.sending||!draft?.payload;
+  for(const id of ['asset','target','step','author-confirm',...orchestrationHumanFields])orchestrationNode(`human-${id}`).disabled=state.sending||Boolean(draft?.uncertain);
+  if(unavailable)for(const id of ['asset','target','step'])orchestrationNode(`human-${id}`).disabled=true;
+  if(blocked)orchestrationNode('human-confirmation').hidden=true;
+}
+function orchestrationHumanOptionsValid(data) {
+  const integer=value=>Number.isSafeInteger(value)&&value>=0, hash=value=>typeof value==='string'&&/^sha256:[0-9a-f]{64}$/.test(value);
+  return data?.schema_id==='gurumoji.human-record-options'&&data.schema_version===1&&data.item_id===orchestrationState.itemId&&data.run_id===orchestrationState.runId&&
+    (data.generation===null||integer(data.generation))&&typeof data.enabled==='boolean'&&(!data.enabled||integer(data.generation))&&integer(data.offset)&&data.offset<=10000&&data.limit===20&&
+    (data.next_offset===null||integer(data.next_offset)&&data.next_offset<=10000)&&Array.isArray(data.options)&&data.options.length<=20&&data.options.every(option=>
+      option.asset_key&&typeof option.library_id==='string'&&option.asset_key.library_id===option.library_id&&option.scope&&
+      ['candidate','theme'].includes(option.target_kind)&&typeof option.label==='string'&&option.target&&
+      option.target.domain===(option.target_kind==='candidate'?'ta-candidate-content-v1':'ta-theme-content-v1')&&integer(option.target.version)&&option.target.version>=1&&hash(option.target.content_hash)&&
+      integer(option.expected_state_revision)&&typeof option.enabled==='boolean'&&Array.isArray(option.human_steps)&&option.human_steps.length===4&&
+      new Set(option.human_steps.map(step=>step.step_id)).size===4&&option.human_steps.every(step=>typeof step.step_id==='string'&&typeof step.label==='string'&&integer(step.next_revision)&&step.next_revision>=1&&
+        (step.latest_record===null?step.next_revision===1&&step.next_supersedes_record_ref===null:
+          step.latest_record?.record?.actor?.kind==='researcher'&&typeof step.latest_record.record.actor.actor_id==='string'&&
+          Boolean(orchestrationHumanDecision[step.latest_record.record.decision])&&hash(step.latest_record.record_ref?.content_hash)&&
+          step.next_revision===step.latest_record.record.revision+1&&step.next_supersedes_record_ref?.content_hash===step.latest_record.record_ref.content_hash)));
+}
+async function orchestrationHumanJson(url,options={}) {
+  const response=await apiFetch(url,options),data=await readJsonResponse(response);
+  if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);Object.assign(error,{field:data.field,code:data.reason_code,status:response.status});throw error;}
+  return {data,status:response.status};
+}
+async function orchestrationHumanLoad(offset=0,preserve=Boolean(orchestrationHumanState.selection)) {
+  const state=orchestrationHumanState;if(state.loading||state.sending||orchestrationHumanDraft()?.uncertain)return;
+  orchestrationHumanCapture();const previous=state.selection,request=++state.request,epoch=orchestrationState.epoch,viewer=orchestrationState.viewerEpoch;
+  const oldKey=previous&&orchestrationHumanTargetKey(previous.option),oldStep=previous?.step?.step_id;
+  state.loading=true;state.options=null;orchestrationNode('human-confirmation').hidden=true;orchestrationHumanAvailability();
+  const current=()=>request===state.request&&epoch===orchestrationState.epoch&&viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open;
+  try {
+    const {data}=await orchestrationHumanJson(`${orchestrationBase()}/human-records?offset=${offset}`);
+    if(!current())return;
+    if(!orchestrationHumanOptionsValid(data))throw Error('研究者記録の読取形式・対象・改訂情報を確認できません。未対応の応答です。');
+    state.options=data;
+    const retained=preserve&&data.options.find(option=>orchestrationHumanTargetKey(option)===oldKey);
+    if(preserve&&previous&&!retained) {
+      const draft=orchestrationHumanDraft();if(draft){draft.refreshRequired=true;draft.payload=null;}
+      orchestrationNode('human-form').hidden=false;
+      orchestrationHumanMessage('元の対象版が現在の選択肢にありません。原文メモは元の対象に保持しました。別の候補へ転用せず、対象を確認してください。',true,true);return;
+    }
+    const assets=[...data.options.reduce((map,option)=>{const key=orchestrationHumanAssetKey(option);if(!map.has(key)||option.target_kind==='candidate')map.set(key,option);return map;},new Map()).values()];
+    orchestrationNode('human-asset').replaceChildren(...assets.map((option,index)=>{const node=orchestrationElement('option',`保存候補 ${data.offset+index+1} · ${option.label}`);node.value=orchestrationHumanAssetKey(option);return node;}));
+    orchestrationNode('human-next').hidden=data.next_offset===null;
+    if(retained)orchestrationNode('human-asset').value=orchestrationHumanAssetKey(retained);
+    state.selection=null;orchestrationNode('human-form').hidden=!data.options.length;
+    if(data.options.length)orchestrationHumanSelect('asset',retained,oldStep,preserve);
+    if(!preserve)orchestrationHumanMessage(data.options.length?'対象と一つの段階を選び、研究者本人の記録を入力してください。':'この実行に記録可能な保存候補はありません。');
+    const draft=orchestrationHumanDraft();if(draft){draft.refreshRequired=false;draft.payload=null;}
+  } catch(error) {
+    if(current()){orchestrationNode('human-form').hidden=!state.selection;orchestrationHumanMessage(`保存候補の取得: ${error.message}。入力メモは保持しています。`,true);}
+  } finally {if(request===state.request){state.loading=false;orchestrationHumanAvailability();}}
+}
+function orchestrationHumanSelect(kind,retained=null,oldStep=null,preserveMessage=false) {
+  const state=orchestrationHumanState;orchestrationHumanCapture();
+  if(kind==='asset') {
+    const choices=state.options?.options.filter(option=>orchestrationHumanAssetKey(option)===orchestrationNode('human-asset').value)||[];
+    orchestrationNode('human-target').replaceChildren(...choices.map(option=>{const node=orchestrationElement('option',`${option.target_kind==='candidate'?'候補全体':'テーマ'} · ${option.label} · 版 ${option.target.version}`);node.value=orchestrationHumanTargetKey(option);return node;}));
+    if(retained)orchestrationNode('human-target').value=orchestrationHumanTargetKey(retained);
+  }
+  const option=state.options?.options.find(option=>orchestrationHumanTargetKey(option)===orchestrationNode('human-target').value);
+  if(!option){state.selection=null;orchestrationHumanAvailability();return;}
+  if(kind!=='step') {
+    const placeholder=orchestrationElement('option','今回記録する一つの段階を選択');placeholder.value='';
+    orchestrationNode('human-step').replaceChildren(placeholder,...option.human_steps.map(step=>{const node=orchestrationElement('option',step.label);node.value=step.step_id;return node;}));
+    if(oldStep)orchestrationNode('human-step').value=oldStep;
+  }
+  const step=option.human_steps.find(step=>step.step_id===orchestrationNode('human-step').value);state.selection={option,step};
+  const key=orchestrationHumanDraftKey();
+  if(!state.drafts.has(key))state.drafts.set(key,{actor:step?.latest_record?.record.actor.actor_id||'',source:'',reason:'',decision:'',payload:null,uncertain:false,refreshRequired:false});
+  const draft=orchestrationHumanDraft();
+  for(const id of orchestrationHumanFields){const node=orchestrationNode(`human-${id}`);node.value=draft[id];node.removeAttribute('aria-invalid');}
+  if(step?.latest_record)orchestrationNode('human-actor').value=draft.actor=step.latest_record.record.actor.actor_id;
+  orchestrationNode('human-actor').readOnly=Boolean(step?.latest_record);
+  orchestrationNode('human-author-field').hidden=!step?.latest_record;
+  orchestrationNode('human-author-confirm').required=Boolean(step?.latest_record);
+  orchestrationNode('human-author-confirm').checked=false;
+  const scope=option.scope;
+  orchestrationText('human-scope',`対象版 ${option.target.version} · 対象発話 ${scope.member_ids?.length??'未取得'}件 · 除外 ${scope.excluded_ids?.length??'未取得'}件 · ローカル保存。対象集合は保存版に固定されています。${option.target_kind==='theme'?'このテーマの判断は、候補全体の採用とは別です。':''}`);
+  orchestrationNode('human-stages').replaceChildren(...option.human_steps.map(entry=>orchestrationElement('li',`${entry.label}：${entry.latest_record?`${orchestrationHumanDecision[entry.latest_record.record.decision]}を記録済み（第${entry.latest_record.record.revision}版）`:'研究者記録なし'}`)));
+  orchestrationText('human-existing',step?.latest_record?`既存記録の訂正（第${step.next_revision}版）です。記録者・対象・段階は引き継ぎます。前の理由：${step.latest_record.record.reason}`:step?'この段階の新しい研究者記録です。':'四つの段階を一度に確認済みにする操作はありません。');
+  orchestrationNode('human-confirmation').hidden=!draft.uncertain;
+  if(!option.enabled&&!preserveMessage)orchestrationHumanMessage(`${orchestrationHumanReason(option.reason_code)} 入力メモは元の対象に保持しています。`,true);
+  orchestrationHumanAvailability();
+}
+function orchestrationHumanEdit(event) {
+  if(![...orchestrationHumanFields,'author-confirm'].some(id=>event.target===orchestrationNode(`human-${id}`)))return;
+  event.target.removeAttribute('aria-invalid');
+  orchestrationHumanCapture();const draft=orchestrationHumanDraft();if(!draft)return;
+  draft.payload=null;orchestrationNode('human-confirmation').hidden=true;orchestrationHumanAvailability();
+}
+function orchestrationHumanError(error) {
+  const id=error.field==='source_text'?'source':error.field==='expected_state_revision'?'asset':
+    error.code?.includes('actor')?'actor':error.code?.includes('source')?'source':error.code?.includes('step')?'step':error.code?.includes('target')?'target':'asset';
+  const node=orchestrationNode(`human-${id}`);node.setAttribute('aria-invalid','true');node.setAttribute('aria-describedby','orchestration-human-message');
+  orchestrationHumanMessage(`研究者記録の保存: ${error.message}。原文メモと判断は保持しています。`,true);node.focus();
+}
+async function orchestrationHumanReview(event) {
+  event.preventDefault();orchestrationHumanAvailability();if(orchestrationNode('human-review').disabled)return;
+  const form=orchestrationNode('human-form');if(!form.reportValidity())return;
+  orchestrationHumanCapture();const state=orchestrationHumanState,{option,step}=state.selection,draft=orchestrationHumanDraft(),key=orchestrationHumanDraftKey(),epoch=orchestrationState.epoch;
+  if(!draft.actor.trim()||!draft.source.trim()||!draft.reason.trim()||!orchestrationHumanDecision[draft.decision]){orchestrationHumanMessage('記録者・原文メモ・判断・理由をそれぞれ入力してください。',true);return;}
+  state.sending=true;orchestrationHumanAvailability();
+  try {
+    const bytes=new TextEncoder().encode(draft.source),digest=await crypto.subtle.digest('SHA-256',bytes);
+    if(epoch!==orchestrationState.epoch||key!==orchestrationHumanDraftKey())return;
+    const recordId=step.latest_record?.record.record_id||`researcher-${crypto.randomUUID()}`;
+    const record={record_id:recordId,revision:step.next_revision,supersedes_record_ref:orchestrationHumanCopy(step.next_supersedes_record_ref),
+      actor:step.latest_record?orchestrationHumanCopy(step.latest_record.record.actor):{kind:'researcher',actor_id:draft.actor.trim()},decision:draft.decision,
+      target:orchestrationHumanCopy(option.target),allowed_step_ids:[step.step_id],scope:orchestrationHumanCopy(option.scope),recorded_at:new Date().toISOString(),reason:draft.reason,
+      record_ref:{target_type:'researcher_memo',target_id:`human-source:${recordId}`,version:String(step.next_revision),content_hash:`sha256:${Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')}`,hash_domain:'raw-bytes-v1',library_id:option.library_id}};
+    const payload={asset_key:orchestrationHumanCopy(option.asset_key),record,source_text:draft.source,expected_state_revision:option.expected_state_revision};
+    if(new TextEncoder().encode(JSON.stringify(payload)).length>65536)throw Error('記録が保存上限を超えています。原文メモ・理由を短くしてください。');
+    draft.payload=payload;
+    orchestrationText('human-summary',`${option.target_kind==='candidate'?'候補全体':'テーマ'} · ${option.label} · 版 ${option.target.version}\n${step.label}\n記録者：${record.actor.actor_id}\n判断：${orchestrationHumanDecision[record.decision]}\n理由：${record.reason}\n原文メモ：\n${draft.source}\nこの一つの段階だけを、第${record.revision}版としてローカルに保存します。`);
+    orchestrationNode('human-confirmation').hidden=false;orchestrationNode('human-save').textContent='確認した研究者記録を保存';
+  }catch(error){orchestrationHumanMessage(`記録内容の確認: ${error.message}。メモは保持しています。`,true);}
+  finally{state.sending=false;orchestrationHumanAvailability();if(draft.payload)orchestrationNode('human-save').focus();}
+}
+async function orchestrationHumanSave() {
+  orchestrationHumanAvailability();const state=orchestrationHumanState,draft=orchestrationHumanDraft();if(state.sending||!draft?.payload||orchestrationNode('human-save').disabled)return;
+  const payload=draft.payload,key=orchestrationHumanDraftKey(),epoch=orchestrationState.epoch,base=orchestrationBase();
+  state.sending=true;orchestrationHumanAvailability();orchestrationHumanMessage('研究者の原文メモと、この段階の判断を保存しています…');
+  let refresh=false;
+  try {
+    const {data,status}=await orchestrationHumanJson(`${base}/human-records`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(![200,201].includes(status)||data.record?.record_id!==payload.record.record_id||data.record?.revision!==payload.record.revision||typeof data.duplicate!=='boolean')throw Error('保存の応答を確認できません。');
+    draft.payload=null;draft.uncertain=false;draft.refreshRequired=true;
+    if(epoch!==orchestrationState.epoch||key!==orchestrationHumanDraftKey())return;
+    orchestrationNode('human-confirmation').hidden=true;
+    orchestrationHumanMessage(data.duplicate?'同じ研究者記録は保存済みです。重複して記録していません。':'この段階の研究者記録を保存しました。他の段階の判断は変更していません。',false,true);refresh=true;
+  }catch(error) {
+    if(error.status>=400&&error.status<500){draft.payload=null;draft.uncertain=false;draft.refreshRequired=true;refresh=true;}
+    else {draft.uncertain=true;orchestrationNode('human-save').textContent='同じ記録の保存結果を確認・再送';}
+    if(epoch===orchestrationState.epoch&&key===orchestrationHumanDraftKey()) {
+      orchestrationHumanError(error);
+      if(draft.uncertain)orchestrationHumanMessage(`保存結果を確認できません: ${error.message}。新しい記録を作らず、同じ内容で確認・再送できます。原文は保持しています。`,true,true);
+      else orchestrationNode('human-confirmation').hidden=true;
+    }
+  }finally {
+    state.sending=false;orchestrationHumanAvailability();
+    if(refresh&&epoch===orchestrationState.epoch&&key===orchestrationHumanDraftKey())await orchestrationHumanLoad(state.options?.offset||0,true);
+  }
 }
 window.addEventListener('DOMContentLoaded',bindAnalysisOrchestration);

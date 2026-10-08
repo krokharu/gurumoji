@@ -27,6 +27,9 @@ test('real GET metadata builds five opt-in methods; reading/rendering sends no P
  assert.equal(node(h,'table-method').options.length,5);assert.equal(node(h,'table-asset').options.length,fixture.options.inputs.length);
  assert.match(node(h,'table-scope').textContent,/固定入力版.*対象.*除外/);
  assert.equal(node(h,'table-confirmation').hidden,true);h.evaluate('renderAnalysisOrchestration();renderAnalysisOrchestration()');
+ assert.equal(h.document.getElementById('orchestration-human-form').hidden,true);
+ assert.equal(h.requests.filter(r=>r.url.includes('/human-records')).length,0,'table opt-in and polling must not create researcher records or fetch them implicitly');
+ assert.match(h.document.querySelector('.orchestration-human-record').textContent,/数量分析の入力として利用できるとは限りません/);
  assert.equal(h.requests.filter(r=>r.options.method==='POST').length,0);
  assert.equal(node(h,'table-form').querySelector('textarea'),null);
  assert.equal(node(h,'table-parameters').querySelectorAll('input:disabled:checked').length,3);
@@ -102,7 +105,7 @@ try:
   if kwargs.get('request_id','').startswith('table-pilot:'):saves.append(kwargs['request_id'])
   return real_save(**kwargs)
  t.service.method_runner=compute;t.f.store.save=save
- print(json.dumps(dict(options=t.options(),run=t.run,seed_projection=seed_projection)))
+ print(json.dumps(dict(options=t.options(),run=t.run,seed_projection=seed_projection,seed_source=t.fixture.asset['asset_key'])))
  for line in sys.stdin:
   calls.clear();saves.clear()
   method,body=json.loads(line);response=t.client.post(t.url+'/'+method,json=body);data=response.get_json()
@@ -120,6 +123,10 @@ finally:t.doCleanups()
  const read=async()=>{const line=await lines.next();assert.equal(line.done,false,stderr);return JSON.parse(line.value);};
  t.after(()=>{worker.stdin.end();});
  const live=await read(),h=await setup(t);h.fixture(live.run);h.evaluate('orchestrationAdopt(window.fixture,"TEST-conversation")');await load(h,live.options);
+ // Option order is not source identity: reusable aggregate/projection assets
+ // may sort ahead of the immutable original. Select the actual seeded input.
+ const seedIndex=live.options.inputs.findIndex(input=>Object.entries(live.seed_source).every(([key,value])=>input.source.asset_key[key]===value));
+ assert(seedIndex>=0,'GET must expose the seeded immutable original');h.change(node(h,'table-asset'),String(seedIndex));
  for(const method of live.options.methods){
   h.change(node(h,'table-method'),method.method_id);
   if(method.method_id==='table_join')h.change(node(h,'table-second'),String(live.options.inputs.findIndex(a=>!a.fields.includes('n'))));

@@ -130,3 +130,14 @@
 #orchestration-table-confirmation { margin-top: 16px; padding: 12px; border: 1px solid var(--green); border-radius: 8px; background: var(--green-soft); }
 #orchestration-table-summary, #orchestration-table-message { overflow-wrap: anywhere; }
 #orchestration-table-message:not(:empty) { margin: 12px 0; }
+.orchestration-human-record .field { margin:12px 0; }
+.orchestration-human-record :is(input:not([type="checkbox"]),select,textarea) { width:100%; max-width:100%; min-width:0; }
+.orchestration-human-record .check-row { align-items:flex-start; line-height:1.7; }
+.orchestration-human-record textarea { resize:vertical; padding:12px; border:1px solid var(--line); border-radius:9px; background:var(--card); color:var(--ink); line-height:1.7; }
+.orchestration-human-record :is(input,select,textarea,button):focus-visible { outline:var(--focus-ring); outline-offset:2px; }
+.orchestration-human-record [aria-invalid="true"] { border-color:var(--red); }
+.orchestration-human-stages { padding-left:24px; font-size:.8rem; line-height:1.8; }
+#orchestration-human-confirmation { margin-top:16px; padding:12px; border:1px solid var(--green); border-radius:8px; background:var(--green-soft); }
+#orchestration-human-summary { white-space:pre-wrap; }
+#orchestration-human-message:not(:empty) { padding:12px; border-left:3px solid var(--green); background:var(--green-soft); }
+#orchestration-human-message[data-error="true"] { border-color:var(--red); }
