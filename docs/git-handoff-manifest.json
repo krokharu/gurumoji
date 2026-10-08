@@ -175,8 +175,8 @@
     },
     {
       "path": "scripts/check_git_handoff.py",
-      "sha256": "2d10fd5c71587c9da006cdb75aac320e41bdea1743e47c1a6dd9aea3ec0fa1e1",
-      "bytes": 2446
+      "sha256": "1e10c7e0ef0fb9c4ede81c52df5068b414c277ac2cf06a091fa95770e7e64884",
+      "bytes": 5208
     },
     {
       "path": "scripts/test_expert_agent_model.py",
@@ -438,6 +438,11 @@
       "path": "tests/test_statistical_report_acceptance.py",
       "sha256": "9a5b93a0c2963ca62616cfe1445ccba6037f1d8e75e45a5f8ba0df98184786f4",
       "bytes": 48263
+    },
+    {
+      "path": "tests/test_git_handoff.py",
+      "sha256": "c9f6274852aa21251e59cc644d94e42982a86abf97b7b6b7881a57081e8d155c",
+      "bytes": 7507
     }
   ]
 }
