@@ -21,7 +21,7 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 ## 2026-10-09 05:10 JST の固定候補
 
-現在の共有sourceは `fa69de25b3926eb250b2a85c3548f79df9f1fa6b`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
+現在の共有sourceは `deaa6751a566c7c22a8f1e205e26165e28b74bb3`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
 
 - 実際に保存された研究者記録を持つTA候補から発話単位・明示対応による参加者単位へ変換し、count/sum/mean、完全な一対一join、探索的相関を既存Handler／Storeで保存してfresh再利用する。無発話の名簿を観測ゼロにしない。現在の実接続は単一会話。複数会話はkernelだけでなく、全保存元／原票／現在の権限を照合する実Store橋を必須後続に残す。
 - 同Handlerの資産依存計画を接続し、選択したfrom_stepの実保存receiptを待つ。重送／順序違い／欠落通知／再開は実台帳から照合する。旧世代resumeの計算・保存を0で拒否し、正常completed後の新run再利用を保持する。独立最終関連11件、独立unittest12件、standalone4probesが成功。初期のP1/P2失敗は履歴として保持し、修正版だけで閉鎖した。通信先の不確定な実LLM結果にexactly-onceを主張しない。
@@ -35,6 +35,14 @@ C0が管理・割当・受入を担当し、Orca側LunaはDot応答と作業有�
 
 実モデル品質・全323発話・研究者採否・実Vault・AT・非図表の残る接続は未完了。図表延期と残件を明示し、全要求や研究品質の合格にはしない。通常共有はdraftで、main merge・強制push・私有履歴／実DB／研究本文／資格情報の公開は行わない。
 
+
+## 2026-10-09: Dot #25 の Windows 受入
+
+Dot #25 / Draft PR #26 の固定 `6534303820148b6b679e35e1ccd9ea7dbd4792a7` から `src/gurumoji/services/analysis_unit_groups.py` と `tests/test_analysis_unit_groups.py` だけを選別し、共有 `deaa6751a566c7c22a8f1e205e26165e28b74bb3` へ統合した。Issue #25 の確認済み契約 [6068361583](https://github.com/krokharu/gurumoji/issues/25#issuecomment-6068361583) と公開候補の bytes / SHA-256 / blob を固定 fetch/readback で照合した。
+
+Windows / Python 3.13.7 の `PYTHONPATH=src;tests python -m unittest test_analysis_unit_groups -v` は14件成功。別3会話合成例で count / sum / mean、発話加重平均5.25、projection原分母と現在context、qualified対応、異なる変数定義の拒否が成功。helperは原snapshot evidence対応・現在権限・実HC採択を認定しない。実複数会話Handler保存/fresh橋、実DB/Vault/モデル、PNG接続は未実行で、engineering_holdを維持する。
+
+共有frontend14の凍結bytes・未stage・index内容を保護した。最終S6 backend `178bc53b136394784fd89f982c1f8dd403519ee2`（基点 `2805d9987fe9831058e66385a56c3f2cdef049a9`、明示6file、patch SHA-256 `afafcb2f91e88c1f2d8faf7751c88f52a6aecef9a22a316965930b606dd9084e`）は読取り受領済みで独立レビュー待ち。通常合格後の共有統合ownerはWindows担当、画面→保存→fresh/Edge受入はfrontend担当、通常push/Dot通知はLuna。私有履歴・未コミットfrontendは公開候補に含めない。
 
 ## 過去の固定候補と検証（当時の状態）
 

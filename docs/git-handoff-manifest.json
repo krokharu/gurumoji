@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "fa69de25b3926eb250b2a85c3548f79df9f1fa6b",
+  "source_commit": "deaa6751a566c7c22a8f1e205e26165e28b74bb3",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "7bd6cedd8c74d10049462090a9edbc8c3bb5f57ff511c6ca7f0b31f0884ec01b",
-      "bytes": 12289
+      "sha256": "07e97d743cc95e26a75eebaa7879690d44e3447acd84b56db00da595fa8a6ec3",
+      "bytes": 13841
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -159,6 +159,11 @@
       "bytes": 11907
     },
     {
+      "path": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
+      "sha256": "68305c78e2b9f1d9f20e36a73e93e4b696a0fe7ba35b3d154f9686332bc21393",
+      "bytes": 46081
+    },
+    {
       "path": "docs/program-vault/90-Templates/knowledge-evaluation.md",
       "sha256": "90d6fc97ed16544dddbcd815522677a33efe1f9d0c1b7b4d514e6dfde6886849",
       "bytes": 2722
@@ -252,6 +257,11 @@
       "path": "src/gurumoji/services/analysis_orchestration_methods.py",
       "sha256": "c56decb405cdfae3c37639730acb43b8ffa4ffb5511ffc5b9d5109f3bf3fd1eb",
       "bytes": 25915
+    },
+    {
+      "path": "src/gurumoji/services/analysis_unit_groups.py",
+      "sha256": "ae6d9f8c216111d1cf1e2e47556b3f2cfe1ceac539d5e525b7e8c7efc2e02a08",
+      "bytes": 15487
     },
     {
       "path": "src/gurumoji/services/analysis_visual_package.py",
@@ -437,6 +447,11 @@
       "path": "tests/test_analysis_typed_assets.py",
       "sha256": "03689f31285ff23af6dc91aacf4c5064cd467208d7800ecefb8c51a82cf85059",
       "bytes": 35125
+    },
+    {
+      "path": "tests/test_analysis_unit_groups.py",
+      "sha256": "9561ff9a87397f4ea619a7f5a7ec214263e1b2e0553711be2018e4b526edb16d",
+      "bytes": 26178
     },
     {
       "path": "tests/test_analysis_visual_package.py",

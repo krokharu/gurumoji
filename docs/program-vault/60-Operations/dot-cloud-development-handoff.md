@@ -5,7 +5,7 @@ title: dot クラウド開発とローカルへの引継ぎ
 summary: dot を優先して基本作業を進め、設計判断・変更背景・検証・未解決事項をローカル開発へ引き継ぐためのプロジェクト記録。
 status: current
 verified: 2026-10-02
-updated: 2026-10-04
+updated: 2026-10-09
 feature: development-workflow
 tags:
   - gurumoji/program
@@ -287,3 +287,12 @@ PPTX sampleはネイティブの編集可能text object、JSON/notesにrun・入
 - PPTXはpackage／geometry／EA font指定／native chartとembedded workbook参照／first-party importの検査を通過。描画はartifact-toolであり、Windows PowerPointの実表示と編集操作、実ブラウザー一連操作は未検証。相対API参照は引き続きグルモジ内の照合用
 
 生成器依存は既存python-pptxのまま。追加AI、課金、実会話／実研究Vaultを使う検証は0。source-only ZIP、完全Git bundle、検証資料を別々の20MB未満ファイルにし、別フォルダー復元でsource全hashとbundleのHEAD／tree／fsckを照合する。サンプルのスライド数を固定する契約ではなく、保存内容と安全な分割により実runの枚数は変わる。
+
+
+## 2026-10-09: Windows 選別受入と次の所有者
+
+共有baseline `f52e95948e4fef3abe8afbe2d0ddd617c69ade3b` 上で、Dot #25 固定 `6534303820148b6b679e35e1ccd9ea7dbd4792a7` のpure pooling helper/test二fileだけを `deaa6751a566c7c22a8f1e205e26165e28b74bb3` に選別した。既存carrierを再利用し、原分母と欠測/観測zeroを保持する。原snapshot evidence対応、現在projection/policy、HC採択、execute/save/fresh権限の確認は既存Store owner責務である（Issue #25 確認6068361583）。
+
+Windows Python3.13関連14件と別3会話合成例が成功。count/sum/mean・発話加重平均5.25・projection原分母と現在context・異なる定義の拒否を確認した。frontend14の凍結bytes/未stage/indexは不変。研究者データと実DB/Vault/モデルへ接触していない。実複数会話Handler保存/fresh橋、PNG接続、利用者Edge経路は未実行で、helper合格をそれらの完了へ拡張しない。
+
+S6最終 `178bc53b136394784fd89f982c1f8dd403519ee2` の明示6fileは基点2805d998とのpatch hashを照合して読取り受領済み。独立レビュー後にWindows ownerがbackend-only shared index leaseで3way統合し、frontendへ固定ready版とleaseを返す。Lunaは受入済み公開SHAの通常push/通知のみ、仕様変更/担当競合はC0へ戻す。公開正本は `docs/GIT_HANDOFF.md` とmanifest、検証receiptはOrca Run `run_30240e5eb510` / Dispatch `ctx_b1d0fd9e06ef` を参照する。
