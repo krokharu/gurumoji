@@ -232,6 +232,8 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
             bind_evidence_ids(schema, [row["evidence_id"] for row in packet["evidence"]])
             bind_statistical_requests(schema, profile)
             expert_prompt = EXPERT_PROMPT
+            if profile.get("typed_contract") == "thematic_candidates_v1":
+                expert_prompt += "\n版2のthematic_candidates_v1はthematic_sourceの固定参照・scope・発話hashに束縛します。7文字列から機械項目や採否を推定しません。AI候補はhuman_pending、本人記録はnot_entered/[]、未検証のreceiptはunknown/not_run、未読はids:nullです。支持・反例・代替の空配列は不存在や全読了を意味しません。\n"
             if "statistical_tools" in profile:
                 expert_prompt += STATISTICAL_EXPERT_PROMPT
                 role_prompt = ""

@@ -8,7 +8,7 @@ from typing import Any, Callable
 from flask import Blueprint, Flask, Response, jsonify, request
 
 from ..analysis_core import AnalysisContractError, TABLE_PILOT_MAX_BYTES
-from ..analysis_store import StoreConflict
+from ..analysis_store import StoreConflict, AssetBindingError
 
 
 def register_orchestration_routes(app: Flask, service: Callable[[], Any],
@@ -42,7 +42,7 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.errorhandler(StoreConflict)
     def publication_conflict(exc):
-        return jsonify(error=str(exc), reason_code="publication_conflict"), 409
+        return jsonify(error=str(exc), reason_code=exc.reason if isinstance(exc, AssetBindingError) else "publication_conflict"), 409
 
     @blueprint.errorhandler(LookupError)
     def not_found(_exc):
@@ -121,6 +121,14 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
     def resume(item_id, run_id):
         return jsonify(run=public_run(item_id, service().resume(item_id, run_id, payload()))), 202
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
+    def human_record(item_id, run_id):
+        value = payload()
+        outcome = service().submit_human_record(item_id, run_id, value, request_bytes=request.get_data(cache=True))
+        response = jsonify(outcome)
+        response.headers["Cache-Control"] = "no-store"
+        return response, 200 if outcome["duplicate"] else 201
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/publication/retry")
     def retry_publication(item_id, run_id):

@@ -80,6 +80,12 @@ def _validate_export(db, item_id, run_id, run, exported):
     expected_run = copy.deepcopy(run)
     expected_run["config"].setdefault("publication_targets", [])
     expected_run["config"]["effective_publication_writers"] = list(EFFECTIVE_PUBLICATION_WRITERS) if _scope(run) else []
+    if "expert_agents" in run:
+        from .expert_agents import catalog_packet, verify_bundle
+        verify_bundle(run["expert_agents"])
+        if exported.get("expert_knowledge_snapshot") != run["expert_agents"]:
+            raise StoreConflict("専門家の固定知識・契約版が一致しません。")
+        expected_run["expert_agents"] = catalog_packet(run["expert_agents"])
     if any(exported.get("run", {}).get(key) != value for key, value in expected_run.items()):
         raise StoreConflict("出力のrun版が一致しません。")
     tasks = {}
@@ -179,6 +185,26 @@ def build_orchestration_package(exported, sealed_hash):
     result = {"schema_version": 1, "parameters": parameters,
               "algorithms": {"orchestration_output": OUTPUT_VERSION}, "methods": [method],
               "orchestration": copy.deepcopy(exported)}
+    from .expert_agents import thematic_source_packet, validate_report
+    profiles = exported.get("expert_knowledge_snapshot", {}).get("profiles", {})
+    typed_results = []
+    for row in exported.get("raw_results", []):
+        raw = row.get("raw", row.get("raw_result", {}))
+        report = raw.get("expert_report", {}) if isinstance(raw, dict) else {}
+        if "thematic_candidates_v1" not in report: continue
+        if row.get("validation_status") != "valid" or row.get("stale"):
+            continue  # Preserve invalid/stale raw bytes, never expose them as typed outputs.
+        profile = profiles.get(report.get("expert_id"))
+        if profile is None or profile.get("typed_contract") != "thematic_candidates_v1":
+            raise StoreConflict("明示選択していない型付き候補です。")
+        candidate = report["thematic_candidates_v1"]
+        if candidate is None: continue
+        source = candidate["content"]["input_refs"][0]
+        fixed = thematic_source_packet(initial, library_id=source["library_id"], conversation_id=run["item_id"])
+        validate_report(profile, raw, by_id, thematic_source=fixed)
+        typed_results.append({"result_id": row["result_id"], "task_id": row["task_id"], "candidate": copy.deepcopy(candidate)})
+    if typed_results:
+        result["orchestration"]["thematic_candidates_v1"] = typed_results
     return archived, result, {"autonomous_summary": (fields, rows)}
 
 
@@ -320,7 +346,7 @@ class AnalysisOrchestrationPublicationService:
                     commit_guard=lambda db: self._guard(db, item_id, run_id, attempt_id, allow_stale=True))
                 verified = store.verified_package(saved["id"])
                 if (verified[1].get("parameters") != result["parameters"]
-                        or verified[1].get("orchestration") != exported or saved["item_id"] != item_id):
+                        or verified[1].get("orchestration") != result["orchestration"] or saved["item_id"] != item_id):
                     raise StoreConflict("保存済みpackageと封印した出力が一致しません。")
                 with self._db() as db:
                     current = self._guard(db, item_id, run_id, attempt_id, allow_stale=True)

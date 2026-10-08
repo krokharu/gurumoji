@@ -6,6 +6,7 @@ can be retried from the saved package without repeating analysis or AI calls.
 from __future__ import annotations
 
 import copy
+import base64
 import csv
 import hashlib
 import html
@@ -29,6 +30,8 @@ LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
 STORE_VERSION = 1
 TABLE_FORMAT_VERSION = 1
+HUMAN_RECORD_KIND = "analysis_human_record"
+_HUMAN_RECORD_WRITER = object()
 
 
 class StoreConflict(ValueError):
@@ -368,15 +371,19 @@ def _asset_descriptor(asset, *, original=False):
                 or not all(_asset_id(asset[k]) for k in ("execution_run_id", "producer_task_id") if k in asset)
                 or ("supersedes" in asset and not _asset_refs(asset["supersedes"], nonempty=True))):
             raise AssetBindingError("asset")
-        from .analysis_method_registry import connection_method_descriptor
+        from .analysis_method_registry import connection_method_descriptor, connection_output_contract
         registered = connection_method_descriptor(asset["method_id"])
         if registered is None: raise AssetBindingError("method_unregistered")
         if asset["method_version"] != registered.get("method_version", registered["registry_version"]):
             raise AssetBindingError("method_version")
-        if asset["asset_key"]["output_name"] not in {f"tables/{name}.json" for name in registered["output_names"]}:
+        output = connection_output_contract(asset["method_id"], asset["asset_key"]["output_name"], asset["kind"])
+        if output is None:
             raise AssetBindingError("method_output_unregistered")
-        if asset["content_domain"] != "raw-bytes-v1" or asset["kind"] != "observation_table":
-            raise AssetBindingError("typed_schema_unimplemented", "unsupported")
+        if (asset["content_domain"] != output["content_domain"] or asset["kind"] != output["kind"]
+                or asset["schema"] != output["schema"] or asset["adapter"] != output["adapter"]):
+            raise AssetBindingError("typed_schema_or_domain")
+        if asset["kind"] != "observation_table" and asset["variables"]:
+            raise AssetBindingError("typed_variables_unpermitted")
         if not isinstance(asset["variables"], list): raise AssetBindingError("variables")
         ids = []
         for variable in asset["variables"]:
@@ -395,6 +402,9 @@ def _asset_descriptor(asset, *, original=False):
         if len(ids) != len(set(ids)): raise AssetBindingError("variable_duplicate")
     _asset_key(asset["asset_key"]); _asset_scope(asset["scope"]); _asset_meaning(asset["meaning"])
     validate_connection_actor(asset["producer"])
+    if not original and asset["kind"] != "observation_table":
+        if (asset["producer"]["kind"] not in output["actor_kinds"] or asset["meaning"]["unit"] != output["unit"]):
+            raise AssetBindingError("typed_actor_or_meaning")
     if not original and not asset["parent_refs"]:
         raise AssetBindingError("derived_parent_missing")
     if not _connection_hash(asset["raw_byte_hash"]) or not _connection_schema(asset["schema"]):
@@ -652,8 +662,11 @@ class AnalysisStore:
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
-             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION) -> dict:
+             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION,
+             _human_writer=None) -> dict:
         with STORE_LOCK:
+            if (kind == HUMAN_RECORD_KIND or "human_submission" in result) and _human_writer is not _HUMAN_RECORD_WRITER:
+                raise AssetBindingError("human_record_origin")
             check_cancelled()
             library_id = self.library_id()
             snapshot = {**snapshot, "library_id": library_id}
@@ -662,6 +675,10 @@ class AnalysisStore:
                         "input_fingerprint": input_fingerprint,
                         "algorithms": result.get("algorithms", {}), "parameters": result.get("parameters", {}),
                         "ai_request": result.get("ai_request_id", "")}
+            if result.get("orchestration", {}).get("thematic_candidates_v1"):
+                identity["typed_candidates"] = digest(result["orchestration"]["thematic_candidates_v1"])
+            if kind == HUMAN_RECORD_KIND:
+                identity["human_submission"] = digest(result["human_submission"])
             if kind in {"ai_finishing", "ai_insights"}: identity["request"] = request_id
             fingerprint = digest(identity)
             previous = self.by_request(request_id)
@@ -734,6 +751,57 @@ class AnalysisStore:
                 files = {"input.json": (canonical(snapshot), "application/json", None),
                          "parameters.json": (canonical(result.get("parameters", {})), "application/json", None),
                          "result.json": (canonical(result), "application/json", None)}
+                if kind == HUMAN_RECORD_KIND:
+                    human = result["human_submission"]
+                    files.update({"human/record.json": (canonical(human["record"]), "application/json", None),
+                        "human/source.txt": (human["source_text"].encode("utf-8"), "text/plain", None),
+                        "human/submission.json": (base64.b64decode(human["request_bytes"], validate=True), "application/json", None)})
+                orchestration = result.get("orchestration", {})
+                candidates = orchestration.get("thematic_candidates_v1", [])
+                if candidates:
+                    from .services.expert_agents import thematic_source_packet, validate_report
+                    from .analysis_core import validate_thematic_candidates
+                    fixed = thematic_source_packet(orchestration["initial"], library_id=library_id, conversation_id=item_id)
+                    if not isinstance(candidates, list) or len(candidates) > 9999:
+                        raise StoreConflict("型付き候補の保存件数が不正です。")
+                    files["assets/orchestration_snapshot.json"] = (canonical(orchestration["initial"]["snapshot"]), "application/json", None)
+                    seen = set()
+                    validated_candidates = []
+                    for index, entry in enumerate(candidates):
+                        if (not isinstance(entry, dict) or set(entry) != {"result_id", "task_id", "candidate"}
+                                or not _asset_id(entry["result_id"]) or entry["result_id"] in seen or not _asset_id(entry["task_id"])):
+                            raise StoreConflict("型付き候補の原結果識別子が不正です。")
+                        seen.add(entry["result_id"])
+                        matches = [r for r in orchestration.get("raw_results", []) if r.get("result_id") == entry["result_id"] and r.get("task_id") == entry["task_id"]]
+                        if (len(matches) != 1 or matches[0].get("validation_status") != "valid" or matches[0].get("stale")
+                                or matches[0].get("raw", {}).get("expert_report", {}).get("thematic_candidates_v1") != entry["candidate"]):
+                            raise StoreConflict("型付き候補と検証済みの原結果が一致しません。")
+                        raw_report = matches[0]["raw"]
+                        profile = orchestration.get("expert_knowledge_snapshot", {}).get("profiles", {}).get(raw_report["expert_report"]["expert_id"])
+                        if profile is None or profile.get("typed_contract") != "thematic_candidates_v1":
+                            raise StoreConflict("型付き候補の選択・契約版が一致しません。")
+                        execution_run = orchestration.get("run", {}).get("run_id")
+                        if not _asset_id(execution_run): raise AssetBindingError("typed_execution_provenance")
+                        with self.connect() as db:
+                            task_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND task_id=?",
+                                (execution_run, entry["task_id"])).fetchone()
+                            result_row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE run_id=? AND result_id=? AND task_id=?",
+                                (execution_run, entry["result_id"], entry["task_id"])).fetchone()
+                        task = _read_typed_json(task_row[0]) if task_row else {}
+                        result_state = _read_typed_json(result_row[1]) if result_row else {}
+                        if (not task or task.get("kind") != "ai" or task.get("status") != "succeeded" or not result_row
+                                or result_state.get("validation_status") != "valid" or result_state.get("stale")
+                                or _read_typed_json(result_row[0]) != raw_report
+                                or result_state.get("raw_hash") != _asset_hash(canonical(raw_report))):
+                            raise AssetBindingError("typed_execution_provenance")
+                        from .services.expert_agents import thematic_execution_producer
+                        expected_producer = thematic_execution_producer(task)
+                        validate_report(profile, raw_report, [r["evidence_id"] for r in fixed["evidence"]], thematic_source=fixed,
+                            expected_producer=expected_producer)
+                        candidate = validate_thematic_candidates(entry["candidate"], source=fixed)
+                        self._validate_thematic_versions(candidate, pending_candidates=validated_candidates)
+                        validated_candidates.append(candidate)
+                        files[f"assets/thematic_candidates_{index:04d}.json"] = (canonical(candidate), "application/json", None)
                 for name, (fields, rows) in datasets.items():
                     if not re.fullmatch(r"[a-z_]+", name): raise ValueError("表の名前が正しくありません。")
                     if table_version == TABLE_FORMAT_VERSION:
@@ -899,6 +967,104 @@ class AnalysisStore:
             raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")
         return _read_typed_json(content[references["data"]])
 
+    def thematic_asset_descriptors(self, run_id):
+        """Verified saved review choices; registration/adoption remains explicit."""
+        from .analysis_method_registry import connection_kind_contract, connection_method_descriptor
+        from .services.expert_agents import thematic_source_packet
+        _snapshot, result, manifest, content = self.verified_package(run_id)
+        orchestration = result.get("orchestration", {})
+        entries = orchestration.get("thematic_candidates_v1", [])
+        if not entries: raise AssetBindingError("typed_candidates_missing", "needs_input")
+        fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+        artifacts = {a["name"]: a for a in self.artifacts(run_id)}
+        def common(name, kind, producer, description):
+            contract = connection_kind_contract(kind)
+            return {"asset_key": {"library_id": self.library_id(), "store_run_id": run_id,
+                    "artifact_id": artifacts[name]["id"], "output_name": name},
+                    "raw_byte_hash": _asset_hash(content[name]), "schema": contract["schema"],
+                    "scope": copy.deepcopy(fixed["scope"]), "producer": copy.deepcopy(producer),
+                    "adapter": contract["adapter"], "meaning": {"definition_refs": [], "description": description,
+                    "status": "declared", "unit": contract["unit"]}}
+        original = {**common("assets/orchestration_snapshot.json", "snapshot",
+            {"kind": "system", "actor_id": "Handler-fixed-input", "step_ids": []}, "固定されたテーマ分析の入力。"),
+            "source_ref": fixed["source_ref"]}
+        assets = []
+        for index, entry in enumerate(entries):
+            candidate = entry["candidate"]
+            asset = {**common(f"assets/thematic_candidates_{index:04d}.json", "claim_set", candidate["content"]["producer"],
+                "研究者未確定のテーマ候補。支持・反例・代替はAI下書き。"),
+                "contract_id": "gurumoji.analysis-asset-connection", "contract_version": 1,
+                "content_hash": candidate["content_hash"], "content_domain": "ta-candidate-content-v1", "kind": "claim_set",
+                "source_refs": copy.deepcopy(candidate["content"]["input_refs"]), "method_id": "thematic",
+                "method_version": connection_method_descriptor("thematic")["method_version"],
+                "variables": [], "parent_refs": [fixed["source_ref"]]}
+            self._connection_content(asset); assets.append(asset)
+        self._connection_content(original, original=True)
+        return {"original": original, "assets": assets, "human_status": "human_pending"}
+
+    def read_asset(self, descriptor, *, original=False):
+        """Review-only immutable read, never a state transition or execution grant."""
+        raw, _snapshot = self._connection_content(descriptor, original=original)
+        return {"value": _read_typed_json(raw), "raw_byte_hash": _asset_hash(raw),
+                "content_hash": descriptor.get("content_hash", descriptor.get("source_ref", {}).get("content_hash")),
+                "content_domain": descriptor.get("content_domain", descriptor.get("source_ref", {}).get("hash_domain")),
+                "human_status": "human_pending" if descriptor["producer"]["kind"] in {"ai", "researcher"} else "not_applicable",
+                "execution_enabled": False, "adoption_performed": False}
+
+    def _validate_thematic_versions(self, candidate, *, pending_candidates=()):
+        """Resolve historical ThemeTargets to retained, verified immutable bytes."""
+        from .analysis_core import validate_thematic_candidates
+        from .services.expert_agents import thematic_source_packet
+        known = [candidate] + [c for c in pending_candidates if c["content"]["candidate_set_id"] == candidate["content"]["candidate_set_id"]]
+        with self.connect() as db:
+            runs = db.execute("SELECT id FROM analysis_runs WHERE kind='autonomous_analysis' AND status='completed'").fetchall()
+        for row in runs:
+            _snapshot, result, manifest, content = self.verified_package(row[0])
+            orchestration = result.get("orchestration", {})
+            for index, entry in enumerate(orchestration.get("thematic_candidates_v1", [])):
+                old = entry["candidate"]
+                if old["content"]["candidate_set_id"] != candidate["content"]["candidate_set_id"]: continue
+                if content.get(f"assets/thematic_candidates_{index:04d}.json") != canonical(old):
+                    raise AssetBindingError("typed_history_bytes")
+                fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+                validate_thematic_candidates(old, source=fixed)
+                known.append(old)
+        versions = {}; themes = {}; targets = set()
+        for saved in known:
+            version = saved["content"]["version"]
+            if version in versions and versions[version] != saved["content_hash"]:
+                raise AssetBindingError("typed_candidate_version_conflict")
+            versions[version] = saved["content_hash"]
+            for theme, target in zip(saved["themes"], saved["content"]["theme_refs"]):
+                key = (theme["content"]["theme_id"], theme["content"]["version"])
+                if key in themes and themes[key] != theme["content_hash"]:
+                    raise AssetBindingError("typed_theme_version_conflict")
+                themes[key] = theme["content_hash"]; targets.add(canonical(target))
+        for change in candidate["history"]:
+            if any(canonical(t) not in targets for t in change["from_themes"] + change["to_themes"]):
+                raise AssetBindingError("typed_history_unresolved", "needs_input")
+
+    @staticmethod
+    def _validate_manual_relations(table, snapshot, descriptor):
+        """Reuse the saved hand-annotated interaction_links carrier and direction."""
+        if descriptor["meaning"]["unit"] != "utterance" or descriptor["producer"]["kind"] != "researcher":
+            raise AssetBindingError("graph_meaning_or_actor")
+        required = {"relation", "source_segment_id", "target_segment_id", "context_segment_ids", "source_text", "target_text", "status"}
+        if not required <= set(table["fields"]): raise AssetBindingError("graph_fields")
+        evidence = {str(row.get("utterance_id", row.get("evidence_id"))): row for row in snapshot.get("evidence", [])}
+        if not evidence: raise AssetBindingError("graph_evidence_missing", "needs_input")
+        for row in table["rows"]:
+            link = row["values"]
+            if (not all(_asset_id(link.get(k)) for k in ("relation", "source_segment_id", "target_segment_id", "status"))
+                    or not _asset_ids(link.get("context_segment_ids"))): raise AssetBindingError("graph_edge")
+            # Deleted endpoints are preserved by the legacy artifact, but cannot
+            # become resolved evidence in a typed consumer.
+            for endpoint in ("source", "target"):
+                item = evidence.get(link[endpoint + "_segment_id"])
+                if item is None: raise AssetBindingError("graph_endpoint_unresolved", "needs_input")
+                if item["text"] != link[endpoint + "_text"]: raise AssetBindingError("graph_evidence_text")
+            if not set(link["context_segment_ids"]) <= evidence.keys(): raise AssetBindingError("graph_context")
+
     def _connection_content(self, descriptor, *, original=False):
         """Verify an explicit immutable address; never read a current library item."""
         _asset_descriptor(descriptor, original=original)
@@ -912,6 +1078,35 @@ class AnalysisStore:
         if artifact is None: raise AssetBindingError("artifact_missing", "needs_input")
         raw = content[key["output_name"]]
         if _asset_hash(raw) != descriptor["raw_byte_hash"]: raise AssetBindingError("raw_hash_mismatch")
+        from .analysis_method_registry import connection_kind_contract
+        # Fixed Handler source lives alongside the unchanged human-readable
+        # archive; it is never reconstructed from a current database item.
+        thematic_source = original and descriptor["schema"] == connection_kind_contract("snapshot")["schema"]
+        if thematic_source or (not original and descriptor["kind"] == "claim_set"):
+            from .services.expert_agents import thematic_source_packet
+            from .analysis_core import validate_thematic_candidates
+            orchestration = _result.get("orchestration", {})
+            fixed = thematic_source_packet(orchestration["initial"], library_id=key["library_id"], conversation_id=manifest["conversation_id"])
+            fixed_raw = content.get("assets/orchestration_snapshot.json")
+            if fixed_raw != canonical(orchestration["initial"]["snapshot"]): raise AssetBindingError("typed_source_bytes")
+            if descriptor["scope"] != fixed["scope"]: raise AssetBindingError("typed_scope_mismatch")
+            if thematic_source:
+                contract = connection_kind_contract("snapshot")
+                if (key["output_name"] != "assets/orchestration_snapshot.json" or descriptor["source_ref"] != fixed["source_ref"]
+                        or descriptor["adapter"] != contract["adapter"]): raise AssetBindingError("typed_original_reference")
+            else:
+                candidate = _read_typed_json(raw)
+                validate_thematic_candidates(candidate, source=fixed)
+                self._validate_thematic_versions(candidate)
+                index = int(key["output_name"].removeprefix("assets/thematic_candidates_").removesuffix(".json"))
+                entries = orchestration.get("thematic_candidates_v1", [])
+                if (index >= len(entries) or canonical(entries[index]["candidate"]) != raw
+                        or descriptor["content_hash"] != candidate["content_hash"]
+                        or descriptor["producer"] != candidate["content"]["producer"]
+                        or descriptor["source_refs"] != candidate["content"]["input_refs"]
+                        or descriptor["meaning"]["unit"] != "dataset_claim"):
+                    raise AssetBindingError("typed_content_mismatch")
+            return raw, orchestration["initial"]["snapshot"]
         if original:
             from .analysis_method_registry import connection_method_descriptor
             native = connection_method_descriptor("pearson")
@@ -931,15 +1126,21 @@ class AnalysisStore:
                 raise AssetBindingError("original_payload_schema")
         else:
             dataset = key["output_name"].removeprefix("tables/").removesuffix(".json")
+            if descriptor["kind"] in {"event_sequence", "embedding_matrix"}:
+                raise AssetBindingError("typed_asset_adapter_unimplemented", "unsupported")
+            graph = descriptor["kind"] == "relation_graph"
+            contract = connection_kind_contract("relation_graph") if graph else None
             if (key["output_name"] != f"tables/{dataset}.json" or dataset not in manifest.get("typed_tables", {})
-                    or descriptor["schema"] != {"schema_id": "gurumoji.analysis-table", "version": 1,
-                                               "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))}
-                    or descriptor["adapter"] != {"adapter_id": "analysis-store-table", "version": "1"}):
+                    or descriptor["schema"] != (contract["schema"] if graph else {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                               "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))})
+                    or descriptor["adapter"] != (contract["adapter"] if graph else {"adapter_id": "analysis-store-table", "version": "1"})):
                 raise AssetBindingError("table_schema_or_hash", "unsupported")
             if descriptor["content_hash"] != _asset_hash(raw): raise AssetBindingError("content_hash_mismatch")
             table = self.read_table(key["store_run_id"], dataset)
-            if set(v["variable_id"] for v in descriptor["variables"]) != {c["name"] for c in table["columns"]}:
+            if not graph and set(v["variable_id"] for v in descriptor["variables"]) != {c["name"] for c in table["columns"]}:
                 raise AssetBindingError("table_variable_coverage")
+            if graph:
+                self._validate_manual_relations(table, snapshot, descriptor)
             for variable in descriptor["variables"]:
                 for row in table["rows"]:
                     if variable["variable_id"] not in row["values"] or row["values"][variable["variable_id"]] is None:
@@ -975,6 +1176,250 @@ class AnalysisStore:
                 or set(scope["context_ids"]) != {e["evidence_id"] for e in evidence if e["excluded"]}):
             raise AssetBindingError("scope_population_mismatch")
         return raw, snapshot
+
+    def _human_contract(self, asset, *, require_current=False):
+        """Resolve the exact immutable output and its frozen researcher duties."""
+        choices = self.thematic_asset_descriptors(asset["asset_key"]["store_run_id"])
+        if not any(canonical(asset) == canonical(a) for a in choices["assets"]):
+            raise AssetBindingError("human_record_asset")
+        _snapshot, result, manifest, content = self.verified_package(asset["asset_key"]["store_run_id"])
+        orchestration = result["orchestration"]
+        candidate = _read_typed_json(content[asset["asset_key"]["output_name"]])
+        execution_run = orchestration.get("run", {}).get("run_id")
+        entry = next((e for e in orchestration["thematic_candidates_v1"] if e["candidate"] == candidate), None)
+        try:
+            with self.connect() as db:
+                run_row = db.execute("SELECT item_id,state_json FROM orchestration_runs WHERE run_id=?", (execution_run,)).fetchone()
+                result_row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE run_id=? AND result_id=? AND task_id=?",
+                    (execution_run, entry["result_id"], entry["task_id"])).fetchone() if entry else None
+                task_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND task_id=?",
+                    (execution_run, entry["task_id"])).fetchone() if entry else None
+        except Exception as exc:
+            import sqlite3
+            if isinstance(exc, sqlite3.Error): raise AssetBindingError("human_record_ledger_unavailable", "needs_input") from None
+            raise
+        if (not run_row or run_row["item_id"] != manifest["conversation_id"] or not result_row
+                or _read_typed_json(run_row["state_json"]).get("expert_agents") != orchestration["expert_knowledge_snapshot"]
+                or _read_typed_json(result_row["state_json"]).get("validation_status") != "valid"
+                or _read_typed_json(result_row["raw_json"]).get("expert_report", {}).get("thematic_candidates_v1") != candidate):
+            raise AssetBindingError("human_record_ledger_mismatch")
+        if require_current:
+            current_run, current_result = _read_typed_json(run_row["state_json"]), _read_typed_json(result_row["state_json"])
+            if current_run.get("cancel_requested") or current_run.get("status") == "cancelled":
+                raise AssetBindingError("human_run_cancelled", "blocked")
+            if current_run.get("stale") or current_result.get("stale") or self.get(asset["asset_key"]["store_run_id"])["stale"]:
+                raise AssetBindingError("human_target_stale", "blocked")
+        profiles = orchestration["expert_knowledge_snapshot"]["profiles"]
+        profile = profiles.get("exp-thematic-analysis", {})
+        steps = [s["id"] for s in profile.get("human_steps", []) if s.get("actor") == "researcher"]
+        if profile.get("typed_contract") != "thematic_candidates_v1" or not steps or len(steps) != len(set(steps)):
+            raise AssetBindingError("human_record_contract")
+        if require_current:
+            from .analysis_core import AnalysisContractError
+            from .services.expert_agents import validate_report, thematic_execution_producer, thematic_source_packet
+            task = _read_typed_json(task_row[0]) if task_row else {}
+            if (task.get("task_id") != entry["task_id"] or task.get("run_id") != execution_run or task.get("kind") != "ai"
+                    or task.get("status") != "succeeded" or not all(_asset_id(task.get(k)) for k in ("model", "provider"))):
+                raise AssetBindingError("typed_execution_provenance", "blocked")
+            fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+            try:
+                validate_report(profile, _read_typed_json(result_row["raw_json"]), [r["evidence_id"] for r in fixed["evidence"]],
+                    thematic_source=fixed, expected_producer=thematic_execution_producer(task))
+            except AnalysisContractError as exc:
+                raise AssetBindingError(exc.code, "blocked") from None
+        return candidate, steps, choices["original"], manifest, orchestration
+
+    def _human_packages(self):
+        """Fresh saved bytes, not descriptor claims, establish researcher records."""
+        from .analysis_core import validate_human_record, content_fingerprint
+        with self.connect() as db:
+            rows = db.execute("SELECT id FROM analysis_runs WHERE kind=? AND status='completed' ORDER BY id", (HUMAN_RECORD_KIND,)).fetchall()
+        packages = []
+        for row in rows:
+            _snapshot, result, manifest, content = self.verified_package(row[0])
+            human = result.get("human_submission")
+            _asset_fields(human, ("asset_key", "record", "source_text", "expected_state_revision", "request_bytes"))
+            if (content.get("human/record.json") != canonical(human["record"])
+                    or content.get("human/source.txt") != human["source_text"].encode("utf-8")
+                    or content.get("human/submission.json") != base64.b64decode(human["request_bytes"], validate=True)):
+                raise AssetBindingError("human_record_body")
+            request = _read_typed_json(content["human/submission.json"])
+            if canonical(request) != canonical({k:v for k,v in human.items() if k != "request_bytes"}):
+                raise AssetBindingError("human_record_submission")
+            choices = self.thematic_asset_descriptors(human["asset_key"]["store_run_id"])
+            matches = [a for a in choices["assets"] if a["asset_key"] == human["asset_key"]]
+            if len(matches) != 1: raise AssetBindingError("human_record_asset")
+            candidate, steps, _original, target_manifest, _orch = self._human_contract(matches[0])
+            if (manifest["library_id"], manifest["conversation_id"]) != (target_manifest["library_id"], target_manifest["conversation_id"]):
+                raise AssetBindingError("human_record_owner")
+            record = validate_human_record(human["record"], candidate=candidate, required_steps=steps,
+                library_id=self.library_id(), source_text=human["source_text"])
+            artifact = next(a for a in manifest["artifacts"] if a["name"] == "human/record.json")
+            ref = {"target_type": "artifact", "target_id": artifact["id"], "version": str(record["revision"]),
+                "content_hash": content_fingerprint("human-record-v1", record), "hash_domain": "human-record-v1", "library_id": self.library_id()}
+            packages.append({"run_id": row[0], "asset_key": human["asset_key"], "record": record, "ref": ref})
+        histories = {}
+        for package in packages:
+            record = package["record"]; history = histories.setdefault(record["record_id"], {})
+            if record["revision"] in history: raise AssetBindingError("human_record_revision_conflict")
+            history[record["revision"]] = package
+        for history in histories.values():
+            for revision, package in sorted(history.items()):
+                record = package["record"]; old = history.get(revision - 1)
+                if revision > 1:
+                    if old is None: raise AssetBindingError("human_record_revision_gap")
+                    predecessor = old["record"]
+                    expected = {"domain": "human-record-v1", "record_id": predecessor["record_id"], "revision": revision - 1,
+                        "content_hash": old["ref"]["content_hash"]}
+                    if (record["supersedes_record_ref"] != expected or record["actor"] != predecessor["actor"]
+                            or record["allowed_step_ids"] != predecessor["allowed_step_ids"]
+                            or package["asset_key"] != old["asset_key"] or record["target"] != predecessor["target"]
+                            or record["scope"] != predecessor["scope"]):
+                        raise AssetBindingError("human_record_supersedes")
+        return packages, {record_id: history[max(history)] for record_id, history in histories.items()}
+
+    def _human_review(self, asset, state):
+        """Review is scoped qualitative adoption, never measurement certification."""
+        if asset.get("kind") != "claim_set": raise AssetBindingError("human_record_contract_unsupported", "human_pending")
+        candidate, required, _original, _manifest, _orch = self._human_contract(asset, require_current=True)
+        _packages, latest = self._human_packages()
+        target = {"domain": "ta-candidate-content-v1", "candidate_set_id": candidate["content"]["candidate_set_id"],
+            "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]}
+        records = [p for p in latest.values() if p["asset_key"] == asset["asset_key"]]
+        refs = [p["ref"] for p in records]
+        if len(state["review_refs"]) != len(refs) or any(ref not in refs for ref in state["review_refs"]):
+            raise AssetBindingError("human_record_current", "human_pending")
+        covered = set()
+        for package in records:
+            if package["ref"] not in state["review_refs"]: continue
+            if package["record"]["decision"] != "adopt": raise AssetBindingError("human_record_not_adopted", "human_pending")
+            if package["record"]["target"] == target: covered.update(package["record"]["allowed_step_ids"])
+        if covered != set(required): raise AssetBindingError("human_record_steps_pending", "human_pending")
+        # Record body, scope and HC were just read and validated above. No AI
+        # unread/search receipts or mutable wrapper status can substitute them.
+        return True
+
+    def submit_human_record(self, *, item_id, execution_run_id, payload, request_bytes, commit_guard=None):
+        """Append a researcher HTTP statement and current policy/state metadata.
+
+        Called only by the explicit Handler route. Generic save cannot produce
+        human artifacts; retries must return through this same checked path.
+        """
+        from .analysis_core import validate_human_record, content_fingerprint
+        _asset_fields(payload, ("asset_key", "record", "source_text", "expected_state_revision"))
+        _asset_key(payload["asset_key"])
+        if payload["asset_key"]["library_id"] != self.library_id(): raise AssetBindingError("human_record_library")
+        if (not isinstance(request_bytes, bytes) or _read_typed_json(request_bytes) != payload
+                or type(payload["expected_state_revision"]) is not int or payload["expected_state_revision"] < 0):
+            raise AssetBindingError("human_record_request")
+        with STORE_LOCK:
+            choices = self.thematic_asset_descriptors(payload["asset_key"]["store_run_id"])
+            matches = [a for a in choices["assets"] if a["asset_key"] == payload["asset_key"]]
+            if len(matches) != 1: raise AssetBindingError("human_record_asset")
+            asset = matches[0]
+            candidate, steps, original, manifest, orchestration = self._human_contract(asset, require_current=True)
+            if (manifest["conversation_id"] != item_id or orchestration["run"]["run_id"] != execution_run_id):
+                raise AssetBindingError("human_record_owner")
+            record = validate_human_record(payload["record"], candidate=candidate, required_steps=steps,
+                library_id=self.library_id(), source_text=payload["source_text"])
+            packages, latest = self._human_packages()
+            old = latest.get(record["record_id"])
+            record_hash = content_fingerprint("human-record-v1", record)
+            duplicate = old is not None and old["ref"]["content_hash"] == record_hash and old["asset_key"] == asset["asset_key"]
+            if old and not duplicate:
+                predecessor = old["record"]
+                expected = {"domain": "human-record-v1", "record_id": predecessor["record_id"], "revision": predecessor["revision"],
+                    "content_hash": old["ref"]["content_hash"]}
+                if (record["revision"] != predecessor["revision"] + 1 or record["supersedes_record_ref"] != expected
+                        or record["actor"] != predecessor["actor"] or record["allowed_step_ids"] != predecessor["allowed_step_ids"]
+                        or old["asset_key"] != asset["asset_key"] or record["target"] != predecessor["target"]
+                        or record["scope"] != predecessor["scope"]):
+                    raise AssetBindingError("human_record_supersedes")
+            elif not old and record["revision"] != 1: raise AssetBindingError("human_record_revision_gap")
+            for other in latest.values():
+                if (other["record"]["record_id"] != record["record_id"] and other["asset_key"] == asset["asset_key"]
+                        and other["record"]["target"] == record["target"]
+                        and other["record"]["allowed_step_ids"] == record["allowed_step_ids"]):
+                    raise AssetBindingError("human_record_step_conflict")
+            assets, originals, states, links = self._connection_index()
+            key = _asset_key(asset["asset_key"]); history = states.get(key, {})
+            current = history[max(history)] if history else None
+            if duplicate and current and old["ref"] in current["review_refs"]:
+                if commit_guard:
+                    with self.connect() as db: commit_guard(db)
+                stale_assets = []
+                for metadata_run, metadata in self._connection_packages():
+                    saved_snapshot = self.verified_package(metadata_run)[0]
+                    if saved_snapshot.get("human_record_ref") == old["ref"]:
+                        stale_assets.extend(s["asset_key"] for s in metadata["states"]
+                            if s["status"] == "stale" and s["asset_key"] != asset["asset_key"])
+                return {"record": copy.deepcopy(record), "record_ref": old["ref"], "state": current,
+                        "duplicate": True, "stale_assets": stale_assets}
+            if payload["expected_state_revision"] != (current["state_revision"] if current else 0):
+                raise AssetBindingError("human_record_state_revision", "blocked")
+            if current and (current["revoked"] or current["status"] in {"retired", "unavailable"}):
+                raise AssetBindingError("human_record_state_unavailable", "blocked")
+            def guarded(db):
+                if commit_guard: commit_guard(db)
+                self._human_contract(asset, require_current=True)
+                fresh_states = self._connection_index()[2]
+                for checked_key in {key, _asset_key(original["asset_key"])} | set(states):
+                    was = states.get(checked_key, {})
+                    actual = fresh_states.get(checked_key, {})
+                    if canonical(was) != canonical(actual):
+                        raise AssetBindingError("human_record_state_changed", "blocked")
+            human = {**copy.deepcopy(payload), "request_bytes": base64.b64encode(request_bytes).decode("ascii")}
+            saved = self.get(old["run_id"]) if duplicate else self.save(item_id=item_id, kind=HUMAN_RECORD_KIND, snapshot={"target_asset_key": asset["asset_key"]},
+                result={"schema_version": STORE_VERSION, "parameters": {"human_record_hash": record_hash}, "human_submission": human},
+                datasets={}, request_id="human-record:" + digest(human), input_fingerprint=digest(asset["asset_key"]),
+                source_revision=manifest["source_revision"], analysis_revision=manifest["analysis_revision"], publish=False,
+                commit_guard=guarded, _human_writer=_HUMAN_RECORD_WRITER)
+            packages, latest = self._human_packages()
+            stored = next(p for p in packages if p["run_id"] == saved["id"])
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            def initial_state(descriptor, status):
+                return {"asset_key": descriptor["asset_key"], "target_content_hash": descriptor.get("content_hash", descriptor["raw_byte_hash"]),
+                    "target_domain": descriptor.get("content_domain", "raw-bytes-v1"), "state_revision": 1, "policy_revision": 1,
+                    "status": status, "allowed_purposes": ["exploratory", "qualitative_compare"], "send_policy": "local_only",
+                    "destinations": [], "revoked": False, "review_refs": [], "reason": "Explicit researcher submission", "updated_at": now}
+            refs = [p["ref"] for p in latest.values() if p["asset_key"] == asset["asset_key"]]
+            updated = copy.deepcopy(current) if current else initial_state(asset, "candidate")
+            if current: updated["state_revision"] += 1
+            updated.update(review_refs=refs, updated_at=now, reason=record["reason"])
+            try: self._human_review(asset, updated); adopted = True
+            except AssetBindingError as exc:
+                if exc.decision != "human_pending": raise
+                adopted = False
+            updated["status"] = "adopted" if adopted else "stale" if current and current["status"] in {"adopted", "stale"} else "candidate"
+            changed = [updated]; stale_assets = []
+            # Corrections invalidate all retained descendants, without rewriting
+            # their payloads, raw responses or the original sealed publication.
+            if old and not duplicate:
+                affected = {key}
+                while True:
+                    children = {k for k,a in assets.items() if k not in affected and any(
+                        r["target_type"] == "artifact" and any(r["target_id"] == assets[parent]["asset_key"]["artifact_id"]
+                            for parent in affected if parent in assets) for r in a["parent_refs"])}
+                    if not children: break
+                    affected.update(children)
+                for child in affected - {key}:
+                    revisions = states.get(child, {})
+                    if not revisions: continue
+                    state = copy.deepcopy(revisions[max(revisions)])
+                    if state["status"] in {"retired", "unavailable", "rejected"}: continue
+                    state.update(status="stale", state_revision=state["state_revision"] + 1,
+                        updated_at=now, reason="Researcher record corrected")
+                    changed.append(state); stale_assets.append(assets[child]["asset_key"])
+            original_key = _asset_key(original["asset_key"])
+            if original_key not in states: changed.append(initial_state(original, "adopted"))
+            self.save_connection_metadata(request_id="human-state:" + digest({"record": stored["ref"], "states": changed}),
+                item_id=item_id, snapshot={"human_record_ref": stored["ref"]}, metadata={"version": CONNECTION_METADATA_VERSION,
+                    "assets": [asset], "originals": [original], "states": changed, "producer_links": []}, commit_guard=guarded)
+            if stale_assets:
+                with self.connect() as db:
+                    db.executemany("UPDATE analysis_runs SET stale=1 WHERE id=?", [(a["store_run_id"],) for a in stale_assets])
+            return {"record": record, "record_ref": stored["ref"], "state": updated, "duplicate": duplicate,
+                    "stale_assets": stale_assets}
 
     def _connection_packages(self):
         with self.connect() as conn:
@@ -1020,10 +1465,11 @@ class AnalysisStore:
         for link in links: _asset_producer_link(link, assets)
         return assets, originals, states, links
 
-    def save_connection_metadata(self, *, request_id, item_id, snapshot, metadata):
+    def save_connection_metadata(self, *, request_id, item_id, snapshot, metadata, commit_guard=None):
         """Append a new immutable metadata package via save, without SQL migration.
 
-        This private opt-in route has no human adoption, publication or scheduler.
+        Metadata cannot certify human adoption: binding checks saved records.
+        This path has no publication or scheduler.
         State/policy and review/history bytes are outside the referenced payload.
         """
         _asset_fields(metadata, ("version", "assets", "originals", "states", "producer_links"))
@@ -1074,7 +1520,8 @@ class AnalysisStore:
             return self.save(item_id=item_id, kind=CONNECTION_METADATA_KIND, snapshot=snapshot,
                              result={"schema_version": STORE_VERSION, "parameters": {"metadata_hash": digest(payload)},
                                      "connection_metadata": payload}, datasets={}, request_id=request_id,
-                             input_fingerprint=digest(snapshot), source_revision=1, analysis_revision=1, publish=False)
+                             input_fingerprint=digest(snapshot), source_revision=1, analysis_revision=1, publish=False,
+                             commit_guard=commit_guard)
 
     def list_assets(self, *, output_name=None):
         """Enumerate distinct explicit choices, never choose/recompute/adopt one."""
@@ -1160,7 +1607,7 @@ class AnalysisStore:
                     raise AssetBindingError("parent_state_unavailable", "blocked")
                 if state["status"] != "adopted": raise AssetBindingError("parent_not_adopted", "human_pending")
                 if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
-                    raise AssetBindingError("parent_human_unverified", "human_pending")
+                    self._human_review(asset, state)
                 if (asset["scope"]["scope_id"], asset["scope"]["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
                     raise AssetBindingError("parent_scope_intersection", "blocked")
                 permissions.append(state)
@@ -1242,10 +1689,9 @@ class AnalysisStore:
                     raise AssetBindingError("state_unavailable", "blocked")
                 if state["status"] != "adopted": raise AssetBindingError("not_adopted", "human_pending")
                 if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
-                    # No trusted human-record adoption seam exists in this wave.
-                    raise AssetBindingError("human_record_unverified", "human_pending")
+                    self._human_review(asset, state)
                 if asset["meaning"]["status"] != "declared": raise AssetBindingError("meaning_unknown", "human_pending")
-                if context["purpose"] == "confirmatory" and not original and any(v["validity"] != "human_reviewed" for v in asset["variables"]):
+                if context["purpose"] == "confirmatory" and not original and (asset["kind"] == "claim_set" or any(v["validity"] != "human_reviewed" for v in asset["variables"])):
                     raise AssetBindingError("variable_review_unconfirmed", "human_pending")
                 scope = asset["scope"]
                 if (scope["scope_id"], scope["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
@@ -1253,6 +1699,9 @@ class AnalysisStore:
                 if selector["range_ref"] is not None: raise AssetBindingError("range_adapter_unimplemented", "unsupported")
                 if original:
                     if selector["row_ids"] or selector["column_ids"]: raise AssetBindingError("original_selector_unimplemented", "unsupported")
+                    payload = _read_typed_json(raw)
+                elif asset["kind"] != "observation_table":
+                    if selector["row_ids"] or selector["column_ids"]: raise AssetBindingError("typed_selector_unimplemented", "unsupported")
                     payload = _read_typed_json(raw)
                 else:
                     payload = _read_typed_json(raw)
@@ -1292,7 +1741,7 @@ class AnalysisStore:
                 candidate = {"source_type": "original" if original else "artifact", "schema": asset["schema"],
                              "unit": asset["meaning"]["unit"], "scope_mode": scope["mode"], "scope_policy": "all_included_initial",
                              "actor": asset["producer"], "adapter": asset["adapter"], "purpose": context["purpose"],
-                             "meaning_status": asset["meaning"]["status"], "human_review_state": "structural_checked"}
+                             "meaning_status": asset["meaning"]["status"], "human_review_state": "human_reviewed" if asset.get("kind") == "claim_set" and state["review_refs"] else "structural_checked"}
                 candidate.update({"source_ref": asset["source_ref"]} if original else
                                  {"kind": asset["kind"], "content_hash": content_hash, "content_domain": domain})
                 envelopes.append({"input_ref_id": ref["input_ref_id"], "selection": "selected", "role": ref["role"],
@@ -1314,6 +1763,10 @@ class AnalysisStore:
                 if any(current_state.get(k) != check[k] for k in
                        ("target_content_hash", "target_domain", "state_revision", "policy_revision")):
                     raise AssetBindingError("state_changed_during_resolution", "blocked")
+                key = _asset_key(check["asset_key"])
+                checked_asset = _new_assets.get(key) or _new_originals.get(key)
+                if checked_asset and (checked_asset["producer"]["kind"] in {"ai", "researcher"} or current_state["review_refs"]):
+                    self._human_review(checked_asset, current_state)
             base.update(decision=checked["decision"], reason=checked["reason"], content_resolution=True,
                         state_policy_pre_adoption=True, actual_payload_bytes=total,
                         authority_check="registry_callback" if assess else "metadata_only",

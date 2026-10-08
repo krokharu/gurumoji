@@ -90,6 +90,29 @@ class ExpertAgentTests(unittest.TestCase):
         self.service.run(run["run_id"])
         return self.service.status("synthetic", run["run_id"])
 
+    def test_typed_opt_in_keeps_legacy_fields_and_binds_fixed_source(self):
+        from gurumoji.services.expert_agents import thematic_source_packet, request_packet, validate_report, render_expert_context
+        from test_analysis_typed_assets import candidate_fixture
+        run = self.start(); self.drive(run)
+        initial = self.service.result("synthetic", run["run_id"])["initial"]
+        source = thematic_source_packet(initial, library_id="TEST-library", conversation_id="synthetic")
+        profile = self.registry.freeze({"expert_ids": [EXPERT], "expert_inputs": {EXPERT: {"typed_contract": "thematic_candidates_v1"}}})["profiles"][EXPERT]
+        context = copy.deepcopy(next(c for r, c in self.calls if r == "interpretation"))
+        packet = request_packet(profile, context, initial["snapshot"]["analysis"], thematic_source=source)
+        self.assertEqual(profile["contract_version"], 2)
+        self.assertEqual(len(profile["output_schema"]["properties"]), 7)
+        self.assertEqual(packet["thematic_source"]["source_ref"], source["source_ref"])
+        self.assertNotIn("text", packet["thematic_source"]["utterance_index"][0])
+        context["expert_request"] = packet
+        producer = {"kind": "ai", "actor_id": "TEST-model", "step_ids": [profile["allowed_steps"][0]["id"]],
+                    "model_id": "TEST-model", "revision": "TEST-revision", "provider": "TEST-provider"}
+        raw = self.report(context); raw["expert_report"]["thematic_candidates_v1"] = candidate_fixture(source, producer=producer)
+        validate_report(profile, raw, raw["expert_report"]["evidence_ids"], thematic_source=source)
+        rendered = render_expert_context(context)
+        self.assertEqual(rendered["expert_request"]["typed_contract"], "thematic_candidates_v1")
+        self.assertEqual(rendered["expert_request"]["thematic_source"], packet["thematic_source"])
+        with self.assertRaises(AnalysisContractError): request_packet(profile, context, initial["snapshot"]["analysis"])
+
     def test_handler_loads_selected_knowledge_and_receipts_without_exposing_text_to_core(self):
         final = self.drive(self.start())
         self.assertEqual(final["status"], "completed", final.get("error"))

@@ -76,6 +76,50 @@ class OrchestrationPublicationTests(unittest.TestCase):
         self.assertEqual(value["save_status"], "saved", value)
         return value
 
+    def test_typed_projection_fixed_save_preserves_raw_and_archive(self):
+        from pathlib import Path
+        from gurumoji.method_experts import ExpertCatalog
+        from gurumoji.services.expert_agents import ExpertAgentRegistry, thematic_source_packet
+        from gurumoji.services.analysis_orchestration_publication import build_orchestration_package
+        from test_analysis_typed_assets import candidate_fixture, EXPERT
+        rid = self.start()
+        exported = self.runtime.result("content", rid)
+        registry = ExpertAgentRegistry(ExpertCatalog(root=Path(__file__).resolve().parents[1] / "docs/program-vault",
+            local_root=self.store.root / "TEST-empty-local"))
+        profile = registry.freeze({"expert_ids": [EXPERT], "expert_inputs": {EXPERT: {"typed_contract": "thematic_candidates_v1"}}})["profiles"][EXPERT]
+        exported["run"]["expert_agents"] = {"profiles": {EXPERT: profile}}
+        exported["expert_knowledge_snapshot"] = {"profiles": {EXPERT: profile}}
+        source = thematic_source_packet(exported["initial"], library_id=self.store.library_id(), conversation_id="content")
+        producer = {"kind": "ai", "actor_id": "TEST-task", "step_ids": [profile["allowed_steps"][0]["id"]],
+            "model_id": "TEST-model", "revision": "unverified", "provider": "TEST-provider"}
+        candidate = candidate_fixture(source, producer=producer)
+        raw = {"expert_report": {"expert_id": EXPERT, "profile_hash": profile["profile_hash"], "knowledge_hash": profile["knowledge_hash"],
+            "status": "draft", "outputs": {k: "Synthetic seven strings" for k in profile["output_schema"]["properties"]},
+            "evidence_ids": [source["evidence"][0]["evidence_id"]], "knowledge_note_ids": [profile["knowledge"][0]["note_id"]],
+            "performed_step_ids": producer["step_ids"], "missing_inputs": [], "limitations": "Human pending", "thematic_candidates_v1": candidate}}
+        # Retain the matching TEST producer ledger used by the pure package
+        # projection. The seal's live task checks remain independently covered.
+        task = {"task_id": "TEST-task", "run_id": rid, "kind": "ai", "status": "succeeded",
+            "model": "TEST-model", "provider": "TEST-provider"}
+        metadata = {"result_id": "TEST-typed", "task_id": "TEST-task", "run_id": rid,
+            "validation_status": "valid", "stale": False, "raw_hash": fingerprint(raw)}
+        with app.database_connection() as db:
+            db.execute("INSERT INTO orchestration_tasks VALUES (?,?,?,?)", ("TEST-task", rid, "TEST-task", json.dumps(task)))
+            db.execute("INSERT INTO orchestration_results VALUES (?,?,?,?,?)", ("TEST-typed", rid, "TEST-task", json.dumps(raw), json.dumps(metadata)))
+        exported["raw_results"].append({"result_id": "TEST-typed", "task_id": "TEST-task", "validation_status": "valid", "raw": raw})
+        before = copy.deepcopy(exported)
+        snapshot, result, datasets = build_orchestration_package(exported, fingerprint(exported))
+        self.assertEqual(exported, before)
+        self.assertEqual(result["orchestration"]["raw_results"], exported["raw_results"])
+        self.assertEqual(snapshot, self.snapshot["archive_snapshot"])
+        saved = self.store.save(item_id="content", kind="autonomous_analysis", snapshot=snapshot, result=result, datasets=datasets,
+            request_id="TEST-typed-publication", input_fingerprint="input-v0", source_revision=0, analysis_revision=1, publish=False)
+        fresh = AnalysisStore(self.store.database_file, self.store.connect)
+        choices = fresh.thematic_asset_descriptors(saved["id"])
+        self.assertEqual(fresh.read_asset(choices["assets"][0])["value"], candidate)
+        invalid = copy.deepcopy(exported); invalid["raw_results"][-1]["validation_status"] = "invalid"
+        self.assertNotIn("thematic_candidates_v1", build_orchestration_package(invalid, fingerprint(invalid))[1]["orchestration"])
+
     def test_default_off_scope_direct_publish_retry_refresh_never_write(self):
         self.assertEqual(validate_orchestration_payload({"model": "synthetic"})["publication_targets"], [])
         rid = self.start()

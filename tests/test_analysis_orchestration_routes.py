@@ -63,6 +63,16 @@ class OrchestrationRouteTests(unittest.TestCase):
         self.assertEqual(self.client.post(self.url + "/run-1/resume", json={}).status_code, 202)
         self.service.resume.assert_called_once_with("synthetic", "run-1", {})
 
+    def test_researcher_route_retains_original_wire_body_without_model_preparation(self):
+        self.service.submit_human_record = Mock(return_value={"duplicate": False, "state": {"status": "candidate"}})
+        raw = b'{ "TEST_fixture_only": true }'
+        response = self.client.post(self.url + "/run-1/human-records", data=raw, content_type="application/json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.service.submit_human_record.assert_called_once_with("synthetic", "run-1", {"TEST_fixture_only": True}, request_bytes=raw)
+        self.prepare.assert_not_called()
+        self.service.start.assert_not_called()
+
     def test_storage_errors_do_not_expose_filesystem_or_data(self):
         self.service.status.side_effect = OSError("private-path-and-data")
         response = self.client.get(self.url + "/run-1")

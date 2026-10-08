@@ -90,6 +90,19 @@ def connection_method_descriptor(method_id: str) -> dict | None:
         STATISTICAL_TOOLS, STATISTICAL_TOOL_VERSION,
     )
     from .analysis_core import fingerprint
+    if method_id == "thematic":
+        contracts = [connection_kind_contract(k) for k in
+                     ("claim_set", "relation_graph", "event_sequence", "embedding_matrix", "snapshot")]
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "thematic_candidates_v1",
+                "output_names": ["thematic_candidates"], "logical_output_kinds": ["claim_set"],
+                "native_adapter": contracts[0]["adapter"], "native_input_schema": contracts[0]["schema"],
+                "input_contracts": contracts, "original_source_types": ["snapshot"],
+                "units": ["dataset_claim", "utterance", "event", "vector_row"],
+                "reference_roles": ["evidence_context"], "input_actor_kinds": ["ai", "code", "system", "researcher"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial",
+                "purposes": ["exploratory", "qualitative_compare"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": True}
     if method_id in TABLE_PILOT_METHODS:
         from .analysis_store import CONNECTION_TABLE_SCHEMA
         return {"metadata_version": "analysis-connections-1", "method_id": method_id,
@@ -125,6 +138,52 @@ def connection_method_descriptor(method_id: str) -> dict | None:
             "original_source_types": [], "units": [], "scope_modes": [], "purposes": [],
             "reference_roles": [], "input_actor_kinds": [],
             "typed_asset_adapter_supported": False, "native_adapter_supported": False}
+
+
+def connection_kind_contract(kind):
+    """Fixed identities, including metadata-only kinds with no executor."""
+    from .analysis_core import fingerprint, thematic_candidates_schema
+    from .analysis_store import CONNECTION_TABLE_SCHEMA
+    contracts = {
+        "claim_set": ("gurumoji.thematic-candidate", thematic_candidates_schema(), "thematic-candidates", "dataset_claim", True),
+        "relation_graph": ("gurumoji.manual-interaction-graph", {"table": CONNECTION_TABLE_SCHEMA,
+            "endpoints": ["target_segment_id", "source_segment_id"], "direction": "target_to_source",
+            "relation": "manual_annotation", "context": "context_segment_ids"}, "manual-interaction-graph", "utterance", True),
+        "event_sequence": ("gurumoji.event-sequence", {"required": ["conversation_id", "order", "valid_time", "observed", "missing_intervals"]}, "event-sequence", "event", False),
+        "embedding_matrix": ("gurumoji.embedding-matrix", {"required": ["source_rows", "dimensions", "encoder_revision", "input_kind", "space_id"]}, "embedding-matrix", "vector_row", False),
+        "snapshot": ("gurumoji.thematic-initial-snapshot", {"initial_id": "string", "snapshot": "Handler fixed snapshot",
+            "input_hash": "string", "evidence": "fixed utterance text and exclusions"}, "thematic-initial-snapshot", "utterance", True),
+    }
+    if kind not in contracts: return None
+    sid, schema, adapter, unit, supported = contracts[kind]
+    return {"kind": kind, "schema": {"schema_id": sid, "version": 1, "schema_hash": fingerprint(schema)},
+            "adapter": {"adapter_id": adapter, "version": "1"}, "unit": unit, "supported": supported,
+            "content_domain": "ta-candidate-content-v1" if kind == "claim_set" else "canonical-json-v1" if kind == "snapshot" else "raw-bytes-v1",
+            "actor_kinds": ["researcher"] if kind == "relation_graph" else ["ai", "code"] if kind == "claim_set" else ["system", "code"]}
+
+
+def connection_output_contract(method_id, output_name, kind=None):
+    """No arbitrary filename or executable schema supplied by a producer."""
+    import re
+    if method_id == "thematic":
+        if kind in {None, "claim_set"} and re.fullmatch(r"assets/thematic_candidates_[0-9]{4}\.json", output_name):
+            return connection_kind_contract("claim_set")
+        return None
+    if kind in {None, "relation_graph"} and method_id == "qualitative_coding" and output_name == "tables/interaction_links.json":
+        return {**connection_kind_contract("relation_graph"), "content_domain": "raw-bytes-v1"}
+    known = {("conversation_dynamics", "tables/timeline.json"): "event_sequence",
+             ("transformer_topics", "assets/embedding_matrix.json"): "embedding_matrix"}
+    if (method_id, output_name) in known and kind in {None, known[method_id, output_name]}:
+        return {**connection_kind_contract(known[method_id, output_name]), "content_domain": "raw-bytes-v1"}
+    registered = connection_method_descriptor(method_id)
+    if registered and output_name in {f"tables/{name}.json" for name in registered["output_names"]}:
+        from .analysis_core import fingerprint
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        return {"kind": "observation_table", "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)},
+                "adapter": {"adapter_id": "analysis-store-table", "version": "1"}, "unit": "utterance",
+                "supported": True, "content_domain": "raw-bytes-v1"}
+    return None
 
 
 # Separate opt-in code steps; neither the saved-method22 nor expert stat8 changes.

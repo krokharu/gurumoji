@@ -438,6 +438,19 @@ class AnalysisOrchestrationService:
             raise _error("初期分析の保存hashが一致しません。AI実行を停止します。", "initial_hash_mismatch")
         return value
 
+    def _thematic_source(self, db, run, profile, snapshot):
+        """Opt-in only: actual Store authority and immutable Handler snapshot."""
+        if profile.get("typed_contract") != "thematic_candidates_v1": return None
+        if self.table_store is None:
+            raise _error("型付き候補の固定保存先が利用できません。", "typed_source_missing")
+        from pathlib import Path
+        authority = next((row[2] for row in db.execute("PRAGMA database_list") if row[1] == "main"), None)
+        if not authority or Path(authority).resolve() != self.table_store.database_file:
+            raise _error("HandlerとStoreのlibraryが異なります。", "typed_store_mismatch")
+        from .services.expert_agents import thematic_source_packet
+        return thematic_source_packet({"initial_id": run["initial_id"], "snapshot": snapshot},
+            library_id=self.table_store.library_id(), conversation_id=run["item_id"])
+
     def start(self, item_id: str, payload: dict, app_url: str = "", *, budget_factory=None) -> dict:
         origin = self._budget_clock()
         config = validate_orchestration_payload(payload)
@@ -987,6 +1000,56 @@ class AnalysisOrchestrationService:
             raise LookupError("会話が見つかりません。")
         with self._db() as db:
             return self.result_locked(db, item_id, run_id, result_id)
+
+    def submit_human_record(self, item_id, run_id, payload, *, request_bytes):
+        """Explicit local researcher submission; no model dispatch or inference."""
+        if self.table_store is None: raise _error("固定保存が接続されていません。", "human_store_unavailable")
+        with self.lock:
+            with self._db() as db:
+                run = self._read_run(db, run_id, item_id)
+                self._check_version(run)
+                from pathlib import Path
+                authority = db.execute("PRAGMA database_list").fetchone()[2]
+                if not authority or Path(authority).resolve() != self.table_store.database_file.resolve():
+                    raise _error("保存台帳が一致しません。", "human_store_mismatch")
+                generation = run["generation"]
+            def guard(db):
+                current = self._read_run(db, run_id, item_id)
+                self._check_version(current)
+                item = self.find_item(item_id)
+                if item is None:
+                    raise _error("元データが変更されています。", "revision_conflict")
+                if self.source_fingerprint: self._validate_initial_source(current)
+                if current["generation"] != generation:
+                    raise _error("記録中に分析版が変わりました。", "revision_conflict")
+            outcome = self.table_store.submit_human_record(item_id=item_id, execution_run_id=run_id,
+                payload=payload, request_bytes=request_bytes, commit_guard=guard)
+            if outcome["stale_assets"]:
+                assets, _originals, _states, links = self.table_store._connection_index()
+                keys = outcome["stale_assets"]
+                producers = {(a.get("execution_run_id"), a.get("producer_task_id")) for a in assets.values() if a["asset_key"] in keys}
+                producers.update((link["execution_run_id"], link["producer_task_id"]) for link in links if link["asset_key"] in keys)
+                with self._db() as db:
+                    for producer_run, task_id in producers:
+                        if not producer_run or not task_id: continue
+                        row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?", (task_id, producer_run)).fetchone()
+                        if row:
+                            task = json.loads(row[0])
+                            if task.get("human_record_ref") == outcome["record_ref"]: continue
+                            task.update(stale=True, stale_reason="human_record_corrected", human_record_ref=outcome["record_ref"])
+                            self._write_task(db, task)
+                        for row in db.execute("SELECT result_id,state_json FROM orchestration_results WHERE task_id=? AND run_id=?", (task_id, producer_run)).fetchall():
+                            meta = json.loads(row["state_json"]); meta.update(stale=True, stale_reason="human_record_corrected")
+                            db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), row["result_id"]))
+                        dependent_run = self._read_run(db, producer_run)
+                        # A record correction affects these retained outputs,
+                        # not every independent output sharing the execution run.
+                        marked = set(dependent_run.get("human_record_stale_tasks", [])); marked.add(task_id)
+                        dependent_run["human_record_stale_tasks"] = sorted(marked)
+                        self._write_run(db, dependent_run)
+                        self._event(db, producer_run, "human_record_corrected", "参照した研究者記録が訂正されました。", task_id=task_id,
+                                    record_ref=outcome["record_ref"])
+            return outcome
 
     def result_locked(self, db, item_id: str, run_id: str, result_id: str | None = None) -> dict:
         """Serialize an export inside the caller's transaction, without nesting."""
@@ -1570,7 +1633,9 @@ class AnalysisOrchestrationService:
                     allowance = 10000 // max(1, len(calculations))
                     context["statistical_calculations"] = [calculation_packet(content, metadata, max_chars=allowance)
                                                           for content, metadata in calculations.values()]
-                context["expert_request"] = request_packet(profile, context, initial["analysis"])
+                typed_source = self._thematic_source(db, run, profile, initial)
+                context["expert_request"] = request_packet(profile, context, initial["analysis"],
+                    **({"thematic_source": typed_source} if typed_source is not None else {}))
                 if run["config"].get("expert_hooks", False):
                     from .services.expert_data_hooks import prepare_context
                     context = prepare_context(context, evidence_limit=run["config"]["context_evidence_limit"],
@@ -2055,7 +2120,10 @@ class AnalysisOrchestrationService:
             bind_statistical_requests(schema, profile)
             validate_shape(schema, raw)
             cells = validate_report(profile, raw, task["expert_evidence_ids"], calculation_ids, calculations=calculations,
-                                    response_phase=task.get("expert_response_phase"))
+                                    response_phase=task.get("expert_response_phase"),
+                                    thematic_source=self._thematic_source(db, run, profile, initial),
+                                    expected_producer={"kind": "ai", "actor_id": task["task_id"], "model_id": task["model"],
+                                        "provider": task["provider"], "revision": "unverified"} if profile.get("typed_contract") else None)
             if profile.get("contract_schema_version") == 2:
                 phase = task["expert_response_phase"]
                 requirements = profile["phase_requirements"][phase]

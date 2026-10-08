@@ -450,9 +450,293 @@ CONNECTION_UNITS = frozenset({"utterance", "conversation_speaker", "participant"
 HASH_DOMAINS = frozenset({"raw-bytes-v1", "canonical-json-v1", "utf8-text-v1", "ta-candidate-content-v1", "ta-theme-content-v1", "human-record-v1"})
 CONNECTION_PURPOSES = frozenset({"exploratory", "descriptive", "qualitative_compare", "confirmatory"})
 
+THEMATIC_CANDIDATES_VERSION = "thematic_candidates_v1"
+
+
+def content_fingerprint(domain, content):
+    """Semantic content address; wrapper/state/receipt bytes have a separate hash."""
+    if domain not in {"ta-candidate-content-v1", "ta-theme-content-v1", "human-record-v1"}:
+        raise AnalysisContractError("未登録の内容hash領域です。", code="typed_content_domain")
+    return fingerprint({"domain": domain, "content": content})
+
+
+def thematic_candidates_schema():
+    """Closed S1 machine contract, independent of the seven legacy prose fields."""
+    def obj(fields, optional=()):
+        return {"type": "object", "additionalProperties": False,
+                "required": [k for k in fields if k not in optional], "properties": fields}
+    def arr(child, minimum=0):
+        return {"type": "array", "items": child, "minItems": minimum, "maxItems": 2000}
+    def enum(*values): return {"type": "string", "enum": list(values)}
+    identifier = {"type": "string", "minLength": 1, "maxLength": 20000}
+    number = {"type": "integer", "minimum": 1}
+    digest = {"type": "string", "pattern": r"^sha256:[0-9a-f]{64}$"}
+    ids = arr(identifier)
+    ref = obj({"target_type": enum(*sorted(ORIGINAL_SOURCE_TYPES | {"artifact"})),
+        "target_id": identifier, "version": identifier, "content_hash": digest,
+        "hash_domain": enum(*sorted(HASH_DOMAINS)), "library_id": identifier,
+        "utterance_id": identifier, "locator": identifier}, ("library_id", "utterance_id", "locator"))
+    actor = obj({"kind": enum("ai", "code", "system", "researcher"), "actor_id": identifier,
+        "step_ids": ids, "model_id": identifier, "revision": identifier, "provider": identifier},
+        ("model_id", "revision", "provider"))
+    scope = obj({"scope_id": identifier, "manifest_hash": digest, "mode": enum("dataset"),
+        "input_refs": arr(ref, 1), "conversation_ids": arr(identifier, 1), "member_ids": ids, "context_ids": ids})
+    target = obj({"domain": enum("ta-theme-content-v1"), "candidate_set_id": identifier,
+        "theme_id": identifier, "version": number, "content_hash": digest})
+    evidence = obj({"library_id": identifier, "snapshot_ref": ref, "input_version": identifier,
+        "input_hash": digest, "utterance_id": identifier, "utterance_hash": digest, "context_ids": ids,
+        "relation": enum("support", "counterexample", "alternative")})
+    code = obj({"code_id": identifier, "version": number, "definition_hash": digest, "source_ref": ref})
+    content = obj({"candidate_set_id": identifier, "theme_id": identifier, "version": number,
+        "claim_id": identifier, "input_refs": arr(ref, 1), "scope": scope, "producer": actor,
+        "name": {"anyOf": [identifier, {"type": "null"}]},
+        "definition": {"anyOf": [identifier, {"type": "null"}]}, "code_refs": arr(code),
+        "support": arr(evidence), "counterexamples": arr(evidence),
+        "alternatives": arr(obj({"alternative_id": identifier, "description": identifier,
+                                 "evidence_refs": arr(evidence), "reason": identifier}))})
+    theme = obj({"content": content, "content_hash": digest,
+        "status": enum("draft", "merged", "split", "rejected", "superseded"),
+        "meaning_review": enum("undetermined", "human_pending"),
+        "search_state": obj({k: enum("not_searched", "partial", "recorded")
+                             for k in ("support", "counterexamples", "alternatives")}),
+        "memo_refs": arr(ref), "receipt_bindings": arr(obj({"evidence_ref": evidence,
+                                 "read_receipt_ids": ids, "delivery_receipt_ids": ids}))})
+    receipt = obj({"receipt_id": identifier, "receipt_type": enum("read", "delivery", "processing"),
+        "task_id": identifier, "actor": actor, "input_hash": digest, "ids": ids,
+        "status": enum("recorded", "partial", "unknown", "not_run"),
+        "payload_ref": {"anyOf": [ref, {"type": "null"}]},
+        "payload_hash": {"anyOf": [digest, {"type": "null"}]}})
+    unread = obj({"status": enum("measured", "unknown", "not_run"),
+                  "ids": {"anyOf": [ids, {"type": "null"}]}})
+    coverage = obj({"dataset_ids": ids, "required_ids": ids, "excluded_ids": ids,
+        **{k + "_receipts": arr(receipt) for k in ("read", "delivery", "processing")},
+        "human_read_record_refs": arr(ref),
+        "unread_sets": obj({k: unread for k in ("retrieval", "delivery", "processing", "human")})})
+    change = obj({"change_id": identifier, "operation": enum("create", "update", "merged", "split", "rejected", "supersedes"),
+        "from_themes": arr(target), "to_themes": arr(target), "reason": identifier,
+        "actor": actor, "recorded_at": identifier, "affected_code_refs": arr(ref)})
+    return obj({"schema_id": enum("gurumoji.thematic-candidate"), "schema_version": {"type": "integer", "enum": [1]},
+        "content": obj({"candidate_set_id": identifier, "version": number, "input_refs": arr(ref, 1),
+                        "scope": scope, "producer": actor, "theme_refs": arr(target)}),
+        "content_hash": digest, "themes": arr(theme), "coverage": coverage,
+        "human_status": enum("human_pending"), "human_record_state": enum("not_entered"),
+        "human_records": {"type": "array", "items": {}, "maxItems": 0}, "history": arr(change)})
+
+
+def _typed_shape(schema, value):
+    if "anyOf" in schema:
+        for variant in schema["anyOf"]:
+            try: _typed_shape(variant, value); return
+            except AnalysisContractError: pass
+        raise AnalysisContractError("型付き内容の型が不正です。", code="typed_shape")
+    kind = schema["type"]
+    valid = {"object": type(value) is dict, "array": type(value) is list,
+             "string": type(value) is str, "integer": type(value) is int, "null": value is None}[kind]
+    if (not valid or ("enum" in schema and value not in schema["enum"])
+            or (kind == "integer" and value < schema.get("minimum", value))):
+        raise AnalysisContractError("型付き内容の型が不正です。", code="typed_shape")
+    if kind == "string" and (not value.strip() or len(value) > schema.get("maxLength", 20000)
+                              or ("pattern" in schema and not re.fullmatch(schema["pattern"], value))):
+        raise AnalysisContractError("型付き内容の文字列が不正です。", code="typed_shape")
+    if kind == "object":
+        if not set(schema["required"]) <= set(value) <= set(schema["properties"]):
+            raise AnalysisContractError("型付き内容は閉鎖objectです。", code="typed_shape")
+        for key, child in value.items(): _typed_shape(schema["properties"][key], child)
+    if kind == "array":
+        if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", 2000):
+            raise AnalysisContractError("型付き配列の件数が不正です。", code="typed_shape")
+        for child in value: _typed_shape(schema["items"], child)
+
+
+def validate_thematic_candidates(value, *, source=None, receipt_resolver=None):
+    """Validate content, fixed evidence, history and honest receipt/unread states.
+
+    Model candidates accept no HumanRecord. Explicit researcher submissions are
+    separately saved and verified against their frozen steps and source bytes.
+    """
+    def require(condition, code):
+        if not condition: raise AnalysisContractError("型付きテーマ候補を確認してください。", code=code)
+    _typed_shape(thematic_candidates_schema(), value)
+    content = value["content"]
+    validate_connection_actor(content["producer"])
+    require(content["producer"]["kind"] in {"ai", "code"}, "typed_producer")
+    def refs(values):
+        require(len({fingerprint(r) for r in values}) == len(values), "typed_ref_duplicate")
+        for ref in values:
+            original = {**ref, "target_type": "definition"} if ref["target_type"] == "artifact" else ref
+            require(_connection_source_ref(original), "typed_source_ref")
+    refs(content["input_refs"])
+    scope = content["scope"]
+    require(scope["input_refs"] == content["input_refs"], "typed_scope_refs")
+    require(fingerprint({k: v for k, v in scope.items() if k != "manifest_hash"}) == scope["manifest_hash"], "typed_scope_hash")
+    for field in ("member_ids", "context_ids", "conversation_ids"):
+        require(_connection_list(scope[field]), "typed_scope_ids")
+    require(not set(scope["member_ids"]) & set(scope["context_ids"]), "typed_scope_overlap")
+    if source is not None:
+        require(content["input_refs"] == [source["source_ref"]] and scope == source["scope"], "typed_source_mismatch")
+    evidence_by_id = {e["utterance_id"]: e for e in source["evidence"]} if source is not None else None
+    def evidence(ref, relation=None):
+        refs([ref["snapshot_ref"]])
+        require(ref["snapshot_ref"] in content["input_refs"] and ref["snapshot_ref"]["target_type"] == "snapshot"
+            and ref["library_id"] == ref["snapshot_ref"].get("library_id")
+            and ref["input_version"] == ref["snapshot_ref"]["version"]
+            and ref["input_hash"] == ref["snapshot_ref"]["content_hash"], "typed_evidence_source")
+        require(_connection_list(ref["context_ids"]) and (relation is None or ref["relation"] == relation), "typed_evidence_relation")
+        require(ref["utterance_id"] in scope["member_ids"] and set(ref["context_ids"]) <= set(scope["member_ids"] + scope["context_ids"]), "typed_evidence_scope")
+        if evidence_by_id is not None:
+            row = evidence_by_id.get(ref["utterance_id"])
+            require(row is not None and not row.get("excluded")
+                and ref["utterance_hash"] == "sha256:" + hashlib.sha256(row["text"].encode("utf-8")).hexdigest(), "typed_utterance_hash")
+    themes = {}; claims = set()
+    for theme, target in zip(value["themes"], content["theme_refs"]):
+        tc = theme["content"]
+        for key in ("candidate_set_id", "input_refs", "scope", "producer"):
+            require(tc[key] == content[key], "typed_theme_parent")
+        require(tc["theme_id"] not in themes and tc["claim_id"] not in claims, "typed_theme_duplicate")
+        themes[tc["theme_id"]] = theme; claims.add(tc["claim_id"])
+        th = content_fingerprint("ta-theme-content-v1", tc)
+        require(theme["content_hash"] == th and target == {"domain": "ta-theme-content-v1",
+            "candidate_set_id": tc["candidate_set_id"], "theme_id": tc["theme_id"], "version": tc["version"], "content_hash": th}, "typed_theme_hash")
+        refs(theme["memo_refs"])
+        require(all(r["target_type"] == "researcher_memo" for r in theme["memo_refs"]), "typed_memo_ref")
+        require(len({r["code_id"] for r in tc["code_refs"]}) == len(tc["code_refs"]), "typed_code_duplicate")
+        for code in tc["code_refs"]:
+            refs([code["source_ref"]]); require(code["definition_hash"] == code["source_ref"]["content_hash"], "typed_code_hash")
+        for key, rel in (("support", "support"), ("counterexamples", "counterexample")):
+            require(len({fingerprint(r) for r in tc[key]}) == len(tc[key]), "typed_evidence_duplicate")
+            for ref in tc[key]: evidence(ref, rel)
+        require(len({r["alternative_id"] for r in tc["alternatives"]}) == len(tc["alternatives"]), "typed_alternative_duplicate")
+        for alternative in tc["alternatives"]:
+            for ref in alternative["evidence_refs"]: evidence(ref, "alternative")
+    require(len(value["themes"]) == len(content["theme_refs"]), "typed_theme_refs")
+    require(value["content_hash"] == content_fingerprint("ta-candidate-content-v1", content), "typed_candidate_hash")
+    coverage = value["coverage"]
+    for key in ("dataset_ids", "required_ids", "excluded_ids"):
+        require(_connection_list(coverage[key]), "typed_coverage_ids")
+    dataset = set(scope["member_ids"] + scope["context_ids"])
+    require(set(coverage["dataset_ids"]) == dataset and set(coverage["required_ids"]) == set(scope["member_ids"])
+        and set(coverage["excluded_ids"]) == set(scope["context_ids"]), "typed_coverage_scope")
+    require(not coverage["human_read_record_refs"], "typed_human_record_untrusted")
+    receipt_ids = {}; read_ids = {}
+    for kind, unread_kind in (("read", "retrieval"), ("delivery", "delivery"), ("processing", "processing")):
+        done = set()
+        for receipt in coverage[kind + "_receipts"]:
+            validate_connection_actor(receipt["actor"])
+            require(receipt["receipt_type"] == kind and receipt["input_hash"] == content["input_refs"][0]["content_hash"]
+                and _connection_list(receipt["ids"]) and set(receipt["ids"]) <= dataset, "typed_receipt_source")
+            rid = receipt["receipt_id"]
+            require(rid not in receipt_ids or receipt_ids[rid] == receipt, "typed_receipt_conflict")
+            receipt_ids[rid] = receipt
+            if receipt["status"] in {"recorded", "partial"}:
+                ref = receipt["payload_ref"]; require(ref is not None and receipt["payload_hash"] is not None, "typed_receipt_payload")
+                refs([ref]); require(ref["hash_domain"] == "raw-bytes-v1" and ref["content_hash"] == receipt["payload_hash"], "typed_receipt_hash")
+                require(receipt_resolver is not None, "typed_receipt_unresolved")
+                raw = receipt_resolver(ref)
+                require(type(raw) is bytes and "sha256:" + hashlib.sha256(raw).hexdigest() == receipt["payload_hash"], "typed_receipt_bytes")
+                done.update(receipt["ids"])
+            else: require(receipt["payload_ref"] is None and receipt["payload_hash"] is None and not receipt["ids"], "typed_receipt_unknown")
+        read_ids[kind] = {r["receipt_id"]: set(r["ids"]) for r in coverage[kind + "_receipts"] if r["status"] in {"recorded", "partial"}}
+        unread = coverage["unread_sets"][unread_kind]
+        if unread["status"] == "measured": require(_connection_list(unread["ids"]) and set(unread["ids"]) == dataset - done, "typed_unread_difference")
+        else: require(unread["ids"] is None, "typed_unread_unknown")
+    human = coverage["unread_sets"]["human"]
+    require(human["status"] in {"unknown", "not_run"} and human["ids"] is None, "typed_human_read_untrusted")
+    for theme in value["themes"]:
+        for binding in theme["receipt_bindings"]:
+            evidence(binding["evidence_ref"])
+            for kind in ("read", "delivery"):
+                require(_connection_list(binding[kind + "_receipt_ids"]), "typed_receipt_binding")
+                for rid in binding[kind + "_receipt_ids"]:
+                    require(binding["evidence_ref"]["utterance_id"] in read_ids[kind].get(rid, set()), "typed_receipt_binding")
+    edges = {}; changes = set()
+    for change in value["history"]:
+        validate_connection_actor(change["actor"]); refs(change["affected_code_refs"])
+        require(change["actor"] == content["producer"], "typed_change_actor_untrusted")
+        require(change["change_id"] not in changes, "typed_change_duplicate"); changes.add(change["change_id"])
+        require(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", change["recorded_at"]) is not None, "typed_change_time")
+        from datetime import datetime
+        try: datetime.fromisoformat(change["recorded_at"].replace("Z", "+00:00"))
+        except ValueError: require(False, "typed_change_time")
+        before, after, op = change["from_themes"], change["to_themes"], change["operation"]
+        require({"create": not before and bool(after), "update": len(before) == len(after) == 1,
+                 "supersedes": len(before) == len(after) == 1, "merged": len(before) >= 2 and len(after) == 1,
+                 "split": len(before) == 1 and len(after) >= 2, "rejected": bool(before) and not after}[op], "typed_change_cardinality")
+        for targets in (before, after):
+            require(len({fingerprint(t) for t in targets}) == len(targets), "typed_change_duplicate_target")
+            require(all(t["candidate_set_id"] == content["candidate_set_id"] for t in targets), "typed_change_set")
+        for target in after:
+            require(target in content["theme_refs"] or any(target in row["from_themes"] for row in value["history"]), "typed_change_unresolved")
+        for old in before:
+            for new in after:
+                require(old != new and (old["theme_id"] != new["theme_id"] or old["version"] < new["version"]), "typed_change_version")
+                if op in {"update", "supersedes"}: require(old["theme_id"] == new["theme_id"], "typed_change_identity")
+                edges.setdefault(fingerprint(old), set()).add(fingerprint(new))
+    nodes = set(edges) | {child for children in edges.values() for child in children}
+    indegrees = {node: 0 for node in nodes}
+    for children in edges.values():
+        for child in children: indegrees[child] += 1
+    ready = [node for node, count in indegrees.items() if not count]; visited = 0
+    while ready:
+        node = ready.pop(); visited += 1
+        for child in edges.get(node, ()):
+            indegrees[child] -= 1
+            if not indegrees[child]: ready.append(child)
+    require(visited == len(nodes), "typed_change_cycle")
+    return json.loads(canonical(value))
+
 
 def _connection_object(value, keys, optional=()):
     return isinstance(value, dict) and set(keys) <= set(value) <= set(keys) | set(optional)
+
+
+def validate_human_record(record, *, candidate, required_steps, library_id, source_text):
+    """Validate an explicit researcher statement, never a model's review claim.
+
+    A source reference addresses the separately retained UTF-8 statement, not
+    the JSON wrapper containing this record. Each researcher step has its own
+    revision lineage. Dataset adoption requires every frozen researcher step.
+    """
+    def require(ok, code):
+        if not ok: raise AnalysisContractError("研究者記録の契約が一致しません。", code=code)
+    require(_connection_object(record, ("record_id", "revision", "supersedes_record_ref", "actor", "decision",
+                "target", "allowed_step_ids", "scope", "recorded_at", "reason", "record_ref")), "human_record_shape")
+    require(_connection_id(record["record_id"]) and type(record["revision"]) is int and record["revision"] >= 1,
+            "human_record_revision")
+    require(_connection_object(record["actor"], ("kind", "actor_id")) and record["actor"]["kind"] == "researcher"
+            and _connection_id(record["actor"]["actor_id"]), "human_record_actor")
+    require(isinstance(record["decision"], str) and record["decision"] in {"adopt", "reject", "defer"}
+            and _connection_id(record["reason"]), "human_record_decision")
+    require(_connection_list(record["allowed_step_ids"], set(required_steps), empty=False)
+            and len(record["allowed_step_ids"]) == 1, "human_record_step")
+    require(canonical(record["scope"]) == canonical(candidate["content"]["scope"]), "human_record_scope")
+    targets = [{"domain": "ta-candidate-content-v1", "candidate_set_id": candidate["content"]["candidate_set_id"],
+                "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]}]
+    targets.extend(candidate["content"]["theme_refs"])
+    require(any(canonical(record["target"]) == canonical(t) for t in targets), "human_record_target")
+    try:
+        from datetime import datetime
+        require(isinstance(record["recorded_at"], str) and re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", record["recorded_at"]) is not None,
+            "human_record_time")
+        stamp = datetime.fromisoformat(record["recorded_at"].replace("Z", "+00:00"))
+        require(stamp.tzinfo is not None, "human_record_time")
+    except (ValueError, TypeError, AttributeError): require(False, "human_record_time")
+    require(isinstance(source_text, str) and bool(source_text.strip()), "human_record_source")
+    try: source_bytes = source_text.encode("utf-8")
+    except UnicodeEncodeError: require(False, "human_record_source")
+    source = {"target_type": "researcher_memo", "target_id": "human-source:" + record["record_id"],
+              "version": str(record["revision"]), "content_hash": "sha256:" + hashlib.sha256(source_bytes).hexdigest(),
+              "hash_domain": "raw-bytes-v1", "library_id": library_id}
+    require(canonical(record["record_ref"]) == canonical(source), "human_record_source")
+    old = record["supersedes_record_ref"]
+    if record["revision"] == 1:
+        require(old is None, "human_record_revision")
+    else:
+        require(_connection_object(old, ("domain", "record_id", "revision", "content_hash"))
+                and old["domain"] == "human-record-v1" and old["record_id"] == record["record_id"]
+                and type(old["revision"]) is int and old["revision"] == record["revision"] - 1
+                and _connection_hash(old["content_hash"]), "human_record_revision")
+    return json.loads(canonical(record))
 
 
 def _connection_id(value):
@@ -621,15 +905,27 @@ def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
                 or candidate["scope_mode"] not in slot["scope_modes"] or actor["kind"] not in slot["actors"]
                 or candidate["adapter"] != slot["adapter"] or candidate["purpose"] not in slot["purposes"]):
             return result("rejected", "slot_incompatible")
-        if candidate["meaning_status"] == "unknown" or candidate["human_review_state"] == "human_pending":
-            return result("human_pending", "meaning_or_human_unconfirmed")
-        if (candidate["schema"] != descriptor.get("native_input_schema")
+        contracts = descriptor.get("input_contracts")
+        contract = next((c for c in contracts or [] if c["schema"] == candidate["schema"]
+                         and c["kind"] == ("snapshot" if candidate["source_type"] == "original" else candidate["kind"])), None)
+        schema = contract["schema"] if contract else descriptor.get("native_input_schema")
+        adapter = contract["adapter"] if contract else descriptor.get("native_adapter")
+        if contract and (actor["kind"] not in contract["actor_kinds"]
+                or (candidate.get("content_domain") if candidate["source_type"] == "artifact" else candidate["source_ref"]["hash_domain"]) != contract["content_domain"]):
+            return result("rejected", "typed_actor_or_domain")
+        if (candidate["schema"] != schema
                 or actor["kind"] not in descriptor.get("input_actor_kinds", [])
-                or candidate["adapter"] != descriptor.get("native_adapter") or candidate["unit"] not in descriptor.get("units", [])
+                or candidate["adapter"] != adapter or candidate["unit"] not in descriptor.get("units", [])
                 or candidate["scope_mode"] not in descriptor.get("scope_modes", [])
                 or candidate["purpose"] not in descriptor.get("purposes", [])
                 or candidate["scope_policy"] != descriptor.get("scope_policy")):
             return result("unsupported", "method_capability_unavailable")
+        if contracts and (contract is None or not contract["supported"]):
+            return result("unsupported", "typed_asset_adapter_unimplemented")
+        if contract and candidate["unit"] != contract["unit"]:
+            return result("rejected", "typed_meaning_unit")
+        if candidate["meaning_status"] == "unknown" or candidate["human_review_state"] == "human_pending":
+            return result("human_pending", "meaning_or_human_unconfirmed")
         if candidate["source_type"] == "artifact" and not descriptor.get("typed_asset_adapter_supported"):
             return result("unsupported", "typed_asset_adapter_unimplemented")
         if candidate["source_type"] == "original" and (not descriptor.get("native_adapter_supported") or candidate["source_ref"]["target_type"] not in descriptor.get("original_source_types", [])):
