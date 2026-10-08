@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any, Callable
 
 from flask import Blueprint, Flask, Response, jsonify, request
 
 from ..analysis_core import AnalysisContractError, TABLE_PILOT_MAX_BYTES
-from ..analysis_store import StoreConflict, AssetBindingError
+from ..analysis_store import (StoreConflict, AssetBindingError, HUMAN_RECORD_OPTIONS_MAX_BYTES,
+                              human_record_options_offset)
 
 
 def register_orchestration_routes(app: Flask, service: Callable[[], Any],
@@ -121,6 +123,39 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
     def resume(item_id, run_id):
         return jsonify(run=public_run(item_id, service().resume(item_id, run_id, payload()))), 202
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
+    def human_record_options(item_id, run_id):
+        if set(request.args) - {"offset"} or len(request.args.getlist("offset")) > 1:
+            raise AnalysisContractError("研究者記録の取得条件が不正です。", code="human_record_options_query")
+        offset = human_record_options_offset(request.args.get("offset", "0"))
+        # The existing app reader uses mode=ro/query_only. Never initialize an
+        # execution service or writer store as a fallback for a missing reader.
+        try:
+            if table_reader is None: raise OSError("read-only record reader is not configured")
+            reader = table_reader()
+            item = reader.find_item(item_id)
+            if item is None: raise LookupError("対象の会話がありません。")
+            if reader.table_store is None: raise OSError("read-only record store is not configured")
+            with reader.connect() as db:
+                authority = db.execute("PRAGMA database_list").fetchone()[2]
+            if not authority or Path(authority).resolve() != reader.table_store.database_file:
+                raise OSError("record store authority mismatch")
+            stamp = reader.source_fingerprint(item) if reader.source_fingerprint else None
+            source = dict(item)
+            response = viewer_response(reader.table_store.human_record_options(item_id=item_id,
+                execution_run_id=run_id, offset=offset, current_input_hash=stamp,
+                current_source_revisions={"source_revision": source.get("revision_count", 0),
+                                          "analysis_revision": source.get("analysis_revision", 0)}))
+        except LookupError:
+            return viewer_response({"error": "対象の会話または固定分析が見つかりません。",
+                                    "reason_code": "human_record_options_unavailable"}), 404
+        except (sqlite3.Error, OSError):
+            return viewer_response({"error": "研究者記録の保存済み台帳を読み取れません。",
+                                    "reason_code": "human_record_options_storage_unavailable"}), 503
+        if len(response.get_data()) > HUMAN_RECORD_OPTIONS_MAX_BYTES:
+            raise AnalysisContractError("研究者記録の選択情報が上限を超えています。", code="human_record_options_byte_limit")
+        return response
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
     def human_record(item_id, run_id):

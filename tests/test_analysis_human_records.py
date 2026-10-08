@@ -17,6 +17,11 @@ class HumanRecordTests(unittest.TestCase):
         self.helper.setUp()
         self.addCleanup(self.helper.doCleanups)
         self.fixture = self.helper.fixture
+        # Match the Handler's synthetic source versions before publishing. A
+        # later library UPDATE correctly stales saved packages via the real
+        # Store trigger and must never be used to prepare a readonly fixture.
+        with self.fixture.connect() as db:
+            db.execute("UPDATE library_items SET revision_count=1,analysis_revision=1 WHERE id='TEST-conversation'")
         self.service = self.helper.service()
         run = self.helper.start(self.service); self.run_id = run["run_id"]
         self.service.run(self.run_id)
@@ -29,7 +34,8 @@ class HumanRecordTests(unittest.TestCase):
         self.candidate, self.steps, *_ = self.fixture.store._human_contract(self.asset)
         self.binding_helper = typed.TypedAssetsTests(); self.binding_helper.fixture = self.fixture
         app = Flask(__name__)
-        register_orchestration_routes(app, lambda: self.service, lambda _: self.fail("No AI preparation"))
+        register_orchestration_routes(app, lambda: self.service, lambda _: self.fail("No AI preparation"),
+                                      table_reader=lambda: self.service)
         self.client = app.test_client()
         self.url = f"/api/library/TEST-conversation/analysis/orchestration/{self.run_id}/human-records"
 

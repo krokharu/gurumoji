@@ -32,6 +32,19 @@ STORE_VERSION = 1
 TABLE_FORMAT_VERSION = 1
 HUMAN_RECORD_KIND = "analysis_human_record"
 _HUMAN_RECORD_WRITER = object()
+HUMAN_RECORD_OPTIONS_LIMIT = 20
+HUMAN_RECORD_OPTIONS_MAX_BYTES = 65536
+
+
+def human_record_options_offset(value):
+    """Bound the public cursor before any database/factory access."""
+    from .analysis_core import AnalysisContractError
+    text = str(value)
+    if (type(value) not in (int, str) or not text or len(text) > 5
+            or any(c not in "0123456789" for c in text)
+            or (len(text) > 1 and text[0] == "0") or int(text) > 10000):
+        raise AnalysisContractError("研究者記録の開始位置が不正です。", code="human_record_options_offset")
+    return int(text)
 
 
 class StoreConflict(ValueError):
@@ -1233,6 +1246,131 @@ class AnalysisStore:
             except AnalysisContractError as exc:
                 raise AssetBindingError(exc.code, "blocked") from None
         return candidate, steps, choices["original"], manifest, orchestration
+
+    def human_record_options(self, *, item_id, execution_run_id, offset=0, current_input_hash=None,
+                             current_source_revisions=None):
+        """Verified, read-only form choices; enabled never grants adoption.
+
+        The application supplies its existing readonly connection and current
+        source stamp. No execution transaction, schema recovery or actor/source
+        statement is created here. Immutable records are exposed only for this
+        exact saved run/target; their separately saved source text is not copied
+        into a new researcher statement.
+        """
+        from .analysis_core import AnalysisContractError
+        from .services.expert_agents import verify_bundle
+        offset = human_record_options_offset(offset)
+        result = {"schema_id": "gurumoji.human-record-options", "schema_version": 1,
+                  "item_id": item_id, "run_id": execution_run_id, "generation": None,
+                  "enabled": False, "reason_code": None, "offset": offset,
+                  "limit": HUMAN_RECORD_OPTIONS_LIMIT, "next_offset": None, "options": []}
+
+        def disabled(reason):
+            return {**result, "enabled": False, "reason_code": reason, "options": [], "next_offset": None}
+
+        if not self.database_file.is_file():
+            raise LookupError("研究者記録の保存済み台帳がありません。")
+        try:
+            with self.connect() as db:
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                required = {"orchestration_runs", "orchestration_tasks", "orchestration_results",
+                            "orchestration_publications", "analysis_runs", "analysis_artifacts", "application_metadata"}
+                if not required <= tables: return disabled("human_record_ledger_unavailable")
+                row = db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=? AND item_id=?",
+                                 (execution_run_id, item_id)).fetchone()
+                if not row: raise LookupError("対象の分析履歴がありません。")
+                run = _read_typed_json(row[0])
+                if (run.get("run_id") != execution_run_id or run.get("item_id") != item_id
+                        or type(run.get("generation")) is not int or run["generation"] < 1):
+                    return disabled("human_record_ledger_mismatch")
+                result["generation"] = run["generation"]
+                publication = db.execute("SELECT result_run_id,generation FROM orchestration_publications WHERE run_id=? AND item_id=?",
+                                         (execution_run_id, item_id)).fetchone()
+            if not publication or not publication[0]: return disabled("human_record_candidates_unavailable")
+            if publication[1] != run["generation"]: return disabled("human_record_generation_changed")
+            if current_input_hash is None: return disabled("human_record_source_unavailable")
+            if current_input_hash != run.get("input_hash"): return disabled("revision_conflict")
+            if current_source_revisions is None: return disabled("human_record_source_unavailable")
+            if any(int(current_source_revisions.get(k, 0) or 0) != run.get(k)
+                   for k in ("source_revision", "analysis_revision")):
+                return disabled("revision_conflict")
+            verify_bundle(run.get("expert_agents"))
+            choices = self.thematic_asset_descriptors(publication[0])
+            _assets, _originals, states, _links = self._connection_index()
+            _packages, latest = self._human_packages()
+
+            def state_reason(state, *, parent=False):
+                if state is None: return None  # First explicit submission has revision zero.
+                if (state["revoked"] or state["status"] in {"retired", "unavailable", "rejected"}
+                        or (parent and state["status"] != "adopted")):
+                    return "parent_state_unavailable" if parent else "human_record_state_unavailable"
+                if (state["send_policy"] == "prohibited"
+                        or (state["send_policy"] == "permitted_destinations" and "local" not in state["destinations"])
+                        or not {"exploratory", "qualitative_compare"} & set(state["allowed_purposes"])):
+                    return "human_record_policy_unavailable"
+                return None
+
+            def current(descriptor):
+                history = states.get(_asset_key(descriptor["asset_key"]), {})
+                return history[max(history)] if history else None
+
+            index = 0
+            for asset in choices["assets"]:
+                candidate, required_steps, original, manifest, orchestration = self._human_contract(asset, require_current=True)
+                if (manifest["conversation_id"] != item_id or orchestration["run"]["run_id"] != execution_run_id
+                        or asset["asset_key"]["library_id"] != self.library_id()):
+                    raise AssetBindingError("human_record_owner")
+                profile = orchestration["expert_knowledge_snapshot"]["profiles"]["exp-thematic-analysis"]
+                steps = profile["human_steps"]
+                if (len(required_steps) != 4 or {s["id"] for s in steps} != set(required_steps)
+                        or any(not isinstance(s.get("title"), str) or not s["title"].strip() for s in steps)):
+                    raise AssetBindingError("human_record_contract")
+                state = current(asset)
+                reason = state_reason(state) or state_reason(current(original), parent=True)
+                targets = [("candidate", {"domain": "ta-candidate-content-v1",
+                    "candidate_set_id": candidate["content"]["candidate_set_id"],
+                    "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]},
+                    candidate["content"]["candidate_set_id"])]
+                targets.extend(("theme", t, theme["content"]["name"]) for t, theme in
+                               zip(candidate["content"]["theme_refs"], candidate["themes"]))
+                for kind, target, label in targets:
+                    position = index; index += 1
+                    if position < offset: continue
+                    if len(result["options"]) == HUMAN_RECORD_OPTIONS_LIMIT:
+                        result["next_offset"] = position
+                        break
+                    rows = []
+                    for step in steps:
+                        old = next((p for p in latest.values() if p["asset_key"] == asset["asset_key"]
+                            and p["record"]["target"] == target and p["record"]["allowed_step_ids"] == [step["id"]]), None)
+                        rows.append({"step_id": step["id"], "label": step["title"],
+                            "latest_record": {"record": copy.deepcopy(old["record"]), "record_ref": copy.deepcopy(old["ref"])} if old else None,
+                            "next_revision": old["record"]["revision"] + 1 if old else 1,
+                            "next_supersedes_record_ref": {"domain": "human-record-v1", "record_id": old["record"]["record_id"],
+                                "revision": old["record"]["revision"], "content_hash": old["ref"]["content_hash"]} if old else None})
+                    option = {"asset_key": copy.deepcopy(asset["asset_key"]), "library_id": manifest["library_id"],
+                        "scope": copy.deepcopy(asset["scope"]), "target_kind": kind, "target": copy.deepcopy(target),
+                        "label": label, "expected_state_revision": state["state_revision"] if state else 0,
+                        "enabled": reason is None, "reason_code": reason, "human_steps": rows}
+                    result["options"].append(option)
+                    if len(json.dumps(result, ensure_ascii=True).encode("utf-8")) > HUMAN_RECORD_OPTIONS_MAX_BYTES - 128:
+                        result["options"].pop()
+                        if not result["options"]:
+                            raise AnalysisContractError("研究者記録の選択情報が上限を超えています。", code="human_record_options_byte_limit")
+                        result["next_offset"] = position
+                        break
+                if result["next_offset"] is not None: break
+            result["enabled"] = any(o["enabled"] for o in result["options"])
+            result["reason_code"] = None if result["enabled"] else (
+                result["options"][0]["reason_code"] if result["options"] else "human_record_options_empty")
+            return result
+        except AnalysisContractError as exc:
+            if exc.code == "human_record_options_byte_limit": raise
+            return disabled(exc.code)
+        except AssetBindingError as exc:
+            return disabled(exc.reason)
+        except (StoreConflict, ValueError, TypeError, KeyError, IndexError):
+            return disabled("human_record_options_unverified")
 
     def _human_packages(self):
         """Fresh saved bytes, not descriptor claims, establish researcher records."""
