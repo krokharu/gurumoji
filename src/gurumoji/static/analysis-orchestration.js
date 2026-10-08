@@ -160,6 +160,7 @@ async function startAnalysisOrchestration(event) {
 function orchestrationAdopt(run, itemId, itemName = '') {
   if (run.item_id && run.item_id !== itemId) throw Error('取得した実行の対象が一致しません。');
   ++orchestrationState.epoch; orchestrationState.poll = null;
+  orchestrationTableReset();
   window.clearTimeout(orchestrationState.timer);
   Object.assign(orchestrationState,{runId:run.run_id,itemId,itemName:itemName || run.item_name || run.source_name || (analysisState.itemId===itemId ? analysisState.data?.item?.source_name : '') || '',run,error:'',operation:orchestrationState.operation==='start'?'start':'',lastSeq:null,taskFingerprint:'',recoveryFingerprint:'',initialFingerprint:'',outputFingerprint:'',fetchedAt:Date.now()});
   orchestrationPersist(); renderAnalysisOrchestration();
@@ -221,6 +222,7 @@ function orchestrationRenderRole(role) {
 function renderAnalysisOrchestration() {
   const state = orchestrationState, run = state.run, live = orchestrationNode('live'); if (!live) return;
   const active = orchestrationActiveStatuses.includes(run?.status);
+  orchestrationTableAvailability();
   const draining = !active && orchestrationPendingCompletion(run);
   orchestrationNode('chip').hidden = !state.runId;
   orchestrationNode('chip').classList.toggle('is-active', active || draining);
@@ -354,7 +356,7 @@ function orchestrationRenderTasks(tasks) {
   const host=orchestrationNode('tasks'); host.replaceChildren(); orchestrationText('task-count',`(${tasks.length})`);
   for (const task of tasks) {
     const row=orchestrationElement('tr');
-    const title=orchestrationElement('td',task.title || task.task_id || '名称未取得'); title.append(orchestrationElement('small',task.task_id || ''));
+    const title=orchestrationElement('td',orchestrationTableNames[task.method_id] || task.title || task.task_id || '名称未取得'); title.append(orchestrationElement('small',task.task_id || ''));
     const role=orchestrationRoles.find(r=>r.id===(task.role || task.assigned_to));
     const who=orchestrationElement('td',`${role?.label || task.role || '担当未取得'} / ${role?.kind === 'code' ? 'コード実行' : task.model || 'モデル未取得'}`);
     const result=orchestrationElement('td');
@@ -424,7 +426,9 @@ async function orchestrationReadResults(resultId = '') {
     const data=await analysisExecutionRequestJson(`${orchestrationBase()}/results${resultId ? `/${encodeURIComponent(resultId)}` : ''}`);
     if(request!==orchestrationState.resultRequest || epoch!==orchestrationState.epoch || viewer!==orchestrationState.viewerEpoch || runId!==orchestrationState.runId || !orchestrationNode('live').open) return;
     host.replaceChildren(orchestrationElement('p','固定された保存結果です。初期版・根拠ID・未解決点を含めて確認してください。'));
-    const pre=orchestrationElement('pre',JSON.stringify(data,null,2));pre.tabIndex=0;host.append(pre);
+    if (!orchestrationTableResult(host,data.raw)) {
+      const pre=orchestrationElement('pre',JSON.stringify(data,null,2));pre.tabIndex=0;host.append(pre);
+    }
   } catch(error) { if(request===orchestrationState.resultRequest && epoch===orchestrationState.epoch && viewer===orchestrationState.viewerEpoch && orchestrationNode('live').open)host.replaceChildren(orchestrationElement('p',`結果を取得できません: ${error.message}`)); }
 }
 async function orchestrationHistory() {
@@ -443,6 +447,13 @@ async function orchestrationHistory() {
   }catch(error){if(orchestrationSetupCurrent(epoch))host.replaceChildren(orchestrationElement('p',error.message));}
 }
 function bindAnalysisOrchestration() {
+  listen(orchestrationNode('table-load'),'click',()=>orchestrationTableLoad());
+  listen(orchestrationNode('table-next'),'click',()=>orchestrationTableLoad(orchestrationTableState.options?.next_offset));
+  listen(orchestrationNode('table-form'),'submit',orchestrationTableReview);
+  listen(orchestrationNode('table-execute'),'click',orchestrationTableExecute);
+  for (const id of ['table-asset','table-method','table-second']) listen(orchestrationNode(id),'change',orchestrationTableParameters);
+  listen(orchestrationNode('table-parameters'),'input',orchestrationTableInvalidate);
+  listen(orchestrationNode('table-parameters'),'change',orchestrationTableInvalidate);
   const overrideHost=orchestrationNode('role-overrides');
   for(const role of orchestrationRoles.filter(r=>r.kind==='ai')) {
     const row=orchestrationElement('div',undefined,'orchestration-form-grid');
@@ -476,5 +487,152 @@ function bindAnalysisOrchestration() {
   orchestrationNode('live').classList.toggle('reduce-motion',motion.matches);
   let stored;try{stored=JSON.parse(sessionStorage.getItem(orchestrationStorageKey)||'null');}catch(_){/* unavailable */}
   if(stored?.itemId && stored?.runId){orchestrationState.itemId=stored.itemId;orchestrationState.runId=stored.runId;renderAnalysisOrchestration();pollAnalysisOrchestration();}
+}
+const orchestrationTableState = {options:null, reviewed:null, loading:false, sending:false, request:0};
+const orchestrationTableNames = {table_projection:'列・行の抽出',table_aggregate:'発話ごとの件数',table_join:'発話ごとの表結合',table_frequency:'カテゴリの度数',table_crosstab:'2カテゴリのクロス集計'};
+const orchestrationTableFieldNames = {value_column:'値の列',status_column:'欠測・処理状態の列',row_column:'行カテゴリの列',column_column:'列カテゴリの列',group_by:'グループ列',key:'結合キー',operation:'集計方法',unit:'集計単位'};
+function orchestrationTableInvalidate() {
+  orchestrationTableState.reviewed=null;
+  orchestrationNode('table-confirmation').hidden=true;
+}
+function orchestrationTableReset() {
+  ++orchestrationTableState.request;
+  Object.assign(orchestrationTableState,{options:null,reviewed:null,loading:false,sending:false});
+  orchestrationNode('table-form').hidden=true;
+  orchestrationNode('table-next').hidden=true;
+  orchestrationNode('table-message').textContent='';
+}
+function orchestrationTableAvailability() {
+  const run=orchestrationState.run, state=orchestrationTableState;
+  const ready=['queued','running'].includes(run?.status) && run?.phase!=='initial' && !run?.stale && !run?.cancel_requested;
+  const reason=ready?(state.options && state.options.context.generation!==run?.generation?'実行の固定版が変わりました。保存表を再取得してください。':'現在の固定実行へ追加できます。保存表と現在の許可を確認してください。'):run?.phase==='initial'?'固定入力の準備中です。準備が終わってから確認してください。':'停止・完了・入力変更または復旧待ちの実行には追加できません。';
+  if (!ready || state.options && state.options.context.generation!==run?.generation) orchestrationTableInvalidate();
+  orchestrationText('table-availability',reason);
+  orchestrationNode('table-load').disabled=!ready||state.loading||state.sending;
+  orchestrationNode('table-next').disabled=!ready||state.loading||state.sending;
+  const stale=state.options && state.options.context.generation!==run?.generation;
+  orchestrationNode('table-review').disabled=!ready||stale||state.loading||state.sending;
+  orchestrationNode('table-execute').disabled=!ready||state.loading||state.sending||!state.reviewed;
+}
+async function orchestrationTableJson(url,options={}) {
+  // Preserve the existing HTTP error contract, including its responsible field.
+  const response=await apiFetch(url,options), data=await readJsonResponse(response);
+  if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.field=data.field;error.code=data.reason_code;throw error;}
+  return data;
+}
+function orchestrationTableError(error) {
+  const labels={parameters:'処理パラメーター',bindings:'保存表・利用許可',context:'固定入力・実行状態',method_id:'処理方式'};
+  orchestrationText('table-message',`${labels[error.field]||orchestrationTableFieldNames[error.field]||'保存表の接続'}: ${error.message}。選択肢を再取得して確認してください。`);
+  const node=orchestrationNode(`table-param-${error.field}`)||orchestrationNode(error.field==='method_id'?'table-method':'table-asset');
+  node.setAttribute('aria-invalid','true');node.setAttribute('aria-describedby','orchestration-table-message');
+}
+async function orchestrationTableLoad(offset=0) {
+  const state=orchestrationTableState;if(state.loading||state.sending)return;
+  const request=++state.request,epoch=orchestrationState.epoch,viewer=orchestrationState.viewerEpoch;
+  state.loading=true;state.options=null;orchestrationTableInvalidate();orchestrationNode('table-form').hidden=true;
+  orchestrationText('table-message','保存表と利用許可を取得しています…');orchestrationTableAvailability();
+  const current=()=>request===state.request&&epoch===orchestrationState.epoch&&viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open;
+  try {
+    const data=await orchestrationTableJson(`${orchestrationBase()}/table-pilot?offset=${Number(offset)||0}`);
+    if(!current())return;
+    state.options=data;
+    for(const [id,entries] of [['table-asset',data.inputs],['table-second',data.inputs],['table-method',data.methods]]) {
+      orchestrationNode(id).replaceChildren(...entries.map((entry,index)=>{
+        const option=orchestrationElement('option',entry.method_id?orchestrationTableNames[entry.method_id]:`保存表 ${data.offset+index+1} · ${entry.row_ids.length}行 · ${entry.fields.join(' / ')}`);
+        option.value=entry.method_id||String(index);return option;
+      }));
+      orchestrationNode(id).removeAttribute('aria-invalid');
+    }
+    orchestrationNode('table-next').hidden=data.next_offset===null;
+    orchestrationNode('table-form').hidden=!data.inputs.length;
+    orchestrationText('table-message',data.inputs.length?'利用可能な保存表です。処理方式と列を選んでください。':'この固定入力で利用できる保存表はありません。保存済み表・宣言済み変数・利用許可が必要です。');
+    if(data.inputs.length)orchestrationTableParameters();
+  }catch(error){if(current())orchestrationTableError(error);}
+  finally{if(request===state.request){state.loading=false;orchestrationTableAvailability();}}
+}
+function orchestrationTableSelection() {
+  const options=orchestrationTableState.options;
+  return {options,asset:options?.inputs[Number(orchestrationNode('table-asset').value)],
+    second:options?.inputs[Number(orchestrationNode('table-second').value)],
+    method:options?.methods.find(m=>m.method_id===orchestrationNode('table-method').value)};
+}
+function orchestrationTableParameters() {
+  orchestrationTableInvalidate();const {options,asset,method}=orchestrationTableSelection();if(!asset||!method)return;
+  orchestrationNode('table-second-field').hidden=method.method_id!=='table_join';
+  const typeLabels={integer:'整数',number:'数値',boolean:'真偽',string:'文字列',nominal:'名義尺度',ordinal:'順序尺度',ratio:'比率尺度',interval:'間隔尺度',utterance:'発話'};
+  const types=Object.fromEntries(asset.variables.map(v=>[v.variable_id,[v.value_type,v.scale,v.unit].map(k=>typeLabels[k]||k).join(' / ')]));
+  orchestrationText('table-scope',`固定入力版 ${options.input.source_revision} · 分析版 ${options.input.analysis_revision} · 対象 ${asset.scope.member_ids.length}発話 · 除外 ${asset.scope.context_ids.length}発話 · 宣言された単位: 発話`);
+  const host=orchestrationNode('table-parameters');host.replaceChildren();
+  const field=(name,choices,selected)=>{
+    const label=orchestrationElement('label',undefined,'field'),caption=orchestrationElement('span',orchestrationTableFieldNames[name]||name);caption.id=`orchestration-table-label-${name}`;label.append(caption);
+    const select=orchestrationElement('select');select.id=`orchestration-table-param-${name}`;
+    select.setAttribute('aria-labelledby',caption.id);
+    for(const [value,text] of choices){const option=orchestrationElement('option',text);option.value=value;select.append(option);}if(selected!==undefined)select.value=selected;
+    label.append(select);host.append(label);
+  };
+  for(const name of method.parameter_fields) {
+    if(name==='columns'){
+      const box=orchestrationElement('fieldset');box.append(orchestrationElement('legend','抽出する列（宣言済み）'));
+      for(const column of asset.fields){const label=orchestrationElement('label',undefined,'check-row');const input=orchestrationElement('input');input.type='checkbox';input.value=column;input.checked=true;input.disabled=['utterance_id','conversation_id','value_status'].includes(column);input.name='table-columns';label.append(input,orchestrationElement('span',`${column}${types[column]?` · ${types[column]}`:''}${input.disabled?'（固定の必須列）':''}`));box.append(label);}host.append(box);
+    }else if(name==='row_ids'){
+      const label=orchestrationElement('label',undefined,'field');label.append(orchestrationElement('span','保存順で先頭から抽出する行数'));
+      const input=orchestrationElement('input');input.type='number';input.min='1';input.max=String(asset.row_ids.length);input.value=input.max;input.required=true;input.id='orchestration-table-param-row_ids';label.append(input);host.append(label);
+    }else if(name==='operation')field(name,[[method.parameter_defaults[name],'件数']],method.parameter_defaults[name]);
+    else if(name==='unit')field(name,[['utterance','発話']],method.parameter_defaults[name]);
+    else if(['status_column','group_by','key'].includes(name))field(name,[[method.parameter_defaults[name],{status_column:'保存された欠測・処理状態',group_by:'発話ごと',key:'同じ発話'}[name]]],method.parameter_defaults[name]);
+    else field(name,asset.variables.filter(v=>!['utterance_id','conversation_id','value_status','source_utterance_ids'].includes(v.variable_id)).map(v=>[v.variable_id,`${v.variable_id} · ${types[v.variable_id]}`]));
+  }
+  orchestrationTableAvailability();
+}
+function orchestrationTableReview(event) {
+  event.preventDefault();const state=orchestrationTableState;if(state.sending||state.loading)return;
+  const {options,asset,second,method}=orchestrationTableSelection();if(!asset||!method)return;
+  if(options.context.generation!==orchestrationState.run?.generation)return;
+  orchestrationTableInvalidate();
+  try{
+    const request=JSON.parse(JSON.stringify(asset.projection_request));request.bindings.slot=method.slot;request.parameters={};
+    for(const name of method.parameter_fields){
+      if(name==='columns')request.parameters.columns=Array.from(orchestrationNode('table-parameters').querySelectorAll('input[name="table-columns"]:checked'),n=>n.value);
+      else if(name==='row_ids'){const n=Number(orchestrationNode('table-param-row_ids').value);if(!Number.isInteger(n)||n<1||n>asset.row_ids.length)throw Error('抽出行数は保存表の行数以内で指定してください');request.parameters.row_ids=asset.row_ids.slice(0,n);}
+      else request.parameters[name]=orchestrationNode(`table-param-${name}`).value;
+    }
+    if(request.parameters.columns?.length===0)throw Error('抽出する列を1つ以上選んでください');
+    if(method.method_id==='table_join'){
+      if(!second||second===asset)throw Error('結合する別の保存表を選んでください');
+      if(second.scope.manifest_hash!==asset.scope.manifest_hash)throw Error('対象集合の同じ保存表を選んでください');
+      request.bindings.inputs=[request.bindings.inputs[0],JSON.parse(JSON.stringify(second.projection_request.bindings.inputs[0]))];
+      request.bindings.inputs.forEach((binding,index)=>{binding.input_ref_id=`table-input-${index}`;});
+    }
+    if(new Blob([JSON.stringify(request)]).size>options.max_bytes)throw Error('選択内容が上限を超えています。抽出する列・行を減らしてください');
+    state.reviewed={request,method:method.method_id,epoch:orchestrationState.epoch};
+    const params=Object.entries(request.parameters).map(([k,v])=>`${orchestrationTableFieldNames[k]||({columns:'抽出列',row_ids:'抽出行'}[k])}: ${k==='row_ids'?`${v.length}行`:Array.isArray(v)?v.join(' / '):({count:'件数',sum:'合計',mean:'平均',min:'最小',max:'最大',utterance:'発話'}[v]||v)}`).join(' · ');
+    orchestrationText('table-summary',`${orchestrationTableNames[method.method_id]} · ${method.method_id==='table_join'?'保存表2件':'保存表1件'} · ${params}。固定入力版 ${options.input.source_revision}、対象 ${asset.scope.member_ids.length}発話。実行結果は研究者の採用・確定解釈とは別です。`);
+    orchestrationNode('table-confirmation').hidden=false;orchestrationText('table-message','内容を確認し、実行ボタンを押してください。');orchestrationTableAvailability();
+  }catch(error){orchestrationTableError(error);}
+}
+async function orchestrationTableExecute() {
+  const state=orchestrationTableState,reviewed=state.reviewed;if(!reviewed||state.sending||reviewed.epoch!==orchestrationState.epoch)return;
+  state.sending=true;orchestrationTableAvailability();const epoch=orchestrationState.epoch,viewer=orchestrationState.viewerEpoch;
+  try{
+    const data=await orchestrationTableJson(`${orchestrationBase()}/table-pilot/${encodeURIComponent(reviewed.method)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(reviewed.request)});
+    if(epoch!==orchestrationState.epoch||viewer!==orchestrationState.viewerEpoch||!orchestrationNode('live').open)return;
+    orchestrationTableInvalidate();orchestrationText('table-message',data.task.registration_duplicate?'同じ内容は受付済みです。状態・保存結果を確認してください。':'表処理を受け付けました。処理中・失敗・保存済み結果はタスク台帳で確認できます。');
+    pollAnalysisOrchestration();
+  }catch(error){if(epoch===orchestrationState.epoch&&viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open){orchestrationTableInvalidate();orchestrationTableError(error);}}
+  finally{if(epoch===orchestrationState.epoch){state.sending=false;orchestrationTableAvailability();}}
+}
+function orchestrationTableResult(host,raw) {
+  if(!orchestrationTableNames[raw?.method_id]||!raw.datasets?.table)return false;
+  const table=raw.datasets.table,p=raw.population||{},m=raw.manifest||{};
+  host.append(orchestrationElement('h4',orchestrationTableNames[raw.method_id]),orchestrationElement('p',`対象の分母 ${m.included_denominator??'未取得'} · 計算の分母 ${m.calculation_denominator??'未取得'} · 欠測 ${p.missing_ids?.length??'未取得'} · 未処理 ${p.unprocessed_ids?.length??'未取得'} · 不明 ${p.unknown_ids?.length??'未取得'} · 除外 ${p.excluded_ids?.length??'未取得'} · 観測ゼロ ${p.observed_zero_ids?.length??'未取得'}`));
+  const wrap=orchestrationElement('div',undefined,'orchestration-table-wrap');wrap.tabIndex=0;wrap.setAttribute('aria-label','保存された固定表');
+  const grid=orchestrationElement('table'),head=orchestrationElement('thead'),header=orchestrationElement('tr');
+  for(const f of table.fields){const th=orchestrationElement('th',f);th.scope='col';header.append(th);}head.append(header);grid.append(head);
+  const body=orchestrationElement('tbody');for(const row of table.rows){const tr=orchestrationElement('tr');for(const f of table.fields){
+    const value=row[f],category=['category','row_value','column_value'].includes(f)&&['table_frequency','table_crosstab'].includes(raw.method_id);
+    const text=value===undefined?'未取得':value===null?'null（保存値）':category?`${typeof value==='string'?`「${value}」`:String(value)}（${{string:'文字列',number:'数値',boolean:'真偽'}[typeof value]||'型未取得'}）`:f==='value_status'?({observed:'観測済み',missing:'欠測',unprocessed:'未処理',excluded:'除外',unknown:'不明'}[value]||String(value)):Array.isArray(value)?value.join(' / '):String(value);
+    tr.append(orchestrationElement('td',text));}body.append(tr);}grid.append(body);wrap.append(grid);host.append(wrap);
+  const evidence=orchestrationElement('button','固定入力・発話の根拠を履歴ビューアーで読む','secondary-button');evidence.type='button';evidence.addEventListener('click',()=>orchestrationNode('viewer').click());host.append(evidence);
+  host.append(orchestrationElement('p','空セルをゼロとは扱いません。表の値・対象集合・計算対象はこの保存結果の固定版です。研究者による採否は別に確認してください。','field-note'));return true;
 }
 window.addEventListener('DOMContentLoaded',bindAnalysisOrchestration);

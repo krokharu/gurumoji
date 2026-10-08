@@ -91,6 +91,29 @@
     <div class="orchestration-live-actions"><button id="orchestration-viewer" type="button" class="secondary-button">履歴と根拠を読む</button><button id="orchestration-refresh" type="button" class="secondary-button">状態を更新</button><button id="orchestration-stop" type="button" class="secondary-button danger">停止する</button><button id="orchestration-resume" type="button" class="primary-button" hidden>保存地点から再開</button><button id="orchestration-results" type="button" class="secondary-button">保存済み結果・初期版</button></div>
     <p id="orchestration-stop-reason" class="orchestration-boundary"></p>
     <p class="field-note">閉じても実行は止まりません。上部の「自律分析」から戻れます。表示の更新・再表示は保存済み状態の取得だけで、AI呼出しやVault出力を開始しません。</p>
+    <section class="orchestration-output orchestration-table-pilot" aria-labelledby="orchestration-table-title">
+      <h3 id="orchestration-table-title">保存済み表から、局所集計 <span class="orchestration-kind">CODE</span></h3>
+      <p class="field-note">現在の実行に固定された、利用許可のある保存表を選びます。選択肢の取得は計算しません。実行はアプリのローカルコード処理です。</p>
+      <p id="orchestration-table-availability"></p>
+      <button id="orchestration-table-load" type="button" class="secondary-button">利用できる保存表を確認</button>
+      <button id="orchestration-table-next" type="button" class="secondary-button" hidden>次の保存表を確認</button>
+      <p id="orchestration-table-message" role="status" aria-live="polite"></p>
+      <form id="orchestration-table-form" hidden>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-table-asset-label">保存表</span><select id="orchestration-table-asset" aria-labelledby="orchestration-table-asset-label"></select></label>
+          <label class="field"><span id="orchestration-table-method-label">処理方式</span><select id="orchestration-table-method" aria-labelledby="orchestration-table-method-label"></select></label>
+          <label id="orchestration-table-second-field" class="field" hidden><span id="orchestration-table-second-label">結合する保存表</span><select id="orchestration-table-second" aria-labelledby="orchestration-table-second-label"></select></label>
+        </div>
+        <p id="orchestration-table-scope" class="field-note"></p>
+        <div id="orchestration-table-parameters" class="orchestration-form-grid"></div>
+        <p class="field-note">対象集合と計算の分母は結果で確認できます。欠測・未処理・不明・除外は、観測されたゼロと区別して保存されます。行の抽出は対象集合そのものの変更ではありません。</p>
+        <button id="orchestration-table-review" type="submit" class="secondary-button">選択内容を確認</button>
+        <div id="orchestration-table-confirmation" hidden>
+          <p id="orchestration-table-summary"></p>
+          <button id="orchestration-table-execute" type="button" class="primary-button">確認した表処理をローカルで実行</button>
+        </div>
+      </form>
+    </section>
     <section id="orchestration-memory" class="orchestration-output" aria-labelledby="orchestration-memory-title">
       <h3 id="orchestration-memory-title">Obsidian管理とデータ参照</h3>
       <p id="orchestration-memory-status" role="status" aria-live="polite"></p>

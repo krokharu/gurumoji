@@ -124,3 +124,9 @@
 .orchestration-output > p { font-size:.8rem; line-height:1.7; }
 #orchestration-publication-retry { min-height:42px; font-size:.8rem; }
 @media (max-width:540px) { .orchestration-publication-outcomes { grid-template-columns:1fr; } }
+.orchestration-table-pilot select { max-width: 100%; min-width: 0; }
+.orchestration-table-pilot fieldset { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.orchestration-table-pilot .check-row { overflow-wrap: anywhere; }
+#orchestration-table-confirmation { margin-top: 16px; padding: 12px; border: 1px solid var(--green); border-radius: 8px; background: var(--green-soft); }
+#orchestration-table-summary, #orchestration-table-message { overflow-wrap: anywhere; }
+#orchestration-table-message:not(:empty) { margin: 12px 0; }
