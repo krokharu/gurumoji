@@ -90,3 +90,7 @@ tests/test_table_pilot_routes.py -text
 tests/test_table_pilot_ui.cjs -text
 tests/test_git_handoff.py -text
 src/gurumoji/static/analysis-orchestration.css -text
+src/gurumoji/services/analysis_visuals.py -text
+tests/test_analysis_visuals.py -text
+tests/test_analysis_human_records.py -text
+tests/test_analysis_typed_assets.py -text

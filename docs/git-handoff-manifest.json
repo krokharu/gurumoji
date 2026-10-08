@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "3d14ddb5c45ce96ec8eb4528cf554dbd8903789d",
+  "source_commit": "9c82e95566e4eb708c41b6692a773eeedf9b2f8f",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "27fc3ed0516f3edd10bcede81e432478f8b486dad1be0c9bf66b952b69ee87f1",
-      "bytes": 6862
+      "sha256": "d159fe78afdd210c3b791a0113abe123433b7cb963ceaffb89ea675b14b4cbb4",
+      "bytes": 8353
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/10-Experts/thematic-analysis/07-Agent-Contract.md",
-      "sha256": "453adefd17b23e289352affafc4ae85d61afa1a6f094a34e774c806772050a65",
-      "bytes": 3770
+      "sha256": "09f3742811e56c187427ec5b7899d8f7fb9cc576f6ec36ffb26f538069aa3beb",
+      "bytes": 5630
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding.md",
@@ -200,23 +200,23 @@
     },
     {
       "path": "src/gurumoji/analysis_core.py",
-      "sha256": "69403fe1ce460c511cd4961470b6b68d2934c413cd033cad881626bd6f4c54c8",
-      "bytes": 43385
+      "sha256": "567ddcb49eda3e8d05d36755d3c904340cf87313a01efc3070d6ac19ab4d3d35",
+      "bytes": 65175
     },
     {
       "path": "src/gurumoji/analysis_method_registry.py",
-      "sha256": "b180ae37b01669cfd26e8684a57338e5c11e9f9a35b52b9eefd35630635df7f3",
-      "bytes": 25097
+      "sha256": "a8c0530e8c7b93166e646c668167938ded27dc1430a5a4b86a6ed0bdda11a59a",
+      "bytes": 29767
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "54f3bdd9f849639eec8019f4ac28f84c26d70277a200ae219fcc1e42c06bcf63",
-      "bytes": 190458
+      "sha256": "850d0949f190750171efc9a28f644d6004eb6d531c69933eef0ac2ddaf7c2425",
+      "bytes": 195815
     },
     {
       "path": "src/gurumoji/analysis_store.py",
-      "sha256": "103138124d713f5353f3290e9815c5fe86f4a1f22fe4048c12c78a044e1dd2d8",
-      "bytes": 147144
+      "sha256": "dedd4f3b506add7afaa581aefb18c70d71713f96f0183cf6eddce18714f0a5d1",
+      "bytes": 183700
     },
     {
       "path": "src/gurumoji/app.py",
@@ -225,7 +225,7 @@
     },
     {
       "path": "src/gurumoji/method_experts.py",
-      "sha256": "f633ecc768cd1741946cbd70ea647f8a5037fc7fad13c86bca69612f506263c0",
+      "sha256": "a859994762095d225ca99f472eb8c711538ce3cedac83190c5388e20fc2f5fc1",
       "bytes": 86330
     },
     {
@@ -245,8 +245,8 @@
     },
     {
       "path": "src/gurumoji/services/analysis_orchestration_adapters.py",
-      "sha256": "03dbe930fd8899f1ba4e955b5f5460e3579b118a59a46b424b8b5edabbffca4c",
-      "bytes": 24895
+      "sha256": "836361009bf754543b7cd7266237eb0adc99ad13691403e5951694729bbf376c",
+      "bytes": 25383
     },
     {
       "path": "src/gurumoji/services/analysis_orchestration_methods.py",
@@ -254,9 +254,14 @@
       "bytes": 23824
     },
     {
+      "path": "src/gurumoji/services/analysis_visuals.py",
+      "sha256": "0b709c46f8c04dcd10935cedc198ba939ebb6672383bf5806e6b584903acc5cf",
+      "bytes": 24859
+    },
+    {
       "path": "src/gurumoji/services/expert_agents.py",
-      "sha256": "3bfac9714b6fc9feea421f9abea098b737d48f89eff79b9d34862614f557b2bf",
-      "bytes": 52852
+      "sha256": "ffdcfae4c0a899a54926e75ebc78675c34b98db8203f1a5fa003171aa5c65476",
+      "bytes": 59707
     },
     {
       "path": "src/gurumoji/services/expert_data_hooks.py",
@@ -295,8 +300,8 @@
     },
     {
       "path": "src/gurumoji/web/analysis_orchestration_routes.py",
-      "sha256": "8656f62b01dd632d4ae7ebe03ea5c9e33b5694e1ca6852933a0a4c7e311a8552",
-      "bytes": 10787
+      "sha256": "40bd86494849fe976dfdb26c73952d4f35ed2338a1b6c0f5d27ab90605acf0ed",
+      "bytes": 11287
     },
     {
       "path": "tests/dom/orchestration.test.cjs",
@@ -369,6 +374,11 @@
       "bytes": 16820
     },
     {
+      "path": "tests/test_analysis_human_records.py",
+      "sha256": "1c56581713b2995a3ff4e53e157435a5ae97342a73e76025868d486831de7e24",
+      "bytes": 24022
+    },
+    {
       "path": "tests/test_analysis_orchestration.py",
       "sha256": "1e9f9b6a0a1246ed99380031d13c5279429d40bc89add47505a5192a47e83184",
       "bytes": 35738
@@ -394,9 +404,19 @@
       "bytes": 29043
     },
     {
+      "path": "tests/test_analysis_typed_assets.py",
+      "sha256": "03689f31285ff23af6dc91aacf4c5064cd467208d7800ecefb8c51a82cf85059",
+      "bytes": 35125
+    },
+    {
+      "path": "tests/test_analysis_visuals.py",
+      "sha256": "9799562a82e9e708f25923700741867e5f11fbf96bce3e6586457684b5b4ab7b",
+      "bytes": 20807
+    },
+    {
       "path": "tests/test_expert_agents.py",
-      "sha256": "990bb14df8421b37a15d70b1b6f473721653cce28e1aaa47db988aa7133b5584",
-      "bytes": 28287
+      "sha256": "5d3731ba125816f854cd8f7327fd73008872792ed36cab8fa418d4c802bc9481",
+      "bytes": 30293
     },
     {
       "path": "tests/test_expert_data_hooks.py",
