@@ -78,6 +78,79 @@ METHODS = [
 ]
 SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_classification", "autonomous_analysis"}
 
+
+def connection_method_descriptor(method_id: str) -> dict | None:
+    """Metadata for existing outputs, never a new executor or typed adapter.
+
+    The 22 saved-method names and eight Handler tools remain their authorities.
+    Native statistical results are tables; the proposed Asset wrapper/resolver
+    is not implemented merely because its logical kind is known.
+    """
+    from .services.analysis_orchestration_methods import (
+        STATISTICAL_TOOLS, STATISTICAL_TOOL_VERSION,
+    )
+    from .analysis_core import fingerprint
+    if method_id in TABLE_PILOT_METHODS:
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "table-pilot-1",
+                "output_names": ["table"], "logical_output_kinds": ["observation_table"],
+                "native_adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+                "native_input_schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                        "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)},
+                "original_source_types": [], "units": ["utterance"], "reference_roles": ["data_input"],
+                "input_actor_kinds": ["system", "code"], "scope_modes": ["dataset"],
+                "scope_policy": "all_included_initial", "purposes": ["exploratory", "descriptive"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": False}
+    registered = {key: outputs for key, _, outputs in METHODS}
+    if method_id in STATISTICAL_TOOLS:
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": STATISTICAL_TOOL_VERSION,
+                "output_names": [STATISTICAL_TOOLS[method_id][0]],
+                "logical_output_kinds": ["observation_table"],
+                "native_adapter": {"adapter_id": "statistical-tools", "version": STATISTICAL_TOOL_VERSION},
+                "native_input_schema": {"schema_id": "orchestration-initial-snapshot", "version": 1,
+                    "schema_hash": fingerprint({"input_hash": "string", "source_revision": "integer",
+                        "analysis_revision": "integer", "analysis": "object"})},
+                "original_source_types": ["snapshot"], "units": ["utterance"],
+                "reference_roles": ["data_input"], "input_actor_kinds": ["system", "code"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial",
+                "purposes": ["exploratory", "descriptive"],
+                "typed_asset_adapter_supported": False, "native_adapter_supported": True}
+    if method_id not in registered:
+        return None
+    return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+            "registry_version": REGISTRY_VERSION, "output_names": list(registered[method_id]),
+            "logical_output_kinds": [], "native_adapter": None,
+            "original_source_types": [], "units": [], "scope_modes": [], "purposes": [],
+            "reference_roles": [], "input_actor_kinds": [],
+            "typed_asset_adapter_supported": False, "native_adapter_supported": False}
+
+
+# Separate opt-in code steps; neither the saved-method22 nor expert stat8 changes.
+TABLE_PILOT_METHODS = {
+    "table_projection": ("columns", "row_ids"),
+    "table_aggregate": ("value_column", "status_column", "operation", "group_by", "unit"),
+    "table_join": ("key",),
+    "table_frequency": ("value_column", "status_column"),
+    "table_crosstab": ("row_column", "column_column", "status_column"),
+}
+
+
+def table_pilot_slot(method_id):
+    from .analysis_core import TABLE_PILOT_MAX_BYTES
+    descriptor = connection_method_descriptor(method_id)
+    if method_id not in TABLE_PILOT_METHODS:
+        from .analysis_core import AnalysisContractError
+        raise AnalysisContractError("未登録の表stepです。", code="table_method_unsupported")
+    count = 2 if method_id == "table_join" else 1
+    return {"slot_id": "table", "required": True, "min_items": count, "max_items": count,
+            "roles": ["data_input"], "accept_kinds": ["observation_table"],
+            "accept_schemas": [descriptor["native_input_schema"]], "accept_units": ["utterance"],
+            "scope_modes": ["dataset"], "actors": ["code", "system"],
+            "adapter": descriptor["native_adapter"], "purposes": descriptor["purposes"],
+            "max_bytes": TABLE_PILOT_MAX_BYTES}
+
 # Navigation categories describe the implemented methods, not external engines.
 METHOD_GROUPS = [
     ("text", "KH Coder系・計量テキスト分析",

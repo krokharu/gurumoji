@@ -1,0 +1,49 @@
+filters:
+  and:
+    - 'file.inFolder("50-Analysis-Methods")'
+    - 'file.ext == "md"'
+    - or:
+        - 'note_type == "expert-definition"'
+        - 'note_type == "expert-skill-hook-binding"'
+        - 'note_type == "executable-skill"'
+        - 'note_type == "hook-specification"'
+        - 'note_type == "knowledge-evaluation"'
+properties:
+  file.name:
+    displayName: ノート
+  expert_id:
+    displayName: 専門家ID
+  expert_ids:
+    displayName: 対応専門家
+  definition_version:
+    displayName: 定義版
+  stage:
+    displayName: 作業段階
+  review_state:
+    displayName: 文書レビュー
+  runtime_state:
+    displayName: 実行接続
+  note_id:
+    displayName: ノートID
+views:
+  - type: table
+    name: 既存の専門家定義
+    filters: 'note_type == "expert-definition"'
+    order:
+      - file.name
+      - expert_id
+      - definition_version
+      - note_id
+  - type: table
+    name: 対応と評価の確認待ち
+    filters:
+      and:
+        - 'note_type != "expert-definition"'
+        - 'review_state != "reviewed" || runtime_state != "connected"'
+    order:
+      - file.name
+      - expert_ids
+      - stage
+      - review_state
+      - runtime_state
+      - note_id

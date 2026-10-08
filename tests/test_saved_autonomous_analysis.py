@@ -12,6 +12,18 @@ spec.loader.exec_module(smoke)
 
 
 class AutonomousSmokeAcceptanceTests(unittest.TestCase):
+    def test_expert_hook_report_uses_expert_identity_instead_of_role_name(self):
+        state = {"config": {"expert_hooks": True, "expert_hook_version": "fixture"},
+                 "tasks": [{"task_id": "expert1", "role": "interpretation", "status": "succeeded",
+                            "expert_agent": {"expert_id": "exp-thematic-analysis"}, "model_calls": 2,
+                            "expert_hook_reads": [{"request": {"name": "read_evidence"}, "packet_hash": "hash"}]},
+                           {"task_id": "core1", "role": "core", "status": "succeeded"}]}
+        summary = smoke.expert_hook_summary(state)
+        self.assertEqual(len(summary["tasks"]), 1)
+        self.assertEqual(summary["tasks"][0]["model_calls"], 2)
+        self.assertEqual(summary["tasks"][0]["expert_id"], "exp-thematic-analysis")
+        self.assertEqual(summary["tasks"][0]["reads"][0]["packet_hash"], "hash")
+
     def test_runtime_initialization_is_fenced_to_the_isolated_database(self):
         copied = Path("synthetic-copy/library.sqlite3")
         initialize = Mock()

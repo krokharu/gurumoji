@@ -24,14 +24,17 @@ from .analysis_core import (AnalysisContractError, canonical, fingerprint,
                             validate_publication_targets, EFFECTIVE_PUBLICATION_WRITERS)
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
     read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
+from .services.analysis_orchestration_methods import STATISTICAL_TOOLS
+from .analysis_method_registry import TABLE_PILOT_METHODS
 
 SCHEMA_VERSION = 1
 ROLES = {"core": "Core", "handler": "Handler", "interpretation": "会話解釈",
-         "statistics": "数量・統計", "verification": "独立検証", "critic": "批判者"}
+         "statistics": "数量・統計", "verification": "独立検証", "critic": "批判者",
+         "obsidian_manager": "Obsidian管理"}
 AI_ROLES = frozenset({"core", "interpretation", "verification", "critic"})
 INITIAL_SECTIONS = frozenset({"segments", "annotations", "automatic", "manual", "research", "config", "cautions", "classification"})
 LABEL_FIELDS = frozenset({"code", "codes", "theme", "sentiment", "dialogue_act", "importance", "review", "category"})
-METHODS = frozenset({"participation", "conversation_dynamics", "label_frequency"})
+METHODS = frozenset({"participation", "conversation_dynamics", "label_frequency", *STATISTICAL_TOOLS})
 TERMINAL = frozenset({"completed", "stopped", "cancelled", "failed"})
 IMPORTANCE = {"low": 1, "medium": 2, "high": 3}
 
@@ -158,7 +161,29 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "max_cost": payload.get("max_cost"),
               "context_index_limit": payload.get("context_index_limit", 0),
               "context_evidence_limit": payload.get("context_evidence_limit", 120),
-              "context_text_limit": payload.get("context_text_limit", 60000)}
+              "context_text_limit": payload.get("context_text_limit", 60000),
+              "obsidian_management": payload.get("obsidian_management", True),
+              "expert_hooks": payload.get("expert_hooks", True)}
+    for key in ("expert_ids", "expert_inputs"):
+        if key in payload:
+            config[key] = copy.deepcopy(payload[key])
+    if "expert_ids" in config and (not isinstance(config["expert_ids"], list)
+            or not 1 <= len(config["expert_ids"]) <= 9
+            or any(not isinstance(eid, str) or not eid.startswith("exp-") or len(eid) > 100 for eid in config["expert_ids"])
+            or len(set(config["expert_ids"])) != len(config["expert_ids"])):
+        raise _error("専門家IDは重複なく1〜6件指定してください。", "expert_selection_invalid")
+    if "expert_inputs" in config and (not isinstance(config["expert_inputs"], dict)
+            or len(_json(config["expert_inputs"]).encode("utf-8")) > 16000):
+        raise _error("専門家の入力形式・サイズが正しくありません。", "expert_format_mismatch")
+    if type(config["obsidian_management"]) is not bool:
+        raise _error("Obsidian管理はtrueまたはfalseです。", field="obsidian_management")
+    if type(config["expert_hooks"]) is not bool:
+        raise _error("専門家のデータhookはtrueまたはfalseです。", field="expert_hooks")
+    if config["expert_hooks"]:
+        from .services.expert_data_hooks import VERSION
+        config["expert_hook_version"] = payload.get("expert_hook_version", VERSION)
+        if config["expert_hook_version"] != VERSION:
+            raise _error("専門家のデータhookの版が異なります。", "expert_hook_version_conflict")
     for key, low, high in (("max_calls", 1, 10000), ("max_tasks", 1, 20000), ("concurrency", 1, 4),
                            ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000),
                            ("context_evidence_limit", 1, 120), ("context_text_limit", 1, 60000)):
@@ -212,6 +237,61 @@ class ExecutionStopped(Exception):
     """A cooperative cancellation/deadline signal, never an agent result."""
 
 
+class OrchestrationBudget:
+    """Private lifecycle state around the existing transport guard (not a serializer).
+
+    The caller owns proof, reservation limits and any shared batch quota. A run
+    never recreates this controller from persisted clock numbers on restart.
+    """
+    def __init__(self, request_budget, *, run_id, run_started_at, clock):
+        from .services.ai.request_budget import RUN_SECONDS, TASK_SECONDS, payload_hash
+        ledger = request_budget.ledger()
+        if (request_budget._clock is not clock or ledger["run_started_at"] != run_started_at
+                or ledger["run_id"] != payload_hash(run_id)):
+            raise _error("budgetの時計と起点が一致しません。", "budget_origin_mismatch")
+        self.request_budget, self.clock = request_budget, clock
+        self.origin, self.deadline = run_started_at, run_started_at + RUN_SECONDS
+        self.task_seconds, self.tasks = TASK_SECONDS, {}
+        self.clock_id = uuid.uuid4().hex
+        self.last_clock = run_started_at
+        self.lock = threading.RLock()
+        self.cleanup_hold = None
+        self.clock_hold = None
+
+    def register(self, task_id, origin):
+        with self.lock:
+            self.request_budget.register_task(task_id, origin)
+            self.tasks[task_id] = origin
+
+    def reason(self, task_id=None):
+        with self.lock:
+            if self.clock_hold:
+                return self.clock_hold
+            try:
+                now = self.clock()
+            except Exception:
+                self.clock_hold = "budget_clock_mismatch"
+                return self.clock_hold
+            if type(now) not in (int, float) or not math.isfinite(now) or now < self.last_clock:
+                self.clock_hold = "budget_clock_mismatch"
+                return self.clock_hold
+            self.last_clock = now
+            if now >= self.deadline:
+                return "time_limit"
+            if task_id is not None:
+                if task_id not in self.tasks:
+                    return "budget_origin_unavailable"
+                if now >= min(self.deadline, self.tasks[task_id] + self.task_seconds):
+                    return "call_timeout"
+            if self.request_budget.ledger()["batch"]["hold_reason"]:
+                return "budget_hold"
+            return None
+
+    def snapshot(self):
+        return {"guarded": True, "run_started_at": self.origin, "clock_id": self.clock_id,
+                "cleanup_hold": self.cleanup_hold, "clock_hold": self.clock_hold, "ledger": self.request_budget.ledger()}
+
+
 class AnalysisOrchestrationService:
     def __init__(self, *, connect: Callable[[], sqlite3.Connection] | None = None,
                  database_connection: Callable[[], sqlite3.Connection] | None = None,
@@ -219,7 +299,10 @@ class AnalysisOrchestrationService:
                  agent_runner: Callable[..., Any], method_runner: Callable[..., Any],
                  source_fingerprint: Callable[[Any], str] | None = None,
                  write_lock: Any = None, schedule: bool = True, adapter_version: str = "core-handler-prompts-1",
-                 initial_builder: Any = None, on_complete: Callable[[str, str], Any] | None = None):
+                 initial_builder: Any = None, on_complete: Callable[[str, str], Any] | None = None,
+                 memory_manager: Any = None, expert_provider: Callable[[dict], dict] | None = None,
+                 budget_factory: Callable[..., Any] | None = None, budget_clock: Callable[[], float] = time.monotonic,
+                 table_store: Any = None):
         self.connect = connect or database_connection
         if self.connect is None:
             raise TypeError("connect is required")
@@ -228,6 +311,11 @@ class AnalysisOrchestrationService:
         self.source_fingerprint, self.schedule = source_fingerprint, schedule
         self.adapter_version = adapter_version
         self.initial_builder, self.on_complete = initial_builder, on_complete
+        self.memory_manager = memory_manager
+        self.expert_provider = expert_provider
+        self.table_store = table_store
+        self._budget_factory, self._budget_clock = budget_factory, budget_clock
+        self._run_budgets: dict[str, OrchestrationBudget] = {}
         if initial_builder is not None and source_fingerprint is None:
             raise TypeError("staged initial analysis requires source_fingerprint")
         self._driving: set[str] = set()
@@ -254,6 +342,10 @@ class AnalysisOrchestrationService:
                     connection.close()
 
     def _check_version(self, run):
+        if run["config"].get("expert_hooks", False):
+            from .services.expert_data_hooks import VERSION
+            if run["config"].get("expert_hook_version") != VERSION:
+                raise _error("専門家のデータhookの版が変わりました。新しいrunを開始してください。", "expert_hook_version_conflict")
         if run.get("schema_version") != SCHEMA_VERSION:
             raise _error("保存されたrunの形式版が異なります。元の版で復旧してください。", "schema_version_conflict")
         if run["config"].get("adapter_version") != self.adapter_version:
@@ -266,8 +358,30 @@ class AnalysisOrchestrationService:
         return json.loads(row["state_json"])
 
     def _write_run(self, db, run: dict) -> None:
+        db.execute("UPDATE orchestration_runs SET state_json=? WHERE run_id=?", (self._run_json(run), run["run_id"]))
+
+    def _run_json(self, run: dict) -> str:
+        """Prepare safety metadata and serialization before a promotion fence."""
         run["updated_at"] = _now()
-        db.execute("UPDATE orchestration_runs SET state_json=? WHERE run_id=?", (_json(run), run["run_id"]))
+        guard = self._run_budgets.get(run["run_id"])
+        if guard is not None:
+            run["request_budget"] = guard.snapshot()
+        return _json(run)
+
+    def _budget_reason(self, run, task_id=None):
+        saved = run.get("request_budget")
+        guard = self._run_budgets.get(run["run_id"])
+        if saved is None and guard is None:
+            return None
+        if guard is None or guard.clock is not self._budget_clock or guard.request_budget._clock is not guard.clock or (saved is not None and
+                (saved.get("clock_id") != guard.clock_id or saved.get("run_started_at") != guard.origin)):
+            return "budget_origin_unavailable"
+        return guard.reason(task_id)
+
+    def _require_budget(self, run, task_id=None):
+        reason = self._budget_reason(run, task_id)
+        if reason:
+            raise _error("guarded実行の期限・時計・usage証明を確認できません。", reason)
 
     def _event(self, db, run_id: str, event_type: str, message: str, *, source="handler", target="", task_id="", **extra):
         event = {"type": event_type, "from": source, "to": target, "task_id": task_id,
@@ -289,7 +403,8 @@ class AnalysisOrchestrationService:
             raise _error("初期分析の保存hashが一致しません。AI実行を停止します。", "initial_hash_mismatch")
         return value
 
-    def start(self, item_id: str, payload: dict, app_url: str = "") -> dict:
+    def start(self, item_id: str, payload: dict, app_url: str = "", *, budget_factory=None) -> dict:
+        origin = self._budget_clock()
         config = validate_orchestration_payload(payload)
         request_id = payload.get("request_id") or _id("request")
         if not isinstance(request_id, str) or len(request_id) > 200:
@@ -305,8 +420,14 @@ class AnalysisOrchestrationService:
             if existing:
                 matches = existing["request_hash"] == request_hash
                 saved_config = json.loads(existing["state_json"])["config"]
+                comparison_config = copy.deepcopy(config)
+                if "obsidian_management" not in saved_config and "obsidian_management" not in payload:
+                    comparison_config.pop("obsidian_management", None)
+                    matches = existing["request_hash"] == fingerprint({"item_id": item_id, "config": comparison_config,
+                        "source_revision": payload.get("source_revision"), "analysis_revision": payload.get("analysis_revision"),
+                        "input_hash": payload.get("input_hash")})
                 if not matches and "publication_targets" not in saved_config and not config["publication_targets"]:
-                    legacy_config = {key: value for key, value in config.items()
+                    legacy_config = {key: value for key, value in comparison_config.items()
                                      if key not in {"publication_targets", "effective_publication_writers"}}
                     matches = existing["request_hash"] == fingerprint({"item_id": item_id, "config": legacy_config,
                         "source_revision": payload.get("source_revision"), "analysis_revision": payload.get("analysis_revision"),
@@ -314,6 +435,12 @@ class AnalysisOrchestrationService:
                 if existing["item_id"] != item_id or not matches:
                     raise _error("同じrequest_idに異なる設定は使えません。", "request_conflict")
                 return self._public(db, json.loads(existing["state_json"]))
+        run_id = _id("run")
+        factory = budget_factory if budget_factory is not None else self._budget_factory
+        if factory is not None:
+            budget = factory(run_id=run_id, run_started_at=origin, clock=self._budget_clock)
+            self._run_budgets[run_id] = OrchestrationBudget(budget, run_id=run_id, run_started_at=origin, clock=self._budget_clock)
+            self._require_budget({"run_id": run_id})
         item = self.find_item(item_id)
         if item is None:
             raise LookupError("会話が見つかりません。")
@@ -323,11 +450,17 @@ class AnalysisOrchestrationService:
                 raise _error("確認した入力版が更新されています。", "revision_conflict", supplied)
         # A source fingerprint permits cache lookup before the expensive fixed analysis.
         before = self.source_fingerprint(item) if self.source_fingerprint else None
+        self._require_budget({"run_id": run_id})
+        if self.expert_provider is None and any(key in config for key in ("expert_ids", "expert_inputs")):
+            raise _error("専門家の知識取得が接続されていません。", "expert_provider_unavailable")
+        expert_bundle = self.expert_provider(config) if self.expert_provider is not None else None
+        self._require_budget({"run_id": run_id})
         if self.initial_builder is not None:
-            return self._start_staged(item_id, payload, config, request_id, request_hash, app_url, item, before)
+            return self._start_staged(item_id, payload, config, request_id, request_hash, app_url, item, before, expert_bundle, run_id)
         snapshot = None
         if before is None:
             snapshot = self.snapshot_builder(item)
+            self._require_budget({"run_id": run_id})
             before = snapshot.get("input_hash")
         if payload.get("input_hash") is not None and payload["input_hash"] != before:
             raise _error("確認した入力hashが更新されています。", "revision_conflict", "input_hash")
@@ -358,14 +491,15 @@ class AnalysisOrchestrationService:
                 snapshot["evidence"] = self._evidence(snapshot)
                 if not any(not e["excluded"] and e["text"].strip() for e in snapshot["evidence"]):
                     raise _error("分析できる発話がありません。", "no_valid_input")
-                with self._db() as db:
-                    db.execute("UPDATE orchestration_initials SET status='ready',snapshot_json=?,snapshot_hash=? WHERE initial_id=? AND status='building'",
-                               (_json(snapshot), fingerprint(snapshot), initial_id))
+                if run_id not in self._run_budgets:
+                    # Preserve the ordinary unguarded capture/cache behavior.
+                    with self._db() as db:
+                        db.execute("UPDATE orchestration_initials SET status='ready',snapshot_json=?,snapshot_hash=? WHERE initial_id=? AND status='building'",
+                                   (_json(snapshot), fingerprint(snapshot), initial_id))
             except Exception as exc:
                 with self._db() as db:
                     db.execute("UPDATE orchestration_initials SET status='failed',error=? WHERE initial_id=?", (type(exc).__name__, initial_id))
                 raise
-        run_id = _id("run")
         run = {"schema_version": SCHEMA_VERSION, "label_audit_version": 1, "run_id": run_id, "item_id": item_id, "request_id": request_id,
                "initial_id": initial_id, "input_hash": snapshot["input_hash"],
                "source_revision": snapshot.get("source_revision", 0), "analysis_revision": snapshot.get("analysis_revision", 0),
@@ -377,17 +511,39 @@ class AnalysisOrchestrationService:
                        snapshot["analysis"].get("config", {}).get("codebook_version", 1))), "view_version": 0, "current_view": {}, "pending_stop": None,
                "reviewed_stop_versions": [], "last_decision_id": None, "error": "", "stale": False,
                "review_status": "not_requested", "publication_status": "not_requested"}
-        labels = self._source_labels(snapshot)
-        with self._db() as db:
-            # Recheck a concurrent identical start after initial capture.
-            existing = db.execute("SELECT * FROM orchestration_runs WHERE request_id=?", (request_id,)).fetchone()
-            if existing:
-                if existing["request_hash"] != request_hash:
-                    raise _error("request_idが競合しました。", "request_conflict")
-                return self._public(db, json.loads(existing["state_json"]))
-            db.execute("INSERT INTO orchestration_runs VALUES (?,?,?,?,?,?)", (run_id, item_id, request_id, request_hash, initial_id, _json(run)))
-            db.execute("INSERT INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, _json(labels)))
-            self._event(db, run_id, "initial_saved", "初期分析の全結果を不変の版として固定しました。", initial_id=initial_id)
+        if expert_bundle is not None:
+            run["expert_agents"] = expert_bundle
+        guarded_build = build and run_id in self._run_budgets
+        try:
+            # No guarded ready state is visible until every preparation has
+            # completed and this transaction, including its final fence, commits.
+            labels_json = _json(self._source_labels(snapshot))
+            snapshot_json = _json(snapshot) if guarded_build else None
+            snapshot_hash = fingerprint(snapshot) if guarded_build else None
+            run_json = self._run_json(run)
+            with self._db() as db:
+                # Recheck a concurrent identical start after initial capture.
+                existing = db.execute("SELECT * FROM orchestration_runs WHERE request_id=?", (request_id,)).fetchone()
+                if existing:
+                    if existing["request_hash"] != request_hash:
+                        raise _error("request_idが競合しました。", "request_conflict")
+                    return self._public(db, json.loads(existing["state_json"]))
+                self._require_budget(run)
+                if guarded_build:
+                    db.execute("UPDATE orchestration_initials SET status='ready',snapshot_json=?,snapshot_hash=? WHERE initial_id=? AND status='building'",
+                               (snapshot_json, snapshot_hash, initial_id))
+                db.execute("INSERT INTO orchestration_runs VALUES (?,?,?,?,?,?)", (run_id, item_id, request_id, request_hash, initial_id, run_json))
+                db.execute("INSERT INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, labels_json))
+                self._event(db, run_id, "initial_saved", "初期分析の全結果を不変の版として固定しました。", initial_id=initial_id)
+                self._require_budget(run)
+        except Exception as exc:
+            if guarded_build:
+                with self._db() as db:
+                    # Never invalidate a cached initial owned by an earlier run.
+                    db.execute("UPDATE orchestration_initials SET status='failed',error=? WHERE initial_id=? AND status='building'",
+                               (getattr(exc, "code", type(exc).__name__), initial_id))
+            raise
+        self._notify_management(run_id)
         if self.schedule:
             self._schedule(run_id)
         return self.status(item_id, run_id)
@@ -401,12 +557,12 @@ class AnalysisOrchestrationService:
             if int(row.get(column, 0) or 0) != run[key]:
                 raise _error("初期分析の入力版が更新されています。", "revision_conflict")
 
-    def _start_staged(self, item_id, payload, config, request_id, request_hash, app_url, item, before):
+    def _start_staged(self, item_id, payload, config, request_id, request_hash, app_url, item, before, expert_bundle=None, run_id=None):
         if payload.get("input_hash") is not None and payload["input_hash"] != before:
             raise _error("確認した入力hashが更新されています。", "revision_conflict", "input_hash")
         identity = fingerprint({"item_id": item_id, "dataset_version": before,
                                 "template_version": config["template_version"], "config": config["template_config"]})
-        run_id = _id("run")
+        run_id = run_id or _id("run")
         snapshot = None
         with self._db() as db:
             existing = db.execute("SELECT * FROM orchestration_runs WHERE request_id=?", (request_id,)).fetchone()
@@ -419,6 +575,7 @@ class AnalysisOrchestrationService:
                 initial_id = _id("initial")
                 # Freeze row JSON before expensive work and before returning the run.
                 frozen = self.initial_builder.freeze(item)
+                self._require_budget({"run_id": run_id})
                 db.execute("INSERT INTO orchestration_initials(initial_id,identity,item_id,status,created_at) VALUES (?,?,?,?,?)",
                            (initial_id, identity, item_id, "building", _now()))
                 create_initial_checkpoints(db, initial_id, self.initial_builder, frozen, before, run_id)
@@ -447,16 +604,23 @@ class AnalysisOrchestrationService:
                    "codebook_version": 1, "view_version": 0, "current_view": {}, "pending_stop": None,
                    "reviewed_stop_versions": [], "last_decision_id": None, "error": "", "stale": False,
                    "review_status": "not_requested", "publication_status": "not_requested"}
+            if expert_bundle is not None:
+                run["expert_agents"] = expert_bundle
             self._validate_initial_source(run)
             if snapshot is not None:
                 run["source_revision"] = snapshot.get("source_revision", run["source_revision"])
                 run["analysis_revision"] = snapshot.get("analysis_revision", run["analysis_revision"])
                 run["codebook_version"] = int(snapshot["analysis"].get("manual", {}).get("codebook_version", snapshot["analysis"].get("config", {}).get("codebook_version", 1)))
-            db.execute("INSERT INTO orchestration_runs VALUES (?,?,?,?,?,?)", (run_id, item_id, request_id, request_hash, initial_id, _json(run)))
+            labels_json = _json(self._source_labels(snapshot)) if snapshot is not None else None
+            run_json = self._run_json(run)
+            self._require_budget(run)
+            db.execute("INSERT INTO orchestration_runs VALUES (?,?,?,?,?,?)", (run_id, item_id, request_id, request_hash, initial_id, run_json))
             if snapshot is not None:
-                db.execute("INSERT INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, _json(self._source_labels(snapshot))))
+                db.execute("INSERT INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, labels_json))
             self._event(db, run_id, "initial_saved" if snapshot is not None else "initial_queued",
-                        "初期分析の保存済み全結果を再利用します。" if snapshot is not None else "初期分析の入力を固定しました。段階ごとに保存して実行します。", initial_id=initial_id)
+                         "初期分析の保存済み全結果を再利用します。" if snapshot is not None else "初期分析の入力を固定しました。段階ごとに保存して実行します。", initial_id=initial_id)
+            self._require_budget(run)
+        self._notify_management(run_id)
         if self.schedule:
             self._schedule(run_id)
         return self.status(item_id, run_id)
@@ -499,12 +663,17 @@ class AnalysisOrchestrationService:
                         snapshot["evidence"] = self._evidence(snapshot)
                         if not any(not e["excluded"] and e["text"].strip() for e in snapshot["evidence"]):
                             raise _error("分析できる発話がありません。", "no_valid_input")
-                        db.execute("UPDATE orchestration_initials SET status='ready',snapshot_json=?,snapshot_hash=?,error='' WHERE initial_id=?",
-                                   (_json(snapshot), fingerprint(snapshot), run["initial_id"]))
-                        db.execute("INSERT OR IGNORE INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, _json(self._source_labels(snapshot))))
+                        encoded_snapshot, snapshot_hash = _json(snapshot), fingerprint(snapshot)
+                        labels_json = _json(self._source_labels(snapshot))
                         run.update(phase="core", error="", codebook_version=int(snapshot["analysis"].get("manual", {}).get("codebook_version", snapshot["analysis"].get("config", {}).get("codebook_version", 1))))
-                        self._write_run(db, run)
+                        run_json = self._run_json(run)
+                        self._require_budget(run)
+                        db.execute("UPDATE orchestration_initials SET status='ready',snapshot_json=?,snapshot_hash=?,error='' WHERE initial_id=?",
+                                   (encoded_snapshot, snapshot_hash, run["initial_id"]))
+                        db.execute("INSERT OR IGNORE INTO orchestration_label_versions VALUES (?,?,?)", (run_id, 0, labels_json))
+                        db.execute("UPDATE orchestration_runs SET state_json=? WHERE run_id=?", (run_json, run_id))
                         self._event(db, run_id, "initial_saved", "初期分析の全段階を不変の版として固定しました。", initial_id=run["initial_id"])
+                        self._require_budget(run)
                         return True
                     if pending["status"] == "running":
                         # Another live driver owns this stage. Startup recovery
@@ -535,6 +704,7 @@ class AnalysisOrchestrationService:
                     self._event(db, run_id, "initial_stage_completed", state["label"], stage_id=stage_id, output_hash=state["output_hash"])
                     # Cancellation permits retaining this deterministic output;
                     # the next loop fences adoption and all later stages/AI.
+                self._notify_management(run_id)
                 stage_id, attempt_id = None, None
         except Exception as exc:
             with self._db() as db:
@@ -549,10 +719,62 @@ class AnalysisOrchestrationService:
                             write_stage(db, run["initial_id"], state)
                 db.execute("UPDATE orchestration_initials SET status='failed',error=? WHERE initial_id=? AND status!='ready'", (error, run["initial_id"]))
                 if run["status"] not in TERMINAL:
-                    run.update(status="recovery_required", error=error, stale=run["stale"] or error == "revision_conflict")
-                    self._write_run(db, run)
-                    self._event(db, run_id, "initial_recovery_required", "初期分析は未完了です。完了済み段階を保持しています。", error=error)
+                    limit = self._budget_reason(run)
+                    if limit:
+                        run["error"] = error
+                        self._stop(db, run, limit)
+                    else:
+                        run.update(status="recovery_required", error=error, stale=run["stale"] or error == "revision_conflict")
+                        self._write_run(db, run)
+                        self._event(db, run_id, "initial_recovery_required", "初期分析は未完了です。完了済み段階を保持しています。", error=error)
             return False
+
+    def _notify_management(self, run_id):
+        """Forward committed Core/Handler data without a DB transaction during writes.
+
+        Keep the library -> Vault lock order and serialize receipts, so a delayed
+        worker cannot publish an older view over a newer committed snapshot.
+        """
+        if self.memory_manager is None:
+            return
+        from .services.obsidian_management import management_packet
+        with self.lock:
+            with self._db() as db:
+                run = self._read_run(db, run_id)
+                if not run["config"].get("obsidian_management", False):
+                    return
+                state = self._public(db, run)
+                decisions = [json.loads(row[0]) for row in db.execute(
+                    "SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run_id,))]
+            try:
+                item = self.find_item(run["item_id"])
+                if item is None:
+                    raise LookupError("source_deleted")
+                state["stale"] = bool(state["stale"] or self.source_fingerprint and self.source_fingerprint(item) != run["input_hash"])
+                receipt = self.memory_manager.receive(management_packet(state, decisions))
+            except Exception as exc:
+                # Exceptions can contain paths/secrets. Store only a reason code.
+                receipt = {"status": "failed", "error_code": type(exc).__name__}
+            with self._db() as db:
+                latest = self._read_run(db, run_id)
+                latest["obsidian_management"] = receipt
+                self._write_run(db, latest)
+
+    def sync_memory(self, item_id, run_id):
+        with self._db() as db:
+            run = self._read_run(db, run_id, item_id)
+            if not run["config"].get("obsidian_management", False) or self.memory_manager is None:
+                raise _error("この実行ではObsidian管理が有効ではありません。", "memory_not_enabled")
+        self._notify_management(run_id)
+        return self.status(item_id, run_id)
+
+    def memory_note(self, item_id, run_id):
+        with self._db() as db:
+            run = self._read_run(db, run_id, item_id)
+            if not run["config"].get("obsidian_management", False) or self.memory_manager is None:
+                raise LookupError("管理ノートがありません。")
+            state = self._public(db, run)
+        return self.memory_manager.read_note(state, state["obsidian_management"])
 
     def _notify_completed(self, run_id):
         if self.on_complete is None:
@@ -561,11 +783,18 @@ class AnalysisOrchestrationService:
             run = self._read_run(db, run_id)
             if run["status"] != "completed" or run.get("completion_callback_status"):
                 return
+            limit = self._budget_reason(run)
+            if limit:
+                run.update(completion_callback_status="failed", publication_error=limit)
+                self._write_run(db, run)
+                return
             run["completion_callback_status"] = "running"
             self._write_run(db, run)
             item_id = run["item_id"]
         try:
             self.on_complete(item_id, run_id)
+            with self._db() as db:
+                self._require_budget(self._read_run(db, run_id))
         except Exception as exc:
             with self._db() as db:
                 run = self._read_run(db, run_id)
@@ -585,10 +814,21 @@ class AnalysisOrchestrationService:
             utterance_id = str(segment.get("id", segment.get("segment_id", index)))
             text = str(segment.get("text", ""))
             evidence_id = "ev_" + fingerprint({"dataset": snapshot["input_hash"], "utterance": utterance_id, "text": text})[7:31]
-            evidence.append({"id": evidence_id, "evidence_id": evidence_id, "utterance_id": utterance_id,
-                             "dataset_version": snapshot["input_hash"], "source_hash": fingerprint(text),
-                             "text": text, "speaker": segment.get("speaker"), "start": segment.get("start"),
-                             "end": segment.get("end"), "excluded": bool(segment.get("excluded"))})
+            row = {"id": evidence_id, "evidence_id": evidence_id, "utterance_id": utterance_id,
+                   "dataset_version": snapshot["input_hash"], "source_hash": fingerprint(text),
+                   "text": text, "speaker": segment.get("speaker"), "start": segment.get("start"),
+                   "end": segment.get("end"), "excluded": bool(segment.get("excluded"))}
+            if "valid_time" in segment:
+                row["valid_time"] = segment["valid_time"]
+                if "duration" in segment:
+                    row["duration"] = segment["duration"]
+                # Timeline zeroes can be placeholders; only the explicit flag
+                # marks unknown time. Observed zero and legacy rows stay intact.
+                if segment["valid_time"] is False:
+                    row["start"] = row["end"] = None
+                    if "duration" in row:
+                        row["duration"] = None
+            evidence.append(row)
         if len({row["utterance_id"] for row in evidence}) != len(evidence):
             raise _error("発話IDが重複しています。", "invalid_snapshot")
         return evidence
@@ -616,19 +856,40 @@ class AnalysisOrchestrationService:
                 "input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"),
                 "total_tokens": total("total_tokens"), "cost": total("cost"),
                 "currency": "USD" if any(r.get("currency") == "USD" for r in records) else None,
-                "measured_calls": len({r.get("task_id") for r in records}),
+                "measured_calls": len(records),
                 "measurement_status": "reported" if records else "unavailable"}
 
     def _public(self, db, run):
         result = copy.deepcopy(run)
+        if "expert_agents" in run:
+            from .services.expert_agents import catalog_packet
+            result["expert_agents"] = catalog_packet(run["expert_agents"])
         result["config"].setdefault("publication_targets", [])
         result["config"]["effective_publication_writers"] = list(EFFECTIVE_PUBLICATION_WRITERS) if result["config"]["publication_targets"] else []
         result["initial"] = initial_progress(db, run["initial_id"])
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
+        for task in tasks:
+            if task["method_id"] in TABLE_PILOT_METHODS and task.get("table_pilot_prepared"):
+                task["current_permission"] = self._table_current_permission(task)
+                if run["cancel_requested"] or run["status"] == "cancelled":
+                    task["current_permission"] = {"decision": "blocked", "reason": "table_run_cancelled",
+                                                  "execution_enabled": False, "adoption_performed": False}
+                if task["status"] == "succeeded" and task["current_permission"]["decision"] != "eligible":
+                    task["status"] = "blocked"
         result["tasks"] = tasks
         result["events"] = [{"seq": row[0], **json.loads(row[1])} for row in db.execute(
             "SELECT seq,payload_json FROM orchestration_events WHERE run_id=? ORDER BY seq", (run["run_id"],))]
+        enabled = run["config"].get("obsidian_management", False)
+        memory = copy.deepcopy(run.get("obsidian_management") or {"status": "pending" if self.memory_manager else "unavailable"})
+        if not enabled:
+            memory = {"status": "disabled"}
+        elif self.memory_manager is not None:
+            try:
+                memory = self.memory_manager.inspect(result, memory)
+            except (OSError, ValueError, TypeError, KeyError):
+                memory = {**memory, "status": "conflict"}
+        result["obsidian_management"] = {**memory, "enabled": enabled}
         result["usage"] = self._usage(db, run)
         result["roles"] = []
         for role, label in ROLES.items():
@@ -641,6 +902,9 @@ class AnalysisOrchestrationService:
                 "assigned": len(assigned), "completed": sum(t["status"] == "succeeded" for t in assigned),
                 "failed": sum(t["status"] in {"failed", "quarantined", "uncertain"} for t in assigned),
                 "current_task": running[0]["title"] if running else ""})
+            if role == "obsidian_manager":
+                result["roles"][-1].update(status=memory["status"], assigned=None, completed=None, failed=None,
+                    current_task="Core判断・Handler台帳とデータ参照を管理")
         result["results"] = [json.loads(r[0]) for r in db.execute("SELECT state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
         result["issues"] = [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_issues WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
         result["critique_responses"] = [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_responses WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
@@ -696,11 +960,27 @@ class AnalysisOrchestrationService:
             row = db.execute("SELECT * FROM orchestration_results WHERE result_id=? AND run_id=?", (result_id, run_id)).fetchone()
             if row is None:
                 raise LookupError("結果が見つかりません。")
-            return {**json.loads(row["state_json"]), "raw": json.loads(row["raw_json"])}
+            result = {**json.loads(row["state_json"]), "raw": json.loads(row["raw_json"])}
+            task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (row["task_id"],)).fetchone()[0])
+            if task["method_id"] in TABLE_PILOT_METHODS:
+                result["current_permission"] = self._table_current_permission(task)
+                if run["cancel_requested"] or run["status"] == "cancelled":
+                    result["current_permission"] = {"decision": "blocked", "reason": "table_run_cancelled",
+                                                    "execution_enabled": False, "adoption_performed": False}
+            return result
         initial = db.execute("SELECT * FROM orchestration_initials WHERE initial_id=?", (run["initial_id"],)).fetchone()
-        return {"run": self._public(db, run), "initial": {"initial_id": initial["initial_id"],
+        public = self._public(db, run)
+        table_permissions = {t["task_id"]: t["current_permission"] for t in public["tasks"] if "current_permission" in t}
+        if "obsidian_management" in run:
+            # Seal committed receipts, not a filesystem observation made at export
+            # time. Live integrity/missing states remain on the status API.
+            public["obsidian_management"] = copy.deepcopy(run["obsidian_management"])
+        return {"run": public, **({"expert_knowledge_snapshot": copy.deepcopy(run["expert_agents"])} if "expert_agents" in run else {}),
+            "initial": {"initial_id": initial["initial_id"],
             "hash": initial["snapshot_hash"], "snapshot": json.loads(initial["snapshot_json"]) if initial["snapshot_json"] else None},
-            "raw_results": [{**json.loads(r[0]), "raw": json.loads(r[1])} for r in db.execute("SELECT state_json,raw_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run_id,))],
+            "raw_results": [{**json.loads(r[0]), "raw": json.loads(r[1]),
+                             **({"current_permission": table_permissions[json.loads(r[0])["task_id"]]}
+                                if json.loads(r[0])["task_id"] in table_permissions else {})} for r in db.execute("SELECT state_json,raw_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run_id,))],
             "decisions": [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run_id,))],
             "label_audit": [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_label_audit WHERE run_id=? ORDER BY rowid", (run_id,))],
             "label_versions": [{"annotation_version": r[0], "labels": json.loads(r[1])} for r in db.execute(
@@ -711,6 +991,8 @@ class AnalysisOrchestrationService:
     def _stop(self, db, run, reason, *, completed=False):
         if run["status"] in TERMINAL:
             return
+        if completed and self._statistical_review_gate(db, run):
+            completed, reason = False, "human_review_required"
         run.update(status="completed" if completed else ("cancelled" if reason == "user_stop" else "stopped"),
                    phase="stopped", stop_reason=reason, ended_at=_now(), generation=run["generation"] + 1)
         for task in self._tasks(db, run["run_id"]):
@@ -733,10 +1015,13 @@ class AnalysisOrchestrationService:
             if run["status"] not in TERMINAL:
                 run["cancel_requested"] = True
                 self._stop(db, run, "user_stop")
-            return self._public(db, run)
+        self._notify_management(run_id)
+        return self.status(item_id, run_id)
 
     def resume(self, item_id: str, run_id: str, payload: dict | None = None) -> dict:
         payload = payload or {}
+        if "obsidian_management" in payload and type(payload["obsidian_management"]) is not bool:
+            raise _error("Obsidian管理はtrueまたはfalseです。", field="obsidian_management")
         if self.find_item(item_id) is None:
             raise LookupError("会話が見つかりません。")
         with self._worker_lock:
@@ -746,8 +1031,11 @@ class AnalysisOrchestrationService:
         with self._db() as db:
             run = self._read_run(db, run_id, item_id)
             self._check_version(run)
+            self._require_budget(run)
             if "publication_targets" in payload and validate_publication_targets(payload["publication_targets"]) != run["config"].get("publication_targets", []):
                 raise _error("再開時に公開先を変更できません。新しいrunを開始してください。", "publication_scope_conflict")
+            if "obsidian_management" in payload and payload["obsidian_management"] != run["config"].get("obsidian_management", False):
+                raise _error("再開時にObsidian管理の保存範囲を変更できません。", "memory_scope_conflict")
             if run["phase"] == "initial":
                 self._validate_initial_source(run)
                 if self.initial_builder is None:
@@ -775,6 +1063,7 @@ class AnalysisOrchestrationService:
                 return self._public(db, run)
             run.update(status="queued", error="", generation=run["generation"] + 1)
             self._write_run(db, run)
+        self._notify_management(run_id)
         if self.schedule:
             self._schedule(run_id)
         return self.status(item_id, run_id)
@@ -782,6 +1071,9 @@ class AnalysisOrchestrationService:
     def _limit(self, db, run, *, new_round=False):
         if run["cancel_requested"]:
             return "user_stop"
+        guarded_limit = self._budget_reason(run)
+        if guarded_limit:
+            return guarded_limit
         if run["deadline"] is not None and time.time() >= run["deadline"]:
             return "time_limit"
         if new_round and run["config"]["max_iterations"] is not None and run["iteration"] >= run["config"]["max_iterations"]:
@@ -812,7 +1104,27 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
         return True
 
+    def register_table_pilot(self, item_id, run_id, method_id, request):
+        """Explicit local code opt-in; normal Core/Pack readers remain unchanged."""
+        if self.table_store is None:
+            raise _error("表pilotのStore接続がありません。", "table_pilot_disabled")
+        with self._db() as db:
+            run = self._read_run(db, run_id, item_id)
+            if run["status"] in TERMINAL or run["cancel_requested"]:
+                raise _error("停止したrunへ発注できません。", "table_run_stopped")
+            self._check_version(run)
+            authority_path = db.execute("PRAGMA database_list").fetchone()[2]
+            from pathlib import Path
+            if Path(authority_path).resolve() != Path(self.table_store.database_file).resolve():
+                raise _error("HandlerとStoreのlibraryが異なります。", "table_store_mismatch")
+            task = self._register(db, run, {"role": "statistics", "method_id": method_id,
+                "question": "固定表の局所記述", "why_now": "明示的な表pilot要求",
+                "success_criteria": "固定入力・構造・保存・現在権限を確認", "table_pilot": request},
+                phase="table_pilot")
+            return copy.deepcopy(task)
+
     def _register(self, db, run, intent: dict, *, phase: str, automatic=False) -> dict | None:
+        task_origin = self._budget_clock()
         role = intent.get("role")
         if role not in AI_ROLES | {"statistics"}:
             raise _error("未対応の専門家です。", "invalid_intent")
@@ -821,9 +1133,26 @@ class AnalysisOrchestrationService:
             raise _error("既存コード計算は初期版の全範囲専用です。部分範囲・ラベル再計算は未対応です。", "method_scope_unavailable")
         if method == "label_frequency" and (role != "statistics" or intent.get("label_field", "codes") not in LABEL_FIELDS):
             raise _error("対応するラベル集計列を指定してください。", "label_field_unavailable")
-        if role == "statistics" and method not in METHODS:
+        if role == "statistics" and method not in METHODS and method not in TABLE_PILOT_METHODS:
             raise _error("未対応のコード計算です。", "method_unavailable")
         initial = self._initial(db, run["initial_id"])
+        pilot = method in TABLE_PILOT_METHODS
+        if pilot:
+            from .analysis_core import validate_table_pilot_request
+            if self.table_store is None or role != "statistics" or intent.get("expert_id") or phase != "table_pilot" or automatic:
+                raise _error("表pilotは明示的なcode接続専用です。", "table_pilot_disabled")
+            request = validate_table_pilot_request(method, intent.get("table_pilot"))
+            context = request["bindings"]["context"]
+            expected_plan = fingerprint({"run_id": run["run_id"], "input_hash": run["input_hash"]})
+            if (context["plan_id"] != run["run_id"] or context["plan_version"] != 1
+                    or context["plan_hash"] != expected_plan or context["generation"] != run["generation"]
+                    or context["cancelled"] or any(ref["consumer_task_id"] != context["consumer_task_id"]
+                                                   for ref in request["bindings"]["inputs"])):
+                raise _error("run・plan・consumer版が一致しません。", "table_plan_mismatch")
+            intent = {**intent, "table_pilot": request}
+        elif "table_pilot" in intent:
+            raise _error("未登録の表計算です。", "table_method_unsupported")
+        expert = self._intent_expert(run, intent)
         valid_evidence = {e["evidence_id"] for e in initial["evidence"] if not e["excluded"]}
         evidence_ids = intent.get("evidence_ids", [])
         if not isinstance(evidence_ids, list) or any(e not in valid_evidence for e in evidence_ids):
@@ -859,6 +1188,10 @@ class AnalysisOrchestrationService:
                     "evidence_version": fingerprint([run["input_hash"], run["annotation_version"]]) if role == "critic" else intent.get("evidence_version", run["input_hash"]), "replicate_id": intent.get("replicate_id") or None,
                     "round": run["iteration"] if role == "core" else None, "options": run["config"]["roles"].get(role), "kind": intent.get("kind", "analysis"), "result_id": intent.get("result_id"), "initial_sections": intent.get("initial_sections", []),
                     "dependencies": sorted(dependencies)}
+        if pilot:
+            identity["table_pilot_hash"] = fingerprint(request)
+        if expert is not None:
+            identity["expert_id"], identity["expert_profile_hash"] = expert["expert_id"], expert["profile_hash"]
         key = fingerprint(identity)
         existing = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND idempotency_key=?", (run["run_id"], key)).fetchone()
         if existing:
@@ -882,9 +1215,31 @@ class AnalysisOrchestrationService:
                 "codebook_version": run["codebook_version"], "label_dependent": label_dependent,
                 "dependencies": dependencies, "status": "queued", "validation_status": "pending", "stale": False,
                 "created_at": _now(), "started_at": None, "ended_at": None, "error": ""}
+        if pilot:
+            trusted = task["intent"]["table_pilot"]["bindings"]
+            trusted["context"]["consumer_task_id"] = task["task_id"]
+            for ref in trusted["inputs"]: ref["consumer_task_id"] = task["task_id"]
+        if expert is not None:
+            task["expert_agent"] = {key: expert[key] for key in ("expert_id", "profile_hash", "knowledge_hash", "contract_version")}
+        self._require_budget(run)
+        guard = self._run_budgets.get(run["run_id"])
+        if guard is not None:
+            guard.register(task["task_id"], task_origin)
+            task["budget_started_at"] = task_origin
         db.execute("INSERT INTO orchestration_tasks VALUES (?,?,?,?)", (task["task_id"], run["run_id"], key, _json(task)))
         self._event(db, run["run_id"], "task_registered", task["title"], target=role, task_id=task["task_id"])
         return task
+
+    @staticmethod
+    def _intent_expert(run, intent):
+        expert_id = intent.get("expert_id", "")
+        bundle = run.get("expert_agents")
+        if expert_id and (bundle is None or intent.get("role") != "interpretation"):
+            raise _error("専門家IDは知識を接続した会話解釈タスクへ指定してください。", "expert_selection_invalid")
+        if bundle is not None and intent.get("role") == "interpretation":
+            from .services.expert_agents import expert_profile
+            return expert_profile(bundle, expert_id)
+        return None
 
     @staticmethod
     def _safe_section(value, evidence):
@@ -1005,6 +1360,9 @@ class AnalysisOrchestrationService:
                               "min_iterations": run["config"].get("min_iterations", 0),
                               "completed_core_iterations": self._completed_core_iterations(db, run),
                               "deadline": run["deadline"]}, "stop_proposal": run["pending_stop"]}
+        gate = self._statistical_review_gate(db, run)
+        if gate:
+            context["statistical_review_gate"] = gate
         context["labels"] = json.loads(db.execute("SELECT payload_json FROM orchestration_label_versions WHERE run_id=? AND annotation_version=?",
                                                     (run["run_id"], task["annotation_version"])).fetchone()[0])
         included_ids = {e["utterance_id"] for e in raw}
@@ -1034,22 +1392,172 @@ class AnalysisOrchestrationService:
         if task["role"] == "critic":
             context["review_target"] = {"target_id": task["intent"]["target_id"], "target_version": task["intent"]["target_version"],
                                         "evidence_version": fingerprint([run["input_hash"], run["annotation_version"]]), "view": run["current_view"], "stop": run["pending_stop"]}
+        if run["config"].get("obsidian_management", False):
+            context["management"] = {"role": "obsidian_manager", "kind": "code", "enabled": True,
+                "status": run.get("obsidian_management", {}).get("status", "not_started"),
+                "note_id": run.get("obsidian_management", {}).get("note_id", ""),
+                "authority": "Handler forwards committed records; manager links data without executing analysis"}
+        if "expert_agents" in run:
+            from .services.expert_agents import catalog_packet, expert_profile, request_packet
+            if task["role"] == "core":
+                context["expert_catalog"] = catalog_packet(run["expert_agents"])
+            elif task.get("expert_agent"):
+                profile = expert_profile(run["expert_agents"], task["expert_agent"]["expert_id"])
+                self._validate_expert_receipt(task, profile)
+                if "statistical_tools" in profile:
+                    from .services.analysis_orchestration_methods import calculation_packet
+                    calculations = {}
+                    for metadata in public["results"]:
+                        if (metadata["role"] != "statistics" or metadata["validation_status"] != "valid"
+                                or metadata.get("stale") or metadata["dataset_version"] != run["input_hash"]):
+                            continue
+                        source_task = next(value for value in public["tasks"] if value["task_id"] == metadata["task_id"])
+                        if (source_task["method_id"] not in profile["statistical_tools"]
+                                or source_task["status"] != "succeeded"
+                                or (task["dependencies"] and source_task["task_id"] not in task["dependencies"])):
+                            continue
+                        row = db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=? AND run_id=?",
+                                         (metadata["result_id"], run["run_id"])).fetchone()
+                        content = self._statistical_source(db, run, source_task, metadata, json.loads(row[0]), initial)
+                        calculations[source_task["method_id"]] = (content, metadata)
+                    allowance = 10000 // max(1, len(calculations))
+                    context["statistical_calculations"] = [calculation_packet(content, metadata, max_chars=allowance)
+                                                          for content, metadata in calculations.values()]
+                context["expert_request"] = request_packet(profile, context, initial["analysis"])
+                if run["config"].get("expert_hooks", False):
+                    from .services.expert_data_hooks import prepare_context
+                    context = prepare_context(context, evidence_limit=run["config"]["context_evidence_limit"],
+                                              text_limit=run["config"]["context_text_limit"])
         return copy.deepcopy(context)
 
     def _check(self, run_id, generation, task_id=None):
+        stopped = None
         with self._db() as db:
             run = self._read_run(db, run_id)
             limit = "source_deleted" if self.find_item(run["item_id"]) is None else self._limit(db, run)
+            if not limit and task_id:
+                limit = self._budget_reason(run, task_id)
+                row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()
+                task = json.loads(row[0])
+                if not limit and task.get("started_epoch") and time.time() - task["started_epoch"] > run["config"]["call_timeout_seconds"]:
+                    limit = "call_timeout"
             if limit and run["status"] not in TERMINAL:
                 self._stop(db, run, limit)
             if limit or run["status"] in TERMINAL or run["generation"] != generation:
-                raise ExecutionStopped(run["stop_reason"] or "stopped")
-            if task_id:
-                row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()
-                task = json.loads(row[0])
-                if task.get("started_epoch") and time.time() - task["started_epoch"] > run["config"]["call_timeout_seconds"]:
-                    self._stop(db, run, "call_timeout")
-                    raise ExecutionStopped("call_timeout")
+                stopped = run["stop_reason"] or "stopped"
+                if "request_budget" not in run and run_id not in self._run_budgets:
+                    raise ExecutionStopped(stopped)  # Preserve the legacy path.
+        # Raising inside _db would roll back the stop just recorded above.
+        if stopped:
+            raise ExecutionStopped(stopped)
+
+    def _expert_data_hook(self, run_id, original_task, action, payload):
+        """Serve reads for an active expert; never create another analysis task."""
+        from .services.expert_data_hooks import read_data, MAX_ROUNDS, VERSION, fail
+        task_id = original_task["task_id"]
+        self._check(run_id, original_task["generation"], task_id)
+        with self._db() as db:
+            run = self._read_run(db, run_id)
+            row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?", (task_id, run_id)).fetchone()
+            task = json.loads(row[0]) if row else {}
+            if (not task.get("expert_agent") or task.get("status") != "running"
+                    or task.get("attempt_id") != original_task["attempt_id"]
+                    or task.get("generation") != original_task["generation"]
+                    or not run["config"].get("expert_hooks", False)
+                    or run["config"].get("expert_hook_version") != VERSION):
+                fail("expert_hook_inactive")
+            self._validate_initial_source(run)
+            if action == "response":
+                history = task.setdefault("expert_hook_responses", [])
+                if len(history) >= MAX_ROUNDS + 1 or len(_json(payload).encode("utf-8")) > 32000:
+                    fail("expert_hook_round_limit")
+                history.append({"response": copy.deepcopy(payload), "response_hash": fingerprint(payload)})
+                self._write_task(db, task)
+                return None
+            if action == "continue":
+                if task.get("model_calls", 1) >= MAX_ROUNDS + 1:
+                    fail("expert_hook_round_limit")
+                retrieved = set(task["expert_evidence_ids"])
+                for read in task.get("expert_hook_reads", []):
+                    retrieved.update(read.get("provided_evidence_ids", []))
+                packets = []
+                if isinstance(payload, dict):
+                    if set(payload) != {"evidence_ids", "calculation_packets"} or not isinstance(payload["calculation_packets"], list):
+                        fail("expert_hook_delivery_mismatch")
+                    packets, payload = payload["calculation_packets"], payload["evidence_ids"]
+                if not isinstance(payload, list) or any(not isinstance(eid, str) or eid not in retrieved for eid in payload):
+                    fail("expert_hook_scope_mismatch")
+                deliveries = []
+                for packet in packets:
+                    packet_hash = fingerprint(packet)
+                    read = next((read for read in task.get("expert_hook_reads", [])
+                                 if read["packet_hash"] == packet_hash and "provided_rows" in read), None)
+                    if (read is None or any(read.get(key) != task[key] for key in ("run_id", "task_id", "attempt_id", "generation"))
+                            or read.get("version") != VERSION or read.get("data_version") != run["input_hash"]
+                            or packet.get("version") != VERSION or packet.get("data_version") != run["input_hash"]):
+                        fail("expert_hook_delivery_mismatch")
+                    ref = next((ref for ref in task.get("expert_calculation_refs", []) if ref["result_id"] == packet.get("result_id")), None)
+                    if (ref is None or ref.get("delivery_version") != VERSION
+                            or ref["raw_hash"] != packet.get("source_hash")):
+                        fail("expert_hook_delivery_mismatch")
+                    deliveries.append({"packet_hash": packet_hash, "result_id": packet["result_id"],
+                                       "table_id": packet["table_id"], "provided_rows": copy.deepcopy(read["provided_rows"])})
+                queued_calls = sum(t["kind"] == "ai" and t["status"] == "queued" for t in self._tasks(db, run_id))
+                if run["calls_started"] + queued_calls >= run["config"]["max_calls"]:
+                    self._stop(db, run, "call_budget_limit")
+                    return {"stopped": True}
+                run["calls_started"] += 1
+                task["expert_evidence_ids"] = sorted(set(task["expert_evidence_ids"]) | set(payload))
+                task["model_calls"] = task.get("model_calls", 1) + 1
+                if deliveries:
+                    task.setdefault("expert_hook_deliveries", []).append({"version": VERSION,
+                        **{key: task[key] for key in ("run_id", "task_id", "attempt_id", "generation")},
+                        "model_call": task["model_calls"], "packets": deliveries})
+                    for delivery in deliveries:
+                        ref = next(ref for ref in task["expert_calculation_refs"] if ref["result_id"] == delivery["result_id"])
+                        for name, ids in delivery["provided_rows"].items():
+                            ref["provided_rows"][name] = sorted(set(ref["provided_rows"][name]) | set(ids))
+                self._write_run(db, run)
+                self._write_task(db, task)
+                self._event(db, run_id, "expert_hook_continue", "追加取得したデータで専門家の応答を継続します。", target=task["role"], task_id=task_id)
+                return None
+            if action != "read":
+                fail()
+            initial = self._initial(db, run["initial_id"])
+            selected = task["intent"].get("evidence_ids", [])
+            allowed = selected or [e["evidence_id"] for e in initial["evidence"] if not e["excluded"]]
+            calculations = {}
+            for ref in task.get("expert_calculation_refs", []):
+                saved = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=? AND run_id=?", (ref["result_id"], run_id)).fetchone()
+                metadata = json.loads(saved["state_json"]) if saved else {}
+                if (metadata.get("task_id") != ref["task_id"] or metadata.get("raw_hash") != ref["raw_hash"]
+                        or metadata.get("dataset_version") != run["input_hash"] or metadata.get("stale")
+                        or metadata.get("validation_status") != "valid"
+                        or fingerprint(json.loads(saved["raw_json"])) != ref["raw_hash"]):
+                    fail("statistics_result_mismatch")
+                source = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?", (ref["task_id"], run_id)).fetchone()
+                if source is None:
+                    fail("statistics_result_mismatch")
+                content = self._statistical_source(db, run, json.loads(source[0]), metadata, json.loads(saved["raw_json"]), initial)
+                calculations[ref["result_id"]] = (content, metadata)
+            packet = read_data(payload, evidence=initial["evidence"], calculations=calculations,
+                               allowed_evidence_ids=allowed, data_version=run["input_hash"],
+                               max_chars=run["config"]["context_text_limit"], evidence_limit=min(8, run["config"]["context_evidence_limit"]))
+            receipt = {"version": VERSION, "request": copy.deepcopy(payload), "request_hash": fingerprint(payload),
+                       "packet_hash": fingerprint(packet), "source_hash": packet["source_hash"],
+                       "data_version": run["input_hash"], "created_at": _now(),
+                       **{key: task[key] for key in ("run_id", "task_id", "attempt_id", "generation")}}
+            if packet["hook"] == "read_evidence":
+                receipt["provided_evidence_ids"] = [row["evidence_id"] for row in packet["evidence"]]
+            else:
+                receipt.update(result_id=packet["result_id"], table_id=packet["table_id"],
+                               provided_rows={packet["table_id"]: [row["row_id"] for row in packet["rows"]]})
+            task.setdefault("expert_hook_reads", []).append(receipt)
+            self._write_task(db, task)
+            self._event(db, run_id, "expert_hook_data", "専門家へ指示範囲内の保存済みデータを渡しました。", source="handler", target=task["role"], task_id=task_id,
+                        hook=packet["hook"], request_hash=receipt["request_hash"], packet_hash=receipt["packet_hash"],
+                        source_hash=receipt["source_hash"])
+            return packet
 
     def _record_usage(self, run_id, task_id, usage=None, **values):
         data = dict(usage or {}, **values)
@@ -1076,29 +1584,69 @@ class AnalysisOrchestrationService:
             if task["status"] != "queued" or run["status"] in TERMINAL:
                 return
             self._check_version(run)
-            limit = self._limit(db, run)
+            limit = self._limit(db, run) or self._budget_reason(run, task_id)
             if limit:
                 self._stop(db, run, limit)
                 return
+            try:
+                context = self._context(db, run, task)
+                self._require_budget(run, task_id)
+            except AnalysisContractError as exc:
+                task.update(status="failed", ended_at=_now(), error=exc.code)
+                self._write_task(db, task)
+                self._event(db, run_id, "task_input_rejected", exc.code, task_id=task_id)
+                self._stop(db, run, self._budget_reason(run, task_id) or "human_review_required")
+                return
             task.update(status="running", started_at=_now(), started_epoch=time.time(), generation=run["generation"])
+            if task.get("expert_agent"):
+                task["expert_evidence_ids"] = [row["evidence_id"] for row in context["raw_evidence"]]
+                if "calculations" in context["expert_request"]:
+                    task["expert_calculation_refs"] = [{key: row[key] for key in ("result_id", "task_id", "raw_hash")}
+                                                       for row in context["expert_request"]["calculations"]]
+                    task["expert_response_phase"] = context["expert_request"]["response_phase"]
+                    for ref, calc in zip(task["expert_calculation_refs"], context["expert_request"]["calculations"]):
+                        ref["provided_rows"] = {name: [row["row_id"] for row in table["rows"]]
+                                                for name, table in calc["datasets"].items()}
+                        if run["config"].get("expert_hooks", False):
+                            from .services.expert_data_hooks import VERSION
+                            ref["delivery_version"] = VERSION
+                            ref["initial_provided_rows"] = copy.deepcopy(ref["provided_rows"])
+                self._event(db, run_id, "expert_knowledge_loaded", "専門知識と入出力契約を固定版から渡しました。",
+                            target=task["role"], task_id=task_id, **task["expert_agent"])
             run["calls_started" if task["kind"] == "ai" else "code_executions"] += 1
             self._write_task(db, task)
             self._write_run(db, run)
             self._event(db, run_id, "task_started", task["title"], target=task["role"], task_id=task_id)
-            context = self._context(db, run, task)
             snapshot = self._initial(db, run["initial_id"]) if task["kind"] == "code" else None
             if snapshot is not None:
                 snapshot["orchestration_task"] = copy.deepcopy(task)
                 snapshot["orchestration_labels"] = json.loads(db.execute("SELECT payload_json FROM orchestration_label_versions WHERE run_id=? AND annotation_version=?",
                     (run_id, task["annotation_version"])).fetchone()[0])
         check = lambda: self._check(run_id, task["generation"], task_id)
+        self._notify_management(run_id)
         try:
             check()
             if task["kind"] == "code":
+                if task["method_id"] in TABLE_PILOT_METHODS:
+                    from .services.analysis_orchestration_adapters import resolve_table_pilot
+                    snapshot["table_pilot"] = resolve_table_pilot(self.table_store, task["method_id"],
+                                                               task["intent"]["table_pilot"], snapshot)
+                    check()
+                    with self._db() as db:
+                        current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?",
+                                                        (task_id,)).fetchone()[0])
+                        current["table_pilot_prepared"] = copy.deepcopy(snapshot["table_pilot"])
+                        self._require_budget(self._read_run(db, run_id), task_id)
+                        self._write_task(db, current)
                 raw = self.method_runner(task["method_id"], snapshot)
             else:
                 options = {**copy.deepcopy(run["config"]), **run["config"]["roles"][task["role"]], "timeout_seconds": run["config"]["call_timeout_seconds"],
                            "deadline": run["deadline"], "research_mode": "exploratory", "provider_policy": run["config"]["provider_policy"]}
+                guard = self._run_budgets.get(run_id)
+                if guard is not None:
+                    options.update(_request_budget=guard.request_budget, _budget_attempt_id=task["attempt_id"])
+                if task.get("expert_agent") and run["config"].get("expert_hooks", False):
+                    options["_expert_data_hook"] = lambda action, payload: self._expert_data_hook(run_id, task, action, payload)
                 raw = self.agent_runner(task["role"], context, options, check,
                                         lambda usage=None, **kw: self._record_usage(run_id, task_id, usage, **kw))
             # Raw response commits before semantic validation, including a late response.
@@ -1107,11 +1655,13 @@ class AnalysisOrchestrationService:
                 latest = self._read_run(db, run_id)
                 if self.find_item(latest["item_id"]) is None and latest["status"] not in TERMINAL:
                     self._stop(db, latest, "source_deleted")
-                limit = self._limit(db, latest)
+                limit = self._limit(db, latest) or self._budget_reason(latest, task_id)
                 if not limit and time.time() - task["started_epoch"] > latest["config"]["call_timeout_seconds"]:
                     limit = "call_timeout"
                 if limit and latest["status"] not in TERMINAL:
                     self._stop(db, latest, limit)
+                if run_id in self._run_budgets:
+                    self._write_run(db, latest)
                 late = latest["status"] in TERMINAL or latest["generation"] != task["generation"]
                 metadata = {"result_id": _id("result"), "run_id": run_id, "task_id": task_id, "role": task["role"],
                             "attempt_id": task["attempt_id"], "received_at": _now(), "raw_hash": fingerprint(raw),
@@ -1132,19 +1682,27 @@ class AnalysisOrchestrationService:
                 if current["status"] in {"running", "cancel_requested"}:
                     current.update(status="cancelled", ended_at=_now(), error="cooperative_stop")
                     self._write_task(db, current)
+                if run_id in self._run_budgets:
+                    self._write_run(db, self._read_run(db, run_id))
         except Exception as exc:
             with self._db() as db:
                 current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                 # Transport errors may have consumed external work. Never retry blind.
-                current.update(status="uncertain" if task["kind"] == "ai" else "failed", ended_at=_now(), error=type(exc).__name__)
+                current.update(status="uncertain" if task["kind"] == "ai" else "failed", ended_at=_now(), error=getattr(exc, "code", type(exc).__name__))
                 self._write_task(db, current)
                 latest = self._read_run(db, run_id)
                 if latest["status"] not in TERMINAL and task["kind"] == "ai":
                     latest.update(status="recovery_required", error="外部呼出しの実行結果が不明です。自動再試行しません。")
                     self._write_run(db, latest)
+                elif run_id in self._run_budgets:
+                    self._write_run(db, latest)
                 self._event(db, run_id, "execution_uncertain" if task["kind"] == "ai" else "task_failed", type(exc).__name__, task_id=task_id)
 
     def _validate_received(self, run_id, task_id):
+        with self._db() as db:
+            probe = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
+        if probe["method_id"] in TABLE_PILOT_METHODS:
+            return self._validate_table_received(run_id, task_id)
         with self._db() as db:
             run = self._read_run(db, run_id)
             task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
@@ -1161,32 +1719,141 @@ class AnalysisOrchestrationService:
                 return
             if meta["validation_status"] != "received":
                 if task["status"] == "received":
-                    task.update(status="succeeded" if meta["validation_status"] == "valid" else "quarantined",
+                    valid_state = "blocked" if meta.get("statistical_review", {}).get("ai_complete") is False else "succeeded"
+                    task.update(status=valid_state if meta["validation_status"] == "valid" else "quarantined",
                                 validation_status=meta["validation_status"], result_id=meta["result_id"])
                     self._write_task(db, task)
                 return
+            guarded = "request_budget" in run or run_id in self._run_budgets
             try:
+                if guarded:
+                    db.execute("SAVEPOINT guarded_validation")
+                self._require_budget(run, task_id)
                 if len(row["raw_json"].encode("utf-8")) > run["config"]["max_result_bytes"]:
                     raise _error("結果が保存上限を超えています。", "result_size_limit")
                 if run["status"] in TERMINAL:
                     raise _error("停止後の結果は採用しません。", "late_response_after_stop")
-                self._validate_result(db, run, task, raw)
+                statistical_review = self._validate_result(db, run, task, raw)
+                self._require_budget(run, task_id)
                 meta.update(validation_status="valid", error="")
                 task.update(status="succeeded", validation_status="valid", error="")
+                if task["role"] == "statistics" and task["method_id"] in STATISTICAL_TOOLS:
+                    meta["calculation_status"] = raw["status"]
+                if statistical_review is not None:
+                    meta["statistical_review"] = statistical_review
+                    task["statistical_review_status"] = statistical_review["status"]
+                    if not statistical_review["ai_complete"]:
+                        task.update(status="blocked", error=statistical_review["ai_status"])
                 if task["role"] == "critic":
                     self._save_issues(db, run, task, raw, meta)
                 for patch in raw.get("label_patches", []):
                     self._save_patch(db, run, task, patch, meta)
+                self._require_budget(run, task_id)
                 self._event(db, run_id, "result_validated", "保存済み・内容未検証としてCoreへ渡します。", source="handler", target="core", task_id=task_id)
             except (AnalysisContractError, ValueError, TypeError, KeyError) as exc:
+                if guarded:
+                    db.execute("ROLLBACK TO guarded_validation")
                 code = getattr(exc, "code", "invalid_result")
                 meta.update(validation_status="quarantined", error=code)
                 task.update(status="quarantined", validation_status="quarantined", error=code)
                 self._event(db, run_id, "result_quarantined", code, task_id=task_id)
+            finally:
+                if guarded:
+                    db.execute("RELEASE guarded_validation")
             db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
             self._write_task(db, task)
 
+    def _table_current_permission(self, task, snapshot=None):
+        try:
+            if self.table_store is None: raise ValueError("table_pilot_disabled")
+            self.table_store.revalidate_table_pilot(task["table_pilot_prepared"], expected_snapshot=snapshot)
+            if task.get("table_store_run_id"):
+                self.table_store.read_table(task["table_store_run_id"], "table")
+            return {"decision": "eligible", "execution_enabled": False, "adoption_performed": False}
+        except (AnalysisContractError, ValueError, TypeError, KeyError, OSError) as exc:
+            return {"decision": "blocked", "reason": getattr(exc, "code", "table_revalidation_failed"),
+                    "execution_enabled": False, "adoption_performed": False}
+
+    def _validate_table_received(self, run_id, task_id):
+        """Store outside Handler's write transaction, then fence final promotion."""
+        from .services.analysis_orchestration_methods import validate_table_pilot_result
+        try:
+            with self._db() as db:
+                run = self._read_run(db, run_id)
+                task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
+                row = db.execute("SELECT * FROM orchestration_results WHERE task_id=?", (task_id,)).fetchone()
+                meta, raw = json.loads(row["state_json"]), json.loads(row["raw_json"])
+                if meta["validation_status"] != "received": return
+                if (fingerprint(raw) != meta["raw_hash"] or meta["task_id"] != task_id or meta["run_id"] != run_id
+                        or meta["attempt_id"] != task["attempt_id"] or meta["result_id"] != row["result_id"]):
+                    raise _error("原結果hashが異なります。", "result_integrity_mismatch")
+                self._require_budget(run, task_id)
+                self._check_version(run)
+                if run["status"] in TERMINAL or run["cancel_requested"] or task["generation"] != run["generation"]:
+                    raise _error("停止後の結果です。", "late_response_after_stop")
+                if len(row["raw_json"].encode("utf8")) > run["config"]["max_result_bytes"]:
+                    raise _error("結果上限を超えました。", "result_size_limit")
+                initial = self._initial(db, run["initial_id"])
+                prepared = task["table_pilot_prepared"]
+                validate_table_pilot_result(raw, task, prepared)
+                self.table_store.revalidate_table_pilot(prepared, expected_snapshot=initial)
+            def fence(connection):
+                # Store and Handler must share this SQLite authority. No nested writer.
+                current = self._read_run(connection, run_id)
+                if (current["status"] in TERMINAL or current["cancel_requested"]
+                        or current["generation"] != task["generation"]):
+                    raise _error("保存前に停止されました。", "table_cancelled")
+                self._require_budget(current, task_id)
+                self._check_version(current)
+                self.table_store.revalidate_table_pilot(prepared, expected_snapshot=initial)
+            check = lambda: self._check(run_id, task["generation"], task_id)
+            check()
+            carrier, provenance = self.table_store.table_pilot_carrier(raw, prepared)
+            from .analysis_core import TABLE_PILOT_MAX_BYTES
+            if len(canonical({"carrier": carrier, "provenance": provenance})) > TABLE_PILOT_MAX_BYTES:
+                raise _error("保存payloadのUTF8上限を超えました。", "table_carrier_byte_limit")
+            saved = self.table_store.save(item_id=run["item_id"], kind="ai_insights", snapshot=initial,
+                result={**raw, "parameters": {"table_pilot": prepared["request"], "task_id": task_id, "execution_run_id": run_id,
+                                            "adoption_state": "unanswered", "input_content_hash": prepared["content_hash"],
+                                            "table_pilot_provenance": provenance}},
+                datasets={"table": (carrier["fields"], carrier["rows"])},
+                request_id="table-pilot:" + task_id, input_fingerprint=prepared["content_hash"],
+                source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
+                publish=False, check_cancelled=check, commit_guard=fence)
+            check()
+            reloaded = self.table_store.read_table(saved["id"], "table")
+            if fingerprint([r["values"] for r in reloaded["rows"]]) != fingerprint(carrier["rows"]):
+                raise _error("再読込結果が異なります。", "table_reload_mismatch")
+            self.table_store.revalidate_table_pilot(prepared, expected_snapshot=initial)
+            with self._db() as db:
+                fence(db)
+                current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
+                if current["status"] != "received": raise _error("採用状態が変わりました。", "table_task_changed")
+                meta.update(validation_status="valid", error="", table_store_run_id=saved["id"],
+                            permission_at_validation={"decision": "eligible"}, adoption_performed=False,
+                            content_status="unreviewed")
+                current.update(status="succeeded", validation_status="valid", error="", table_store_run_id=saved["id"],
+                               adoption_performed=False)
+                self._require_budget(self._read_run(db, run_id), task_id)
+                db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
+                self._write_task(db, current)
+                self._event(db, run_id, "table_pilot_validated", "固定表を保存・再読込しました。研究者採否は未回答。", task_id=task_id)
+                self._require_budget(self._read_run(db, run_id), task_id)
+        except (AnalysisContractError, ValueError, TypeError, KeyError, OSError, ExecutionStopped) as exc:
+            code = getattr(exc, "code", "table_validation_failed")
+            with self._db() as db:
+                current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
+                current.update(status="quarantined", validation_status="quarantined", error=code)
+                self._write_task(db, current)
+                row = db.execute("SELECT state_json FROM orchestration_results WHERE task_id=?", (task_id,)).fetchone()
+                if row:
+                    metadata = json.loads(row[0])
+                    metadata.update(validation_status="quarantined", error=code, adoption_performed=False)
+                    db.execute("UPDATE orchestration_results SET state_json=? WHERE task_id=?", (_json(metadata), task_id))
+                self._event(db, run_id, "table_pilot_quarantined", code, task_id=task_id)
+
     def _validate_result(self, db, run, task, raw):
+        statistical_review = None
         if not isinstance(raw, dict):
             raise _error("結果はJSONオブジェクトで返してください。", "invalid_result")
         if raw.get("research_mode", "exploratory") != "exploratory":
@@ -1194,6 +1861,63 @@ class AnalysisOrchestrationService:
         if raw.get("dataset_version", run["input_hash"]) != run["input_hash"]:
             raise _error("結果の入力版が一致しません。", "revision_conflict")
         evidence = {e["evidence_id"]: e for e in self._initial(db, run["initial_id"])["evidence"] if not e["excluded"]}
+        if task["role"] == "statistics" and task["method_id"] in STATISTICAL_TOOLS:
+            initial = self._initial(db, run["initial_id"])
+            self._validate_statistical_table(raw, task, initial)
+        if task.get("expert_agent"):
+            from .services.expert_agents import expert_profile, report_schema, validate_shape, validate_report, bind_evidence_ids, bind_statistical_requests
+            from .services.analysis_orchestration_adapters import SPECIALIST_SCHEMA
+            profile = expert_profile(run["expert_agents"], task["expert_agent"]["expert_id"])
+            self._validate_expert_receipt(task, profile)
+            schema = copy.deepcopy(SPECIALIST_SCHEMA)
+            calculation_ids = [ref["result_id"] for ref in task.get("expert_calculation_refs", [])]
+            calculations = []
+            initial = self._initial(db, run["initial_id"])
+            for ref in task.get("expert_calculation_refs", []):
+                saved = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=? AND run_id=?",
+                                   (ref["result_id"], run["run_id"])).fetchone()
+                metadata = json.loads(saved["state_json"]) if saved else {}
+                if (metadata.get("raw_hash") != ref["raw_hash"] or metadata.get("task_id") != ref["task_id"]
+                        or metadata.get("validation_status") != "valid" or metadata.get("stale")
+                        or metadata.get("dataset_version") != run["input_hash"]
+                        or fingerprint(json.loads(saved["raw_json"])) != ref["raw_hash"]):
+                    raise _error("参照計算結果のhash・入力版が一致しません。", "statistics_result_mismatch")
+                source_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                        (ref["task_id"], run["run_id"])).fetchone()
+                if source_row is None:
+                    raise _error("参照計算タスクが見つかりません。", "statistics_result_mismatch")
+                source_task = json.loads(source_row[0])
+                content = self._statistical_source(db, run, source_task, metadata, json.loads(saved["raw_json"]), initial)
+                if source_task["method_id"] not in profile.get("statistical_tools", []):
+                    raise _error("担当外の計算参照です。", "statistics_result_mismatch")
+                # Validate original full tables above, then enforce the exact
+                # delivery receipt. Never rehash a bounded row excerpt.
+                view = {"result_id": ref["result_id"], "manifest": content["manifest"], "status": content["status"],
+                        "datasets": {}, "_original_datasets": content["datasets"]}
+                delivered = self._statistical_delivery_rows(run, task, ref, content, metadata)
+                for name, table in content["datasets"].items():
+                    provided = delivered.get(name, [])
+                    view["datasets"][name] = {"rows": [row for row in table["rows"] if row["row_id"] in provided]}
+                calculations.append(view)
+            schema["properties"]["expert_report"] = report_schema(profile, task["expert_evidence_ids"], calculation_ids, calculations=calculations)
+            schema["required"].append("expert_report")
+            bind_evidence_ids(schema, task["expert_evidence_ids"])
+            bind_statistical_requests(schema, profile)
+            validate_shape(schema, raw)
+            cells = validate_report(profile, raw, task["expert_evidence_ids"], calculation_ids, calculations=calculations,
+                                    response_phase=task.get("expert_response_phase"))
+            if profile.get("contract_schema_version") == 2:
+                phase = task["expert_response_phase"]
+                requirements = profile["phase_requirements"][phase]
+                statistical_review = {"status": "human_pending", "phase": phase,
+                    "contract_version": profile["contract_version"], "profile_hash": profile["profile_hash"],
+                    "knowledge_hash": profile["knowledge_hash"], "ai_status": raw["expert_report"]["status"],
+                    "ai_complete": raw["expert_report"]["status"] in {"draft", "needs_calculation"},
+                    "researcher_record_status": "unsupported", "researcher_steps_pending": requirements["researcher"],
+                    "code_steps": [{"step_id": sid, "status": "verified_attempt", "result_ids": calculation_ids,
+                                    "calculation_statuses": [calc["status"] for calc in calculations]} for sid in requirements["code"]],
+                    "semantic_review": "undetermined", "free_text_status": "unverified_ai_draft",
+                    "eligible_as_confirmed_evidence": False, "rendered_cells": cells}
         for key in ("claims", "issues", "label_patches", "intents", "critique_responses", "label_decisions"):
             if key in raw and (not isinstance(raw[key], list) or any(not isinstance(v, dict) for v in raw[key])):
                 raise _error("結果配列の形式が正しくありません。", "invalid_result")
@@ -1207,11 +1931,14 @@ class AnalysisOrchestrationService:
             if not isinstance(refs, list) or any(ref not in evidence for ref in refs):
                 raise _error("根拠発話が存在しません。", "evidence_missing")
         if task["role"] == "core":
+            if raw.get("claims") and self._statistical_review_gate(db, run):
+                raise _error("統計専門家の未判定候補を確定根拠へ昇格できません。", "statistical_human_review_required")
             if not isinstance(raw.get("summary"), str) or not raw["summary"].strip():
                 raise _error("空でない統合要約が必要です。", "invalid_result")
             if raw.get("stop") is not None and (not isinstance(raw["stop"], dict) or not raw["stop"].get("reason")):
                 raise _error("停止案には理由が必要です。", "invalid_stop")
             for intent in raw.get("intents", []):
+                self._intent_expert(run, intent)
                 role = intent.get("role")
                 if (role not in {"interpretation", "statistics", "verification", "critic"}
                         or not isinstance(intent.get("question"), str) or not intent["question"].strip()
@@ -1261,6 +1988,133 @@ class AnalysisOrchestrationService:
                 if not (value is None or type(value) in {str, bool, int, float}
                         or (isinstance(value, list) and all(isinstance(v, str) for v in value))):
                     raise _error("ラベル値は文字列・数値・真偽値・文字列配列で指定してください。", "invalid_label_patch")
+
+        return statistical_review
+
+    @staticmethod
+    def _statistical_delivery_rows(run, task, ref, content, metadata):
+        """Recheck saved delivery proof without running AI or computations."""
+        from .services.expert_data_hooks import read_data, VERSION, REQUEST_SCHEMA, fail
+        from .services.expert_agents import validate_shape
+        def record(value, fields):
+            if not isinstance(value, dict) or any(type(value.get(key)) is not kind for key, kind in fields.items()):
+                fail("expert_hook_delivery_mismatch")
+        def row_map(value):
+            if (not isinstance(value, dict) or any(not isinstance(name, str) or not isinstance(ids, list)
+                    or any(not isinstance(rid, str) for rid in ids) or len(set(ids)) != len(ids)
+                    for name, ids in value.items())):
+                fail("expert_hook_delivery_mismatch")
+        row_map(ref.get("provided_rows", {}))
+        if "delivery_version" not in ref:
+            if run["config"].get("expert_hooks") and run["config"].get("expert_hook_version") == VERSION:
+                fail("expert_hook_delivery_mismatch")
+            # Frozen legacy receipts retain their original initial-row scope.
+            return ref.get("provided_rows", {})
+        if ref["delivery_version"] != VERSION:
+            fail("expert_hook_delivery_mismatch")
+        provided = copy.deepcopy(ref.get("initial_provided_rows", {}))
+        row_map(provided)
+        if set(provided) != set(content["datasets"]):
+            fail("expert_hook_delivery_mismatch")
+        for name, ids in provided.items():
+            if (not isinstance(ids, list) or len(set(ids)) != len(ids)
+                    or not set(ids) <= {row["row_id"] for row in content["datasets"][name]["rows"]}):
+                fail("expert_hook_delivery_mismatch")
+        deliveries, reads = task.get("expert_hook_deliveries", []), task.get("expert_hook_reads", [])
+        model_calls = task.get("model_calls", 1)
+        if not isinstance(deliveries, list) or not isinstance(reads, list) or type(model_calls) is not int:
+            fail("expert_hook_delivery_mismatch")
+        identity = {"run_id": str, "task_id": str, "attempt_id": str, "generation": int}
+        for read in reads:
+            record(read, {**identity, "version": str, "request": dict, "request_hash": str,
+                          "packet_hash": str, "source_hash": str, "data_version": str})
+            try:
+                validate_shape(REQUEST_SCHEMA, read["request"])
+            except AnalysisContractError:
+                fail("expert_hook_delivery_mismatch")
+            if read["request"]["name"] == "read_calculation_table":
+                record(read, {"result_id": str, "table_id": str, "provided_rows": dict})
+                row_map(read["provided_rows"])
+            elif (not isinstance(read.get("provided_evidence_ids"), list)
+                  or any(not isinstance(eid, str) for eid in read["provided_evidence_ids"])):
+                fail("expert_hook_delivery_mismatch")
+        known_results = {r["result_id"] for r in task["expert_calculation_refs"]}
+        for delivery in deliveries:
+            record(delivery, {**identity, "version": str, "model_call": int, "packets": list})
+            if (delivery.get("version") != VERSION
+                    or any(delivery.get(key) != task[key] for key in ("run_id", "task_id", "attempt_id", "generation"))
+                    or not 2 <= delivery.get("model_call", 0) <= model_calls):
+                fail("expert_hook_delivery_mismatch")
+            for packet in delivery["packets"]:
+                record(packet, {"packet_hash": str, "result_id": str, "table_id": str, "provided_rows": dict})
+                row_map(packet["provided_rows"])
+                if packet["result_id"] not in known_results:
+                    fail("expert_hook_delivery_mismatch")
+                if packet["result_id"] != ref["result_id"]:
+                    continue
+                read = next((r for r in task.get("expert_hook_reads", []) if r["packet_hash"] == packet["packet_hash"]), None)
+                if (read is None or read.get("version") != VERSION or read.get("source_hash") != ref["raw_hash"]
+                        or read.get("data_version") != run["input_hash"]
+                        or any(read.get(key) != task[key] for key in ("run_id", "task_id", "attempt_id", "generation"))
+                        or fingerprint(read["request"]) != read["request_hash"]):
+                    fail("expert_hook_delivery_mismatch")
+                replay = read_data(read["request"], evidence=[], calculations={ref["result_id"]: (content, metadata)},
+                    allowed_evidence_ids=[], data_version=run["input_hash"], max_chars=run["config"]["context_text_limit"])
+                expected = {replay["table_id"]: [row["row_id"] for row in replay["rows"]]}
+                if (fingerprint(replay) != packet["packet_hash"] or replay["table_id"] != packet["table_id"]
+                        or read.get("provided_rows") != expected or packet["provided_rows"] != expected
+                        or read.get("result_id") != replay["result_id"] or read.get("table_id") != replay["table_id"]):
+                    fail("expert_hook_delivery_mismatch")
+                for name, ids in expected.items():
+                    provided[name] = sorted(set(provided[name]) | set(ids))
+        if ({name: sorted(ids) for name, ids in provided.items()}
+                != {name: sorted(ids) for name, ids in ref.get("provided_rows", {}).items()}):
+            fail("expert_hook_delivery_mismatch")
+        return provided
+
+    def _statistical_source(self, db, run, task, metadata, raw, initial):
+        if fingerprint(raw) != metadata.get("raw_hash"):
+            raise _error("保存済み結果のhashが一致しません。", "result_integrity_mismatch")
+        if (task.get("run_id") != run["run_id"] or metadata.get("run_id") != run["run_id"]
+                or task.get("task_id") != metadata.get("task_id") or task.get("result_id") != metadata.get("result_id")
+                or task.get("attempt_id") != metadata.get("attempt_id") or task.get("role") != "statistics"
+                or metadata.get("role") != "statistics" or task.get("kind") != "code"
+                or task.get("method_id") not in STATISTICAL_TOOLS
+                or task.get("status") != "succeeded" or metadata.get("validation_status") != "valid"
+                or task.get("stale") or metadata.get("stale")
+                or task.get("dataset_version") != run["input_hash"] or metadata.get("dataset_version") != run["input_hash"]):
+            raise _error("原計算のタスク・結果・固定入力が一致しません。", "statistics_result_mismatch")
+        self._validate_statistical_table(raw, task, initial)
+        return raw
+
+    @staticmethod
+    def _validate_expert_receipt(task, profile):
+        if any(task["expert_agent"].get(key) != profile[key] for key in
+               ("expert_id", "profile_hash", "knowledge_hash", "contract_version")):
+            raise _error("専門家タスクと固定契約の版・hashが一致しません。", "expert_knowledge_hash_mismatch")
+
+    @staticmethod
+    def _validate_statistical_table(raw, task, initial):
+        from .services.analysis_orchestration_methods import validate_statistical_result
+        linguistics = initial["analysis"].get("research", {}).get("linguistics", {})
+        if (set(raw.get("datasets", {})) != {STATISTICAL_TOOLS[task["method_id"]][0]}
+                or raw.get("manifest", {}).get("computation_input_hash") != fingerprint({"analysis": initial["analysis"], "linguistics": linguistics})):
+            raise _error("原計算の表・固定入力hashが一致しません。", "statistics_result_mismatch")
+        validate_statistical_result(raw, task, initial["evidence"])
+        statuses = {row.get("status") for table in raw["datasets"].values() for row in table["rows"] if "status" in row}
+        rows = [row for table in raw["datasets"].values() for row in table["rows"]]
+        expected_status = ("not_computed" if not rows or statuses and "computed" not in statuses
+                           else "partial" if statuses - {"computed"} else "computed")
+        if raw.get("status") != expected_status:
+            raise _error("計算の部分・未計算状態が一致しません。", "statistics_result_mismatch")
+
+    def _statistical_review_gate(self, db, run):
+        pending = []
+        for row in db.execute("SELECT state_json FROM orchestration_results WHERE run_id=?", (run["run_id"],)):
+            meta = json.loads(row[0])
+            if meta.get("statistical_review", {}).get("status") == "human_pending":
+                pending.append(meta["result_id"])
+        return {"status": "human_pending", "result_ids": pending, "eligible_as_confirmed_evidence": False} if pending else None
 
     def _save_issues(self, db, run, task, raw, meta):
         for issue in raw.get("issues", []):
@@ -1390,15 +2244,17 @@ class AnalysisOrchestrationService:
         meta, raw = json.loads(result["state_json"]), json.loads(result["raw_json"])
         # The validation commit and the decision commit are separate durable
         # boundaries. Recheck the stored bytes at adoption, including restart.
-        if (fingerprint(raw) != meta["raw_hash"] or meta.get("task_id") != task["task_id"]
+        promotion_blocked = bool(raw.get("claims") and self._statistical_review_gate(db, run))
+        if (promotion_blocked or fingerprint(raw) != meta["raw_hash"] or meta.get("task_id") != task["task_id"]
                 or meta.get("run_id") != run["run_id"] or meta.get("result_id") != result["result_id"]
                 or meta.get("attempt_id") != task["attempt_id"]):
-            meta.update(validation_status="quarantined", error="result_integrity_mismatch")
-            task.update(status="quarantined", validation_status="quarantined", error="result_integrity_mismatch")
+            error = "statistical_human_review_required" if promotion_blocked else "result_integrity_mismatch"
+            meta.update(validation_status="quarantined", error=error)
+            task.update(status="quarantined", validation_status="quarantined", error=error)
             db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), result["result_id"]))
             self._write_task(db, task)
-            self._event(db, run["run_id"], "result_quarantined", "result_integrity_mismatch", task_id=task["task_id"])
-            run["error"] = "result_integrity_mismatch"
+            self._event(db, run["run_id"], "result_quarantined", error, task_id=task["task_id"])
+            run["error"] = error
             self._stop(db, run, "execution_failure")
             return
         if db.execute("SELECT 1 FROM orchestration_decisions WHERE result_id=?", (meta["result_id"],)).fetchone():
@@ -1421,6 +2277,9 @@ class AnalysisOrchestrationService:
         claims_changed = bool(raw.get("claims")) and fingerprint(raw.get("claims", [])) != fingerprint(run["current_view"].get("claims", []))
         next_view = {"summary": raw.get("summary", ""), "claims": raw.get("claims", []),
                      "alternatives": raw.get("alternatives", []), "unresolved": raw.get("unresolved", [])}
+        gate = self._statistical_review_gate(db, run)
+        if gate:
+            next_view.update(content_status="unreviewed", statistical_review=gate)
         if next_view != run["current_view"]:
             run["view_version"] += 1
             run["current_view"] = next_view
@@ -1511,6 +2370,8 @@ class AnalysisOrchestrationService:
                     received = [t["task_id"] for t in self._tasks(db, run_id) if t["status"] == "received"]
                 for task_id in received:
                     self._validate_received(run_id, task_id)
+                if received:
+                    self._notify_management(run_id)
                 with self._db() as db:
                     run = self._read_run(db, run_id)
                     limit = self._limit(db, run)
@@ -1562,8 +2423,18 @@ class AnalysisOrchestrationService:
                 self._run_analysis(run_id)
             self._notify_completed(run_id)
         finally:
-            with self._worker_lock:
-                self._driving.discard(run_id)
+            try:
+                self._notify_management(run_id)
+            finally:
+                try:
+                    guard = self._run_budgets.get(run_id)
+                    if guard is not None:
+                        guard.cleanup_hold = guard.reason()
+                        with self._db() as db:
+                            self._write_run(db, self._read_run(db, run_id))
+                finally:
+                    with self._worker_lock:
+                        self._driving.discard(run_id)
 
     def _run_analysis(self, run_id: str) -> None:
         """Drive persisted phases; safe to call synchronously with mock adapters."""
@@ -1584,6 +2455,7 @@ class AnalysisOrchestrationService:
                 run["status"] = "running"
                 self._write_run(db, run)
             while True:
+                self._notify_management(run_id)
                 with self._db() as db:
                     run = self._read_run(db, run_id)
                     if run["status"] in TERMINAL or run["status"] == "recovery_required":
@@ -1614,7 +2486,24 @@ class AnalysisOrchestrationService:
                         if task is None or task["status"] != "succeeded":
                             self._stop(db, run, "execution_failure"); return
                         result = db.execute("SELECT * FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
-                        self._apply_core(db, run, task, result)
+                        guarded = "request_budget" in run or run_id in self._run_budgets
+                        before_adoption = copy.deepcopy(run) if guarded else None
+                        if guarded:
+                            db.execute("SAVEPOINT guarded_adoption")
+                        try:
+                            self._require_budget(run, task["task_id"])
+                            self._apply_core(db, run, task, result)
+                            self._require_budget(run, task["task_id"])
+                        except AnalysisContractError:
+                            if not guarded:
+                                raise
+                            db.execute("ROLLBACK TO guarded_adoption")
+                            run = before_adoption
+                            self._stop(db, run, self._budget_reason(run, task["task_id"]) or "execution_failure")
+                            return
+                        finally:
+                            if guarded:
+                                db.execute("RELEASE guarded_adoption")
                     elif run["phase"] == "stop_review":
                         reviews = [t for t in tasks if t["role"] == "critic" and t["phase"] == "stop_review" and t["intent"].get("target_version") == run["pending_stop"]["target_version"]]
                         blind_reviews = [t for t in tasks if t["role"] == "verification" and t["phase"] == "stop_review" and t["iteration"] == run["iteration"]]

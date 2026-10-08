@@ -963,6 +963,299 @@ def _crosstab_rows(
     return result, row_values, column_values, matrix
 
 
+def _table_pilot_error(code: str, field: str = "") -> None:
+    from .analysis_core import AnalysisContractError
+    raise AnalysisContractError("Table pilot contract failed: " + code,
+                                code="table_pilot_" + code, field=field)
+
+
+def _table_pilot_json(value: Any) -> bytes:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError):
+        _table_pilot_error("json_value")
+
+
+def _table_pilot_names(value: Any, *, nonempty: bool = False) -> bool:
+    return (isinstance(value, list) and (bool(value) or not nonempty)
+            and all(isinstance(v, str) and bool(v.strip()) for v in value)
+            and len(value) == len(set(value)))
+
+
+def _table_pilot_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if type(value) is bool:
+        return "boolean"
+    if type(value) is int:
+        return "integer"
+    if type(value) is float and math.isfinite(value):
+        return "number"
+    if isinstance(value, str):
+        _table_pilot_json(value)
+        return "string"
+    _table_pilot_error("primitive_value")
+
+
+def _table_pilot_input(wrapper: Any) -> dict[str, Any]:
+    """Validate local table structure; frozen hashes/permissions belong to runtime."""
+    if not isinstance(wrapper, dict) or set(wrapper) != {"table", "variables", "scope"}:
+        _table_pilot_error("input_shape")
+    _table_pilot_json(wrapper)
+    table, variables, scope = wrapper["table"], wrapper["variables"], wrapper["scope"]
+    table_keys = {"format", "schema_version", "dataset_id", "run_id", "input_snapshot_id",
+                  "source_revision", "analysis_revision", "fields", "columns", "row_count", "rows"}
+    if (not isinstance(table, dict) or set(table) != table_keys
+            or table["format"] != "gurumoji.analysis-table"
+            or type(table["schema_version"]) is not int or table["schema_version"] != 1
+            or any(not isinstance(table[k], str) or not table[k].strip()
+                   for k in ("dataset_id", "run_id", "input_snapshot_id"))
+            or any(type(table[k]) is not int or table[k] < 0
+                   for k in ("source_revision", "analysis_revision", "row_count"))
+            or not _table_pilot_names(table["fields"], nonempty=True)
+            or not isinstance(table["rows"], list) or table["row_count"] != len(table["rows"])):
+        _table_pilot_error("table_shape")
+    base = {"utterance_id", "conversation_id", "value_status"}
+    if not base <= set(table["fields"]) or "source_utterance_ids" in table["fields"]:
+        _table_pilot_error("identity_columns")
+    rows, native_ids, utterance_ids, column_names = [], set(), set(), set(table["fields"])
+    statuses = {"observed", "excluded", "missing", "unprocessed", "unknown"}
+    for row in table["rows"]:
+        if (not isinstance(row, dict) or set(row) != {"row_id", "values"}
+                or not isinstance(row["row_id"], str) or not row["row_id"].strip()
+                or row["row_id"] in native_ids or not isinstance(row["values"], dict)
+                or any(not isinstance(k, str) or not k.strip() for k in row["values"])):
+            _table_pilot_error("row_shape")
+        values = row["values"]
+        if (not base <= values.keys()
+                or any(not isinstance(values[k], str) or not values[k].strip()
+                       for k in ("utterance_id", "conversation_id"))
+                or not isinstance(values["value_status"], str) or values["value_status"] not in statuses):
+            _table_pilot_error("row_identity_status")
+        if values["utterance_id"] in utterance_ids:
+            _table_pilot_error("duplicate_utterance")
+        for value in values.values():
+            _table_pilot_value_type(value)
+        native_ids.add(row["row_id"]); utterance_ids.add(values["utterance_id"])
+        column_names.update(values); rows.append(row)
+    if not rows:
+        _table_pilot_error("not_computable")
+    if "source_utterance_ids" in column_names:
+        _table_pilot_error("reserved_column")
+    columns = table["columns"]
+    if not isinstance(columns, list):
+        _table_pilot_error("columns")
+    names = []
+    for column in columns:
+        if (not isinstance(column, dict)
+                or set(column) != {"name", "observed_types", "absent_count", "null_count"}
+                or not isinstance(column["name"], str) or column["name"] not in column_names
+                or any(type(column[k]) is not int or column[k] < 0
+                       for k in ("absent_count", "null_count"))):
+            _table_pilot_error("columns")
+        name = column["name"]; names.append(name)
+        values = [r["values"] for r in rows]
+        if (column["observed_types"] != sorted({_table_pilot_value_type(r[name]) for r in values if name in r})
+                or column["absent_count"] != sum(name not in r for r in values)
+                or column["null_count"] != sum(name in r and r[name] is None for r in values)):
+            _table_pilot_error("column_counts")
+    if len(names) != len(set(names)) or set(names) != column_names:
+        _table_pilot_error("columns")
+    variable_keys = {"variable_id", "version", "definition_hash", "value_type", "scale", "unit",
+                     "value_domain", "generation", "validity", "definition_ref"}
+    if not isinstance(variables, list):
+        _table_pilot_error("variables")
+    by_variable = {}
+    from .analysis_core import _connection_hash, validate_connection_actor
+    for variable in variables:
+        if (not isinstance(variable, dict) or set(variable) != variable_keys
+                or not isinstance(variable["variable_id"], str) or variable["variable_id"] not in column_names
+                or variable["variable_id"] in by_variable
+                or type(variable["version"]) is not int or variable["version"] < 1
+                or not isinstance(variable["value_type"], str)
+                or variable["value_type"] not in {"string", "number", "integer", "boolean"}
+                or not isinstance(variable["scale"], str) or variable["scale"] not in {"nominal", "ordinal", "interval", "ratio"}
+                or variable["unit"] != "utterance"
+                or not isinstance(variable["value_domain"], str) or not variable["value_domain"].strip()
+                or not isinstance(variable["validity"], str)
+                or variable["validity"] not in {"candidate", "structural_checked", "human_reviewed", "unknown"}
+                or not isinstance(variable["definition_ref"], dict)
+                or not _connection_hash(variable["definition_hash"])
+                or variable["definition_hash"] != variable["definition_ref"].get("content_hash")):
+            _table_pilot_error("variable")
+        reference = variable["definition_ref"]
+        if (not {"target_type", "target_id", "version", "content_hash", "hash_domain"} <= reference.keys()
+                or not set(reference) <= {"target_type", "target_id", "version", "content_hash", "hash_domain", "library_id", "locator"}
+                or any(not isinstance(reference[k], str) or not reference[k].strip()
+                       for k in ("target_type", "target_id", "version", "hash_domain"))):
+            _table_pilot_error("variable_definition")
+        validate_connection_actor(variable["generation"])
+        by_variable[variable["variable_id"]] = variable
+    if set(by_variable) != column_names:
+        _table_pilot_error("variable_membership")
+    allowed = {"string": {str}, "number": {int, float}, "integer": {int}, "boolean": {bool}}
+    for row in rows:
+        values = row["values"]; status = values["value_status"]
+        for name, variable in by_variable.items():
+            value = values.get(name)
+            if value is not None and type(value) not in allowed[variable["value_type"]]:
+                _table_pilot_error("variable_value_type", name)
+            if name not in base:
+                if status == "observed" and (name not in values or value is None):
+                    _table_pilot_error("observed_missing", name)
+                if status in {"missing", "unprocessed", "unknown"} and value is not None:
+                    _table_pilot_error("nonobserved_value", name)
+    scope_keys = {"scope_id", "manifest_hash", "mode", "input_refs", "conversation_ids", "member_ids", "context_ids"}
+    if (not isinstance(scope, dict) or set(scope) != scope_keys or scope["mode"] != "dataset"
+            or any(not isinstance(scope[k], str) or not scope[k].strip() for k in ("scope_id", "manifest_hash"))
+            or not isinstance(scope["input_refs"], list) or not scope["input_refs"]
+            or not _table_pilot_names(scope["conversation_ids"], nonempty=True)
+            or not _table_pilot_names(scope["member_ids"]) or not _table_pilot_names(scope["context_ids"])
+            or any(r["values"]["conversation_id"] not in scope["conversation_ids"] for r in rows)):
+        _table_pilot_error("scope")
+    _table_pilot_json(scope)
+    return {"table": table, "rows": rows, "columns": names, "scope": scope}
+
+
+def _table_pilot_population(rows: list[dict], measured: list[str], omitted=()) -> dict:
+    groups = {key: set() for key in ("included_ids", "excluded_ids", "missing_ids",
+                                    "unprocessed_ids", "unknown_ids", "observed_zero_ids")}
+    groups["excluded_ids"].update(omitted)
+    for row in rows:
+        values = row["values"]; uid = values["utterance_id"]; status = values["value_status"]
+        if status == "excluded":
+            groups["excluded_ids"].add(uid)
+        else:
+            groups["included_ids"].add(uid)
+            if status in {"missing", "unprocessed", "unknown"}:
+                groups[status + "_ids"].add(uid)
+            elif any(type(values.get(k)) in {int, float} and values[k] == 0 for k in measured):
+                groups["observed_zero_ids"].add(uid)
+    return {**{key: sorted(ids) for key, ids in groups.items()}, "denominator": len(groups["included_ids"])}
+
+
+def _table_pilot_finish(fields: list[str], rows: list[dict], population: dict, *, zero_cells=False) -> dict:
+    if not rows or not population["denominator"]:
+        _table_pilot_error("not_computable")
+    originals = set(population["included_ids"]) | set(population["excluded_ids"])
+    if not _table_pilot_names(fields, nonempty=True):
+        _table_pilot_error("output_fields")
+    for row in rows:
+        sources = row.get("source_utterance_ids")
+        if (set(row) != set(fields) or not _table_pilot_names(sources)
+                or not set(sources) <= originals
+                or (not sources and not (zero_cells and type(row.get("count")) is int and row["count"] == 0))):
+            _table_pilot_error("output_sources")
+    result = {"fields": fields, "rows": rows, "population": population}
+    if len(_table_pilot_json(result)) > 131072:
+        _table_pilot_error("byte_limit")
+    return result
+
+
+def run_table_pilot(method_id: str, tables: list[dict], parameters: dict) -> dict:
+    """Opt-in table-pilot-1 pure calculations; never resolve, execute AI, or adopt.
+
+    Runtime supplies complete frozen native rows and owns snapshot/hash/permission
+    validation and immutable population persistence. Scope evidence IDs are not
+    interpreted as utterance IDs here. Empty explicit selections never mean all.
+    """
+    parameter_keys = {
+        "table_projection": {"columns", "row_ids"},
+        "table_aggregate": {"value_column", "status_column", "operation", "group_by", "unit"},
+        "table_join": {"key"},
+        "table_frequency": {"value_column", "status_column"},
+        "table_crosstab": {"row_column", "column_column", "status_column"},
+    }
+    if not isinstance(method_id, str) or method_id not in parameter_keys:
+        _table_pilot_error("method")
+    if not isinstance(parameters, dict) or set(parameters) != parameter_keys[method_id]:
+        _table_pilot_error("parameters")
+    if not isinstance(tables, list) or len(tables) != (2 if method_id == "table_join" else 1):
+        _table_pilot_error("input_cardinality")
+    inputs = [_table_pilot_input(table) for table in tables]
+    source = inputs[0]; rows = source["rows"]; base = {"utterance_id", "conversation_id", "value_status"}
+    if method_id == "table_projection":
+        fields, selected = parameters["columns"], parameters["row_ids"]
+        if (not _table_pilot_names(fields, nonempty=True) or not base <= set(fields)
+                or not set(fields) <= set(source["columns"]) or not _table_pilot_names(selected)):
+            _table_pilot_error("projection")
+        by_id = {row["row_id"]: row for row in rows}
+        if not set(selected) <= by_id.keys():
+            _table_pilot_error("selector_id")
+        chosen = [by_id[key] for key in selected]
+        omitted = [r["values"]["utterance_id"] for r in rows if r["row_id"] not in set(selected)]
+        population = _table_pilot_population(chosen, [k for k in fields if k not in base], omitted)
+        output = [{**{key: row["values"].get(key) for key in fields},
+                   "source_utterance_ids": [row["values"]["utterance_id"]]} for row in chosen]
+        return _table_pilot_finish([*fields, "source_utterance_ids"], output, population)
+    if method_id == "table_join":
+        if parameters["key"] != "utterance_id":
+            _table_pilot_error("join_key")
+        right = inputs[1]
+        populations = [_table_pilot_population(i["rows"], [k for k in i["columns"] if k not in base]) for i in inputs]
+        left_ids = {r["values"]["utterance_id"] for r in rows}
+        right_rows = {r["values"]["utterance_id"]: r["values"] for r in right["rows"]}
+        shared_populations = [{k: v for k, v in population.items() if k != "observed_zero_ids"}
+                              for population in populations]
+        if (_table_pilot_json(source["scope"]) != _table_pilot_json(right["scope"])
+                or shared_populations[0] != shared_populations[1] or left_ids != right_rows.keys()):
+            _table_pilot_error("join_population_scope")
+        if (set(source["columns"]) & set(right["columns"])) - base:
+            _table_pilot_error("join_collision")
+        fields = [*source["columns"], *[k for k in right["columns"] if k not in base]]
+        output = []
+        for row in rows:
+            left = row["values"]; other = right_rows[left["utterance_id"]]
+            if any(left[k] != other[k] for k in base):
+                _table_pilot_error("join_identity_status")
+            output.append({**{k: left.get(k) if k in source["columns"] else other.get(k) for k in fields},
+                           "source_utterance_ids": [left["utterance_id"]]})
+        # Zero belongs to a measured variable, unlike shared inclusion/status.
+        # Recompute it from the joined columns; an aggregate indicator1 must not
+        # erase the original value0 or turn boolean False into numeric zero.
+        population = _table_pilot_population([{"values": row} for row in output],
+                                             [k for k in fields if k not in base])
+        return _table_pilot_finish([*fields, "source_utterance_ids"], output, population)
+    measured = ([parameters["row_column"], parameters["column_column"]]
+                if method_id == "table_crosstab" else [parameters["value_column"]])
+    if (parameters["status_column"] != "value_status"
+            or any(not isinstance(k, str) or k not in source["columns"] for k in measured)):
+        _table_pilot_error("measurement_columns")
+    population = _table_pilot_population(rows, measured)
+    observed = [r["values"] for r in rows if r["values"]["value_status"] == "observed"]
+    if not observed:
+        _table_pilot_error("not_computable")
+    if method_id == "table_aggregate":
+        if (parameters["operation"], parameters["group_by"], parameters["unit"]) != ("count", "utterance_id", "utterance"):
+            _table_pilot_error("aggregate_parameters")
+        output = [{"utterance_id": r["values"]["utterance_id"], "conversation_id": r["values"]["conversation_id"],
+                   "count": 1 if r["values"]["value_status"] == "observed" else None,
+                   "value_status": r["values"]["value_status"], "source_utterance_ids": [r["values"]["utterance_id"]]}
+                  for r in rows]
+        return _table_pilot_finish(["utterance_id", "conversation_id", "count", "value_status", "source_utterance_ids"], output, population)
+    categories = {}
+    def category(value):
+        key = _table_pilot_json([_table_pilot_value_type(value), value]).decode("utf-8")
+        categories[key] = value
+        return key
+    if method_id == "table_frequency":
+        sources = defaultdict(list)
+        for row in observed:
+            sources[category(row[measured[0]])].append(row["utterance_id"])
+        output = [{"category": categories[key], "count": len(ids), "source_utterance_ids": sorted(ids)}
+                  for key, ids in sorted(sources.items())]
+        return _table_pilot_finish(["category", "count", "source_utterance_ids"], output, population)
+    prepared = [{"segment_id": row["utterance_id"], "row": category(row[measured[0]]),
+                 "column": category(row[measured[1]])} for row in observed]
+    cells, _row_values, _column_values, _matrix = _crosstab_rows(
+        prepared, table_id="table-pilot", table_label="table-pilot", group_variable=measured[0],
+        group_accessor=lambda r: r["row"], column_variable=measured[1], column_accessor=lambda r: r["column"])
+    output = [{"row_value": categories[cell["row_id"]], "column_value": categories[cell["column_value"]],
+               "count": cell["count"], "source_utterance_ids": sorted(cell["segment_ids"])} for cell in cells]
+    return _table_pilot_finish(["row_value", "column_value", "count", "source_utterance_ids"], output, population, zero_cells=True)
+
+
 def _test_result_base(
     family: str,
     test: str,

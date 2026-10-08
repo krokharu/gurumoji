@@ -109,7 +109,23 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
         if value:
             raise AnalysisContractError("保存・公開の再試行で条件や公開先を変更できません。")
         publication().retry(item_id, run_id)
-        return jsonify(run=public_run(item_id, service().status(item_id, run_id)))
+        backend = service()
+        state = backend.status(item_id, run_id)
+        memory = state.get("obsidian_management", {})
+        if memory.get("enabled") and memory.get("status") != "unavailable":
+            state = backend.sync_memory(item_id, run_id)
+        return jsonify(run=public_run(item_id, state))
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/memory/retry")
+    def retry_memory(item_id, run_id):
+        if payload():
+            raise AnalysisContractError("管理ノートの更新で条件・保存先は変更できません。")
+        return jsonify(run=public_run(item_id, service().sync_memory(item_id, run_id)))
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/memory/note")
+    def memory_note(item_id, run_id):
+        return Response(service().memory_note(item_id, run_id), mimetype="text/markdown", headers={
+            "Content-Disposition": 'attachment; filename="obsidian-management.md"', "Cache-Control": "no-store"})
 
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/results")
     def results(item_id, run_id):

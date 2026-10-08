@@ -244,8 +244,212 @@ def frontmatter(note_id: str, title: str, **properties) -> str:
     return "---\n" + "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in data.items()) + "\n---\n\n"
 
 
+CONNECTION_METADATA_VERSION = 1
+CONNECTION_METADATA_KIND = "connection_metadata"
+# A storage schema describes observed JSON values, not a measurement or adapter.
+CONNECTION_TABLE_SCHEMA = {"format": "gurumoji.analysis-table", "schema_version": 1,
+                           "required": ["dataset_id", "run_id", "input_snapshot_id", "source_revision",
+                                        "analysis_revision", "fields", "columns", "row_count", "rows"]}
+
+
+class AssetBindingError(StoreConflict):
+    def __init__(self, reason, decision="rejected"):
+        self.reason, self.decision = reason, decision
+        super().__init__("asset_connection_" + reason)
+
+
+def _asset_hash(raw):
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _asset_fields(value, required, optional=()):
+    if not isinstance(value, dict) or not set(required) <= set(value) <= set(required) | set(optional):
+        raise AssetBindingError("fields")
+
+
+def _asset_id(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _asset_enum(value, choices):
+    return isinstance(value, str) and value in choices
+
+
+def _asset_ids(value, *, nonempty=False):
+    return (isinstance(value, list) and (bool(value) or not nonempty)
+            and all(_asset_id(v) for v in value) and len(value) == len(set(value)))
+
+
+def _asset_ref(ref):
+    from .analysis_core import HASH_DOMAINS, _connection_hash, _connection_source_ref
+    if isinstance(ref, dict) and ref.get("target_type") == "artifact":
+        _asset_fields(ref, ("target_type", "target_id", "version", "content_hash", "hash_domain"), ("library_id", "locator"))
+        return (all(_asset_id(ref[k]) for k in ("target_id", "version", "hash_domain"))
+                and _connection_hash(ref["content_hash"]) and ref["hash_domain"] in HASH_DOMAINS
+                and all(_asset_id(ref[k]) for k in ("library_id", "locator") if k in ref))
+    return _connection_source_ref(ref)
+
+
+def _asset_refs(refs, *, nonempty=False):
+    return (isinstance(refs, list) and (bool(refs) or not nonempty)
+            and all(_asset_ref(r) for r in refs) and len({digest(r) for r in refs}) == len(refs))
+
+
+def _asset_key(key):
+    _asset_fields(key, ("library_id", "store_run_id", "artifact_id", "output_name"))
+    if not all(_asset_id(v) for v in key.values()): raise AssetBindingError("asset_key")
+    return digest(key)
+
+
+def _asset_scope(scope):
+    from .analysis_core import _connection_hash
+    fields = ("scope_id", "manifest_hash", "mode", "input_refs", "conversation_ids", "member_ids", "context_ids")
+    _asset_fields(scope, fields)
+    if (not _asset_id(scope["scope_id"]) or not _asset_enum(scope["mode"], {"dataset", "selection", "section", "episode"})
+            or not _asset_refs(scope["input_refs"], nonempty=True)
+            or not _asset_ids(scope["conversation_ids"], nonempty=True)
+            or not all(_asset_ids(scope[k]) for k in ("member_ids", "context_ids"))
+            or not _connection_hash(scope["manifest_hash"])
+            or scope["manifest_hash"] != _asset_hash(canonical({k: v for k, v in scope.items() if k != "manifest_hash"}))):
+        raise AssetBindingError("scope")
+
+
+def _asset_meaning(meaning):
+    from .analysis_core import CONNECTION_UNITS
+    _asset_fields(meaning, ("definition_refs", "description", "status", "unit"))
+    if (not _asset_refs(meaning["definition_refs"]) or not _asset_enum(meaning["unit"], CONNECTION_UNITS)
+            or not _asset_enum(meaning["status"], {"declared", "unknown"})
+            or (meaning["status"] == "unknown" and meaning["description"] is not None)
+            or (meaning["status"] == "declared" and not _asset_id(meaning["description"]))):
+        raise AssetBindingError("meaning")
+
+
+def _asset_state(state):
+    from .analysis_core import CONNECTION_PURPOSES, _connection_hash
+    _asset_fields(state, ("asset_key", "target_content_hash", "target_domain", "state_revision", "policy_revision",
+                         "status", "allowed_purposes", "send_policy", "destinations", "revoked",
+                         "review_refs", "reason", "updated_at"))
+    _asset_key(state["asset_key"])
+    if (not _connection_hash(state["target_content_hash"]) or not _asset_enum(state["target_domain"],
+            {"raw-bytes-v1", "ta-candidate-content-v1", "ta-theme-content-v1"})
+            or any(type(state[k]) is not int or state[k] < 1 for k in ("state_revision", "policy_revision"))
+            or not _asset_enum(state["status"], {"draft", "candidate", "adopted", "rejected", "retired", "stale", "unavailable"})
+            or not _asset_ids(state["allowed_purposes"]) or not set(state["allowed_purposes"]) <= CONNECTION_PURPOSES
+            or not _asset_enum(state["send_policy"], {"local_only", "permitted_destinations", "prohibited"})
+            or not _asset_ids(state["destinations"]) or type(state["revoked"]) is not bool
+            or not _asset_refs(state["review_refs"]) or not _asset_id(state["reason"])
+            or not isinstance(state["updated_at"], str)
+            or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z", state["updated_at"])):
+        raise AssetBindingError("state")
+    try: datetime.fromisoformat(state["updated_at"].replace("Z", "+00:00"))
+    except ValueError: raise AssetBindingError("state_time") from None
+    if state["send_policy"] != "permitted_destinations" and state["destinations"]:
+        raise AssetBindingError("state_destinations")
+
+
+def _asset_descriptor(asset, *, original=False):
+    from .analysis_core import ASSET_KINDS, _connection_hash, _connection_schema, _connection_adapter, validate_connection_actor
+    common = ("asset_key", "raw_byte_hash", "schema", "scope", "producer", "adapter", "meaning")
+    if original:
+        _asset_fields(asset, common + ("source_ref",))
+        if not _asset_ref(asset["source_ref"]) or asset["source_ref"]["target_type"] != "snapshot":
+            raise AssetBindingError("original_type", "unsupported")
+    else:
+        _asset_fields(asset, common + ("contract_id", "contract_version", "content_hash", "content_domain", "kind",
+                                      "source_refs", "method_id", "method_version", "variables", "parent_refs"),
+                      ("execution_run_id", "producer_task_id", "supersedes"))
+        if (asset["contract_id"] != "gurumoji.analysis-asset-connection" or type(asset["contract_version"]) is not int
+                or asset["contract_version"] != 1 or not _asset_enum(asset["kind"], ASSET_KINDS)
+                or not _connection_hash(asset["content_hash"]) or not _asset_enum(asset["content_domain"],
+                    {"raw-bytes-v1", "ta-candidate-content-v1", "ta-theme-content-v1"})
+                or not _asset_refs(asset["source_refs"], nonempty=True) or not _asset_refs(asset["parent_refs"])
+                or not all(_asset_id(asset[k]) for k in ("method_id", "method_version"))
+                or (("execution_run_id" in asset) != ("producer_task_id" in asset))
+                or not all(_asset_id(asset[k]) for k in ("execution_run_id", "producer_task_id") if k in asset)
+                or ("supersedes" in asset and not _asset_refs(asset["supersedes"], nonempty=True))):
+            raise AssetBindingError("asset")
+        from .analysis_method_registry import connection_method_descriptor
+        registered = connection_method_descriptor(asset["method_id"])
+        if registered is None: raise AssetBindingError("method_unregistered")
+        if asset["method_version"] != registered.get("method_version", registered["registry_version"]):
+            raise AssetBindingError("method_version")
+        if asset["asset_key"]["output_name"] not in {f"tables/{name}.json" for name in registered["output_names"]}:
+            raise AssetBindingError("method_output_unregistered")
+        if asset["content_domain"] != "raw-bytes-v1" or asset["kind"] != "observation_table":
+            raise AssetBindingError("typed_schema_unimplemented", "unsupported")
+        if not isinstance(asset["variables"], list): raise AssetBindingError("variables")
+        ids = []
+        for variable in asset["variables"]:
+            _asset_fields(variable, ("variable_id", "version", "definition_hash", "value_type", "scale", "unit",
+                                     "value_domain", "generation", "validity", "definition_ref"))
+            validate_connection_actor(variable["generation"])
+            if (not all(_asset_id(variable[k]) for k in ("variable_id", "unit", "value_domain"))
+                    or type(variable["version"]) is not int or variable["version"] < 1
+                    or not _asset_enum(variable["value_type"], {"string", "number", "integer", "boolean"})
+                    or not _asset_enum(variable["scale"], {"nominal", "ordinal", "interval", "ratio"})
+                    or not _asset_enum(variable["validity"], {"candidate", "structural_checked", "human_reviewed", "unknown"})
+                    or not _asset_ref(variable["definition_ref"])
+                    or variable["definition_hash"] != variable["definition_ref"]["content_hash"]):
+                raise AssetBindingError("variable")
+            ids.append(variable["variable_id"])
+        if len(ids) != len(set(ids)): raise AssetBindingError("variable_duplicate")
+    _asset_key(asset["asset_key"]); _asset_scope(asset["scope"]); _asset_meaning(asset["meaning"])
+    validate_connection_actor(asset["producer"])
+    if not original and not asset["parent_refs"]:
+        raise AssetBindingError("derived_parent_missing")
+    if not _connection_hash(asset["raw_byte_hash"]) or not _connection_schema(asset["schema"]):
+        raise AssetBindingError("hash_or_schema")
+    if asset["adapter"] is None:
+        if asset["producer"]["kind"] != "researcher": raise AssetBindingError("adapter")
+    elif not _connection_adapter(asset["adapter"]): raise AssetBindingError("adapter")
+
+
+def _asset_transition(history, state, descriptor):
+    _asset_state(state)
+    target = (descriptor.get("content_hash", descriptor["raw_byte_hash"]),
+              descriptor.get("content_domain", "raw-bytes-v1"))
+    if (state["target_content_hash"], state["target_domain"]) != target:
+        raise AssetBindingError("state_target_mismatch")
+    revision = state["state_revision"]
+    if revision in history:
+        if canonical(history[revision]) != canonical(state): raise AssetBindingError("state_revision_conflict")
+        return
+    previous = history[max(history)] if history else None
+    if revision != (previous["state_revision"] + 1 if previous else 1): raise AssetBindingError("state_revision_gap")
+    if previous:
+        changed = any(state[k] != previous[k] for k in ("allowed_purposes", "send_policy", "destinations", "revoked"))
+        if state["policy_revision"] != previous["policy_revision"] + int(changed): raise AssetBindingError("policy_revision")
+        if (not set(state["allowed_purposes"]) <= set(previous["allowed_purposes"])
+                or not set(state["destinations"]) <= set(previous["destinations"])
+                or (previous["revoked"] and not state["revoked"])
+                or (previous["send_policy"] == "prohibited" and state["send_policy"] != "prohibited")
+                or (previous["send_policy"] == "local_only" and state["send_policy"] not in {"local_only", "prohibited"})
+                or (previous["send_policy"] == "permitted_destinations" and state["send_policy"] == "local_only"
+                    and "local" not in previous["destinations"])
+                or (previous["status"] == "adopted" and state["status"] in {"draft", "candidate"})):
+            raise AssetBindingError("permission_widening_or_adopted_downgrade")
+    elif state["policy_revision"] != 1: raise AssetBindingError("policy_revision")
+    history[revision] = state
+
+
+def _asset_producer_link(link, assets):
+    from .analysis_core import _connection_hash
+    _asset_fields(link, ("plan_id", "plan_version", "plan_hash", "generation", "execution_run_id",
+                         "producer_task_id", "output_name", "asset_key"))
+    if (not all(_asset_id(link[k]) for k in ("plan_id", "execution_run_id", "producer_task_id", "output_name"))
+            or any(type(link[k]) is not int or link[k] < 1 for k in ("plan_version", "generation"))
+            or not _connection_hash(link["plan_hash"])):
+        raise AssetBindingError("producer_link")
+    asset = assets.get(_asset_key(link["asset_key"]))
+    if (asset is None or asset.get("execution_run_id") != link["execution_run_id"]
+            or asset.get("producer_task_id") != link["producer_task_id"]
+            or asset["asset_key"]["output_name"] != link["output_name"]):
+        raise AssetBindingError("producer_identity")
+
+
 class AnalysisStore:
     def __init__(self, database_file: Path, connect):
+        self.database_file = Path(database_file).resolve()
         from .obsidian_layout import ObsidianLayout
         from .vault_registry import VaultRegistry
         self.layout = ObsidianLayout(database_file)
@@ -694,6 +898,666 @@ class AnalysisStore:
         if references is None:
             raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")
         return _read_typed_json(content[references["data"]])
+
+    def _connection_content(self, descriptor, *, original=False):
+        """Verify an explicit immutable address; never read a current library item."""
+        _asset_descriptor(descriptor, original=original)
+        key = descriptor["asset_key"]
+        if key["library_id"] != self.library_id(): raise AssetBindingError("foreign_library")
+        snapshot, _result, manifest, content = self.verified_package(key["store_run_id"])
+        if manifest.get("library_id") != key["library_id"] or snapshot.get("library_id") != key["library_id"]:
+            raise AssetBindingError("package_library_mismatch")
+        artifact = next((row for row in self.artifacts(key["store_run_id"])
+                         if row["id"] == key["artifact_id"] and row["name"] == key["output_name"]), None)
+        if artifact is None: raise AssetBindingError("artifact_missing", "needs_input")
+        raw = content[key["output_name"]]
+        if _asset_hash(raw) != descriptor["raw_byte_hash"]: raise AssetBindingError("raw_hash_mismatch")
+        if original:
+            from .analysis_method_registry import connection_method_descriptor
+            native = connection_method_descriptor("pearson")
+            ref = descriptor["source_ref"]
+            expected = {"target_type": "snapshot", "target_id": manifest["input_snapshot_id"],
+                        "version": str(manifest["source_revision"]), "content_hash": _asset_hash(canonical(snapshot)),
+                        "hash_domain": "canonical-json-v1", "library_id": key["library_id"]}
+            if (key["output_name"] != "input.json" or canonical(ref) != canonical(expected)
+                    or descriptor["schema"] != native["native_input_schema"]
+                    or descriptor["adapter"] != native["native_adapter"]):
+                raise AssetBindingError("original_reference_mismatch")
+            if (not isinstance(snapshot.get("analysis"), dict) or not _asset_id(snapshot.get("input_hash"))
+                    or type(snapshot.get("source_revision")) is not int or type(snapshot.get("analysis_revision")) is not int
+                    or snapshot["source_revision"] < 0 or snapshot["analysis_revision"] < 0
+                    or snapshot["source_revision"] != manifest["source_revision"]
+                    or snapshot["analysis_revision"] != manifest["analysis_revision"]):
+                raise AssetBindingError("original_payload_schema")
+        else:
+            dataset = key["output_name"].removeprefix("tables/").removesuffix(".json")
+            if (key["output_name"] != f"tables/{dataset}.json" or dataset not in manifest.get("typed_tables", {})
+                    or descriptor["schema"] != {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                               "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))}
+                    or descriptor["adapter"] != {"adapter_id": "analysis-store-table", "version": "1"}):
+                raise AssetBindingError("table_schema_or_hash", "unsupported")
+            if descriptor["content_hash"] != _asset_hash(raw): raise AssetBindingError("content_hash_mismatch")
+            table = self.read_table(key["store_run_id"], dataset)
+            if set(v["variable_id"] for v in descriptor["variables"]) != {c["name"] for c in table["columns"]}:
+                raise AssetBindingError("table_variable_coverage")
+            for variable in descriptor["variables"]:
+                for row in table["rows"]:
+                    if variable["variable_id"] not in row["values"] or row["values"][variable["variable_id"]] is None:
+                        continue
+                    value = row["values"][variable["variable_id"]]
+                    allowed = {"string": {str}, "number": {int, float}, "integer": {int}, "boolean": {bool}}
+                    if type(value) not in allowed[variable["value_type"]]: raise AssetBindingError("variable_value_type")
+        def check_times(value):
+            if isinstance(value, dict):
+                if value.get("valid_time") is False and any(value.get(k) is not None for k in ("start", "end", "duration")):
+                    raise AssetBindingError("invalid_time_placeholder")
+                for child in value.values(): check_times(child)
+            elif isinstance(value, list):
+                for child in value: check_times(child)
+        check_times(_read_typed_json(raw))
+        scope = descriptor["scope"]
+        if scope["conversation_ids"] != [manifest["conversation_id"]]:
+            raise AssetBindingError("scope_conversation")
+        source = {"target_type": "snapshot", "target_id": manifest["input_snapshot_id"],
+                  "version": str(manifest["source_revision"]), "content_hash": _asset_hash(canonical(snapshot)),
+                  "hash_domain": "canonical-json-v1", "library_id": key["library_id"]}
+        if scope["input_refs"] != [source] or (not original and source not in descriptor["source_refs"]):
+            raise AssetBindingError("scope_input_version")
+        # Only dataset scopes have a storage projection in this wave.
+        if scope["mode"] != "dataset": raise AssetBindingError("scope_projection_unimplemented", "unsupported")
+        evidence = snapshot.get("evidence")
+        if (not isinstance(evidence, list) or any(not isinstance(e, dict) or not _asset_id(e.get("evidence_id"))
+                or type(e.get("excluded")) is not bool for e in evidence)):
+            raise AssetBindingError("scope_population_unavailable", "needs_input")
+        ids = [e["evidence_id"] for e in evidence]
+        if (len(ids) != len(set(ids))
+                or set(scope["member_ids"]) != {e["evidence_id"] for e in evidence if not e["excluded"]}
+                or set(scope["context_ids"]) != {e["evidence_id"] for e in evidence if e["excluded"]}):
+            raise AssetBindingError("scope_population_mismatch")
+        return raw, snapshot
+
+    def _connection_packages(self):
+        with self.connect() as conn:
+            rows = conn.execute("SELECT id FROM analysis_runs WHERE kind=? AND status='completed' ORDER BY id",
+                                (CONNECTION_METADATA_KIND,)).fetchall()
+        packages = []
+        for row in rows:
+            _snapshot, result, _manifest, _content = self.verified_package(row[0])
+            value = result.get("connection_metadata")
+            _asset_fields(value, ("version", "assets", "originals", "states", "producer_links"))
+            if type(value["version"]) is not int or value["version"] != CONNECTION_METADATA_VERSION:
+                raise AssetBindingError("metadata_version", "unsupported")
+            if any(not isinstance(value[k], list) for k in ("assets", "originals", "states", "producer_links")):
+                raise AssetBindingError("metadata_shape")
+            packages.append((row[0], value))
+        return packages
+
+    def _connection_index(self):
+        """State revisions select current permissions, never the latest asset/run."""
+        assets, originals, states, links = {}, {}, {}, []
+        for metadata_run, package in self._connection_packages():
+            for field, target in (("assets", assets), ("originals", originals)):
+                for descriptor in package[field]:
+                    _asset_descriptor(descriptor, original=field == "originals")
+                    key = _asset_key(descriptor["asset_key"])
+                    if key in target and canonical(target[key]) != canonical(descriptor):
+                        raise AssetBindingError("immutable_descriptor_changed")
+                    target[key] = descriptor
+            for state in package["states"]:
+                _asset_state(state); key = _asset_key(state["asset_key"])
+                revision = state["state_revision"]
+                history = states.setdefault(key, {})
+                if revision in history and canonical(history[revision]) != canonical(state):
+                    raise AssetBindingError("state_revision_conflict")
+                history[revision] = state
+            links.extend(package["producer_links"])
+        for key in assets.keys() & originals.keys(): raise AssetBindingError("source_kind_conflict")
+        for key, history in states.items():
+            descriptor = assets.get(key) or originals.get(key)
+            if descriptor is None: raise AssetBindingError("state_target_missing", "needs_input")
+            checked = {}
+            for revision in sorted(history): _asset_transition(checked, history[revision], descriptor)
+        for link in links: _asset_producer_link(link, assets)
+        return assets, originals, states, links
+
+    def save_connection_metadata(self, *, request_id, item_id, snapshot, metadata):
+        """Append a new immutable metadata package via save, without SQL migration.
+
+        This private opt-in route has no human adoption, publication or scheduler.
+        State/policy and review/history bytes are outside the referenced payload.
+        """
+        _asset_fields(metadata, ("version", "assets", "originals", "states", "producer_links"))
+        if type(metadata["version"]) is not int or metadata["version"] != CONNECTION_METADATA_VERSION:
+            raise AssetBindingError("metadata_version", "unsupported")
+        if any(not isinstance(metadata[k], list) for k in ("assets", "originals", "states", "producer_links")):
+            raise AssetBindingError("metadata_shape")
+        with STORE_LOCK:
+            old_assets, old_originals, old_states, _links = self._connection_index()
+            assets, originals = dict(old_assets), dict(old_originals)
+            for field, target in (("assets", assets), ("originals", originals)):
+                keys = []
+                for descriptor in metadata[field]:
+                    self._connection_content(descriptor, original=field == "originals")
+                    key = _asset_key(descriptor["asset_key"]); keys.append(key)
+                    if key in target and canonical(target[key]) != canonical(descriptor):
+                        raise AssetBindingError("immutable_descriptor_changed")
+                    target[key] = descriptor
+                if len(keys) != len(set(keys)): raise AssetBindingError("duplicate_asset")
+            if assets.keys() & originals.keys(): raise AssetBindingError("source_kind_conflict")
+            # Referenced content stays a DAG, even when revisions use old keys.
+            by_artifact = {a["asset_key"]["artifact_id"]: key for key, a in assets.items()}
+            graph = {key: [by_artifact[r["target_id"]] for r in a["parent_refs"] + a.get("supersedes", [])
+                           if r["target_type"] == "artifact" and r["target_id"] in by_artifact]
+                     for key, a in assets.items()}
+            visited, visiting = set(), set()
+            def visit(key):
+                if key in visiting: raise AssetBindingError("content_cycle")
+                if key in visited: return
+                visiting.add(key)
+                for parent in graph.get(key, []): visit(parent)
+                visiting.remove(key); visited.add(key)
+            for key in graph: visit(key)
+            histories = copy.deepcopy(old_states)
+            for state in metadata["states"]: _asset_state(state)
+            for state in sorted(metadata["states"], key=lambda s: s["state_revision"]):
+                key = _asset_key(state["asset_key"])
+                descriptor = assets.get(key) or originals.get(key)
+                if descriptor is None: raise AssetBindingError("state_target_missing", "needs_input")
+                _asset_transition(histories.setdefault(key, {}), state, descriptor)
+            for link in metadata["producer_links"]:
+                _asset_producer_link(link, assets)
+                identity = {k:v for k,v in link.items() if k != "asset_key"}
+                if any(canonical({k:v for k,v in old.items() if k != "asset_key"}) == canonical(identity)
+                       and old["asset_key"] != link["asset_key"] for old in _links):
+                    raise AssetBindingError("producer_mapping_changed")
+            payload = json.loads(canonical(metadata))
+            return self.save(item_id=item_id, kind=CONNECTION_METADATA_KIND, snapshot=snapshot,
+                             result={"schema_version": STORE_VERSION, "parameters": {"metadata_hash": digest(payload)},
+                                     "connection_metadata": payload}, datasets={}, request_id=request_id,
+                             input_fingerprint=digest(snapshot), source_revision=1, analysis_revision=1, publish=False)
+
+    def list_assets(self, *, output_name=None):
+        """Enumerate distinct explicit choices, never choose/recompute/adopt one."""
+        assets, _originals, _states, _links = self._connection_index()
+        rows = []
+        for asset in assets.values():
+            if output_name is not None and asset["asset_key"]["output_name"] != output_name: continue
+            self._connection_content(asset)
+            rows.append(copy.deepcopy(asset))
+        return sorted(rows, key=lambda a: canonical(a["asset_key"]))
+
+    def _connection_parent(self, ref, context, links):
+        source = ref["source"]
+        matches = [link for link in links if all(link[k] == ref[k] for k in ("plan_id", "plan_version", "plan_hash", "generation"))
+                   and link["producer_task_id"] == source["producer_task_id"] and link["output_name"] == source["output_name"]]
+        unique = {digest(link): link for link in matches}
+        if not unique: raise AssetBindingError("parent_mapping_unresolved", "needs_input")
+        if len(unique) != 1: raise AssetBindingError("parent_mapping_ambiguous")
+        link = next(iter(unique.values()))
+        # The mapping is insufficient: the existing persisted producer ledger is authority.
+        try:
+            with self.connect() as conn:
+                task_row = conn.execute("SELECT run_id,state_json FROM orchestration_tasks WHERE task_id=?",
+                                        (link["producer_task_id"],)).fetchone()
+                run_row = conn.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",
+                                       (link["execution_run_id"],)).fetchone()
+                result_row = conn.execute("SELECT raw_json,state_json FROM orchestration_results WHERE task_id=? AND run_id=?",
+                                          (link["producer_task_id"], link["execution_run_id"])).fetchone()
+        except Exception as exc:
+            import sqlite3
+            if isinstance(exc, sqlite3.OperationalError): raise AssetBindingError("parent_ledger_unavailable", "needs_input") from None
+            raise
+        if not task_row or not run_row: raise AssetBindingError("parent_unresolved", "needs_input")
+        task, run = _read_typed_json(task_row["state_json"]), _read_typed_json(run_row[0])
+        if task.get("status") in {"failed", "cancelled", "quarantined", "blocked"}:
+            raise AssetBindingError("parent_failed", "blocked")
+        if task.get("status") != "succeeded" or not result_row: raise AssetBindingError("parent_unresolved", "needs_input")
+        expected = {k: ref[k] for k in ("plan_id", "plan_version", "plan_hash", "generation")}
+        if (task_row["run_id"] != link["execution_run_id"] or task.get("task_id") != link["producer_task_id"]
+                or task.get("run_id") != link["execution_run_id"] or type(task.get("generation")) is not int
+                or task["generation"] != ref["generation"]
+                or canonical(run.get("asset_plan_identity")) != canonical(expected)):
+            raise AssetBindingError("parent_plan_identity")
+        raw, state = _read_typed_json(result_row[0]), _read_typed_json(result_row[1])
+        if (state.get("validation_status") != "valid" or state.get("raw_hash") != _asset_hash(canonical(raw))
+                or state.get("task_id") != link["producer_task_id"] or state.get("run_id") != link["execution_run_id"]):
+            raise AssetBindingError("parent_result_integrity")
+        return link["asset_key"]
+
+    def bind_asset_inputs(self, *, slot, inputs, context, method_id, assess=None):
+        """Read/resolve/revalidate only; eligibility never executes or adopts."""
+        from .analysis_core import validate_connection_slot, assess_connection_inputs, _connection_hash
+        from .analysis_method_registry import connection_method_descriptor
+        base = {"version": "analysis-asset-bindings-1", "execution_enabled": False, "adoption_performed": False,
+                "bindings": [], "payloads": [], "decision": "needs_input", "reason": "unresolved"}
+        try:
+            slot = validate_connection_slot(slot)
+            _asset_fields(context, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id",
+                                    "purpose", "destination", "scope_id", "scope_manifest_hash", "cancelled"))
+            from .analysis_core import CONNECTION_PURPOSES
+            if (not all(_asset_id(context[k]) for k in ("plan_id", "consumer_task_id", "destination", "scope_id"))
+                    or context["purpose"] not in CONNECTION_PURPOSES or type(context["cancelled"]) is not bool
+                    or any(type(context[k]) is not int or context[k] < 1 for k in ("plan_version", "generation"))
+                    or not all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash"))):
+                raise AssetBindingError("context")
+            if context["cancelled"]: raise AssetBindingError("cancelled", "blocked")
+            descriptor = connection_method_descriptor(method_id)
+            if descriptor is None: raise AssetBindingError("method_unregistered")
+            if not isinstance(inputs, list): raise AssetBindingError("inputs")
+            assets, originals, states, links = self._connection_index()
+            envelopes, permissions, seen = [], [], set()
+            base["parent_checks"] = []
+            walked = set()
+            def parent_permissions(asset, original, visiting=()):
+                key = _asset_key(asset["asset_key"])
+                if key in visiting: raise AssetBindingError("content_cycle")
+                if key in walked: return
+                self._connection_content(asset, original=original)
+                history = states.get(key, {})
+                if not history: raise AssetBindingError("parent_state_unknown", "needs_input")
+                state = history[max(history)]
+                if state["revoked"] or state["status"] in {"rejected", "retired", "stale", "unavailable"}:
+                    raise AssetBindingError("parent_state_unavailable", "blocked")
+                if state["status"] != "adopted": raise AssetBindingError("parent_not_adopted", "human_pending")
+                if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
+                    raise AssetBindingError("parent_human_unverified", "human_pending")
+                if (asset["scope"]["scope_id"], asset["scope"]["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
+                    raise AssetBindingError("parent_scope_intersection", "blocked")
+                permissions.append(state)
+                base["parent_checks"].append({"asset_key": asset["asset_key"], "target_content_hash": state["target_content_hash"],
+                                              "target_domain": state["target_domain"], "state_revision": state["state_revision"],
+                                              "policy_revision": state["policy_revision"]})
+                for parent_ref in asset.get("parent_refs", []):
+                    if parent_ref["target_type"] == "artifact":
+                        matches = [a for a in assets.values() if a["asset_key"]["artifact_id"] == parent_ref["target_id"]
+                                   and str(a["schema"]["version"]) == parent_ref["version"]
+                                   and a["content_hash"] == parent_ref["content_hash"] and a["content_domain"] == parent_ref["hash_domain"]
+                                   and parent_ref.get("library_id") == a["asset_key"]["library_id"]]
+                        parent_original = False
+                    elif parent_ref["target_type"] == "snapshot":
+                        matches = [a for a in originals.values() if canonical(a["source_ref"]) == canonical(parent_ref)]
+                        parent_original = True
+                    else: raise AssetBindingError("parent_reference_unimplemented", "unsupported")
+                    if len(matches) != 1: raise AssetBindingError("parent_reference_unresolved", "needs_input")
+                    parent_permissions(matches[0], parent_original, visiting + (key,))
+                walked.add(key)
+            for ref in inputs:
+                _asset_fields(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id",
+                                    "slot_id", "input_ref_id", "role", "selection", "omission_reason"), ("source", "selector"))
+                if (any(ref[k] != context[k] or type(ref[k]) is not type(context[k]) for k in
+                        ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id"))
+                        or ref["slot_id"] != slot["slot_id"] or not _asset_id(ref["input_ref_id"])
+                        or ref["input_ref_id"] in seen or ref["role"] not in slot["roles"]):
+                    raise AssetBindingError("input_identity")
+                seen.add(ref["input_ref_id"])
+                if ref["selection"] == "omitted":
+                    if slot["required"] or "source" in ref or "selector" in ref or not _asset_id(ref["omission_reason"]):
+                        raise AssetBindingError("illegal_omission")
+                    continue
+                if ref["selection"] != "selected" or ref["omission_reason"] is not None:
+                    raise AssetBindingError("selection")
+                if "source" not in ref or "selector" not in ref: raise AssetBindingError("selected_unresolved", "needs_input")
+                source = ref["source"]; selector = ref["selector"]
+                _asset_fields(selector, ("row_ids", "column_ids", "range_ref", "selection_hash"))
+                if (not _asset_ids(selector["row_ids"]) or not _asset_ids(selector["column_ids"])
+                        or (selector["range_ref"] is not None and not _asset_ref(selector["range_ref"]))
+                        or selector["selection_hash"] != _asset_hash(canonical({k: v for k, v in selector.items() if k != "selection_hash"}))):
+                    raise AssetBindingError("selector")
+                if not isinstance(source, dict): raise AssetBindingError("source")
+                original = source.get("type") == "original"
+                if original:
+                    _asset_fields(source, ("type", "source_ref"))
+                    from .analysis_core import _connection_source_ref
+                    if not _connection_source_ref(source["source_ref"]): raise AssetBindingError("source_ref")
+                    if source["source_ref"]["target_type"] != "snapshot":
+                        raise AssetBindingError("original_type_unimplemented", "unsupported")
+                    matches = [a for a in originals.values() if canonical(a["source_ref"]) == canonical(source["source_ref"])]
+                    if not matches: raise AssetBindingError("original_unresolved", "needs_input")
+                    if len(matches) != 1: raise AssetBindingError("original_ambiguous")
+                    asset = matches[0]; key = asset["asset_key"]
+                elif source.get("type") == "frozen":
+                    _asset_fields(source, ("type", "asset_key", "content_hash", "content_domain"))
+                    key = source["asset_key"]; key_id = _asset_key(key)
+                    if key["library_id"] != self.library_id(): raise AssetBindingError("foreign_library")
+                    asset = assets.get(key_id)
+                    if not asset: raise AssetBindingError("asset_unresolved", "needs_input")
+                    if (source["content_hash"], source["content_domain"]) != (asset["content_hash"], asset["content_domain"]):
+                        raise AssetBindingError("content_target_mismatch")
+                elif source.get("type") == "from_step":
+                    _asset_fields(source, ("type", "producer_task_id", "output_name"))
+                    if not all(_asset_id(source[k]) for k in ("producer_task_id", "output_name")):
+                        raise AssetBindingError("from_step")
+                    if source["producer_task_id"] == context["consumer_task_id"]: raise AssetBindingError("task_cycle")
+                    key = self._connection_parent(ref, context, links); asset = assets.get(_asset_key(key))
+                    if not asset: raise AssetBindingError("parent_not_saved", "needs_input")
+                else: raise AssetBindingError("source_type")
+                raw, snapshot = self._connection_content(asset, original=original)
+                key_id = _asset_key(key)
+                history = states.get(key_id, {})
+                if not history: raise AssetBindingError("state_unknown", "needs_input")
+                state = history[max(history)]
+                if state["target_content_hash"] != asset.get("content_hash", asset["raw_byte_hash"]) or state["target_domain"] != asset.get("content_domain", "raw-bytes-v1"):
+                    raise AssetBindingError("state_target_mismatch")
+                if state["revoked"] or state["status"] in {"rejected", "retired", "stale", "unavailable"}:
+                    raise AssetBindingError("state_unavailable", "blocked")
+                if state["status"] != "adopted": raise AssetBindingError("not_adopted", "human_pending")
+                if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
+                    # No trusted human-record adoption seam exists in this wave.
+                    raise AssetBindingError("human_record_unverified", "human_pending")
+                if asset["meaning"]["status"] != "declared": raise AssetBindingError("meaning_unknown", "human_pending")
+                if context["purpose"] == "confirmatory" and not original and any(v["validity"] != "human_reviewed" for v in asset["variables"]):
+                    raise AssetBindingError("variable_review_unconfirmed", "human_pending")
+                scope = asset["scope"]
+                if (scope["scope_id"], scope["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
+                    raise AssetBindingError("scope_mismatch")
+                if selector["range_ref"] is not None: raise AssetBindingError("range_adapter_unimplemented", "unsupported")
+                if original:
+                    if selector["row_ids"] or selector["column_ids"]: raise AssetBindingError("original_selector_unimplemented", "unsupported")
+                    payload = _read_typed_json(raw)
+                else:
+                    payload = _read_typed_json(raw)
+                    rows = {r["row_id"]: r for r in payload["rows"]}; columns = {c["name"] for c in payload["columns"]}
+                    if not set(selector["row_ids"]) <= rows.keys() or not set(selector["column_ids"]) <= columns:
+                        raise AssetBindingError("selector_id")
+                    if selector["row_ids"]: payload["rows"] = [rows[r] for r in selector["row_ids"]]
+                    if selector["column_ids"]:
+                        keep = set(selector["column_ids"]); payload["fields"] = list(selector["column_ids"])
+                        payload["columns"] = [c for c in payload["columns"] if c["name"] in keep]
+                        payload["rows"] = [{**r, "values": {k: v for k, v in r["values"].items() if k in keep}} for r in payload["rows"]]
+                    payload["row_count"] = len(payload["rows"])
+                    # Projection has its own counts; source row IDs and raw bytes stay fixed.
+                    for column in payload["columns"]:
+                        name = column["name"]; selected_values = [r["values"] for r in payload["rows"]]
+                        column.update(observed_types=sorted({_table_value_type(r[name]) for r in selected_values if name in r}),
+                                      absent_count=sum(name not in r for r in selected_values),
+                                      null_count=sum(name in r and r[name] is None for r in selected_values))
+                payload_raw = canonical(payload)
+                if len(payload_raw) > slot["max_bytes"]: raise AssetBindingError("payload_byte_limit", "needs_input")
+                permissions.append(state)
+                parent_permissions(asset, original)
+                content_hash = asset.get("content_hash", asset["source_ref"]["content_hash"] if original else None)
+                domain = asset.get("content_domain", asset["source_ref"]["hash_domain"] if original else None)
+                binding_source = asset["source_ref"] if original else key
+                identity = {"input": ref, "source": binding_source, "content_hash": content_hash, "content_domain": domain,
+                            "selection_hash": selector["selection_hash"], "schema": asset["schema"]}
+                binding = {"source_type": "original" if original else "artifact", "binding_id": _asset_hash(canonical(identity)),
+                           "input_ref_id": ref["input_ref_id"], "source": copy.deepcopy(binding_source),
+                           "content_hash": content_hash, "content_domain": domain, "selection_hash": selector["selection_hash"],
+                           "schema": copy.deepcopy(asset["schema"]), "checked_state_revision": state["state_revision"],
+                           "checked_policy_revision": state["policy_revision"], "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                           "decision": "unsupported", "reason": "consumer_adapter_unimplemented"}
+                base["bindings"].append(binding)
+                base["payloads"].append({"input_ref_id": ref["input_ref_id"], "payload_hash": _asset_hash(payload_raw),
+                                         "payload_domain": "canonical-json-v1", "bytes": len(payload_raw), "value": payload})
+                candidate = {"source_type": "original" if original else "artifact", "schema": asset["schema"],
+                             "unit": asset["meaning"]["unit"], "scope_mode": scope["mode"], "scope_policy": "all_included_initial",
+                             "actor": asset["producer"], "adapter": asset["adapter"], "purpose": context["purpose"],
+                             "meaning_status": asset["meaning"]["status"], "human_review_state": "structural_checked"}
+                candidate.update({"source_ref": asset["source_ref"]} if original else
+                                 {"kind": asset["kind"], "content_hash": content_hash, "content_domain": domain})
+                envelopes.append({"input_ref_id": ref["input_ref_id"], "selection": "selected", "role": ref["role"],
+                                  "omission_reason": None, "candidate": candidate})
+            if not envelopes: raise AssetBindingError("omitted_or_empty", "needs_input")
+            purposes = set.intersection(*(set(s["allowed_purposes"]) for s in permissions))
+            if context["purpose"] not in purposes: raise AssetBindingError("purpose_intersection", "blocked")
+            if any(s["send_policy"] == "prohibited" or (s["send_policy"] == "local_only" and context["destination"] != "local")
+                   or (s["send_policy"] == "permitted_destinations" and context["destination"] not in s["destinations"]) for s in permissions):
+                raise AssetBindingError("destination_intersection", "blocked")
+            total = sum(p["bytes"] for p in base["payloads"])
+            if total > slot["max_bytes"]: raise AssetBindingError("payload_byte_limit", "needs_input")
+            checked = assess(envelopes) if assess else assess_connection_inputs(slot, envelopes, descriptor)
+            base["parent_checks"].sort(key=lambda row: canonical(row["asset_key"]))
+            _new_assets, _new_originals, current_states, _new_links = self._connection_index()
+            for check in base["parent_checks"]:
+                current_history = current_states.get(_asset_key(check["asset_key"]), {})
+                current_state = current_history[max(current_history)] if current_history else {}
+                if any(current_state.get(k) != check[k] for k in
+                       ("target_content_hash", "target_domain", "state_revision", "policy_revision")):
+                    raise AssetBindingError("state_changed_during_resolution", "blocked")
+            base.update(decision=checked["decision"], reason=checked["reason"], content_resolution=True,
+                        state_policy_pre_adoption=True, actual_payload_bytes=total,
+                        authority_check="registry_callback" if assess else "metadata_only",
+                        effective_permissions={"purposes": sorted(purposes), "destination": context["destination"]},
+                        input_refs_hash=_asset_hash(canonical(inputs)), context_hash=_asset_hash(canonical(context)))
+            for binding in base["bindings"]: binding.update(decision=base["decision"], reason=base["reason"])
+            if base["decision"] not in {"eligible", "unsupported"}:
+                base["payloads"] = []
+            return base
+        except AssetBindingError as exc:
+            base.update(decision=exc.decision, reason=exc.reason)
+        except (ValueError, TypeError, KeyError, OSError):
+            base.update(decision="rejected", reason="invalid_or_unverified")
+        # Failed checks never deliver a partial payload.
+        base["payloads"] = []
+        for binding in base["bindings"]: binding.update(decision=base["decision"], reason=base["reason"])
+        return base
+
+    def prepare_table_pilot(self, method_id, request, *, expected_snapshot=None):
+        """Resolve a bounded frozen table; no adoption, scheduler or inferred metadata."""
+        from .analysis_core import validate_table_pilot_request, AnalysisContractError, fingerprint
+        request = validate_table_pilot_request(method_id, request)
+        binding = request["bindings"]
+        context = binding["context"]
+        if context["purpose"] not in {"descriptive", "exploratory"} or context["destination"] != "local":
+            raise AnalysisContractError("局所記述・探索専用です。", code="table_policy_unsupported")
+        receipt = self.bind_asset_inputs(method_id=method_id, **binding)
+        if receipt["decision"] != "eligible":
+            raise AnalysisContractError("固定表を利用できません。", code="table_input_" + receipt["reason"])
+        assets = self._connection_index()[0]
+        tables = []
+        for resolved, delivered in zip(receipt["bindings"], receipt["payloads"]):
+            asset = assets[_asset_key(resolved["source"])]
+            _raw, original = self._connection_content(asset)
+            if expected_snapshot is not None:
+                for key in ("input_hash", "conversation_id", "source_revision", "analysis_revision"):
+                    if original.get(key) != expected_snapshot.get(key):
+                        raise AnalysisContractError("表の元入力版が異なります。", code="table_source_mismatch")
+                if fingerprint(original.get("evidence")) != fingerprint(expected_snapshot.get("evidence")):
+                    raise AnalysisContractError("発話集合が異なります。", code="table_source_mismatch")
+            ref = next(r for r in binding["inputs"] if r["input_ref_id"] == resolved["input_ref_id"])
+            if ref["selector"]["row_ids"] or ref["selector"]["column_ids"]:
+                raise AnalysisContractError("部分選択は登録projectionで指定してください。", code="table_selector_unsupported")
+            if any(v["unit"] != "utterance" for v in asset["variables"]):
+                raise AnalysisContractError("変数の単位が異なります。", code="table_variable_unit")
+            value = delivered["value"]
+            fields = value["fields"]
+            base = {"utterance_id", "conversation_id", "value_status"}
+            if not base <= set(fields):
+                raise AnalysisContractError("発話単位の基底列がありません。", code="table_base_columns")
+            provenance_excluded = set()
+            if asset["method_id"] in {"table_projection", "table_aggregate", "table_join"}:
+                verified_descriptor = self.table_pilot_output_descriptor(asset["asset_key"]["store_run_id"])
+                if verified_descriptor != asset:
+                    raise AnalysisContractError("producer記録とdescriptorが異なります。", code="table_producer_mismatch")
+                producer_result = self.verified_package(asset["asset_key"]["store_run_id"])[1]
+                provenance_excluded = set(producer_result["population"]["excluded_ids"])
+            evidence = original["evidence"]
+            originals = {e.get("utterance_id", e["evidence_id"]): e for e in evidence}
+            seen = set()
+            measured = [request["parameters"][k] for k in ("value_column", "row_column", "column_column")
+                        if k in request["parameters"]]
+            if not set(measured) <= set(fields):
+                raise AnalysisContractError("登録列がありません。", code="table_variable_missing")
+            if method_id == "table_projection" and not set(request["parameters"]["columns"]) <= set(fields):
+                raise AnalysisContractError("projection列がありません。", code="table_variable_missing")
+            for row in value["rows"]:
+                v = row["values"]; uid = v.get("utterance_id")
+                if (not isinstance(uid, str) or not uid or uid in seen or uid not in originals
+                        or v.get("conversation_id") != original["conversation_id"]
+                        or v.get("value_status") not in {"observed", "excluded", "missing", "unprocessed", "unknown"}
+                        or ((v["value_status"] == "excluded") != (originals[uid]["excluded"] or uid in provenance_excluded))):
+                    raise AnalysisContractError("発話ID・状態・会話が不正です。", code="table_row_identity")
+                status = v["value_status"]
+                if ((status == "observed" and any(c not in v or v[c] is None for c in measured))
+                        or (status in {"missing", "unprocessed", "unknown"} and any(v.get(c) is not None for c in measured))):
+                    raise AnalysisContractError("状態と測定値が矛盾しています。", code="table_status_value")
+                seen.add(uid)
+            if seen != set(originals):
+                raise AnalysisContractError("未処理発話も明示してください。", code="table_population_incomplete")
+            tables.append({"table": copy.deepcopy(value), "variables": copy.deepcopy(asset["variables"]),
+                           "scope": copy.deepcopy(asset["scope"])})
+        if method_id == "table_join":
+            if tables[0]["scope"] != tables[1]["scope"]:
+                raise AnalysisContractError("結合対象の範囲が異なります。", code="table_join_scope")
+            left = {r["values"]["utterance_id"]: r["values"] for r in tables[0]["table"]["rows"]}
+            right = {r["values"]["utterance_id"]: r["values"] for r in tables[1]["table"]["rows"]}
+            if left.keys() != right.keys() or any(
+                    (left[i]["conversation_id"], left[i]["value_status"]) !=
+                    (right[i]["conversation_id"], right[i]["value_status"]) for i in left):
+                raise AnalysisContractError("結合の人口・会話・状態が異なります。", code="table_join_population")
+            if (set(tables[0]["table"]["fields"]) & set(tables[1]["table"]["fields"])) - {"utterance_id", "conversation_id", "value_status"}:
+                raise AnalysisContractError("非基底列が衝突します。", code="table_join_columns")
+        from .analysis_core import TABLE_PILOT_MAX_BYTES
+        if len(canonical(tables)) > TABLE_PILOT_MAX_BYTES:
+            raise AnalysisContractError("実payloadのUTF8上限を超えました。", code="table_payload_byte_limit")
+        return {"request": request, "receipt": receipt, "tables": tables,
+                "content_hash": fingerprint(tables)}
+
+    def table_pilot_carrier(self, raw, prepared):
+        """Persist primitive utterance carriers with explicit projection omissions."""
+        from .analysis_core import AnalysisContractError, fingerprint
+        method = raw["method_id"]
+        if method not in {"table_projection", "table_aggregate", "table_join"}:
+            return raw["datasets"]["table"], None
+        output = raw["datasets"]["table"]
+        fields = [f for f in output["fields"] if f != "source_utterance_ids"]
+        base = {"utterance_id", "conversation_id", "value_status"}
+        if not base <= set(fields):
+            raise AnalysisContractError("再利用表に基底列がありません。", code="table_carrier_columns")
+        by_uid = {}
+        for row in output["rows"]:
+            uid = row["utterance_id"]
+            if uid in by_uid or row["source_utterance_ids"] != [uid]:
+                raise AnalysisContractError("再利用表の発話対応が不正です。", code="table_carrier_identity")
+            by_uid[uid] = {k: row[k] for k in fields}
+        original = prepared["tables"][0]["table"]["rows"]
+        originals = {r["values"]["utterance_id"]: r for r in original}
+        if method == "table_projection":
+            selection = set(prepared["request"]["parameters"]["row_ids"])
+            expected = {r["values"]["utterance_id"] for r in original if r["row_id"] in selection}
+            if set(by_uid) != expected:
+                raise AnalysisContractError("projection結果が選択と異なります。", code="table_carrier_selection")
+            for uid in originals.keys() - by_uid.keys():
+                by_uid[uid] = {k: originals[uid]["values"].get(k) for k in fields}
+                by_uid[uid]["value_status"] = "excluded"
+        elif set(by_uid) != set(originals):
+            raise AnalysisContractError("結合・集計が発話を失いました。", code="table_carrier_population")
+        rows = [by_uid[uid] for uid in sorted(by_uid)]
+        variables = {}
+        for table in prepared["tables"]:
+            for variable in table["variables"]:
+                if variable["variable_id"] in fields: variables.setdefault(variable["variable_id"], copy.deepcopy(variable))
+        if method == "table_aggregate":
+            actor = {"kind": "code", "actor_id": "table-pilot-1", "step_ids": [method]}
+            definition = {"target_type": "definition", "target_id": "table-pilot-count-1", "version": "1",
+                          "content_hash": fingerprint({"method": method, "parameters": prepared["request"]["parameters"]}),
+                          "hash_domain": "canonical-json-v1"}
+            variables["count"] = {"variable_id": "count", "version": 1, "definition_hash": definition["content_hash"],
+                "value_type": "integer", "scale": "ratio", "unit": "utterance", "value_domain": "observed_indicator",
+                "generation": actor, "validity": "structural_checked", "definition_ref": definition}
+        if set(variables) != set(fields):
+            raise AnalysisContractError("再利用変数が未定義です。", code="table_carrier_variables")
+        parents = [{"target_type": "artifact", "target_id": b["source"]["artifact_id"], "version": "1",
+                    "content_hash": b["content_hash"], "hash_domain": b["content_domain"],
+                    "library_id": b["source"]["library_id"]} for b in prepared["receipt"]["bindings"]]
+        exclusion_reasons = {}
+        for parent in prepared["receipt"]["bindings"]:
+            _snapshot, parent_result, _manifest, _content = self.verified_package(parent["source"]["store_run_id"])
+            prior = parent_result.get("parameters", {}).get("table_pilot_provenance") or {}
+            exclusion_reasons.update(prior.get("exclusion_reasons", {}))
+        for uid in raw["population"]["excluded_ids"]:
+            exclusion_reasons.setdefault(uid, "registered_projection_omission" if
+                method == "table_projection" and originals[uid]["row_id"] not in set(prepared["request"]["parameters"]["row_ids"])
+                and originals[uid]["values"]["value_status"] != "excluded" else "original_input_excluded")
+        exclusion_reasons = {i:exclusion_reasons[i] for i in raw["population"]["excluded_ids"]}
+        provenance = {"version": "table-pilot-1", "method_id": method, "scope": prepared["tables"][0]["scope"],
+                      "exclusion_reasons": exclusion_reasons,
+                      "variables": [variables[k] for k in fields], "parent_refs": parents,
+                      "carrier_hash": fingerprint(rows), "population_hash": fingerprint(raw["population"])}
+        return {"fields": fields, "rows": rows}, provenance
+
+    def table_pilot_output_descriptor(self, run_id):
+        """Verified technical descriptor only. Caller must explicitly supply state."""
+        from .analysis_core import AnalysisContractError, fingerprint
+        snapshot, result, manifest, content = self.verified_package(run_id)
+        provenance = result.get("parameters", {}).get("table_pilot_provenance")
+        if (not isinstance(provenance, dict) or provenance.get("version") != "table-pilot-1"
+                or result.get("method_id") not in {"table_projection", "table_aggregate", "table_join"}
+                or provenance.get("method_id") != result["method_id"] or result.get("method_version") != "table-pilot-1"
+                or result.get("manifest", {}).get("rows_hash") != fingerprint(result["datasets"]["table"]["rows"])
+                or provenance.get("population_hash") != fingerprint(result["population"])
+                or not isinstance(provenance.get("exclusion_reasons"), dict)
+                or set(provenance["exclusion_reasons"]) != set(result["population"]["excluded_ids"])
+                or any(not isinstance(v, str) or not v for v in provenance["exclusion_reasons"].values())):
+            raise AnalysisContractError("再利用producerは未対応です。", code="table_producer_unsupported")
+        parameters = result["parameters"]
+        with self.connect() as connection:
+            execution = connection.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",
+                                           (parameters.get("execution_run_id"),)).fetchone()
+            task_row = connection.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                          (parameters.get("task_id"), parameters.get("execution_run_id"))).fetchone()
+            raw_row = connection.execute("SELECT state_json FROM orchestration_results WHERE task_id=? AND run_id=?",
+                                         (parameters.get("task_id"), parameters.get("execution_run_id"))).fetchone()
+        execution = _read_typed_json(execution[0]) if execution else {}
+        task = _read_typed_json(task_row[0]) if task_row else {}
+        receipt = _read_typed_json(raw_row[0]) if raw_row else {}
+        original_raw = {k:v for k,v in result.items() if k != "parameters"}
+        if (execution.get("cancel_requested") or execution.get("status") == "cancelled"
+                or task.get("status") != "succeeded" or task.get("validation_status") != "valid"
+                or task.get("table_store_run_id") != run_id or task.get("method_id") != result["method_id"]
+                or receipt.get("validation_status") != "valid" or receipt.get("result_id") != task.get("result_id")
+                or receipt.get("raw_hash") != fingerprint(original_raw)):
+            raise AnalysisContractError("producerは未検証・停止しています。", code="table_producer_unvalidated")
+        table = self.read_table(run_id, "table")
+        if provenance["carrier_hash"] != fingerprint([r["values"] for r in table["rows"]]):
+            raise AnalysisContractError("再利用carrierが異なります。", code="table_carrier_hash")
+        artifact = next(a for a in manifest["artifacts"] if a["name"] == "tables/table.json")
+        raw_hash = _asset_hash(content["tables/table.json"])
+        return {"asset_key": {"library_id": manifest["library_id"], "store_run_id": run_id,
+                             "artifact_id": artifact["id"], "output_name": "tables/table.json"},
+            "raw_byte_hash": raw_hash, "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                                "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))},
+            "scope": copy.deepcopy(provenance["scope"]),
+            "producer": {"kind": "code", "actor_id": "table-pilot-1", "step_ids": [result["method_id"]]},
+            "adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+            "meaning": {"definition_refs": [], "description": "Registered utterance table carrier; semantic review unanswered",
+                        "status": "declared", "unit": "utterance"},
+            "contract_id": "gurumoji.analysis-asset-connection", "contract_version": 1,
+            "content_hash": raw_hash, "content_domain": "raw-bytes-v1", "kind": "observation_table",
+            "source_refs": copy.deepcopy(provenance["scope"]["input_refs"]),
+            "method_id": result["method_id"], "method_version": "table-pilot-1",
+            "variables": copy.deepcopy(provenance["variables"]), "parent_refs": copy.deepcopy(provenance["parent_refs"])}
+
+    def revalidate_table_pilot(self, prepared, *, expected_snapshot=None):
+        from .analysis_core import AnalysisContractError
+        request = prepared["request"]
+        checked = self.revalidate_asset_inputs(prepared["receipt"], method_id=prepared.get("method_id", ""),
+                                               **request["bindings"])
+        if checked["decision"] != "eligible":
+            raise AnalysisContractError("表の状態・権限が変わりました。", code="table_policy_changed")
+        current = self.prepare_table_pilot(prepared["method_id"], request, expected_snapshot=expected_snapshot)
+        if current["content_hash"] != prepared["content_hash"]:
+            raise AnalysisContractError("表の内容が変わりました。", code="table_content_changed")
+        return current
+
+    def revalidate_asset_inputs(self, previous, **request):
+        current = self.bind_asset_inputs(**request)
+        fields = ("binding_id", "content_hash", "content_domain", "selection_hash", "schema",
+                  "checked_state_revision", "checked_policy_revision")
+        valid_previous = (isinstance(previous, dict) and previous.get("version") == "analysis-asset-bindings-1"
+                          and previous.get("decision") in {"eligible", "unsupported"}
+                          and previous.get("execution_enabled") is False and previous.get("adoption_performed") is False
+                          and isinstance(previous.get("bindings"), list)
+                          and all(isinstance(b, dict) and set(fields) <= set(b) for b in previous["bindings"]))
+        if (not valid_previous or current.get("decision") not in {"eligible", "unsupported"}
+                or previous.get("context_hash") != current.get("context_hash")
+                or previous.get("input_refs_hash") != current.get("input_refs_hash")
+                or previous.get("parent_checks") != current.get("parent_checks")
+                or [{k: b[k] for k in fields} for b in previous.get("bindings", [])]
+                    != [{k: b[k] for k in fields} for b in current["bindings"]]):
+            current.update(decision="blocked", reason="pre_adoption_revalidation_changed", payloads=[])
+        current["adoption_performed"] = False
+        return current
 
     def _publication_scope(self, run: dict, result: dict, targets: list[str] | None) -> list[str]:
         if run["kind"] in {"milestone_analysis", "autonomous_analysis"}:

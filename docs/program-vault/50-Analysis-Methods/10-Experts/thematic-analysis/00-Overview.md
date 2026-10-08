@@ -43,3 +43,8 @@ tags:
 
 - [[50-Analysis-Methods/05-Qualitative/01-Qualitative-Coding]]：初期コードとテーマの候補を研究者が記録する。
 - [[50-Analysis-Methods/02-Semantic-and-Audio/01-Transformer-Topics]]：名前が似ているが別の手法。
+
+
+## スキル対応と知識充足の入口（提案）
+
+[[50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding|段階別のスキル・hook対応登録案]] と [[50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness|17専門家の充足・不足表]]。currentPackは暫定維持し、08の実行readerは未接続。研究者の採否は未確認として保持する。

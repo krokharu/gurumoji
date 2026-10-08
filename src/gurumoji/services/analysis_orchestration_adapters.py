@@ -1,7 +1,7 @@
 """Real provider boundary for the durable Core/Handler loop.
 
 The Handler owns execution. This adapter only resolves existing credentials and
-performs one schema-constrained call; it never dispatches tools or writes labels.
+performs bounded schema-constrained calls; it never dispatches analyses or writes labels.
 Display/polling paths do not enter this module's runner.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from ..analysis_core import AnalysisContractError
 
-ADAPTER_VERSION = "core-handler-prompts-4-minimum-iterations"
+ADAPTER_VERSION = "core-handler-prompts-10-statistical-delivery"
 AI_ROLES = ("core", "interpretation", "verification", "critic")
 PROVIDERS = {"lmstudio", "openai", "google"}
 
@@ -37,7 +37,7 @@ INTENT = _object({
     "role": {"type": "string", "enum": ["interpretation", "statistics", "verification", "critic"]},
     "kind": {"type": "string", "enum": ["analysis", "clarification"]}, "result_id": TEXT,
     "initial_sections": _array(TEXT, 12),
-    "question": TEXT, "why_now": TEXT, "success_criteria": TEXT,
+    "question": TEXT, "why_now": TEXT, "success_criteria": TEXT, "expert_id": TEXT,
     "method_id": TEXT, "label_field": TEXT, "evidence_ids": IDS, "importance": IMPORTANCE,
     "importance_reason": TEXT, "dependencies": IDS,
     "label_dependent": {"type": "boolean"}, "replicate_id": TEXT,
@@ -95,11 +95,18 @@ ROLE_PROMPTS = {
 Handlerだけが正式タスクを作成し発注・保存します。初期版は参考資料で正解ではありません。
 既存結果の説明を尋ねる対話はkind=clarificationと保存済みresult_idを指定します。
 初期版の参照はresult_id=initial.initial_idと必要なinitial_sectionsを索引から選びます。
+expert_catalogがある場合、会話解釈には問いに適したexpert_idを一覧から選びます。
+Handlerがその専門家のObsidian知識と入出力契約を渡します。Coreが全分野の本文を抱える必要はありません。
+statistics・verification・criticにはexpert_id=""を指定します。一覧がない場合もexpert_id=""です。
 初期節の読取は追加計算ではありません。通常の結果対話・分析ではinitial_sections=[]です。
 新しい計算はkind=analysis、result_idは空文字です。対話の中で追加処理を直接開始しません。
 現在最も支持される説明、代替説明、合わない証拠を統合し、変化の理由をsummaryに書きます。
 intentsのsuccess_criteriaは望む答えではなく、答えるために何を確かめるかです。
-statisticsのmethod_idはparticipation、conversation_dynamics、label_frequencyだけが実行可能です。
+statisticsのmethod_idはparticipation、conversation_dynamics、label_frequency、descriptive_statistics、frequency_statistics、crosstabs、anova、kruskal_wallis、chi_square、pearson、spearmanが実行可能です。
+統計分野の専門家へもrole=interpretationとそのexpert_idで発注します。専門家のanalysis_requestsは提案であり、必要性を判断してstatisticsへ正式に発注します。
+計算後は同じ専門家へ、計算task_idをdependenciesに指定して結果説明を発注します。needs_calculationは計算成功や分析完了ではありません。
+statistical_review_gateがhuman_pendingなら、専門家候補と計算提案だけを参照しclaims=[]を保ちます。
+コードの数値一致、Core採用、criticの自己申告は研究者の確認を代行しません。確認待ちを確定根拠へ昇格しません。
 statistics以外のintentsではmethod_idとlabel_fieldを空文字にしてください。解釈担当へ統計手法を指定しないでください。
 participationとconversation_dynamicsは初期全範囲の決定的集計で、部分範囲・変更ラベルの再計算には使えません。
 この2手法ではevidence_idsを空にし、label_dependent=falseにします。未対応の計算は未実施と残します。
@@ -198,6 +205,42 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         if provider != "lmstudio" and not api_key:
             raise AnalysisContractError("選択したAIのAPIキーが未設定です。", code="provider_unavailable")
         schema = copy.deepcopy(CORE_SCHEMA if role == "core" else CRITIC_SCHEMA if role == "critic" else SPECIALIST_SCHEMA)
+        expert_prompt = ""
+        role_prompt = ROLE_PROMPTS[role]
+        if role == "verification":
+            from .expert_agents import bind_evidence_ids
+            bind_evidence_ids(schema, [row["evidence_id"] for row in context.get("raw_evidence", [])])
+        if "expert_catalog" in context:
+            allowed_experts = [entry["expert_id"] for entry in context["expert_catalog"]["experts"]]
+            schema["properties"]["intents"]["items"]["properties"]["expert_id"] = {"type": "string", "enum": ["", *allowed_experts]}
+        if role == "core" and context.get("statistical_review_gate", {}).get("status") == "human_pending":
+            schema["properties"]["claims"]["maxItems"] = 0
+        if "expert_request" in context:
+            from .expert_agents import EXPERT_PROMPT, STATISTICAL_EXPERT_PROMPT, report_schema, validate_shape, bind_evidence_ids, bind_statistical_requests, fail, render_expert_context
+            from ..analysis_core import fingerprint
+            packet = context["expert_request"]
+            profile = packet["knowledge"]
+            if (fingerprint({k: v for k, v in profile.items() if k != "profile_hash"}) != profile["profile_hash"]
+                    or any(packet[key] != profile[key] for key in ("expert_id", "profile_hash", "knowledge_hash"))):
+                fail("expert_knowledge_hash_mismatch")
+            validate_shape(profile["input_schema"], packet["inputs"])
+            calculation_ids = [row["result_id"] for row in packet.get("calculations", [])]
+            schema["properties"]["expert_report"] = report_schema(profile, [row["evidence_id"] for row in packet["evidence"]], calculation_ids,
+                                                                   calculations=packet.get("calculations", []))
+            schema["required"].append("expert_report")
+            schema["properties"]["analysis_requests"]["items"]["properties"]["expert_id"] = {"type": "string", "enum": [""]}
+            bind_evidence_ids(schema, [row["evidence_id"] for row in packet["evidence"]])
+            bind_statistical_requests(schema, profile)
+            expert_prompt = EXPERT_PROMPT
+            if "statistical_tools" in profile:
+                expert_prompt += STATISTICAL_EXPERT_PROMPT
+                role_prompt = ""
+            context = render_expert_context(context)
+        if "evidence_index" in context.get("coverage", {}):
+            context = copy.deepcopy(context)
+            context["coverage"]["evidence_index"] = [{"evidence_id": row["evidence_id"]}
+                                                      for row in context["coverage"]["evidence_index"]]
+            context["coverage"]["evidence_index_format"] = "evidence_id only; utterance_id is supplied with raw_evidence"
         if role == "core":
             for field, references, key in (("critique_responses", "issues", "issue_id"),
                                             ("label_decisions", "label_proposals", "proposal_id")):
@@ -214,13 +257,70 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
             properties = schema["properties"]["issues"]["items"]["properties"]
             properties["target_id"] = {"type": "string", "enum": [target["target_id"]]}
             properties["target_version"] = {"type": "integer", "enum": [target["target_version"]]}
-        return call_ai_json(
-            provider, api_key, model, COMMON_PROMPT + ROLE_PROMPTS[role],
-            json.dumps(context, ensure_ascii=False, separators=(",", ":")),
-            "analysis_orchestration_" + role, schema,
-            check_cancelled, record_usage,
-            config.lmstudio_base_url if provider == "lmstudio" else "",
-            options.get("timeout_seconds", 240),
-        )
+        hooks = options.get("_expert_data_hook")
+        use_hooks = "expert_hooks" in context and callable(hooks) and options.get("expert_hooks", False)
+        if use_hooks:
+            from .expert_data_hooks import PROMPT, run_with_hooks
+            expert_prompt += PROMPT
+
+        def call(packet, output_schema, round_index=0):
+            check_cancelled()
+            def usage(data):
+                record_usage({**data, "usage_id": context["task"]["task_id"] + f":expert:{round_index}"})
+            private = {}
+            if options.get("_request_budget") is not None:
+                private = {"request_budget": options["_request_budget"],
+                           "task_id": context["task"]["task_id"],
+                           "attempt_id": options["_budget_attempt_id"] + f":{round_index}",
+                           "raw_usage_callback": options.get("_raw_usage_callback")}
+            result = call_ai_json(
+                provider, api_key, model, COMMON_PROMPT + role_prompt + expert_prompt,
+                json.dumps(packet, ensure_ascii=False, separators=(",", ":")),
+                "analysis_orchestration_" + role, output_schema,
+                check_cancelled, usage if use_hooks else record_usage,
+                config.lmstudio_base_url if provider == "lmstudio" else "",
+                options.get("timeout_seconds", 240),
+                **private,
+            )
+            check_cancelled()
+            return result
+        if use_hooks:
+            def hook(action, value):
+                check_cancelled()
+                result = hooks(action, value)
+                check_cancelled()
+                return result
+            return run_with_hooks(context, schema, call,
+                lambda request: hook("read", request),
+                lambda receipt: hook("continue", receipt),
+                lambda raw: hook("response", raw))
+        return call(context, schema)
 
     return resolve, runner
+
+
+def make_asset_binding_adapters(*, store, expert_registry):
+    """Private opt-in, read-only seam; no model, scheduler or adoption callback.
+
+    The existing registry owns expert/actor/capability checks, the existing store
+    owns immutable content and current permissions. Default AI adapters are intact.
+    """
+    def resolve(*, expert_id, method_id, step_id, actor, slot, inputs, context):
+        return store.bind_asset_inputs(slot=slot, inputs=inputs, context=context, method_id=method_id,
+            assess=lambda envelopes: expert_registry.assess_inputs(
+                expert_id, method_id, step_id, actor, slot, envelopes))
+
+    def revalidate(previous, **request):
+        authority = (request["expert_id"], request["method_id"], request["step_id"], request["actor"])
+        return store.revalidate_asset_inputs(previous, slot=request["slot"], inputs=request["inputs"],
+            context=request["context"], method_id=request["method_id"],
+            assess=lambda envelopes: expert_registry.assess_inputs(*authority, request["slot"], envelopes))
+
+    return resolve, revalidate
+
+
+def resolve_table_pilot(store, method_id, request, snapshot):
+    """Explicit local opt-in seam; no model, latest lookup, or automatic adoption."""
+    prepared = store.prepare_table_pilot(method_id, request, expected_snapshot=snapshot)
+    prepared["method_id"] = method_id
+    return prepared

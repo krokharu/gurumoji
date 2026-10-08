@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import copy
 import os
 import platform
 import re
@@ -1608,6 +1609,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
 def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
     check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
+    *, request_budget=None, task_id="", attempt_id="", raw_usage_callback=None,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1615,11 +1617,18 @@ def call_orchestration_ai_json(
     An ambiguous response in this loop must never silently consume a second call.
     """
     def post_once(url, headers, payload, **kwargs):
-        return ai_client.post_json(
+        if request_budget is not None:
+            kwargs.update(request_budget=request_budget, task_id=task_id, attempt_id=attempt_id)
+        response = ai_client.post_json(
             url, headers, payload, worker_file=AI_HTTP_WORKER_FILE,
             run_subprocess=run_cancellable_subprocess, retry_delays=(),
             timeout=timeout_seconds, **kwargs,
         )
+        # The guard has already checked the strict raw usage. Observe it before
+        # call_ai_json normalizes aliases/missing values for ordinary reporting.
+        if raw_usage_callback is not None:
+            raw_usage_callback(copy.deepcopy(response.get("usage")) if isinstance(response, dict) else None)
+        return response
     return ai_client.call_ai_json(
         provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
         post=post_once, lmstudio_base=lmstudio_base_url,
@@ -1673,8 +1682,22 @@ def analysis_orchestration_service() -> AnalysisOrchestrationService:
                 write_lock=library_write_lock,
                 adapter_version=ORCHESTRATION_ADAPTER_VERSION,
                 on_complete=lambda item_id, run_id: analysis_orchestration_publication_service().finalize(item_id, run_id),
+                memory_manager=make_obsidian_management_agent(),
+                expert_provider=make_expert_agent_registry().freeze,
             )
         return _orchestration_services[key]
+
+
+def make_expert_agent_registry():
+    from .method_experts import ExpertCatalog
+    from .services.expert_agents import ExpertAgentRegistry
+    return ExpertAgentRegistry(ExpertCatalog(local_root=DATA_DIRECTORY / "local_knowledge"))
+
+
+def make_obsidian_management_agent():
+    from .services.obsidian_management import ObsidianManagementAgent
+    return ObsidianManagementAgent(registry_factory=vault_registry,
+        publication_status=lambda item_id, run_id: analysis_orchestration_publication_service().status(item_id, run_id))
 
 
 @contextmanager

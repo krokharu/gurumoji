@@ -6,7 +6,8 @@ const orchestrationRoles = [
   {id: 'interpretation', label: '会話解釈', subtitle: 'テーマ・展開・別解', kind: 'ai'},
   {id: 'statistics', label: '数量・統計', subtitle: 'Python集計', kind: 'code'},
   {id: 'verification', label: '独立検証', subtitle: '原文・数値・根拠', kind: 'ai'},
-  {id: 'critic', label: '批判者', subtitle: '反証・代替説明', kind: 'ai'}
+  {id: 'critic', label: '批判者', subtitle: '反証・代替説明', kind: 'ai'},
+  {id: 'obsidian_manager', label: 'Obsidian管理', subtitle: 'Core判断・Handler記録・データ参照', kind: 'code'}
 ];
 const orchestrationState = {itemId: '', itemName: '', runId: '', run: null, epoch: 0, poll: null, timer: null,
   operation: '', submission: null, setup: null, setupEpoch: 0, viewerEpoch: 0, fetchedAt: null, error: '', lastSeq: null, resultRequest: 0, taskFingerprint: '', recoveryFingerprint: '', initialFingerprint: '', outputFingerprint: ''};
@@ -23,7 +24,8 @@ function isAnalysisOrchestrationActive() { return Boolean(orchestrationState.sub
 function orchestrationLabel(status) {
   return {accepted:'受付済み', queued:'待機', idle:'待機', pending:'待機', running:'実行中', succeeded:'処理成功', completed:'処理終了',
     cancelling:'停止・完了待ち', stopping:'停止・完了待ち', cancelled:'利用者停止', stopped:'停止', interrupted:'中断・復旧待ち',
-    cancel_requested:'停止要求済み', uncertain:'実行結果不明', quarantined:'結果を隔離', paused:'一時停止', recovery_required:'中断・手動復旧待ち', failed:'失敗', blocked:'実行不可', waiting:'確認待ち', skipped:'未実施', validated:'形式確認済み'}[status] || status || '状態未取得';
+    cancel_requested:'停止要求済み', uncertain:'実行結果不明', quarantined:'結果を隔離', paused:'一時停止', recovery_required:'中断・手動復旧待ち', failed:'失敗', blocked:'実行不可', waiting:'確認待ち', skipped:'未実施', validated:'形式確認済み',
+    linked:'参照を保存済み',disabled:'無効',unavailable:'利用不可',missing:'削除済み',edited:'編集を検出',conflict:'競合'}[status] || status || '状態未取得';
 }
 function orchestrationText(id, value) { const node = orchestrationNode(id); if (node && node.textContent !== value) node.textContent = value; }
 function orchestrationElement(tag, text, className) { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; }
@@ -88,6 +90,7 @@ function openAnalysisOrchestrationSettings() {
   // Consent belongs to a new submission, never to a past run or a later opening.
   // An uncertain submission retains the exact choice needed for an idempotent retry.
   orchestrationNode('publication-all').checked = Boolean(orchestrationState.submission?.itemId === nextContext.itemId && orchestrationState.submission.payload.publication_targets?.length);
+  orchestrationNode('memory-enabled').checked = orchestrationState.submission?.itemId === nextContext.itemId ? orchestrationState.submission.payload.obsidian_management !== false : true;
   if (!same) {
     orchestrationNode('question').value = String(analysisState.config?.research_question || '').slice(0, 2000);
     orchestrationNode('cloud-consent').checked = false;
@@ -122,7 +125,8 @@ function orchestrationPayload() {
     max_iterations:['iterations','auto'].includes(mode) ? integer('iterations', mode === 'iterations', 1000) : null,
     importance_threshold:orchestrationNode('importance').value, max_calls:integer('max-calls',true,1000), max_tasks:integer('max-tasks',true,2000),
     concurrency:integer('concurrency',true,4), research_mode:'exploratory', roles:orchestrationRoleOverrides(),
-    publication_targets:orchestrationNode('publication-all').checked ? [...orchestrationPublicationTargets] : []};
+    publication_targets:orchestrationNode('publication-all').checked ? [...orchestrationPublicationTargets] : [],
+    obsidian_management:orchestrationNode('memory-enabled').checked};
 }
 async function startAnalysisOrchestration(event) {
   event?.preventDefault();
@@ -204,6 +208,10 @@ function orchestrationRenderRole(role) {
   const modelText = role.kind === 'code' ? (role.id === 'statistics' ? 'Python · 決定的な集計' : 'アプリ · LLM呼出しなし') : `${provider || '実行先未取得'} / ${model || 'モデル未取得'}`;
   card.append(heading,orchestrationElement('small',role.subtitle),orchestrationElement('p',modelText,'orchestration-role-model'));
   card.append(orchestrationElement('p',orchestrationLabel(status),'orchestration-role-status'));
+  if(role.id==='obsidian_manager') {
+    card.append(orchestrationElement('p','判断と台帳の参照を受け取り、管理ノートと索引を更新します。','orchestration-role-task'));
+    return card;
+  }
   const assigned = data.assigned ?? (Array.isArray(run.tasks) ? tasks.length : null), completed = data.completed ?? (Array.isArray(run.tasks) ? tasks.filter(t=>['succeeded','completed'].includes(t.status)).length : null), failed = data.failed ?? (Array.isArray(run.tasks) ? tasks.filter(t=>t.status==='failed').length : null);
   card.append(orchestrationElement('p',`割当 ${orchestrationNumber(assigned)} · 成功 ${orchestrationNumber(completed)} · 失敗/要確認 ${orchestrationNumber(failed)}`,'orchestration-role-counts'));
   const current = data.current_task || tasks.find(t=>t.status==='running')?.title;
@@ -258,7 +266,7 @@ function renderAnalysisOrchestration() {
   const notes=orchestrationNode('conclusion-notes');notes.replaceChildren();
   for(const [key,label] of [['alternatives','代替説明'],['unresolved','未解決点']])for(const value of run.current_view?.[key] || [])notes.append(orchestrationElement('li',`${label}: ${typeof value === 'string' ? value : JSON.stringify(value)}`));
   orchestrationText('review-state',`終了前レビュー: ${{reviewed:'実施済み（研究上の結論は未確定）',pending:'待機',not_started:'未実施',not_reviewed:'未実施',incomplete:'未完了',unavailable:'実施できず'}[run.review_status] || run.review_status || '状態未取得'}${run.stale ? ' · 入力版が更新された結果です' : ''}`);
-  orchestrationRenderInitial(run); orchestrationRenderOutput(run); orchestrationRenderRecovery(run); orchestrationRenderTasks(tasks); orchestrationRenderReview(run);
+  orchestrationRenderInitial(run); orchestrationRenderOutput(run); orchestrationRenderMemory(run); orchestrationRenderRecovery(run); orchestrationRenderTasks(tasks); orchestrationRenderReview(run);
   orchestrationNode('events').replaceChildren(...events.slice(-100).map(event=>orchestrationElement('li',`${event.seq ?? event.sequence ?? '—'} · ${event.message || event.type}${event.task_id ? ` · ${event.task_id}` : ''}`)));
 }
 function orchestrationRenderInitial(run) {
@@ -294,6 +302,19 @@ function orchestrationArtifactLink(artifact) {
   if(typeof artifact?.url!=='string' || !artifact.url.trim())return null;
   try { const url=new URL(artifact.url,window.location.href);if(!['http:','https:'].includes(url.protocol) || url.username || url.password)return null; } catch(_){return null;}
   const link=orchestrationElement('a',artifact.name || '保存成果物');link.setAttribute('href',artifact.url);link.setAttribute('download','');return link;
+}
+function orchestrationRenderMemory(run) {
+  const memory=run.obsidian_management || {status:'disabled',enabled:false};
+  orchestrationText('memory-status',`Obsidian管理: ${orchestrationLabel(memory.status)}${memory.stale ? ' · 入力更新前の記録' : ''}`);
+  orchestrationText('memory-location',memory.note_id ? `Orchestrator Vault · ${memory.note_id}` : 'この実行の管理ノートは未保存です。');
+  const link=orchestrationNode('memory-note');
+  link.hidden=!memory.note_id || !['linked','pending'].includes(memory.status);
+  if(link.hidden)link.removeAttribute('href');else link.href=`${orchestrationBase(run.item_id,run.run_id)}/memory/note`;
+  const retry=orchestrationNode('memory-retry');
+  retry.hidden=memory.enabled!==true || ['linked','disabled','unavailable'].includes(memory.status);
+  retry.disabled=Boolean(orchestrationState.operation);
+  retry.textContent=orchestrationState.operation==='memory/retry' ? '管理ノートの応答を待っています' : '管理ノートを照合・更新';
+  orchestrationText('memory-warning',{failed:'管理ノートを保存できませんでした。分析台帳は保持されています。',missing:'削除済みノートを自動で復元しません。全履歴JSONから元の記録を参照できます。',edited:'手動編集を検出しました。更新時には編集版を履歴へ保存します。',conflict:'管理ノートの所有権・版・hashを確認できません。元の台帳を参照してください。'}[memory.status] || '');
 }
 function orchestrationRenderOutput(run) {
   const publication=run.publication, selected=orchestrationPublicationSelected(publication), retry=orchestrationNode('publication-retry');
@@ -381,6 +402,7 @@ async function orchestrationAction(action, payload = {}) {
   const allowed=orchestrationState.run?.allowed_actions;
   if (['cancel','resume'].includes(action) && !payload.recovery && Array.isArray(allowed) && !allowed.includes(action)) return;
   if (action === 'publication/retry' && (orchestrationState.run?.status !== 'completed' || orchestrationState.run?.publication?.can_retry !== true)) return;
+  if (action === 'memory/retry' && orchestrationState.run?.obsidian_management?.enabled !== true) return;
   if (action === 'cancel' && !window.confirm('新規タスクの発注を止めます。完了済み結果は保持し、停止不能な呼出しは完了待ちになります。停止しますか？')) return;
   if (action === 'resume' && !window.confirm(payload.recovery ? `選択した${Object.keys(payload.recovery).length}件の結果不明な呼出しを放棄します（${Object.keys(payload.recovery).join(', ')}）。結果は採用せず再送もしません。発生済み費用は不明です。残り予算で復旧を続けますか？` : '保存済みの条件・送信先・残り予算で再開します。完了済み結果を保持します。再開しますか？')) return;
   const epoch=++orchestrationState.epoch,itemId=orchestrationState.itemId,runId=orchestrationState.runId;
@@ -388,11 +410,11 @@ async function orchestrationAction(action, payload = {}) {
   orchestrationState.operation=action;renderAnalysisOrchestration();
   let refreshNeeded=false;
   try {
-    const result=await analysisExecutionRequestJson(`${orchestrationBase(itemId,runId)}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(action==='publication/retry' ? {} : payload)});
+    const result=await analysisExecutionRequestJson(`${orchestrationBase(itemId,runId)}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(['publication/retry','memory/retry'].includes(action) ? {} : payload)});
     if (epoch!==orchestrationState.epoch) return;
     if (result.run?.run_id!==runId || result.run.item_id && result.run.item_id!==itemId) throw Error('実行の対象IDが一致しません。');
     orchestrationState.run=result.run;orchestrationState.error='';orchestrationState.fetchedAt=Date.now();
-  } catch(error) { refreshNeeded=true; if(epoch===orchestrationState.epoch) orchestrationState.error=`${action==='cancel'?'停止':action==='publication/retry'?'保存・出力の再試行':'再開'}の受付を確認できません: ${error.message}。状態を更新して確認してください。`; }
+  } catch(error) { refreshNeeded=true; if(epoch===orchestrationState.epoch) orchestrationState.error=`${action==='cancel'?'停止':action==='publication/retry'?'保存・出力の再試行':action==='memory/retry'?'管理ノートの更新':'再開'}の受付を確認できません: ${error.message}。状態を更新して確認してください。`; }
   finally { if(epoch===orchestrationState.epoch){orchestrationState.operation='';renderAnalysisOrchestration();if(refreshNeeded)pollAnalysisOrchestration();else orchestrationSchedule();} }
 }
 async function orchestrationReadResults(resultId = '') {
@@ -439,6 +461,7 @@ function bindAnalysisOrchestration() {
   listen(orchestrationNode('stop'),'click',()=>orchestrationAction('cancel'));
   listen(orchestrationNode('resume'),'click',()=>orchestrationAction('resume'));
   listen(orchestrationNode('publication-retry'),'click',()=>orchestrationAction('publication/retry'));
+  listen(orchestrationNode('memory-retry'),'click',()=>orchestrationAction('memory/retry'));
   listen(orchestrationNode('abandon'),'click',orchestrationAbandonAndResume);
   listen(orchestrationNode('recovery-tasks'),'change',()=>orchestrationRenderRecovery(orchestrationState.run));
   listen(orchestrationNode('refresh'),'click',pollAnalysisOrchestration);

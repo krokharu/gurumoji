@@ -68,11 +68,32 @@ def assess_run(state: dict) -> dict:
             "failed_task_count": len(failed)}
 
 
-def main() -> int:
+def expert_hook_summary(state: dict) -> dict:
+    """Specialists retain their execution role and are marked by expert_agent."""
+    return {
+        "enabled": state.get("config", {}).get("expert_hooks", False),
+        "version": state.get("config", {}).get("expert_hook_version"),
+        "tasks": [{"task_id": task["task_id"], "expert_id": task["expert_agent"]["expert_id"],
+                   "status": task.get("status"), "error": task.get("error"),
+                   "model_calls": task.get("model_calls", 1),
+                   "reads": [{key: read.get(key) for key in
+                              ("request", "request_hash", "packet_hash", "source_hash", "data_version", "provided_evidence_ids")}
+                             for read in task.get("expert_hook_reads", [])],
+                   "intermediate_response_count": len(task.get("expert_hook_responses", []))}
+                  for task in state.get("tasks", []) if task.get("expert_agent")],
+    }
+
+
+def main(*, trusted_guarded_inputs=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--guarded-manifest", type=Path)
+    parser.add_argument("--guarded-receipt", help="Externally verified C0 acceptance receipt reference")
     parser.add_argument("--database", type=Path, default=ROOT / "runtime/data/library.sqlite3")
     parser.add_argument("--item-id", help="Required if more than one interview is saved")
     parser.add_argument("--model", help="Loaded local model; does not alter app configuration")
+    parser.add_argument("--expert-id", action="append", dest="expert_ids",
+                        help="Limit the expert catalog; Core still decides which task to issue")
+    parser.add_argument("--expert-premises", help="Explicit test-only analysis premises for the selected experts")
     parser.add_argument("--max-iterations", type=int, default=None,
                         help="Optional hard cap; auto mode performs at least three valid Core decisions")
     parser.add_argument("--time-limit", type=int, default=600)
@@ -87,6 +108,14 @@ def main() -> int:
     parser.add_argument("--question", default="マーラータンについて、この会話で語られた選択理由・評価・懸念を根拠発話ID付きで分析し、反例と代替説明を検討してください。未確認の話者役割や研究対象全体への一般化は保留してください。")
     parser.add_argument("--output", type=Path, default=ROOT / "output/malatang-autonomous")
     args = parser.parse_args()
+    # Before even opening the original DB or attempting model discovery.
+    from test_expert_agent_model import guarded_cli_entry
+    guarded_entry = guarded_cli_entry(args, trusted_guarded_inputs)
+    if guarded_entry is not None and (guarded_entry["factory"] is None or not guarded_entry["measurement_ready"]):
+        print(json.dumps({key: value for key, value in guarded_entry.items() if key != "factory"}))
+        return 2
+    if args.expert_premises and not args.expert_ids:
+        parser.error("--expert-premises requires --expert-id")
     source = args.database.resolve()
     with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as db:
         db.execute("PRAGMA query_only=ON")
@@ -123,7 +152,19 @@ def main() -> int:
               "source_stamp_before": before, "test_directory": str(destination),
               "provider": "lmstudio", "mock_ai": False, "publication_targets": [],
               "no_think_requested": args.no_think,
+              "question": args.question, "test_expert_premises": args.expert_premises,
               "calls": [], "not_run": ["audio transcription", "diarization", "browser UI", "Vault publication"]}
+    report["source_state"] = "uncommitted"
+    report["source_sha256"] = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in (
+        "src/gurumoji/analysis_orchestration.py", "src/gurumoji/services/analysis_orchestration_adapters.py",
+        "src/gurumoji/services/expert_data_hooks.py", "src/gurumoji/services/expert_agents.py",
+        "scripts/test_saved_autonomous_analysis.py")}
+    (destination / "runner.py").write_bytes(Path(__file__).read_bytes())
+    for name in report["source_sha256"]:
+        if name.startswith("src/"):
+            target = destination / "source" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / name).read_bytes())
     started = time.monotonic()
     try:
         config = app.load_token_config()
@@ -135,8 +176,6 @@ def main() -> int:
         model = args.model or config.lmstudio_model
         if not model or model not in models:
             raise ValueError("Configured local model is not available")
-        if args.no_think and not model.startswith("qwen/qwen3-"):
-            raise ValueError("--no-think is only supported by this test for Qwen3 models")
         reasoning_payload = {}
         if args.no_think:
             capability = app.lmstudio_reasoning_settings(base, config.lmstudio_api_key, model)
@@ -155,10 +194,16 @@ def main() -> int:
                 for instance in entry.get("loaded_instances", []):
                     if instance.get("id") == model:
                         report["model_context_length"] = instance.get("config", {}).get("context_length")
+                        report["model_parallel"] = instance.get("config", {}).get("parallel")
         except (OSError, ValueError):
             report["model_context_length"] = None
         service = app.analysis_orchestration_service()
         service.schedule = False
+        original_start = service.start
+        def guarded_start(*positional, **keywords):
+            if guarded_entry is not None:
+                keywords["budget_factory"] = guarded_entry["factory"]
+            return original_start(*positional, **keywords)
         client = app.app.test_client()
         actual_call = app.call_orchestration_ai_json
         actual_post = app.ai_client.post_json
@@ -180,7 +225,7 @@ def main() -> int:
             tick = time.monotonic()
             try:
                 actual_arguments = list(positional)
-                if args.no_think:
+                if args.no_think and model.startswith("qwen/qwen3-"):
                     actual_arguments[3] += "\n/no_think"
                 result = actual_call(*actual_arguments, **keywords)
                 call["status"] = "returned"
@@ -200,6 +245,7 @@ def main() -> int:
             raise RuntimeError("Vault publication is prohibited in this test")
 
         with patch.object(app, "call_orchestration_ai_json", side_effect=observed_call), \
+             patch.object(service, "start", side_effect=guarded_start), \
              patch.object(app.ai_client, "post_json", side_effect=configured_post), \
              patch.object(app.AnalysisStore, "_publish_generated_vaults", side_effect=prohibit_vault), \
              patch.object(app.AnalysisStore, "_publish_research", side_effect=prohibit_vault):
@@ -210,7 +256,10 @@ def main() -> int:
                 "time_limit_seconds": args.time_limit, "call_timeout_seconds": args.call_timeout,
                   "context_evidence_limit": args.evidence_limit, "context_text_limit": args.text_limit,
                   "context_index_limit": args.index_limit,
-                "max_calls": 16, "max_tasks": 32, "concurrency": 1, "request_id": uuid.uuid4().hex})
+                "max_calls": 16, "max_tasks": 32, "concurrency": 1, "request_id": uuid.uuid4().hex,
+                **({"expert_ids": args.expert_ids} if args.expert_ids else {}),
+                **({"expert_inputs": {eid: {"analysis_premises": args.expert_premises} for eid in args.expert_ids}}
+                   if args.expert_premises else {})})
             report["start_http_status"] = response.status_code
             if response.status_code != 202:
                 report["reason_code"] = (response.get_json() or {}).get("reason_code", "start_rejected")
@@ -229,6 +278,7 @@ def main() -> int:
                 report.update(run_status=state["status"], stop_reason=state.get("stop_reason"),
                               review_status=state.get("review_status"), usage=state.get("usage"),
                               publication=state.get("publication"))
+                report["expert_hooks"] = expert_hook_summary(state)
                 # Keep the complete fixed evidence and ledger in the isolated DB.
                 count = len(report["calls"])
                 for _ in range(2):

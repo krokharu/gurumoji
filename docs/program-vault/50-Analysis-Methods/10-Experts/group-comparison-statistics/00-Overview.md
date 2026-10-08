@@ -40,3 +40,8 @@ tags:
 
 - `group_statistics`（[[50-Analysis-Methods/03-Statistics/02-Group-Statistics]]）
 - 検定の拡張の計画：[[40-Design/quantification-statistics-plan]]（計画であり実装済みではない）
+
+
+## スキル対応と知識充足の入口（提案）
+
+[[50-Analysis-Methods/10-Experts/group-comparison-statistics/08-Skill-Hook-Binding|段階別のスキル・hook対応登録案]] と [[50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness|17専門家の充足・不足表]]。currentPackは暫定維持し、08の実行readerは未接続。研究者の採否は未確認として保持する。

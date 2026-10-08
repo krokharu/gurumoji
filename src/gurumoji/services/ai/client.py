@@ -8,6 +8,7 @@ runner, which keeps cancellation and test doubles at the application edge.
 from __future__ import annotations
 
 import json
+import ipaddress
 import math
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
+from .request_budget import BudgetHold, RequestBudget
 
 from ...ai_effort import (
     SCHEMA_STAGES,
@@ -121,6 +123,9 @@ def post_json(
     check_cancelled: Callable[[], None] | None = None,
     retry_delays: tuple[float, ...] = RETRY_DELAYS_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
+    request_budget: RequestBudget | None = None,
+    task_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> dict[str, Any]:
     """POST JSON in an isolated process, retrying rate limits and 5xx replies."""
     attempt = 0
@@ -130,6 +135,7 @@ def post_json(
                 url, headers, payload, worker_file=worker_file,
                 run_subprocess=run_subprocess, timeout=timeout,
                 check_cancelled=check_cancelled,
+                request_budget=request_budget, task_id=task_id, attempt_id=attempt_id,
             )
         except RetryableApiError as exc:
             if attempt >= len(retry_delays):
@@ -150,8 +156,15 @@ def _post_json_once(
     run_subprocess: Callable[..., Any],
     timeout: int,
     check_cancelled: Callable[[], None] | None,
+    request_budget: RequestBudget | None = None,
+    task_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> dict[str, Any]:
     """POST JSON in an isolated process so cancellation can stop network I/O."""
+    if request_budget is not None:
+        return _post_budgeted_json_once(url, headers, payload, worker_file=worker_file,
+            run_subprocess=run_subprocess, timeout=timeout, check_cancelled=check_cancelled,
+            request_budget=request_budget, task_id=task_id, attempt_id=attempt_id)
     if not worker_file.is_file():
         raise RuntimeError("AI API 通信ワーカーが見つかりません。")
     timeout_seconds = max(1.0, min(600.0, float(timeout)))
@@ -200,6 +213,62 @@ def _post_json_once(
     if not isinstance(parsed, dict):
         raise RuntimeError("API 応答の形式が不正です。")
     return parsed
+
+
+def _post_budgeted_json_once(url, headers, payload, *, worker_file, run_subprocess,
+        timeout, check_cancelled, request_budget, task_id, attempt_id):
+    """Local-only opt-in path; never leak a worker/body exception into a retry."""
+    if not isinstance(request_budget, RequestBudget):
+        raise BudgetHold("invalid_budget")
+    try:
+        parsed_url = urllib.parse.urlsplit(url)
+        if (parsed_url.scheme not in {"http", "https"}
+                or not ipaddress.ip_address(parsed_url.hostname or "").is_loopback
+                or parsed_url.port is None or not 1 <= parsed_url.port <= 65535
+                or parsed_url.username is not None or parsed_url.password is not None
+                or parsed_url.query or parsed_url.fragment or parsed_url.path != "/v1/chat/completions"):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise BudgetHold("local_endpoint_required") from None
+    if check_cancelled is not None:
+        check_cancelled()
+    reserved = request_budget.reserve(payload, task_id=task_id, attempt_id=attempt_id, timeout=timeout)
+    ticket, final = reserved["ticket"], reserved["payload"]
+    reservation_id = ticket["reservation_id"]
+    try:
+        if not worker_file.is_file():
+            raise RuntimeError
+        worker_input = json.dumps({"url": url, "headers": headers, "payload": final,
+            "request_budget": ticket}, ensure_ascii=False, allow_nan=False)
+        remaining_timeout = request_budget.dispatch_timeout(ticket, final)
+        completed = run_subprocess([sys.executable, "-I", str(worker_file)],
+            input_text=worker_input, timeout=remaining_timeout, check_cancelled=check_cancelled)
+        if completed.returncode != 0 or len(completed.stdout.encode("utf-8")) > 10 * 1024 * 1024:
+            raise RuntimeError
+        result = json.loads(completed.stdout)
+        if not isinstance(result, dict):
+            raise RuntimeError
+        response = None
+        transport_ok = result.get("ok") is True
+        if transport_ok:
+            try:
+                response = json.loads(result["body"])
+            except (ValueError, TypeError, KeyError):
+                transport_ok = False
+        request_budget.finish(ticket, result.get("budget_receipt"), response,
+            transport_ok=transport_ok, http_status=result.get("status"))
+        return response
+    except BaseException as exc:
+        # Cancellation, worker crash, malformed IPC and network failures all
+        # retain the reservation. Unknown delivery must never trigger a retry.
+        # A cancellation callback can raise BudgetHold without settling this
+        # budget. Atomically settle only its still-reserved entry; a concurrent
+        # finish/dispatch may have recorded a receipt or known usage and refund.
+        request_budget.unknown_if_reserved(reservation_id,
+            exc.reason if isinstance(exc, BudgetHold) else "transport_unknown")
+        if not isinstance(exc, BudgetHold):
+            raise BudgetHold("transport_unknown") from None
+        raise
 
 
 def extract_openai_text(response: dict[str, Any]) -> str:

@@ -5,7 +5,7 @@ expert_id: exp-correlation
 title: 相関の専門家
 role: computational
 status: current
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 analysis_method_ids: []
 registry_method_ids:
@@ -66,7 +66,7 @@ tags:
 
 ```yaml
 expert_id: exp-correlation
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 title: 相関の専門家
 role: computational
@@ -146,6 +146,17 @@ procedure:
     basis:
       - LIT-appelbaum-2018-jars-quant
       - LIT-aarts-2014-nested-data
+  - id: cor-ai-plan
+    title: 専用知識から相関の分析案・前提確認事項を下書きし、Handlerへ計算を提案する
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+  - id: cor-ai-report
+    title: Handlerが検証したPearson・Spearmanの結果を参照して説明を下書きする
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+      - LIT-aarts-2014-nested-data
 quality_checks:
   - id: cor-q1
     check: human_review
@@ -172,10 +183,10 @@ output_sections:
   - 分布の確認（外れ値の発話ID）
   - 探索的扱いと限界
 ai_assist:
-  allowed: false
-  steps: []
-  reason: 相関は計算系の専門家で、係数はコードで計算するため、AI見解を使いません。
-  brief: ""
+  allowed: true
+  steps: [cor-ai-plan, cor-ai-report]
+  reason: 相関係数の計算と研究者の確定判断はAIへ委ねない。
+  brief: 専用知識を使って相関の分析案と結果説明を下書きする。数値はHandlerの計算結果だけを参照し、計算前はneeds_calculationを返す。N・欠測・分布・入れ子・多重比較の限界を示し、相関から因果を導かない。
 literature:
   - LIT-spearman-1904-rank
   - LIT-bishara-hittner-2012-correlation

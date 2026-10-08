@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "source_commit": "b932fe11adf0881a3d7093c2761fbee930be0e56",
+  "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
+  "branch": "krokharu/dot-orca-git-share",
+  "status": "engineering_hold",
+  "excluded_source_paths": [
+    "docs/program-vault/40-Design/obsidian-skill-knowledge-work-plan.md"
+  ],
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sha256": "14565919db655a6f2db6b655cec08afd617b6e64384c0a6d8d4f1a0cc9cebfc1",
+      "bytes": 5629
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "bf826e9cf314724e04ece65a67e306b164f37d94c90ed469d7d883d96ffe33c0",
+      "bytes": 6601
+    },
+    {
+      "path": "docs/GIT_HANDOFF.md",
+      "sha256": "9d96a4b65dbc9af098234d5add79de75c51098ab89c585868e60855d2efda30b",
+      "bytes": 4315
+    },
+    {
+      "path": "docs/OBSIDIAN_VAULTS.md",
+      "sha256": "46d411ebe2a0acb16de692bb90aa59e6aca19dac83ecdeb9c407f01b9ae8b7ca",
+      "bytes": 8618
+    },
+    {
+      "path": "docs/program-vault/30-Data/analysis-asset-connection-v1.md",
+      "sha256": "00c42234f95ab433542432cddaf61b29191e0b9f00ae645127d882230bd5e9a5",
+      "bytes": 15948
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/00-Index.md",
+      "sha256": "a78e23451b45ee1dcc0f37dc2ccb225f9d6a29826d758fc9a8ece3b61326d393",
+      "bytes": 14161
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/correlation/00-Overview.md",
+      "sha256": "e736670222904a49d251bf86ff2f04adb0ffa9f478006d4a97b8962bb4dafa5c",
+      "bytes": 2135
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/correlation/01-Expert.md",
+      "sha256": "5a499ea69a38f176a1212ab52d4fe85b8237aaf80ba6fd1b5deed148a14642bb",
+      "bytes": 8217
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/correlation/07-Agent-Contract.md",
+      "sha256": "92c02db1e1db0f68ed2ff0febd3b5d5615149a748bf0b2a7a534dc06478bb3d2",
+      "bytes": 16045
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/correlation/08-Skill-Hook-Binding.md",
+      "sha256": "4834067229ad482d05316df8d504a6cfdc17e8c652b58318801675e9560ffe66",
+      "bytes": 19511
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/descriptive-statistics/01-Expert.md",
+      "sha256": "08c12a57476204ac9dad8520427a4268ad67ed8eec6a35d319334f61890cbdc7",
+      "bytes": 7995
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/descriptive-statistics/07-Agent-Contract.md",
+      "sha256": "97a8dfc961a2c469bd22f76897b790e1bd4a5de0fcf2b6df5a4743b10412ad4a",
+      "bytes": 16238
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/group-comparison-statistics/00-Overview.md",
+      "sha256": "41cfa9360bf94f9713a415cc58a769f3a5c36d71f1a1cfcdffb71c0c456c1fea",
+      "bytes": 2600
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/group-comparison-statistics/01-Expert.md",
+      "sha256": "15ac2cd8ffd7c02a9ffd8d99215a6a2a31fc1b776d3702da23e73b05f3fc9906",
+      "bytes": 10594
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/group-comparison-statistics/07-Agent-Contract.md",
+      "sha256": "a1ed398b0e6f759448fd4b327eccb1d672f5bada923a4f377e82f98a16ed0c5a",
+      "bytes": 16470
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/group-comparison-statistics/08-Skill-Hook-Binding.md",
+      "sha256": "5080fbf445fc4668ca803ffa0cfe4ef5ad00f302786dc3644bb1d9c24f903be4",
+      "bytes": 19989
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/thematic-analysis/00-Overview.md",
+      "sha256": "4548d75bff05a16c6fa2f71638108dac3d7e1226402d381da6639d4797b84c19",
+      "bytes": 3338
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/thematic-analysis/07-Agent-Contract.md",
+      "sha256": "453adefd17b23e289352affafc4ae85d61afa1a6f094a34e774c806772050a65",
+      "bytes": 3770
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding.md",
+      "sha256": "e4677c2271ff95ccdbd053119420d20c44ac1049b3c372e30c24b747037816ef",
+      "bytes": 16339
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/00-Index.md",
+      "sha256": "e569ef34c22279c72d80cc5732a48598d42617268207b1aaf39b08470ef00364",
+      "bytes": 5986
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/80-Hooks/00-Index.md",
+      "sha256": "f702dea12e015b6e8048d92252b41f69c6da95277d4019fbc3d27e395e8f07b2",
+      "bytes": 3583
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/correlation-exploratory-evidence.md",
+      "sha256": "3d29a901c8fc64c7d0822310bb8e97e7137e661431dcd0851e25a766eb7eb2ec",
+      "bytes": 9339
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/group-comparison-exploratory-evidence.md",
+      "sha256": "eb1475f67af863bd232ef3b0701c7bea71c7405c7ce95b8a0fa854544574729d",
+      "bytes": 9959
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/group-interview-evidence-workflow.md",
+      "sha256": "1a8ed0b31076f5ade8ddb30ca953ac00debf022a3b08b20b4544221a096a2a32",
+      "bytes": 13928
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/40-Skills/thematic-candidate-evidence.md",
+      "sha256": "8f7860af502ba9dd6e33da259309284bd53f2fa64c9d91a5d0754c66c82b5527",
+      "bytes": 9995
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/00-Index.md",
+      "sha256": "67607d3db5891438682d26beaafb3887219de676d3f3cd956488f0740ea428f6",
+      "bytes": 3339
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness.md",
+      "sha256": "7c9bc4bbbc11011d936d4572da9fdbf579787cc4d0dbdd914564c045a58ccbd7",
+      "bytes": 32184
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/g3-connection-fixtures.md",
+      "sha256": "4f537fd534120a26bd2ca0edbdaf155ed71e13fb50409647cddabb4c0426d1f3",
+      "bytes": 29739
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/knowledge-readiness.base",
+      "sha256": "0e98ff687db9606268051832098b29d0be55f6ac276d854e0c6a58dababc8834",
+      "bytes": 1214
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/visualization-acceptance-v1.md",
+      "sha256": "bd43c51949161196513b48e927b79a5d64f42d917d0b322dc24f566ae72729e6",
+      "bytes": 11907
+    },
+    {
+      "path": "docs/program-vault/90-Templates/knowledge-evaluation.md",
+      "sha256": "90d6fc97ed16544dddbcd815522677a33efe1f9d0c1b7b4d514e6dfde6886849",
+      "bytes": 2722
+    },
+    {
+      "path": "docs/program-vault/90-Templates/skill-definition.md",
+      "sha256": "85f171179e3bae2cca3950153e2cd7617539dfbefff68ed6f72ad1eda4b9398f",
+      "bytes": 3568
+    },
+    {
+      "path": "docs/program-vault/90-Templates/skill-hook-binding.md",
+      "sha256": "351910247cb771f28b49486f60a0326222180d3b8ade1f15a764de1b8f74bc3c",
+      "bytes": 3674
+    },
+    {
+      "path": "scripts/check_git_handoff.py",
+      "sha256": "2d10fd5c71587c9da006cdb75aac320e41bdea1743e47c1a6dd9aea3ec0fa1e1",
+      "bytes": 2446
+    },
+    {
+      "path": "scripts/test_expert_agent_model.py",
+      "sha256": "b884fa8ee90e28698631a8c783fe8a20cbffa709d2d4b4a529e9f8841e086c14",
+      "bytes": 98700
+    },
+    {
+      "path": "scripts/test_obsidian_management_model.py",
+      "sha256": "e36f9dba496b98d769b9974aae3bbc6ae45777cf1e38833a171aa289ee3476d0",
+      "bytes": 16154
+    },
+    {
+      "path": "scripts/test_saved_autonomous_analysis.py",
+      "sha256": "adfa54d9a3f6a0882e270b6a155a3a2634510a884c26a1cbe0eae7eba569d4af",
+      "bytes": 18100
+    },
+    {
+      "path": "src/gurumoji/ai_http_worker.py",
+      "sha256": "953eb5228fecb1893dc854434db56af396549b2e6c876c9cd430e26543c35be0",
+      "bytes": 9340
+    },
+    {
+      "path": "src/gurumoji/analysis_core.py",
+      "sha256": "69403fe1ce460c511cd4961470b6b68d2934c413cd033cad881626bd6f4c54c8",
+      "bytes": 43385
+    },
+    {
+      "path": "src/gurumoji/analysis_method_registry.py",
+      "sha256": "b180ae37b01669cfd26e8684a57338e5c11e9f9a35b52b9eefd35630635df7f3",
+      "bytes": 25097
+    },
+    {
+      "path": "src/gurumoji/analysis_orchestration.py",
+      "sha256": "9ce83fc47a75089a70e71666e26071d114889f08ee2bc5eb59c36f5481c9fc69",
+      "bytes": 179987
+    },
+    {
+      "path": "src/gurumoji/analysis_store.py",
+      "sha256": "103138124d713f5353f3290e9815c5fe86f4a1f22fe4048c12c78a044e1dd2d8",
+      "bytes": 147144
+    },
+    {
+      "path": "src/gurumoji/app.py",
+      "sha256": "2dc801f34d8975363f32ec3e9a495541263ae8bec75237d9e221372e2ce6c949",
+      "bytes": 91321
+    },
+    {
+      "path": "src/gurumoji/method_experts.py",
+      "sha256": "f633ecc768cd1741946cbd70ea647f8a5037fc7fad13c86bca69612f506263c0",
+      "bytes": 86330
+    },
+    {
+      "path": "src/gurumoji/research_analysis.py",
+      "sha256": "19815fca736897d3346b8057842968837d5d955afb31873329d82705a00e6398",
+      "bytes": 100024
+    },
+    {
+      "path": "src/gurumoji/services/ai/client.py",
+      "sha256": "9bba3399f887249cee339dbec80bfb86b1bc335941dcd68244a0a29724fc976c",
+      "bytes": 25351
+    },
+    {
+      "path": "src/gurumoji/services/ai/request_budget.py",
+      "sha256": "4e80f854bf3273f8b1943396fcd9a14c0f5c103f304830e78cbf11ec4bb87923",
+      "bytes": 25266
+    },
+    {
+      "path": "src/gurumoji/services/analysis_orchestration_adapters.py",
+      "sha256": "03dbe930fd8899f1ba4e955b5f5460e3579b118a59a46b424b8b5edabbffca4c",
+      "bytes": 24895
+    },
+    {
+      "path": "src/gurumoji/services/analysis_orchestration_methods.py",
+      "sha256": "02ebf20f3a59ab7fa92a48345c7e2888ae6db4594df77e0448d0ebd80fdb5fdf",
+      "bytes": 23090
+    },
+    {
+      "path": "src/gurumoji/services/expert_agents.py",
+      "sha256": "3bfac9714b6fc9feea421f9abea098b737d48f89eff79b9d34862614f557b2bf",
+      "bytes": 52852
+    },
+    {
+      "path": "src/gurumoji/services/expert_data_hooks.py",
+      "sha256": "0aee1fc38c7a05cb801b6a3a7b67edaba3b233ae810a3c76a3a09ee942c1df12",
+      "bytes": 14549
+    },
+    {
+      "path": "src/gurumoji/services/obsidian_management.py",
+      "sha256": "f1b623b2d392f2be6c42ab0aa577622fb515efa0e15a3303206dfc2ec7da3f73",
+      "bytes": 8131
+    },
+    {
+      "path": "src/gurumoji/static/analysis-orchestration.js",
+      "sha256": "e9709a989d8eecf4e9a4f6177323be5b2548721ce305bb42f5870c45dda21ce4",
+      "bytes": 50990
+    },
+    {
+      "path": "src/gurumoji/static/app.js",
+      "sha256": "aed10afa17abea09f3cf9f1173be7de7fcb55190a01b890cb5d2b4d6702a8187",
+      "bytes": 442385
+    },
+    {
+      "path": "src/gurumoji/templates/views/analysis-orchestration.html",
+      "sha256": "09608ba5a4e1d2002ef5856221560b87892c8bc442b48bf25589db224c6c7145",
+      "bytes": 14738
+    },
+    {
+      "path": "src/gurumoji/vault_registry.py",
+      "sha256": "7fe68e9427bf7e19a16b653b04d2ae9386d1d7df11846b77054ab4511558adc2",
+      "bytes": 57989
+    },
+    {
+      "path": "src/gurumoji/web/analysis_orchestration_routes.py",
+      "sha256": "913488cd446994ad4fb3c57bbeabecc8840bc270109e76b8ca3d9d98ad2b0883",
+      "bytes": 9257
+    },
+    {
+      "path": "tests/dom/orchestration.test.cjs",
+      "sha256": "e5d82e0bbc37897a6ff5f2dbab1c3760be5aec230db81b50749dfadcb8c4f9a0",
+      "bytes": 31523
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/2907391b55989579935134403f2d12010f73514e/30-Data/analysis-asset-connection-v1.md",
+      "sha256": "438fd973660016ee1ab1c4150ee6c914792bbf3ce3f3f77f88cd49ebfe09e986",
+      "bytes": 15791
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/2907391b55989579935134403f2d12010f73514e/50-Analysis-Methods/40-Skills/thematic-candidate-evidence.md",
+      "sha256": "4d57f828fbcd32c6071baad7b8ed60a51651613d14cd02dfb4318f2fd0c12e55",
+      "bytes": 9938
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/69c523981828e3480348f5941e2163db99b47298/50-Analysis-Methods/40-Skills/correlation-exploratory-evidence.md",
+      "sha256": "4014f7c453f5458fa44e20f071e9341cf29cce8459f1a365e218dadfe71128ea",
+      "bytes": 9296
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/69c523981828e3480348f5941e2163db99b47298/50-Analysis-Methods/40-Skills/group-comparison-exploratory-evidence.md",
+      "sha256": "93f5ce6608696493165e426bca32edf32f35562210d4b749a717544c213d7371",
+      "bytes": 9983
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/69c523981828e3480348f5941e2163db99b47298/50-Analysis-Methods/40-Skills/group-interview-evidence-workflow.md",
+      "sha256": "420906decf0fd83b4a3314ac398dd0215be7a152245f1f1cc29a584842d350e6",
+      "bytes": 13762
+    },
+    {
+      "path": "tests/fixtures/expert_skill_history/hashes.json",
+      "sha256": "da2400c6de312b5794424a762b62334219911db925e6b73221dc1de674225ed7",
+      "bytes": 885
+    },
+    {
+      "path": "tests/test_ai_client_responses.py",
+      "sha256": "c34b152ad9a44d1c46befd6b907fa45b838bf75b8511dd58b07bb2768dfc469a",
+      "bytes": 25692
+    },
+    {
+      "path": "tests/test_ai_http_worker.py",
+      "sha256": "a7147f489c27ccf0cb28a2f77ed468fc251ba0d98065e6f1c4c1ccdacb764b56",
+      "bytes": 22056
+    },
+    {
+      "path": "tests/test_ai_orchestration_budget.py",
+      "sha256": "5aa1806ceafc326a887cbfbef24609f044d8e4c496d3be9ee720740bd498b0a8",
+      "bytes": 40138
+    },
+    {
+      "path": "tests/test_ai_request_budget.py",
+      "sha256": "1db4546e6bd47c865a5b7b6a36b3b9a4777dcdda82b1baa5dc9a689c45b01192",
+      "bytes": 24928
+    },
+    {
+      "path": "tests/test_analysis_asset_bindings.py",
+      "sha256": "0203135828dc43e79cc02965181831731d9480a94ee976c6a4a26e884bf3f908",
+      "bytes": 57753
+    },
+    {
+      "path": "tests/test_analysis_core_contracts.py",
+      "sha256": "03a5d1362ff23c32302817ef4fe29787a632dd91d404d7228be7cb4d974e0bc7",
+      "bytes": 3780
+    },
+    {
+      "path": "tests/test_analysis_fixed_run_ui.cjs",
+      "sha256": "b885334c318f5f0064a777f1fde805a50986aff945b286199d2b7812ff64c850",
+      "bytes": 16820
+    },
+    {
+      "path": "tests/test_analysis_orchestration.py",
+      "sha256": "1e9f9b6a0a1246ed99380031d13c5279429d40bc89add47505a5192a47e83184",
+      "bytes": 35738
+    },
+    {
+      "path": "tests/test_analysis_orchestration_adapters.py",
+      "sha256": "4879e09550bf96c2c6127133a5654ee555de78c0c6e7e8d342287a0113725b55",
+      "bytes": 13741
+    },
+    {
+      "path": "tests/test_analysis_ownership_ui.cjs",
+      "sha256": "003b8761699a1e3daed6350ef00b3ea582454d6f91600d4899f418c1240a394f",
+      "bytes": 23188
+    },
+    {
+      "path": "tests/test_analysis_plan_binding.py",
+      "sha256": "4a5e1a95c2fc994591fd12b072b3dce40ef0c9876726868310fd549ca7a7f724",
+      "bytes": 4524
+    },
+    {
+      "path": "tests/test_analysis_storage.py",
+      "sha256": "9bec1ec5ace451499fe4281b4b552eac1a61a03c275c1a3ca069afb131476be9",
+      "bytes": 29043
+    },
+    {
+      "path": "tests/test_expert_agents.py",
+      "sha256": "990bb14df8421b37a15d70b1b6f473721653cce28e1aaa47db988aa7133b5584",
+      "bytes": 28287
+    },
+    {
+      "path": "tests/test_expert_data_hooks.py",
+      "sha256": "b350c2121d79d146b54b4006d4e20be42294bc23d840cb880797ff3d036d8f4b",
+      "bytes": 37205
+    },
+    {
+      "path": "tests/test_expert_model_comparison.py",
+      "sha256": "821d2abe47cd35cf42d8e943091f75b524d9234997edb59230b518e133859ee3",
+      "bytes": 53166
+    },
+    {
+      "path": "tests/test_expert_skill_bindings.py",
+      "sha256": "f197cfdc9ed1dd1b6491762e6b8b8240ee1e3f4f5356fec288906049130fb217",
+      "bytes": 25339,
+      "source_sha256": "1d5c7639560bfc59c67530114d4d471920470478304d860e9513075012556849"
+    },
+    {
+      "path": "tests/test_method_experts.py",
+      "sha256": "05ac49db2c000dc3d2c87812f8ab534530292978d01a5419fd24ea44021c44b6",
+      "bytes": 29784
+    },
+    {
+      "path": "tests/test_obsidian_management.py",
+      "sha256": "475569c438edf54dbef8a4334a4fb85a425c8eddf00ddef25d954a35dd027e41",
+      "bytes": 14404
+    },
+    {
+      "path": "tests/test_obsidian_management_browser.py",
+      "sha256": "d977cd21551cdd447c1f47ffc418515d166f54a7fa617f4508f62dac762b8c3e",
+      "bytes": 5242
+    },
+    {
+      "path": "tests/test_saved_autonomous_analysis.py",
+      "sha256": "80fd694ecb73ac0205705e9478b583384382a83a3e05ebec06f91be0841a3220",
+      "bytes": 4283
+    },
+    {
+      "path": "tests/test_statistical_expert_agents.py",
+      "sha256": "135a12b252fd8cb6d53834ec1701f9f47114a1e24bb0ae463b0d0b7a14d2c8f5",
+      "bytes": 18128
+    },
+    {
+      "path": "tests/test_statistical_report_acceptance.py",
+      "sha256": "9a5b93a0c2963ca62616cfe1445ccba6037f1d8e75e45a5f8ba0df98184786f4",
+      "bytes": 48263
+    }
+  ]
+}

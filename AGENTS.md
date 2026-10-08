@@ -1,5 +1,7 @@
 # Gurumoji: dot 作業ガイド
 
+Dot／Orca間のGit更新は [受け渡し手順](docs/GIT_HANDOFF.md) の固定SHA・manifest・Issue受領を使う。新しい担当は編集前に共有版とownerを照合する。
+
 ## 適用範囲と入口
 
 このチェックアウトの Gurumoji 開発・検証・クラウド運用に適用する。依頼内容と README／対象実装から Gurumoji の作業だと確認する。`Obsidian` や `docs/program-vault` という名前だけで別プロジェクトへ適用しない。ADC08 は別プロジェクトで、今回は将来用の領域確保まで。

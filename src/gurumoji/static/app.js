@@ -6134,8 +6134,18 @@ async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} 
   const requestId = ++analysisRequestSequence;
   const executionView = document.querySelector('#analysis-execution-view');
   if (executionView) executionView.hidden = true;
+  // Retain this item's last result and local view until a current reload succeeds.
+  const previousData = analysisState.itemId === nextId ? analysisState.data : null;
   analysisState.itemId = nextId;
-  analysisState.data = null;
+  analysisState.data = previousData;
+  const context = captureAnalysisContext();
+  if (previousData) {
+    // New owners keep the last view; outstanding operations retain obsolete contexts.
+    if (analysisState.methods) analysisState.methods = {...analysisState.methods, context, loading: false};
+    const content = contentAnalysisStates.get(nextId);
+    if (content) contentAnalysisStates.set(nextId, {...content, context, controller: null,
+      loading: false, starting: false, transformerStarting: false, semanticLoading: false});
+  }
   if (analysisItemSelect) analysisItemSelect.value = nextId;
   updateAnalysisTarget();
   if (analysisCard && !analysisCard.hidden) syncRouteHash(routeHash('analysis', nextId), {replace: true});
@@ -6147,7 +6157,7 @@ async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} 
       cache: 'no-store', signal: analysisRequestController.signal
     });
     const payload = await readJsonResponse(response);
-    if (requestId !== analysisRequestSequence) return;
+    if (requestId !== analysisRequestSequence || !isAnalysisContextCurrent(context)) return;
     if (!response.ok) throw new Error(payload.error || '分析データを取得できませんでした。');
     const data = payload.analysis && typeof payload.analysis === 'object' ? payload.analysis : payload;
     analysisState.data = data;
@@ -6165,9 +6175,11 @@ async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} 
     onContentAnalysisLoaded();
   } catch (error) {
     if (error.name === 'AbortError') return;
-    if (requestId !== analysisRequestSequence) return;
-    analysisState.data = null;
-    setAlert(document.querySelector('#analysis-message'), error.message, true);
+    if (requestId !== analysisRequestSequence || !isAnalysisContextCurrent(context)) return;
+    const message = previousData
+      ? `再読み込みに失敗しました。前回読み込んだ結果と表示設定を保持しています（今回の条件では未取得）。${error.message}`
+      : error.message;
+    setAlert(document.querySelector('#analysis-message'), message, true);
   } finally {
     if (requestId === analysisRequestSequence) setAnalysisLoading(false);
   }

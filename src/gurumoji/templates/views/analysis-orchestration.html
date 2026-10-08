@@ -50,6 +50,8 @@
         <p id="orchestration-publication-disclosure" class="field-note">対象はInput／Orchestrator／Visualization／Researchの4つ一式です。Researchには保存時点の発話本文も複製します。生成ノートは既存の履歴保護経路で更新し、手動編集の履歴と削除済みノートの保護を維持します。研究者所有ノートの本文・タグ・別名は変更しません。停止・取消・失敗した分析は自動出力しません。</p>
         <p class="field-note">既定はOFFです。この選択は今回開始する実行だけに保存され、過去の実行の再開・再試行には追加されません。</p>
       </fieldset>
+      <label class="orchestration-consent"><input id="orchestration-memory-enabled" type="checkbox" checked> Core判断・Handler記録をObsidian管理ノートへ保存する</label>
+      <p class="field-note">新規実行では既定ONです。Orchestrator Vaultに状態・短い判断・データ参照を保存します。JSON・CSV・DBは正本に保持し、上の4 Vault出力とは別に管理します。</p>
       <p class="orchestration-boundary">探索的なAI下書きです。実行成功・検証済みの表示は、研究上の結論の確定を意味しません。画面の描画・状態取得にAIは使いません。</p>
       <div class="app-dialog-actions"><button id="orchestration-settings-close" class="secondary-button" type="button">閉じる</button><button id="orchestration-history" class="secondary-button" type="button">保存済み実行</button><button id="orchestration-start" class="primary-button" type="submit">自律分析を開始</button></div>
       <div id="orchestration-history-list" aria-live="polite"></div>
@@ -89,6 +91,15 @@
     <div class="orchestration-live-actions"><button id="orchestration-viewer" type="button" class="secondary-button">履歴と根拠を読む</button><button id="orchestration-refresh" type="button" class="secondary-button">状態を更新</button><button id="orchestration-stop" type="button" class="secondary-button danger">停止する</button><button id="orchestration-resume" type="button" class="primary-button" hidden>保存地点から再開</button><button id="orchestration-results" type="button" class="secondary-button">保存済み結果・初期版</button></div>
     <p id="orchestration-stop-reason" class="orchestration-boundary"></p>
     <p class="field-note">閉じても実行は止まりません。上部の「自律分析」から戻れます。表示の更新・再表示は保存済み状態の取得だけで、AI呼出しやVault出力を開始しません。</p>
+    <section id="orchestration-memory" class="orchestration-output" aria-labelledby="orchestration-memory-title">
+      <h3 id="orchestration-memory-title">Obsidian管理とデータ参照</h3>
+      <p id="orchestration-memory-status" role="status" aria-live="polite"></p>
+      <p id="orchestration-memory-location" class="field-note"></p>
+      <p class="field-note">実行中・停止後の記録も管理します。データ本体は保存台帳に保持し、管理ノートからID・版・hashとリンクで対応を確認できます。</p>
+      <p id="orchestration-memory-warning" class="field-note"></p>
+      <a id="orchestration-memory-note" class="secondary-button" download="obsidian-management.md" hidden>管理ノートを取得</a>
+      <button id="orchestration-memory-retry" class="secondary-button" type="button" hidden>管理ノートを照合・更新</button>
+    </section>
     <section id="orchestration-output" class="orchestration-output" aria-labelledby="orchestration-output-title">
       <h3 id="orchestration-output-title">固定成果物とVault出力</h3>
       <p id="orchestration-save-status" role="status" aria-live="polite"></p>

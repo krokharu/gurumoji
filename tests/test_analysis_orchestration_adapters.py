@@ -67,6 +67,32 @@ class OrchestrationAdapterTests(unittest.TestCase):
             self.run("core", {}, self.resolve({}), cancelled, lambda sample: None)
         self.assertEqual(self.calls, [])
 
+    def test_private_guard_seam_preserves_identity_and_checks_after_payload_work(self):
+        guard, observed, checks = object(), [], []
+        def call(*args, **kwargs):
+            observed.append(kwargs)
+            return {"summary": "TEST", "claims": []}
+        resolve, run = make_orchestration_adapters(call_ai_json=call,
+            load_token_config=lambda: self.config, configured_ai_credentials=lambda *_: ("", "synthetic-local"))
+        options = resolve({})
+        options.update(_request_budget=guard, _budget_attempt_id="TEST-attempt")
+        run("core", {"task": {"task_id": "TEST-task"}}, options, lambda: checks.append(True), lambda _: None)
+        self.assertIs(observed[0]["request_budget"], guard)
+        self.assertEqual((observed[0]["task_id"], observed[0]["attempt_id"]), ("TEST-task", "TEST-attempt:0"))
+        self.assertGreaterEqual(len(checks), 3)
+
+    def test_late_adapter_result_is_not_returned_to_consumer(self):
+        called = []
+        def call(*args):
+            called.append(True)
+            return {"summary": "TEST", "claims": []}
+        _, run = make_orchestration_adapters(call_ai_json=call, load_token_config=lambda: self.config,
+            configured_ai_credentials=lambda *_: ("", "synthetic-local"))
+        def check():
+            if called: raise RuntimeError("deadline")
+        with self.assertRaisesRegex(RuntimeError, "deadline"):
+            run("core", {}, self.resolve({}), check, lambda _: None)
+
     def test_review_schema_uses_current_target_without_leaking_between_calls(self):
         options = self.resolve({})
         for version in (2, 3):
@@ -98,6 +124,28 @@ class OrchestrationAdapterTests(unittest.TestCase):
         self.run("core", {}, options, lambda: None, lambda sample: None)
         self.assertEqual(self.calls[0][10], 420)
 
+    def test_verification_references_are_bound_to_its_supplied_evidence_per_call(self):
+        options = self.resolve({})
+        for ids in (["e2", "e1"], ["e3"], []):
+            self.run("verification", {"raw_evidence": [{"evidence_id": eid, "text": "synthetic"} for eid in ids]},
+                     options, lambda: None, lambda _: None)
+            refs = self.calls[-1][6]["properties"]["claims"]["items"]["properties"]["evidence_ids"]
+            if ids:
+                self.assertEqual(refs["items"]["enum"], sorted(ids))
+            else:
+                self.assertEqual(refs["maxItems"], 0)
+        self.assertNotIn("enum", SPECIALIST_SCHEMA["properties"]["claims"]["items"]["properties"]["evidence_ids"]["items"])
+
+    def test_roles_keep_complete_compact_index_and_delivered_utterance_ids(self):
+        context = {"raw_evidence": [{"evidence_id": "e0", "utterance_id": "u0", "text": "synthetic"}],
+                   "coverage": {"evidence_index": [{"evidence_id": f"e{i}", "utterance_id": f"u{i}"} for i in range(323)]}}
+        for role in ("core", "verification", "critic"):
+            self.run(role, context, self.resolve({}), lambda: None, lambda _: None)
+            sent = json.loads(self.calls[-1][4])
+            self.assertEqual(sent["coverage"]["evidence_index"], [{"evidence_id": f"e{i}"} for i in range(323)])
+            self.assertEqual(sent["raw_evidence"][0]["utterance_id"], "u0")
+        self.assertEqual(context["coverage"]["evidence_index"][-1]["utterance_id"], "u322")
+
     def test_handler_and_code_statistics_cannot_call_llm(self):
         for role in ("handler", "statistics", "unregistered"):
             with self.subTest(role=role), self.assertRaises(AnalysisContractError):
@@ -117,6 +165,15 @@ class OrchestrationAdapterTests(unittest.TestCase):
             self.run("core", {}, options, lambda: None, lambda sample: None)
         self.assertEqual(caught.exception.code, "adapter_version_conflict")
         self.assertEqual(self.calls, [])
+
+    def test_handler_pending_gate_constrains_core_without_leaking_to_next_call(self):
+        options = self.resolve({})
+        self.run("core", {"statistical_review_gate": {"status": "human_pending", "result_ids": ["saved-draft"]}},
+                 options, lambda: None, lambda _: None)
+        self.assertEqual(self.calls[-1][6]["properties"]["claims"]["maxItems"], 0)
+        self.run("core", {}, options, lambda: None, lambda _: None)
+        self.assertEqual(self.calls[-1][6]["properties"]["claims"]["maxItems"], 24)
+        self.assertEqual(CORE_SCHEMA["properties"]["claims"]["maxItems"], 24)
 
     def test_model_and_overrides_reject_untrusted_values(self):
         for payload in ({"model": "bad\nmodel"}, {"model": []}, {"provider": "other"},
@@ -143,3 +200,46 @@ class OrchestrationAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssetBindingAdapterBoundaryTests(unittest.TestCase):
+    def test_private_binding_passes_actual_registry_authority_and_never_enables_execution(self):
+        from test_analysis_asset_bindings import SyntheticStore
+        from gurumoji.method_experts import ExpertCatalog
+        from gurumoji.services.expert_agents import ExpertAgentRegistry
+        from gurumoji.services.analysis_orchestration_adapters import make_asset_binding_adapters
+        from pathlib import Path
+        fixture = SyntheticStore()
+        self.addCleanup(fixture.close)
+        original, state = fixture.descriptors(fixture.run(), original=True)
+        fixture.register(originals=[original], states=[state])
+        registry = ExpertAgentRegistry(ExpertCatalog(root=Path(__file__).resolve().parents[1]/"docs/program-vault",
+                                                     local_root=Path(fixture.temp.name)/"empty"))
+        resolve, revalidate = make_asset_binding_adapters(store=fixture.store, expert_registry=registry)
+        request = fixture.request(original, original=True)
+        request.update(expert_id="exp-correlation", step_id="cor-p2",
+                       actor={"kind":"code","actor_id":"TEST-code","step_ids":["cor-p2"]})
+        result = resolve(**request)
+        self.assertEqual(result["decision"], "eligible")
+        self.assertFalse(result["execution_enabled"])
+        request["expert_id"] = "exp-TEST-unknown"
+        self.assertEqual(resolve(**request)["decision"], "rejected")
+        self.assertEqual(revalidate(result, **request)["decision"], "blocked")
+
+    def test_selected_optional_stops_without_implicit_omission_or_model_call(self):
+        from test_analysis_asset_bindings import SyntheticStore
+        from gurumoji.services.analysis_orchestration_adapters import make_asset_binding_adapters
+        from unittest.mock import Mock
+        fixture = SyntheticStore()
+        self.addCleanup(fixture.close)
+        asset, state = fixture.descriptors(fixture.run())
+        fixture.register([asset], states=[state])
+        registry = Mock()
+        resolve, _ = make_asset_binding_adapters(store=fixture.store, expert_registry=registry)
+        request = fixture.request(asset)
+        request["slot"].update(required=False, min_items=0)
+        request["inputs"][0].pop("source")
+        request.update(expert_id="exp-correlation", step_id="cor-p2",
+                       actor={"kind":"code","actor_id":"TEST-code","step_ids":["cor-p2"]})
+        self.assertEqual(resolve(**request)["decision"], "needs_input")
+        registry.assess_inputs.assert_not_called()

@@ -430,5 +430,279 @@ def build_execution_binding(envelope: dict[str, Any], definitions: list[dict[str
     }
 
 
-def capability_catalog() -> dict[str, Any]:
-    return {"version": CONTRACT_VERSION, "capabilities": CAPABILITIES}
+def capability_catalog(*, connections: bool = False) -> dict[str, Any]:
+    result = {"version": CONTRACT_VERSION, "capabilities": CAPABILITIES}
+    if connections:
+        from .analysis_method_registry import METHODS, connection_method_descriptor
+        result["connections"] = {"version": CONNECTION_VERSION, "kinds": sorted(ASSET_KINDS),
+                                 "roles": sorted(REFERENCE_ROLES),
+                                 "methods": [connection_method_descriptor(key) for key, _, _ in METHODS]}
+    return result
+
+
+CONNECTION_VERSION = "analysis-connections-1"
+TABLE_PILOT_VERSION = "table-pilot-1"
+TABLE_PILOT_MAX_BYTES = 131072
+ASSET_KINDS = frozenset({"observation_table", "claim_set", "relation_graph", "event_sequence", "embedding_matrix"})
+REFERENCE_ROLES = frozenset({"data_input", "selection_basis", "evidence_context", "parameter_source"})
+ORIGINAL_SOURCE_TYPES = frozenset({"snapshot", "utterance", "raw_text", "media", "researcher_memo", "definition"})
+CONNECTION_UNITS = frozenset({"utterance", "conversation_speaker", "participant", "conversation", "episode", "dataset_claim", "event", "vector_row", "report_claim"})
+HASH_DOMAINS = frozenset({"raw-bytes-v1", "canonical-json-v1", "utf8-text-v1", "ta-candidate-content-v1", "ta-theme-content-v1", "human-record-v1"})
+CONNECTION_PURPOSES = frozenset({"exploratory", "descriptive", "qualitative_compare", "confirmatory"})
+
+
+def _connection_object(value, keys, optional=()):
+    return isinstance(value, dict) and set(keys) <= set(value) <= set(keys) | set(optional)
+
+
+def _connection_id(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _connection_hash(value):
+    return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+
+
+def _connection_list(value, allowed=None, *, empty=True):
+    return (isinstance(value, list) and (empty or bool(value))
+            and all(_connection_id(v) for v in value) and len(set(value)) == len(value)
+            and (allowed is None or set(value) <= allowed))
+
+
+def _connection_schema(value):
+    return (_connection_object(value, ("schema_id", "version", "schema_hash"))
+            and _connection_id(value["schema_id"]) and type(value["version"]) is int
+            and value["version"] >= 1 and _connection_hash(value["schema_hash"]))
+
+
+def _connection_adapter(value):
+    return (_connection_object(value, ("adapter_id", "version"))
+            and all(_connection_id(v) for v in value.values()))
+
+
+def validate_connection_actor(actor):
+    extras = {"model_id", "revision", "provider"}
+    if (not _connection_object(actor, ("kind", "actor_id", "step_ids"), extras)
+            or not _connection_id(actor["kind"]) or actor["kind"] not in {"ai", "code", "researcher", "system"}
+            or not _connection_id(actor["actor_id"]) or not _connection_list(actor["step_ids"])
+            or (actor["kind"] == "ai" and not all(_connection_id(actor.get(k)) for k in extras))
+            or (actor["kind"] != "ai" and extras & set(actor))):
+        raise AnalysisContractError("actorの型・条件が不正です。", code="connection_actor_invalid")
+    return actor
+
+
+def validate_connection_slot(slot: Any) -> dict:
+    """Strict Slot metadata from common S1/r3; no persistence or resolver."""
+    fields = ("slot_id", "required", "min_items", "max_items", "roles", "accept_kinds", "accept_schemas",
+              "accept_units", "scope_modes", "actors", "adapter", "purposes", "max_bytes")
+    valid = _connection_object(slot, fields, ("accept_source_types",))
+    if valid:
+        valid = (_connection_id(slot["slot_id"]) and type(slot["required"]) is bool
+                 and all(type(slot[k]) is int for k in ("min_items", "max_items", "max_bytes"))
+                 and 0 <= slot["min_items"] <= slot["max_items"] and slot["max_items"] >= 1
+                 and slot["max_bytes"] >= 1 and (not slot["required"] or slot["min_items"] >= 1)
+                 and _connection_list(slot["roles"], REFERENCE_ROLES, empty=False)
+                 and _connection_list(slot["accept_kinds"], ASSET_KINDS)
+                 and isinstance(slot["accept_schemas"], list) and bool(slot["accept_schemas"])
+                 and all(_connection_schema(v) for v in slot["accept_schemas"])
+                 and len({fingerprint(v) for v in slot["accept_schemas"]}) == len(slot["accept_schemas"])
+                 and _connection_list(slot["accept_units"], CONNECTION_UNITS, empty=False)
+                 and _connection_list(slot["scope_modes"], {"dataset", "selection", "section", "episode"}, empty=False)
+                 and _connection_list(slot["actors"], {"ai", "code", "researcher", "system"}, empty=False)
+                 and _connection_adapter(slot["adapter"])
+                 and _connection_list(slot["purposes"], CONNECTION_PURPOSES, empty=False))
+    if valid:
+        valid = ("accept_source_types" not in slot if slot["accept_kinds"] else
+                 _connection_list(slot.get("accept_source_types"), ORIGINAL_SOURCE_TYPES, empty=False))
+    if not valid:
+        raise AnalysisContractError("入力slotの型・条件が不正です。", code="connection_slot_invalid")
+    return json.loads(canonical(slot))
+
+
+def _connection_source_ref(ref):
+    if not _connection_object(ref, ("target_type", "target_id", "version", "content_hash", "hash_domain"),
+                              ("library_id", "utterance_id", "locator")):
+        return False
+    if (not _connection_id(ref["target_type"]) or not _connection_id(ref["hash_domain"])
+            or ref["target_type"] not in ORIGINAL_SOURCE_TYPES or not _connection_id(ref["target_id"])
+            or not _connection_id(ref["version"]) or not _connection_hash(ref["content_hash"])
+            or ref["hash_domain"] not in HASH_DOMAINS):
+        return False
+    if ref["target_type"] in {"snapshot", "utterance"} and not _connection_id(ref.get("library_id")):
+        return False
+    if ref["target_type"] == "utterance":
+        if not _connection_id(ref.get("utterance_id")): return False
+    elif "utterance_id" in ref:
+        return False
+    return all(_connection_id(ref[k]) for k in ("library_id", "utterance_id", "locator") if k in ref)
+
+
+def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
+    """Assess declared metadata only, before G4b resolution/adoption.
+
+    Inputs are a closed, internal selection envelope (not the full proposed
+    InputRef/Asset schema). Selected candidates carry schema/unit/scope/actor/
+    adapter/purpose plus a SourceRef or artifact hash. No metadata is inferred
+    from old runs, labels, receipts or free text; eligibility enables no calls.
+    """
+    def result(decision, reason):
+        return {"version": CONNECTION_VERSION, "decision": decision, "reason": reason,
+                "execution_enabled": False, "adoption_performed": False,
+                "unexecuted_checks": ["content_resolution", "state_policy_pre_adoption", "actual_payload_byte_limit"]}
+    try:
+        slot = validate_connection_slot(slot)
+    except (AnalysisContractError, TypeError, ValueError):
+        return result("rejected", "connection_slot_invalid")
+    if not isinstance(descriptor, dict): return result("rejected", "method_unregistered")
+    from .analysis_method_registry import connection_method_descriptor
+    method_id = descriptor.get("method_id")
+    if not _connection_id(method_id): return result("rejected", "method_unregistered")
+    registered = connection_method_descriptor(method_id)
+    try:
+        if registered is None or canonical(registered) != canonical(descriptor):
+            return result("rejected", "capability_descriptor_mismatch")
+    except (TypeError, ValueError, UnicodeError):
+        return result("rejected", "capability_descriptor_mismatch")
+    if not isinstance(inputs, list): return result("rejected", "input_shape")
+    try:
+        encoded = canonical(inputs)
+    except (TypeError, ValueError, UnicodeError):
+        return result("rejected", "input_encoding")
+    if len(encoded) > slot["max_bytes"]: return result("needs_input", "metadata_byte_limit")
+    selected, ids = [], set()
+    for ref in inputs:
+        if not _connection_object(ref, ("input_ref_id", "selection", "role", "omission_reason"), ("candidate",)):
+            return result("rejected", "input_shape")
+        if not _connection_id(ref["input_ref_id"]) or ref["input_ref_id"] in ids or ref["role"] not in slot["roles"]:
+            return result("rejected", "input_identity_or_role")
+        ids.add(ref["input_ref_id"])
+        if ref["selection"] == "omitted":
+            if slot["required"] or "candidate" in ref or not _connection_id(ref["omission_reason"]):
+                return result("rejected", "illegal_omission")
+            continue
+        if ref["selection"] != "selected" or ref["omission_reason"] is not None:
+            return result("rejected", "selection_invalid")
+        if "candidate" not in ref: return result("needs_input", "selected_input_unresolved")
+        if ref["role"] not in descriptor.get("reference_roles", []):
+            return result("unsupported", "method_reference_role_unimplemented")
+        selected.append(ref["candidate"])
+    if not slot["min_items"] <= len(selected) <= slot["max_items"]:
+        return result("needs_input" if len(selected) < slot["min_items"] else "rejected", "slot_cardinality")
+    for candidate in selected:
+        fields = ("source_type", "schema", "unit", "scope_mode", "scope_policy", "actor", "adapter", "purpose", "meaning_status", "human_review_state")
+        if not _connection_object(candidate, fields, ("source_ref", "kind", "content_hash", "content_domain")):
+            return result("rejected", "candidate_shape")
+        if not all(_connection_id(candidate[k]) for k in ("source_type", "unit", "scope_mode", "scope_policy", "purpose", "meaning_status", "human_review_state")):
+            return result("rejected", "candidate_enum_shape")
+        actor = candidate["actor"]
+        try:
+            validate_connection_actor(actor)
+        except AnalysisContractError:
+            return result("rejected", "actor_shape")
+        if not _connection_schema(candidate["schema"]) or not _connection_adapter(candidate["adapter"]):
+            return result("rejected", "schema_or_adapter_shape")
+        if candidate["unit"] not in CONNECTION_UNITS or candidate["scope_mode"] not in {"dataset", "selection", "section", "episode"}:
+            return result("rejected", "unit_or_scope_invalid")
+        if candidate["purpose"] not in CONNECTION_PURPOSES or candidate["meaning_status"] not in {"declared", "unknown"} or candidate["human_review_state"] not in {"structural_checked", "human_pending", "human_reviewed"}:
+            return result("rejected", "purpose_or_review_invalid")
+        if candidate["source_type"] == "original":
+            if (set(candidate) != set(fields) | {"source_ref"} or slot["accept_kinds"]
+                    or not _connection_source_ref(candidate["source_ref"])
+                    or candidate["source_ref"]["target_type"] not in slot["accept_source_types"]):
+                return result("rejected", "original_source_invalid")
+        elif candidate["source_type"] == "artifact":
+            if (set(candidate) != set(fields) | {"kind", "content_hash", "content_domain"}
+                    or not _connection_id(candidate["kind"]) or not _connection_id(candidate["content_domain"])
+                    or candidate["kind"] not in ASSET_KINDS or not _connection_hash(candidate["content_hash"])
+                    or candidate["content_domain"] not in HASH_DOMAINS or candidate["kind"] not in slot["accept_kinds"]):
+                return result("rejected", "artifact_kind_or_hash")
+        else: return result("rejected", "source_type")
+        if (candidate["schema"] not in slot["accept_schemas"] or candidate["unit"] not in slot["accept_units"]
+                or candidate["scope_mode"] not in slot["scope_modes"] or actor["kind"] not in slot["actors"]
+                or candidate["adapter"] != slot["adapter"] or candidate["purpose"] not in slot["purposes"]):
+            return result("rejected", "slot_incompatible")
+        if candidate["meaning_status"] == "unknown" or candidate["human_review_state"] == "human_pending":
+            return result("human_pending", "meaning_or_human_unconfirmed")
+        if (candidate["schema"] != descriptor.get("native_input_schema")
+                or actor["kind"] not in descriptor.get("input_actor_kinds", [])
+                or candidate["adapter"] != descriptor.get("native_adapter") or candidate["unit"] not in descriptor.get("units", [])
+                or candidate["scope_mode"] not in descriptor.get("scope_modes", [])
+                or candidate["purpose"] not in descriptor.get("purposes", [])
+                or candidate["scope_policy"] != descriptor.get("scope_policy")):
+            return result("unsupported", "method_capability_unavailable")
+        if candidate["source_type"] == "artifact" and not descriptor.get("typed_asset_adapter_supported"):
+            return result("unsupported", "typed_asset_adapter_unimplemented")
+        if candidate["source_type"] == "original" and (not descriptor.get("native_adapter_supported") or candidate["source_ref"]["target_type"] not in descriptor.get("original_source_types", [])):
+            return result("unsupported", "original_adapter_unimplemented")
+    return result("eligible", "metadata_compatible")
+
+
+def validate_table_pilot_request(method_id, request):
+    """Closed opt-in code request. No AI expressions or implicit conversion."""
+    from .analysis_method_registry import TABLE_PILOT_METHODS, table_pilot_slot
+    def reject(code="table_request_invalid"):
+        raise AnalysisContractError("表パイロットの固定契約と一致しません。", code=code)
+    if method_id not in TABLE_PILOT_METHODS: reject("table_method_unsupported")
+    if not _connection_object(request, ("version", "actor", "parameters", "bindings")):
+        reject()
+    if request["version"] != TABLE_PILOT_VERSION or request["actor"] != "code": reject("table_actor_or_version")
+    parameters = request["parameters"]
+    if not _connection_object(parameters, TABLE_PILOT_METHODS[method_id]): reject("table_parameters")
+    if method_id == "table_projection":
+        if (not _connection_list(parameters["columns"], empty=False)
+                or not _connection_list(parameters["row_ids"], empty=False)
+                or not {"utterance_id", "conversation_id", "value_status"} <= set(parameters["columns"])):
+            reject("table_projection_parameters")
+    elif method_id == "table_join":
+        if parameters["key"] != "utterance_id": reject("table_join_key")
+    else:
+        if parameters["status_column"] != "value_status": reject("table_status_column")
+        if any(not _connection_id(parameters[k]) for k in parameters if k.endswith("_column")):
+            reject("table_column")
+        if method_id == "table_aggregate" and any(parameters[k] != v for k,v in
+                (("operation", "count"), ("group_by", "utterance_id"), ("unit", "utterance"))):
+            reject("table_unit_or_operation_unsupported")
+    bindings = request["bindings"]
+    if not _connection_object(bindings, ("slot", "inputs", "context")): reject("table_bindings")
+    if canonical(bindings["slot"]) != canonical(table_pilot_slot(method_id)): reject("table_slot")
+    inputs = bindings["inputs"]
+    if (not isinstance(inputs, list) or len(inputs) != bindings["slot"]["min_items"]
+            or any(not isinstance(ref, dict) or ref.get("selection") != "selected"
+                   or ref.get("role") != "data_input" or not isinstance(ref.get("source"), dict)
+                   or ref["source"].get("type") != "frozen" for ref in inputs)):
+        reject("table_frozen_inputs_required")
+    context = bindings["context"]
+    context_fields = ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "purpose",
+                      "destination", "scope_id", "scope_manifest_hash", "cancelled")
+    if (not _connection_object(context, context_fields)
+            or any(type(context[k]) is not int or context[k] < 1 for k in ("plan_version", "generation"))
+            or type(context["cancelled"]) is not bool
+            or not all(_connection_id(context[k]) for k in ("plan_id", "consumer_task_id", "scope_id", "destination"))
+            or not all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash"))
+            or context["purpose"] not in {"exploratory", "descriptive"} or context["destination"] != "local"):
+        reject("table_context")
+    seen = set()
+    for ref in inputs:
+        required = ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "slot_id",
+                    "input_ref_id", "role", "selection", "omission_reason", "source", "selector")
+        if (not _connection_object(ref, required) or ref["omission_reason"] is not None
+                or not _connection_id(ref["input_ref_id"]) or ref["input_ref_id"] in seen
+                or ref["slot_id"] != "table"
+                or any(type(ref[k]) is not type(context[k]) or ref[k] != context[k] for k in
+                       ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id"))):
+            reject("table_input_identity")
+        seen.add(ref["input_ref_id"])
+        source = ref["source"]
+        if (not _connection_object(source, ("type", "asset_key", "content_hash", "content_domain"))
+                or source["content_domain"] != "raw-bytes-v1" or not _connection_hash(source["content_hash"])
+                or not _connection_object(source["asset_key"], ("library_id", "store_run_id", "artifact_id", "output_name"))
+                or not all(_connection_id(v) for v in source["asset_key"].values())):
+            reject("table_frozen_source")
+        selector = ref["selector"]
+        if (not _connection_object(selector, ("row_ids", "column_ids", "range_ref", "selection_hash"))
+                or not _connection_list(selector["row_ids"]) or not _connection_list(selector["column_ids"])
+                or selector["range_ref"] is not None
+                or selector["selection_hash"] != fingerprint({k:v for k,v in selector.items() if k != "selection_hash"})):
+            reject("table_selector_unsupported")
+    if len(canonical(request)) > TABLE_PILOT_MAX_BYTES: reject("table_request_byte_limit")
+    return json.loads(canonical(request))

@@ -3,7 +3,7 @@ note_id: analysis-experts-index
 note_type: method-group
 title: 分析手法ごとの専門家定義
 status: current
-updated: 2026-09-25
+updated: 2026-10-06
 tags:
   - gurumoji/analysis
   - gurumoji/expert
@@ -22,10 +22,18 @@ tags:
 1. 分析設定の「主となる分析手法」から主の専門家を選ぶ。未選択（`auto`）の場合は、既存の分析方針が暫定で示す主手法の専門家を「暫定」として選ぶ。
 2. 既存の分析方針（`build_focus_group_analysis_plan`）が補助として挙げた手法の専門家を加える。それ以外の専門家は読み込まない。
 3. 選んだ専門家の `01-Expert.md` の「実行定義」だけを解析し、適用条件をコードで判定する。
-4. 同じフォルダーの知識ノートと、実行定義が参照する文献ノートは、知識hashの計算にだけ使う。内容をAIへ送らない。
+4. 従来の手法レビュー経路では、同じフォルダーの知識ノートと参照文献を知識hashの計算に使い、本文をAIへ送らない。下記の自律分析専門家では、指定した専門家の必要な抜粋を版・hash付きで渡す。
 5. 手法の結果を保存するときは、結果を出した手法の専門家の確認結果を付ける。保存する手法ノートの「限界と追加確認」にも、担当専門家の判定と文献IDを書く。
 6. 分析画面の「手法別」タブを開いたときは、一覧に出る手法の担当専門家を読み込む。結果がある手法には結果への判定を、結果がない手法には実行前に満たす条件を示す（ADR-116）。
 7. Gitで共有するこのベースとは別に、実行環境ごとの `<data>/local_knowledge/50-Analysis-Methods/…` があれば同じ相対パスで解決を上書きする（ADR-120、[[40-Design/method-rules#ローカル限定の知識（ADR-120）]]）。一覧の `source` でベース／ローカル追加／ローカル上書きを区別する。
+
+## 自律分析の専門家エージェント（2026-10-06）
+
+`services/expert_agents.ExpertAgentRegistry` と共通Handlerを接続した。新規runで `expert_ids` を1〜9件指定すると、その専門家の定義、知識ノート、共通知識、文献の抜粋、入出力契約を固定する。未指定時は実行定義の `ai_assist.allowed=true` の9分野（質的内容分析、テーマ分析、フレームワーク法、SCAT、M-GTA、相互作用分析、記述統計、群間比較、相関）が候補になる。Coreは索引からIDを選び、Handlerがその専門家だけの知識を会話解釈担当へ渡す。
+
+入力・出力項目と型は専門家フォルダーの任意の `07-Agent-Contract.md` で指定する。例は [[50-Analysis-Methods/10-Experts/thematic-analysis/07-Agent-Contract]]。契約がない専門家は実行定義の `output_sections` から既定項目を生成する。型不一致・不正な知識／発話／手順参照は採用しない。知識はモデルの重みへ追加されるのではなく、呼出し時の文脈として渡す。
+
+統計3分野の定義版2では、分析案・結果説明のAI下書き手順を追加した。コードの数値計算と研究者の確定判断はそのまま分離する。その他のAI補助禁止は維持する。統計専門家は分野内の許可ツールをanalysis_requestsで提案し、Coreが判断、Handlerが正式発注する。計算前はneeds_calculation、計算後の説明はcalculation_result_idsで検証済み表へ戻れるようにする。統計3分野にも07-Agent-Contractを追加した。機械判定不能な必須適用条件は実行を保留し、旧runへ新しい知識や契約を後付けしない。詳細と能力評価の限界は [[20-Modules/analysis-orchestration]] を参照する。
 
 ## 専門家の一覧
 
@@ -98,3 +106,16 @@ tags:
 | `04-Applicability-and-Limits.md` | 入力の条件、適用できない条件、言えないこと、グループインタビューでの注意 |
 | `05-Cases.md` | 文献で確認できた適用例 |
 | `06-Open-Issues.md` | 知識が不足している点、文献間で意見が分かれる点 |
+
+
+## currentPack暫定方式と3試行の登録入口（G1b提案）
+
+C0の配信方針 `task_e1044a47e1e6` はcurrentPack暫定維持。新方式は `notadopted`、b/c未測定であり、比較優位・実モデル品質・研究者の採用を認定していない。既存01・07とコードの実行許可を正とし、08の `proposed`／`runtime_state: planned` は実行登録ではない。段階・kind・actor・scope・根拠と不足は [[50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness|17専門家の充足・不足表]] に集約する。
+
+| 試行対象 | 対応登録案 | 現行の責務と保留 |
+| --- | --- | --- |
+| テーマ分析 | [[50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding\|テーマ分析の段階別対応]] | ta-p2/p3のAI候補、他は研究者。確定テーマは人の記録待ち |
+| 相関 | [[50-Analysis-Methods/10-Experts/correlation/08-Skill-Hook-Binding\|相関の段階別対応]] | cor-ai-plan/report、Handler計算、研究者確認を分離 |
+| 群間比較 | [[50-Analysis-Methods/10-Experts/group-comparison-statistics/08-Skill-Hook-Binding\|群間比較の段階別対応]] | grp-ai-plan/report、Handler計算、研究者確認を分離 |
+
+現行保存出力registryの正本は `analysis_method_registry.METHODS` の22 method（担当専門家あり14／なし8）。17は専門家定義数であり、旧入口の「19手法」とも区別する。統計3の現行07はschema 2・契約版2で、旧F02の契約版1／a修正待ちの3行だけを充足表で補正した。07の現行説明はa04実装・a06限定CPU受入を反映し、a03時点のloader拒否は作成時の履歴として保持する。実行YAMLは同一で、本文訂正後のraw参照hashを対応票へ再束縛した。08reader・汎用能力登録・論理callbackはG2／G4後続で、今回の入口整備によって実装済みにしない。

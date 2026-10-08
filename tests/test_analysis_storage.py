@@ -440,3 +440,32 @@ class AnalysisStorageTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ConnectionStorageBoundaryTests(unittest.TestCase):
+    """Loaded separately by CPU-only ticket; legacy app-heavy classes stay intact."""
+    def test_immutable_metadata_append_reopens_sqlite_without_vault_publication(self):
+        from test_analysis_asset_bindings import SyntheticStore
+        from gurumoji.analysis_store import AnalysisStore
+        fixture = SyntheticStore()
+        self.addCleanup(fixture.close)
+        run = fixture.run()
+        asset, state = fixture.descriptors(run)
+        metadata = fixture.register([asset], states=[state])
+        reopened = AnalysisStore(fixture.path, fixture.connect)
+        self.assertEqual(reopened.list_assets()[0], asset)
+        self.assertEqual(reopened.get(metadata["id"])["status"], "completed")
+        self.assertEqual(reopened.get(metadata["id"])["vault_status"], "pending")
+        self.assertFalse(reopened.vault.exists())
+
+    def test_original_schema_mismatch_cannot_borrow_native_schema_hash(self):
+        from test_analysis_asset_bindings import SyntheticStore
+        from gurumoji.analysis_store import AssetBindingError
+        fixture = SyntheticStore()
+        self.addCleanup(fixture.close)
+        fixture.snapshot.pop("analysis")
+        run = fixture.run()
+        original, state = fixture.descriptors(run, original=True)
+        with self.assertRaises(AssetBindingError) as caught:
+            fixture.register(originals=[original], states=[state])
+        self.assertEqual(caught.exception.reason, "original_payload_schema")
