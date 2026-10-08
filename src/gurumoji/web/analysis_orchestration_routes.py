@@ -10,7 +10,7 @@ from flask import Blueprint, Flask, Response, jsonify, request
 
 from ..analysis_core import AnalysisContractError, TABLE_PILOT_MAX_BYTES
 from ..analysis_store import (StoreConflict, AssetBindingError, HUMAN_RECORD_OPTIONS_MAX_BYTES,
-                              human_record_options_offset)
+                              human_record_options_offset, asset_plan_options_offset)
 
 
 def register_orchestration_routes(app: Flask, service: Callable[[], Any],
@@ -36,7 +36,7 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.errorhandler(AnalysisContractError)
     def contract_error(exc):
-        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run", "asset_plan_conflict", "asset_plan_revision",
+        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run", "asset_plan_conflict", "asset_plan_revision", "asset_plan_changed",
                                 "provider_unavailable", "resume_blocked", "uncertain_execution",
                                 "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch",
                                 "table_run_stopped", "table_run_unavailable", "table_task_limit"}
@@ -129,6 +129,24 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
         outcome=service().register_asset_plan(item_id,run_id,payload(TABLE_PILOT_MAX_BYTES))
         return jsonify(outcome),200 if outcome["duplicate"] else 202
 
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/options")
+    def asset_plan_options(item_id, run_id):
+        if set(request.args) - {"offset"} or len(request.args.getlist("offset")) > 1:
+            raise AnalysisContractError("接続計画の取得条件が不正です。", code="asset_plan_options_query")
+        offset = asset_plan_options_offset(request.args.get("offset", "0"))
+        try:
+            if table_reader is None: raise OSError("read-only asset reader is not configured")
+            reader = table_reader()
+            if reader.table_store is None: raise OSError("read-only asset store is not configured")
+            response = viewer_response(reader.asset_plan_options(item_id, run_id, offset=offset))
+        except LookupError:
+            return viewer_response({"error": "対象の会話または固定分析が見つかりません。", "reason_code": "asset_plan_options_unavailable"}), 404
+        except (sqlite3.Error, OSError):
+            return viewer_response({"error": "接続計画の保存済み台帳を読み取れません。", "reason_code": "asset_plan_options_storage_unavailable"}), 503
+        if len(response.get_data()) > HUMAN_RECORD_OPTIONS_MAX_BYTES:
+            raise AnalysisContractError("接続候補の情報が上限を超えています。", code="asset_plan_options_byte_limit")
+        return response
+
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/notifications/<producer_task_id>")
     def asset_plan_notification(item_id,run_id,producer_task_id):
         if payload():raise AnalysisContractError("通知は保存済producerだけを指定してください。",code="asset_notification_body")
@@ -157,6 +175,11 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
                 execution_run_id=run_id, offset=offset, current_input_hash=stamp,
                 current_source_revisions={"source_revision": source.get("revision_count", 0),
                                           "analysis_revision": source.get("analysis_revision", 0)}))
+            fresh_item = reader.find_item(item_id)
+            if fresh_item is None or (reader.source_fingerprint and reader.source_fingerprint(fresh_item) != stamp):
+                raise AnalysisContractError("取得中に元入力が更新されました。", code="revision_conflict")
+            if any(dict(fresh_item).get(k) != source.get(k) for k in ("revision_count", "analysis_revision")):
+                raise AnalysisContractError("取得中に元入力の版が更新されました。", code="revision_conflict")
         except LookupError:
             return viewer_response({"error": "対象の会話または固定分析が見つかりません。",
                                     "reason_code": "human_record_options_unavailable"}), 404

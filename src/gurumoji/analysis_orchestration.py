@@ -1333,17 +1333,144 @@ class AnalysisOrchestrationService:
             self._schedule(run_id)
         return {**copy.deepcopy(task), "registration_duplicate": duplicate}
 
+    def asset_plan_options(self, item_id, run_id, *, offset=0):
+        from .analysis_store import asset_plan_options_offset
+        offset = asset_plan_options_offset(offset)
+        if self.source_fingerprint is None:
+            raise _error("現在の元入力を確認できません。", "asset_plan_source_unavailable")
+        with self._table_read(item_id) as db:
+            run = self._table_run(db, item_id, run_id)
+            item = dict(self.find_item(item_id))
+            if any(int(item.get(k, 0) or 0) != run.get(v) for k, v in
+                   (("revision_count", "source_revision"), ("analysis_revision", "analysis_revision"))):
+                raise _error("固定元入力の版が更新されています。", "revision_conflict")
+            initial = self._initial(db, run["initial_id"])
+        value = self.table_store.asset_plan_options(run=run, initial=initial, offset=offset)
+        with self._table_read(item_id) as db:
+            current = self._table_run(db, item_id, run_id)
+            if current["generation"] != run["generation"] or current.get("asset_plans", []) != run.get("asset_plans", []):
+                raise _error("取得中に接続計画が更新されました。", "asset_plan_changed")
+        return value
+
+    def _check_web_plan_inputs(self, db, run, plan, *, existing_tasks=None):
+        """Normal UI declarations must come from current verified choices."""
+        from .analysis_core import connected_web_methods
+        initial = self._initial(db, run["initial_id"])
+        options = []; offset = 0
+        while True:
+            page = self.table_store.asset_plan_options(run=run, initial=initial, offset=offset)
+            options.extend(page["inputs"])
+            if page["next_offset"] is None: break
+            offset = page["next_offset"]
+        methods = {m["method_id"]: m for m in connected_web_methods()}
+        steps = {s["step_id"]: s for s in plan["steps"]}
+        for step in plan["steps"]:
+            method = step["method_id"]; params = step["parameters"]; choices = []
+            for ref in step["inputs"]:
+                if ref["selection"] == "omitted": continue
+                source = ref["source"]
+                if source["type"] == "from_step":
+                    parent = steps[source["step_id"]]; declaration = methods[parent["method_id"]]
+                    if method not in declaration["compatible_methods"]:
+                        raise _error("宣言された出力能力と一致しません。", "asset_plan_capability")
+                    saved_choice = None
+                    if existing_tasks:
+                        task_id = existing_tasks[source["step_id"]]
+                        row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?", (task_id, run["run_id"])).fetchone()
+                        task = json.loads(row[0]) if row else {}
+                        if task.get("table_store_run_id"):
+                            saved_choice = next((o for o in options if o["source"].get("asset_key", {}).get("store_run_id") == task["table_store_run_id"]), None)
+                            if saved_choice is None or method not in saved_choice["compatible_methods"]:
+                                raise _error("保存済みproducerの現在権限を確認できません。", "asset_plan_input_unavailable")
+                    choices.append(saved_choice or {"fields": declaration["output_fields"], "unit_ids": [], "theme_ids": [], "relation_ids": [],
+                        "semantic_targets": [], "variables": [], "scope": parent["scope"], "future": True,
+                        "unit": parent["parameters"].get("unit") if parent["method_id"] == "unit_aggregate" else
+                                declaration["output_units"][0] if len(declaration["output_units"]) == 1 else None})
+                else:
+                    choice = next((o for o in options if o["source"] == source), None)
+                    if choice is None or method not in choice["compatible_methods"]:
+                        raise _error("現在利用できる保存済み入力ではありません。", "asset_plan_input_unavailable")
+                    choices.append(choice)
+            if not choices: raise _error("固定入力を選択してください。", "asset_plan_input_unavailable")
+            scope = step["scope"]
+            if not any(all(c["scope"].get(k) == scope[k] for k in scope) for c in choices):
+                raise _error("保存済み範囲と一致しません。", "asset_plan_scope")
+            first = choices[0]
+            def require(value, reason="asset_plan_parameter_choice"):
+                if not value: raise _error("保存済み選択肢または宣言された能力と一致しません。", reason)
+            if method == "theme_evidence_table": require(params["theme_id"] in first["theme_ids"])
+            elif method == "unit_projection":
+                require(not first.get("future"), "require_saved_output")
+                require({"unit_id", "conversation_id", "value_status"} <= set(params["columns"]) <= set(first["fields"])
+                    and set(params["unit_ids"]) <= set(first["unit_ids"]))
+            elif method == "unit_aggregate":
+                require(first["unit"] == "utterance")
+                require(params["value_column"] in first["fields"] and params["value_column"] not in {"unit_id", "conversation_id", "speaker_id", "value_status"})
+                variable = next((v for v in first["variables"] if v["variable_id"] == params["value_column"]), None)
+                if params["operation"] != "count":
+                    require((variable is not None and variable["value_type"] in {"number", "integer"} and variable["scale"] in {"interval", "ratio"})
+                        or (first.get("future") and params["value_column"] in {"support_count", "counter_count"}))
+                if params["unit"] == "participant": require(params["participant_mapping"] == first.get("confirmed_participant_mapping")
+                    and params["participant_mapping"] is not None, "connected_participant_record")
+            elif method == "unit_join": require(all(set(params["keys"]) <= set(c["fields"]) for c in choices))
+            elif method == "unit_correlation":
+                require(not first.get("future"), "require_saved_output")
+                variables = {v["variable_id"]: v for v in first["variables"]}
+                require(all(params[k] in variables and variables[params[k]]["value_type"] in {"number", "integer"}
+                    and variables[params[k]]["scale"] in ({"interval", "ratio"} if params["statistic"] == "pearson" else {"ordinal", "interval", "ratio"})
+                    for k in ("x_column", "y_column")))
+            elif method == "qualitative_reuse":
+                basis = [c for c, ref in zip(choices, [r for r in step["inputs"] if r["selection"] == "selected"]) if ref["role"] == "selection_basis"]
+                require(bool(basis) and not any(c.get("future") for c in basis), "require_saved_output")
+                require(set(params["relation_ids"]) <= {r for c in basis for r in c["relation_ids"]})
+            elif method == "qualitative_compare":
+                allowed = []
+                for choice, ref in zip(choices, [r for r in step["inputs"] if r["selection"] == "selected"]):
+                    allowed.extend({**t, "input_ref_id": ref["input_ref_id"]} for t in choice["semantic_targets"])
+                for proposal in params["proposals"]:
+                    require(isinstance(proposal, dict) and set(proposal) == {"relation_id", "left", "right", "relation", "reason", "actor"})
+                    require(fingerprint(proposal["left"]) in {fingerprint(t) for t in allowed}
+                        and fingerprint(proposal["right"]) in {fingerprint(t) for t in allowed}, "require_saved_output")
+                    actor = proposal["actor"]
+                    require(isinstance(actor, dict) and set(actor) == {"kind", "actor_id", "step_ids"}
+                        and actor["kind"] in {"code", "ai", "researcher", "system"} and isinstance(actor["actor_id"], str) and actor["actor_id"].strip()
+                        and isinstance(actor["step_ids"], list) and all(isinstance(s, str) and s.strip() for s in actor["step_ids"]))
+
     def register_asset_plan(self,item_id,run_id,value):
-        from .analysis_core import validate_asset_plan,validate_connected_request
+        from .analysis_core import validate_asset_plan,validate_connected_request,web_asset_plan_template
         from .analysis_method_registry import connected_slot
         plan,ordered=validate_asset_plan(value); plan_hash=fingerprint(plan)
         with self._db() as db:
             run=self._read_run(db,run_id,item_id)
+            web_bound = plan["plan_id"].startswith("web-assets:")
+            if web_bound:
+                if self.source_fingerprint is None:
+                    raise _error("現在の元入力を確認できません。", "asset_plan_source_unavailable")
+                self._check_version(run)
+                item_row = self.find_item(item_id)
+                if item_row is None: raise LookupError("会話が見つかりません。")
+                from pathlib import Path
+                authority = db.execute("PRAGMA database_list").fetchone()[2]
+                if self.table_store is None or not authority or Path(authority).resolve() != self.table_store.database_file:
+                    raise _error("HandlerとStoreのlibraryが異なります。", "table_store_mismatch")
+                if run.get("cancel_requested") or run["status"] not in {"queued", "running", "completed"}:
+                    raise _error("停止したrunへ発注できません。", "table_run_stopped")
+                if run.get("stale") or self.source_fingerprint(item_row) != run["input_hash"]:
+                    raise _error("固定入力の版が更新されています。", "revision_conflict")
+                if plan["plan_id"] != web_asset_plan_template(run)["plan_id"]:
+                    raise _error("接続計画の世代が変わりました。", "asset_plan_changed")
+                item = dict(item_row)
+                if any(int(item.get(k, 0) or 0) != run.get(v) for k, v in
+                       (("revision_count", "source_revision"), ("analysis_revision", "analysis_revision"))):
+                    raise _error("固定元入力の版が更新されています。", "revision_conflict")
             previous=next((p for p in run.get("asset_plans",[]) if p["plan_id"]==plan["plan_id"] and p["plan_version"]==plan["plan_version"]),None)
             if previous:
                 if previous["plan_hash"] != plan_hash:raise _error("同じ計画版を変更できません。","asset_plan_conflict")
+                if web_bound:
+                    self._check_web_plan_inputs(db, run, plan, existing_tasks=previous["tasks"])
                 return {"identity":previous["identity"],"tasks":previous["tasks"],"duplicate":True}
             run=self._table_run(db,item_id,run_id)
+            if web_bound: self._check_web_plan_inputs(db, run, plan)
             versions=[p["plan_version"] for p in run.get("asset_plans",[]) if p["plan_id"]==plan["plan_id"]]
             if plan["plan_version"] != (max(versions)+1 if versions else 1):raise _error("計画版は連続です。","asset_plan_revision")
             if len(self._tasks(db,run_id))+len(ordered)>run["config"]["max_tasks"]:raise _error("計画全体がtask予算を超えます。","asset_plan_budget")

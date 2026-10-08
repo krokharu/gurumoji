@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from flask import Flask
 
@@ -256,6 +256,106 @@ class HumanRecordOptionsTests(unittest.TestCase):
         response = app.test_client().get(self.url); self.assertEqual(response.status_code, 503)
         self.assertEqual(response.get_json()["reason_code"], "human_record_options_storage_unavailable")
         self.writer.assert_not_called()
+
+
+class GenericHumanRecordOptionsTests(unittest.TestCase):
+    def test_actual_graph_bundle_get_post_save_fresh_and_closed_proposal(self):
+        import test_analysis_qualitative_assets as qualitative
+        original_setup = typed.TypedHandlerIntegrationTests.setUp
+        def fixed_source_setup(test):
+            original_setup(test)
+            with test.fixture.connect() as db:
+                db.execute("UPDATE library_items SET revision_count=1,analysis_revision=1 WHERE id='TEST-conversation'")
+        q = qualitative.QualitativeAssetTests()
+        with patch.object(typed.TypedHandlerIntegrationTests, "setUp", fixed_source_setup): q.setUp()
+        self.addCleanup(q.doCleanups)
+        factory = pilot.TablePilotFactoryTests()
+        namespace, traces, _connections = factory.reader_namespace(q.t.fixture.path, source_hash=q.initial["input_hash"])
+        writer = Mock(return_value=q.service)
+        app = Flask("generic-human"); register_orchestration_routes(app, writer, lambda _: self.fail("No model preparation"),
+            table_reader=namespace["analysis_table_pilot_reader"])
+        client = app.test_client(); root = f'/api/library/TEST-conversation/analysis/orchestration/{q.run["run_id"]}'
+        get = client.get(root + "/human-records"); self.assertEqual(get.status_code, 200, get.get_json())
+        self.assertTrue(get.get_json()["options"], get.get_json())
+        graph = next(o for o in get.get_json()["options"] if o["target_kind"] == "relation_graph")
+        self.assertEqual([s["step_id"] for s in graph["human_steps"]], ["manual-interaction-review"])
+        self.assertEqual(set(graph["target"]), {"domain", "library_id", "store_run_id", "artifact_id", "output_name", "version", "content_hash"})
+        self.assertEqual(graph["human_steps"][0]["next_revision"], 2)
+        writer.assert_not_called()
+        response = client.get(root + "/asset-plans/options")
+        self.assertEqual(response.status_code, 200, response.get_json()); page = response.get_json()
+        left = next(o for o in page["inputs"] if o["source"].get("asset_key") == q.graph["asset_key"])
+        right = next(o for o in page["inputs"] if o["kind"] == "snapshot")
+        proposal = {"relation_id": "TEST-proposed-support", "left": next(t for t in left["semantic_targets"] if t["target_kind"] == "manual_link"),
+            "right": next(t for t in right["semantic_targets"] if t["target_kind"] == "utterance"), "relation": "support",
+            "reason": "TEST invented proposed interpretation", "actor": {"kind": "researcher", "actor_id": "TEST-proposal", "step_ids": []}}
+        plan = {**page["plan_template"], "steps": [{"step_id": "COMPARE", "method_id": "qualitative_compare", "parameters": {"proposals": [proposal]},
+            "scope": {k: left["scope"][k] for k in ("scope_id", "manifest_hash")}, "inputs": [
+                {"input_ref_id": o["input_ref_id"], "role": role, "selection": "selected", "omission_reason": None, "source": o["source"]}
+                for o, role in ((left, "data_input"), (right, "evidence_context"))]}]}
+        forged = copy.deepcopy(plan); forged["steps"][0]["parameters"]["proposals"][0]["left"]["target_id"] = "TEST-forged-link"
+        denied = client.post(root + "/asset-plans", json=forged); self.assertEqual(denied.status_code, 400, denied.get_json())
+        forged = copy.deepcopy(plan); forged["steps"][0]["parameters"]["proposals"][0]["left"]["version"] = True
+        self.assertEqual(client.post(root + "/asset-plans", json=forged).status_code, 400)
+        with q.t.fixture.connect() as db: self.assertEqual(q.service._tasks(db, q.run["run_id"]), [])
+        registered = client.post(root + "/asset-plans", json=plan)
+        self.assertEqual(registered.status_code, 202, registered.get_json()); q.service._drain_tasks(q.run["run_id"])
+        with q.t.fixture.connect() as db: task = q.service._tasks(db, q.run["run_id"])[0]
+        self.assertEqual(task["status"], "succeeded", task.get("error"))
+        fresh = AnalysisStore(q.t.fixture.path, q.t.fixture.connect)
+        asset = fresh.connected_output_descriptor(task["table_store_run_id"])
+        bundle = json.loads(fresh.read_asset(asset)["value"]["rows"][0]["values"]["bundle_json"])
+        self.assertEqual(bundle["relations"][0]["semantic_status"], "human_pending")
+        self.assertEqual(bundle["relations"][0]["actor_evidence"], "declared_unverified")
+        sealed = fresh.verified_package(task["table_store_run_id"])[3]
+        response = client.get(root + "/human-records"); self.assertEqual(response.status_code, 200, response.get_json())
+        option = next(o for o in response.get_json()["options"] if o["target_kind"] == "qualitative_bundle")
+        self.assertEqual([s["step_id"] for s in option["human_steps"]], ["qualitative-interpretation-review"])
+        h = HumanRecordOptionsTests(); statement = h.statement(option, option["human_steps"][0])
+        accepted = client.post(root + "/human-records", json=statement)
+        self.assertEqual(accepted.status_code, 201, accepted.get_json())
+        read = client.get(root + "/human-records").get_json()
+        reread = next(o for o in read["options"] if o["target_kind"] == "qualitative_bundle")
+        self.assertEqual(reread["human_steps"][0]["latest_record"]["record_ref"], accepted.get_json()["record_ref"])
+        self.assertEqual(fresh.verified_package(task["table_store_run_id"])[3], sealed)
+        self.assertEqual(bundle["human_status"], "human_pending")  # Immutable draft never silently rewritten.
+        page = client.get(root + "/asset-plans/options").get_json()
+        ta = next(o for o in page["inputs"] if o["source"].get("asset_key") == q.ta["asset_key"])
+        b1 = next(o for o in page["inputs"] if o["source"].get("asset_key") == asset["asset_key"])
+        def ref(o, role):
+            return {"input_ref_id": o["input_ref_id"], "role": role, "selection": "selected", "omission_reason": None, "source": o["source"]}
+        ta_scope = {k: ta["scope"][k] for k in ("scope_id", "manifest_hash")}
+        plan = {**page["plan_template"], "steps": [
+            {"step_id": "THEME", "method_id": "theme_evidence_table", "parameters": {"theme_id": ta["theme_ids"][0]}, "scope": ta_scope, "inputs": [ref(ta, "data_input")]},
+            {"step_id": "COUNT", "method_id": "unit_aggregate", "parameters": {"value_column": "support_count", "operation": "count", "unit": "conversation", "participant_mapping": None},
+             "scope": ta_scope, "inputs": [{"input_ref_id": "TEST-count-parent", "role": "data_input", "selection": "selected", "omission_reason": None,
+                 "source": {"type": "from_step", "step_id": "THEME", "output_name": "tables/table.json"}}]},
+            {"step_id": "REREAD", "method_id": "qualitative_reuse", "parameters": {"relation_ids": b1["relation_ids"]},
+             "scope": {k: b1["scope"][k] for k in ("scope_id", "manifest_hash")},
+             "inputs": [ref(b1, "selection_basis"), ref(ta, "evidence_context"), ref(right, "evidence_context")]}]}
+        registration = client.post(root + "/asset-plans", json=plan)
+        self.assertEqual(registration.status_code, 202, registration.get_json()); q.service._drain_tasks(q.run["run_id"])
+        with q.t.fixture.connect() as db: tasks = {t["task_id"]: t for t in q.service._tasks(db, q.run["run_id"])}
+        for identifier in registration.get_json()["tasks"].values(): self.assertEqual(tasks[identifier]["status"], "succeeded", tasks[identifier].get("error"))
+        reread = tasks[registration.get_json()["tasks"]["REREAD"]]
+        reread_asset = fresh.connected_output_descriptor(reread["table_store_run_id"])
+        reread_bundle = json.loads(fresh.read_asset(reread_asset)["value"]["rows"][0]["values"]["bundle_json"])
+        self.assertEqual(reread_bundle["stage"], "A2_rereading"); self.assertFalse(reread_bundle["independent_validation"])
+        page = client.get(root + "/asset-plans/options").get_json()
+        theme_run = tasks[registration.get_json()["tasks"]["THEME"]]["table_store_run_id"]
+        table = next(o for o in page["inputs"] if o["source"].get("asset_key", {}).get("store_run_id") == theme_run)
+        self.assertEqual(set(table["numeric_columns"]), {"support_count", "counter_count"})
+        correlation = {**page["plan_template"], "steps": [{"step_id": "CORRELATION", "method_id": "unit_correlation",
+            "parameters": {"x_column": "support_count", "y_column": "counter_count", "statistic": "pearson"},
+            "scope": ta_scope, "inputs": [ref(table, "data_input")]}]}
+        registration = client.post(root + "/asset-plans", json=correlation)
+        self.assertEqual(registration.status_code, 202, registration.get_json()); q.service._drain_tasks(q.run["run_id"])
+        with q.t.fixture.connect() as db: correlation_task = next(t for t in q.service._tasks(db, q.run["run_id"])
+            if t["task_id"] == registration.get_json()["tasks"]["CORRELATION"])
+        self.assertEqual(correlation_task["status"], "succeeded", correlation_task.get("error"))
+        result = fresh.verified_package(correlation_task["table_store_run_id"])[1]
+        self.assertEqual(result["unit_contract"]["unit"], "report_claim")
+        self.assertEqual(result["datasets"]["table"]["rows"][0]["status"], "not_computable")
 
 
 if __name__ == "__main__": unittest.main()

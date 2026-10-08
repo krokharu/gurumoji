@@ -1067,6 +1067,46 @@ def validate_connected_request(method_id, request):
     return json.loads(canonical(request))
 
 
+def web_asset_plan_template(run):
+    """Reserved normal-Web identity; programmatic plan IDs stay independent."""
+    plan_id = "web-assets:" + run["run_id"] + ":g" + str(run["generation"])
+    versions = [p["plan_version"] for p in run.get("asset_plans", []) if p["plan_id"] == plan_id]
+    return {"version": "asset-plan-1", "plan_id": plan_id, "plan_version": max(versions, default=0) + 1}
+
+
+def connected_web_methods():
+    """Registered capabilities, including only output columns known statically."""
+    from .analysis_method_registry import CONNECTED_METHODS, connected_slot, connection_output_contract
+    titles = {"theme_evidence_table": "テーマの根拠表", "unit_projection": "単位表の射影",
+        "unit_aggregate": "単位別集計", "unit_join": "完全キー結合", "unit_correlation": "探索的相関",
+        "qualitative_compare": "質的比較", "qualitative_reuse": "根拠を選んで再読"}
+    fixed = {"theme_evidence_table": (["unit_id", "conversation_id", "speaker_id", "value_status", "support_count", "counter_count"], ["utterance"]),
+        "unit_aggregate": (["unit_id", "conversation_id", "value_status", "value"], ["conversation_speaker", "conversation", "participant"]),
+        "unit_correlation": (["statistic", "coefficient", "n", "status", "source_utterance_ids"], ["report_claim"]),
+        "qualitative_compare": (["bundle_json"], ["dataset_claim"]), "qualitative_reuse": (["bundle_json"], ["dataset_claim"])}
+    choices = {"unit_aggregate": {"operation": ["count", "sum", "mean"], "unit": ["conversation_speaker", "conversation", "participant"]},
+        "unit_correlation": {"statistic": ["pearson", "spearman"]},
+        "qualitative_compare": {"relation": ["support", "counter", "complement", "conflict", "incomparable"]}}
+    defaults = {"unit_aggregate": {"operation": "count", "unit": "conversation", "participant_mapping": None},
+        "unit_correlation": {"statistic": "pearson"}, "qualitative_compare": {"proposals": []}}
+    methods = []
+    for method, parameters in CONNECTED_METHODS.items():
+        slot = connected_slot(method); output = connection_output_contract(method, "tables/table.json")
+        fields, units = fixed.get(method, ([], []))
+        compatible = [m for m in CONNECTED_METHODS if output["kind"] in connected_slot(m)["accept_kinds"]
+            and output["schema"] in connected_slot(m)["accept_schemas"]
+            and (not units or set(units) & set(connected_slot(m)["accept_units"]))]
+        methods.append({"method_id": method, "title": titles[method], "parameter_fields": list(parameters),
+            "parameter_choices": choices.get(method, {}), "parameter_defaults": defaults.get(method, {}),
+            "roles": slot["roles"], "min_inputs": 3 if method == "qualitative_reuse" else 2 if method == "qualitative_compare" else slot["min_items"],
+            "max_inputs": slot["max_items"], "output_kind": output["kind"], "output_name": "tables/table.json",
+            "output_schema": output["schema"], "output_fields": fields, "output_units": units,
+            "compatible_methods": compatible, "output_reason_code": None if fields else "require_saved_output",
+            "omission_reason_choices": [{"value": v, "label": label} for v, label in
+                (("not_selected", "今回は選択しない"), ("not_applicable", "対象外"), ("not_available", "未取得"))] if method.startswith("qualitative_") else []})
+    return methods
+
+
 def validate_asset_plan(value):
     """Freeze selected dependencies before any task is registered or executed."""
     from .analysis_method_registry import CONNECTED_METHODS, connection_output_contract, connected_slot
