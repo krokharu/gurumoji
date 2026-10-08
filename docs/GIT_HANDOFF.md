@@ -19,9 +19,9 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 既存の共有checkoutでは `python scripts/check_git_handoff.py --fetch --expected-commit <通知された完全SHA>` を使う。fetchはrefの更新だけで、checkoutを自動更新しない。`received=false` ならcommit・dirty・mismatchesを確認し、成果を退避せずに強制上書きしない。Gitの読取だけ可能なDotはcommitの取得とファイルmanifest照合を報告し、Python未実行を明記する。GitHub Issue/PRが双方の永続的な通知・受領経路であり、ChatGPTの会話は短い通知に使う。バックグラウンドの自動受信や監視は設定していない。
 
-## 2026-10-09 05:10 JST の固定候補
+## 2026-10-09 の共有固定候補
 
-現在の共有sourceは `deaa6751a566c7c22a8f1e205e26165e28b74bb3`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
+現在の共有sourceは `1949833c1c20e898fe935cbad5df382d2c18fb23`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
 
 - 実際に保存された研究者記録を持つTA候補から発話単位・明示対応による参加者単位へ変換し、count/sum/mean、完全な一対一join、探索的相関を既存Handler／Storeで保存してfresh再利用する。無発話の名簿を観測ゼロにしない。現在の実接続は単一会話。複数会話はkernelだけでなく、全保存元／原票／現在の権限を照合する実Store橋を必須後続に残す。
 - 同Handlerの資産依存計画を接続し、選択したfrom_stepの実保存receiptを待つ。重送／順序違い／欠落通知／再開は実台帳から照合する。旧世代resumeの計算・保存を0で拒否し、正常completed後の新run再利用を保持する。独立最終関連11件、独立unittest12件、standalone4probesが成功。初期のP1/P2失敗は履歴として保持し、修正版だけで閉鎖した。通信先の不確定な実LLM結果にexactly-onceを主張しない。
@@ -36,7 +36,15 @@ C0が管理・割当・受入を担当し、Orca側LunaはDot応答と作業有�
 実モデル品質・全323発話・研究者採否・実Vault・AT・非図表の残る接続は未完了。図表延期と残件を明示し、全要求や研究品質の合格にはしない。通常共有はdraftで、main merge・強制push・私有履歴／実DB／研究本文／資格情報の公開は行わない。
 
 
-## 2026-10-09: Dot #25 の Windows 受入
+## 2026-10-09: S6 非図表と通常画面の選別受入
+
+原S6 `178bc53b136394784fd89f982c1f8dd403519ee2`（基点 `2805d9987fe9831058e66385a56c3f2cdef049a9`、明示6ファイル、patch SHA-256 `afafcb2f91e88c1f2d8faf7751c88f52a6aecef9a22a316965930b606dd9084e`）の独立判定は、変更された非図表Web・単一会話native mapping境界で8件と隣接2件成功、open製品指摘0。固定6ファイルを3wayで共有 `213ee596a60a48b18677b5262a233929ef3cc42a` へ統合し、Git bytes/hash、AST6、差分、最小smokeを確認した。作者suiteは再反復していない。
+
+その版の通常UI最終候補を `1949833c1c20e898fe935cbad5df382d2c18fb23` へ選別した。通常8ファイル全体と `analysis-history.css` のfocus hunkだけの9パスで、PNG専用 `analysis-storage.js` / `analysis-visualizations.js` / `test_analysis_visual_ui.cjs` と図表CSS6ルールの作業bytesは保全・非commit。最終stage9のbytes/hashは作者receiptと一致。実Flask→Handler→合成SQLite/Store→fresh経路5件、実Edgeの1テスト内1440/390px操作2シナリオ、変更隣接3件、通常入口1件が成功した。射影→参加者対応HC→平均→保存/fresh、graph/bundleのHC投稿/重複/再読込、取消・権限取消拒否、根拠から戻る際の選択/scroll/focusを確認した。選択欄のラベル不備は修正版で閉鎖し、初回fixture5失敗・応答期待2失敗・Edgeラベル1失敗を履歴として残す。
+
+原checkoutのhelper2は今回不要で追加せず、原source/index/dirty docsには未接触。実複数会話Handler/Store橋・6e8/options複数source seamは次票の未実装、PNG Store/Web/Vault接続は延期。full app起動・full service.run scheduler・実利用者DB/Vault/モデル/認証/main・AT・全suite反復は未実行。Node22.19とjsdom30.1.1宣言engine差はPARTIALのまま。実データ接触0。公開は受入済み完全SHAの通常forward pushをLunaが担当し、共有index/sourceの返却と次票割当はC0へ。manifestはこの固定sourceのGit bytesを使い、未コミット延期差分を含めない。根拠はOrca Run `run_30240e5eb510` / 受入Dispatch `ctx_015ad29dbb33` の単一receipt。
+
+## 2026-10-09: Dot #25 の初回 Windows 受入（当時の区切り）
 
 Dot #25 / Draft PR #26 の固定 `6534303820148b6b679e35e1ccd9ea7dbd4792a7` から `src/gurumoji/services/analysis_unit_groups.py` と `tests/test_analysis_unit_groups.py` だけを選別し、共有 `deaa6751a566c7c22a8f1e205e26165e28b74bb3` へ統合した。Issue #25 の確認済み契約 [6068361583](https://github.com/krokharu/gurumoji/issues/25#issuecomment-6068361583) と公開候補の bytes / SHA-256 / blob を固定 fetch/readback で照合した。
 

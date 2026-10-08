@@ -296,3 +296,12 @@ PPTX sampleはネイティブの編集可能text object、JSON/notesにrun・入
 Windows Python3.13関連14件と別3会話合成例が成功。count/sum/mean・発話加重平均5.25・projection原分母と現在context・異なる定義の拒否を確認した。frontend14の凍結bytes/未stage/indexは不変。研究者データと実DB/Vault/モデルへ接触していない。実複数会話Handler保存/fresh橋、PNG接続、利用者Edge経路は未実行で、helper合格をそれらの完了へ拡張しない。
 
 S6最終 `178bc53b136394784fd89f982c1f8dd403519ee2` の明示6fileは基点2805d998とのpatch hashを照合して読取り受領済み。独立レビュー後にWindows ownerがbackend-only shared index leaseで3way統合し、frontendへ固定ready版とleaseを返す。Lunaは受入済み公開SHAの通常push/通知のみ、仕様変更/担当競合はC0へ戻す。公開正本は `docs/GIT_HANDOFF.md` とmanifest、検証receiptはOrca Run `run_30240e5eb510` / Dispatch `ctx_b1d0fd9e06ef` を参照する。
+
+
+## 2026-10-09: S6 通常受入の完了と延期境界
+
+S6原最終178bc53/base2805d998の明示6fileは独立8＋隣接2件PASSを受領後、共有 `213ee596a60a48b18677b5262a233929ef3cc42a` に3way選別した。固定Git bytes/hash・AST6・diff・最小smokeが成功し、作者suiteの重複実行はしていない。frontend14の凍結を統合前後で保護してから、通常9pathのsource編集/受入を元ownerへ返した。
+
+通常UIは実API5件、Edge1440/390の1テスト内2操作シナリオ、隣接3件、入口1件で成功した。固定原文と現在の対応・版・権限を保った射影→HC→平均→保存/fresh、graph/bundle HC、取消/revoke拒否、根拠往復の選択/scroll/focusを確認。選択欄ラベル不備を修正し、初回fixture5失敗・HTTP期待2失敗・Edge製品ラベル1失敗を消さずに閉鎖した。最終normal8全fileとhistory CSS focusだけを `1949833c1c20e898fe935cbad5df382d2c18fb23` に選別、receiptの9hashとstage一致。PNG専用3fileと図表CSS6rulesは作業bytesを保全し非commit。
+
+実複数会話Store/Handlerと6e8/options複数source seamは未実装、PNG Store/Web/Vault接続は延期。full app/default AI/実利用者DB/Vault/モデル/認証/main/AT/full scheduler・全suite反復は未実行、Node/jsdom engine差はPARTIAL。合成fixtureのみで実データ接触0。原helper2の追加は今回不要で原checkoutへ書き込まなかった。受入source/index leaseは最終receiptでC0へ返却し、Luna新Dispatch `ctx_2496f7f8f44e` が受入済み公開SHAの通常forward push/readback/Dot通知を担当する。割当・仕様/担当競合はC0責務のまま。根拠はRun `run_30240e5eb510` / Dispatch `ctx_015ad29dbb33`、公開正本はGit受渡資料とmanifest。

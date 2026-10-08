@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "deaa6751a566c7c22a8f1e205e26165e28b74bb3",
+  "source_commit": "1949833c1c20e898fe935cbad5df382d2c18fb23",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "9eb41801597fa196c01e71944a694cada5710c8779e542473e614d58927d7f8e",
-      "bytes": 13849
+      "sha256": "8243b3f2476409cb2d57d485444d28977e7e0ec8faa2945df6f9996ef09d6592",
+      "bytes": 16114
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -160,8 +160,8 @@
     },
     {
       "path": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
-      "sha256": "68305c78e2b9f1d9f20e36a73e93e4b696a0fe7ba35b3d154f9686332bc21393",
-      "bytes": 46081
+      "sha256": "d06f8149d5a7e3f3dd4f7b4d4e3a3db6335dec6a62eeeab9d0cf825060b5740d",
+      "bytes": 47885
     },
     {
       "path": "docs/program-vault/90-Templates/knowledge-evaluation.md",
@@ -205,8 +205,8 @@
     },
     {
       "path": "src/gurumoji/analysis_core.py",
-      "sha256": "d9fe6054cb94bc0a0740fbb290fa0a338329916748356a840d4cee7f668eb72b",
-      "bytes": 75157
+      "sha256": "351ac35ba9f3adfd2d31fcca575b0aafdeef8aba4d0d0961bdf57c9eefc2d82b",
+      "bytes": 78607
     },
     {
       "path": "src/gurumoji/analysis_method_registry.py",
@@ -215,13 +215,13 @@
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "e466be9150b2d4dc677394705bfb3b68be75fd3c85bf784c83feee7583cc4b6d",
-      "bytes": 211990
+      "sha256": "effd0acbde6d8b99c51c32d66ea9c9387577adec947c42590ef0c44c4e469ebc",
+      "bytes": 222254
     },
     {
       "path": "src/gurumoji/analysis_store.py",
-      "sha256": "c13fe2b51d5418a4e2267d56487e64985815150218ca3f4948c937105eaed497",
-      "bytes": 225337
+      "sha256": "c2ae6a777a5ede4c5de85af1144aa6913803dc6763c73017b469d15f71392de9",
+      "bytes": 255950
     },
     {
       "path": "src/gurumoji/app.py",
@@ -289,14 +289,29 @@
       "bytes": 8131
     },
     {
+      "path": "src/gurumoji/static/analysis-history.css",
+      "sha256": "6307a786eef66d39b03d1fe3015945400621e21f041dd199ca1c560d9414bf91",
+      "bytes": 5889
+    },
+    {
+      "path": "src/gurumoji/static/analysis-history.js",
+      "sha256": "4bd0f9f4d4ca3b503d6d7becf22815285838d4ce15a08a3ee4703ca96329c832",
+      "bytes": 32148
+    },
+    {
+      "path": "src/gurumoji/static/analysis-method-view.js",
+      "sha256": "f1ce8b95dc5d2b6e159bf6580b6bbaa5385f09b7f774ab4ace86eb6fd60d979c",
+      "bytes": 18641
+    },
+    {
       "path": "src/gurumoji/static/analysis-orchestration.css",
-      "sha256": "1ca6703df960ade83af52b90429ede79578db6d9b74dc21b3f5123557a437872",
-      "bytes": 14849
+      "sha256": "ff45fd87d5ef387e4cff09f6165d51f35fdd22cc7774b7d0ddc9ea040f877392",
+      "bytes": 16579
     },
     {
       "path": "src/gurumoji/static/analysis-orchestration.js",
-      "sha256": "be2ee22bf2c8709eb84a14a90d7b39897ea3eea747d42d67285adb22a3562465",
-      "bytes": 88874
+      "sha256": "f7f39a52d291972d0ff78a16b31b8b5d925c14b6f2f92fcc8291135f9006af5a",
+      "bytes": 145535
     },
     {
       "path": "src/gurumoji/static/app.js",
@@ -305,8 +320,8 @@
     },
     {
       "path": "src/gurumoji/templates/views/analysis-orchestration.html",
-      "sha256": "e08885a75db50d53c140cb02596c8c19c8b209795fa59d1de0485c4b9739863e",
-      "bytes": 21312
+      "sha256": "23e2ebae0cd9dd0f39f1b4f89404308b9006ae98959bd6b2103cb30f552d2fb7",
+      "bytes": 26257
     },
     {
       "path": "src/gurumoji/vault_registry.py",
@@ -315,8 +330,13 @@
     },
     {
       "path": "src/gurumoji/web/analysis_orchestration_routes.py",
-      "sha256": "1311993565ccaa6cb887c995ddbfe6154c27d9d7de60d48b10f6bf3186dcf2ff",
-      "bytes": 14641
+      "sha256": "2448cc4a6263249d5905b2fcdabe004432802c0efe1017517e18fa1d18a599ba",
+      "bytes": 16626
+    },
+    {
+      "path": "tests/dom/analysis-history.test.cjs",
+      "sha256": "a432f426f2246220042cd062899c8fd13cbe184096a7cb36f9c546b2fd1fce06",
+      "bytes": 19631
     },
     {
       "path": "tests/dom/orchestration.test.cjs",
@@ -384,6 +404,11 @@
       "bytes": 13945
     },
     {
+      "path": "tests/test_analysis_asset_plan_options.py",
+      "sha256": "3ee79c97d60c3d30670949d3cfff544aab4caa1d8f4e0c240bd0ba25357d863d",
+      "bytes": 22933
+    },
+    {
       "path": "tests/test_analysis_core_contracts.py",
       "sha256": "03a5d1362ff23c32302817ef4fe29787a632dd91d404d7228be7cb4d974e0bc7",
       "bytes": 3780
@@ -395,13 +420,13 @@
     },
     {
       "path": "tests/test_analysis_human_record_options.py",
-      "sha256": "24d42ebd5e23f583e94c27d1bb6c1d2e364885db5dd0e01795d0b7df21221e2c",
-      "bytes": 19321
+      "sha256": "4d5460c1add9975d55b385c57546ce35127c18a4b4fe91dcc6a1574d91d886e5",
+      "bytes": 28623
     },
     {
       "path": "tests/test_analysis_human_record_ui.cjs",
-      "sha256": "eaed337302ee878c46f07c4974996911c7a03b71ab9a22cb40098a8e4d662e4e",
-      "bytes": 21511
+      "sha256": "3e04c7917a99e67e0aa9fa2dbef225d73284ee6323b06d21291a2b10c8164426",
+      "bytes": 36386
     },
     {
       "path": "tests/test_analysis_human_records.py",
@@ -525,8 +550,8 @@
     },
     {
       "path": "tests/test_table_pilot_ui.cjs",
-      "sha256": "ad76aea5f513af707e27a31050a9c0826f59b5487c5c7989230e51a2b026f2ce",
-      "bytes": 19018
+      "sha256": "bc368bc738bd7b21cbb0991dbd20efc0d5cdbfe394684fb6958d41d7d6895656",
+      "bytes": 61875
     }
   ],
   "original_source_commit": "b932fe11adf0881a3d7093c2761fbee930be0e56"
