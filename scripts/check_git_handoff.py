@@ -52,9 +52,16 @@ def validate_manifest(manifest):
                 or any(ord(char) < 32 for char in name)
                 or any(part in ("", ".", "..") for part in name.split("/"))):
             raise ValueError(f"files[{index}] has an unsafe or noncanonical path")
-        if name in seen:
+        # Apply Windows component rules on every host, including Linux senders.
+        for part in name.split("/"):
+            stem = part.split(".", 1)[0].rstrip(" ").upper()
+            if (part.endswith((".", " ")) or any(char in '<>"|?*' for char in part)
+                    or re.fullmatch(r"CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³]", stem)):
+                raise ValueError(f"files[{index}] has a nonportable path component: {part}")
+        identity = name.casefold()
+        if identity in seen:
             raise ValueError(f"duplicate file path: {name}")
-        seen.add(name)
+        seen.add(identity)
         if not isinstance(row.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"]):
             raise ValueError(f"invalid sha256 for {name}")
         if type(row.get("bytes")) is not int or row["bytes"] < 0:

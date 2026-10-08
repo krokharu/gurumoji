@@ -175,8 +175,8 @@
     },
     {
       "path": "scripts/check_git_handoff.py",
-      "sha256": "1e10c7e0ef0fb9c4ede81c52df5068b414c277ac2cf06a091fa95770e7e64884",
-      "bytes": 5208
+      "sha256": "30c755462744e3f0df945f6fff7dad33d82b1dc6b93b6e601a7fb6bcec44b75c",
+      "bytes": 5710
     },
     {
       "path": "scripts/test_expert_agent_model.py",
@@ -441,8 +441,8 @@
     },
     {
       "path": "tests/test_git_handoff.py",
-      "sha256": "c9f6274852aa21251e59cc644d94e42982a86abf97b7b6b7881a57081e8d155c",
-      "bytes": 7507
+      "sha256": "823d966a9dde68b87e0785439378651b46e06c11077028c8f044b008bfa10297",
+      "bytes": 9740
     }
   ]
 }

@@ -124,6 +124,43 @@ class GitHandoffTests(unittest.TestCase):
         target.unlink()
         self.assertIn("manifest_error", self.receipt()[1])
 
+    def test_nonportable_components_rejected_on_every_host_before_fetch(self):
+        names = ["payload.txt.", "payload.txt ", "dir./payload.txt", "dir /payload.txt",
+                 "CON", "prn.txt", "aux.log", "NUL.data", "con .txt", "CONIN$", "CONOUT$.txt",
+                 "COM1.txt", "com9", "LPT1", "lpt9.log", "COM¹.txt", "LPT²", "COM³",
+                 "dir/NUL.txt/file.txt", 'bad"name', "bad<name", "bad>name",
+                 "bad|name", "bad?name", "bad*name"]
+        for name in names:
+            with self.subTest(path=name):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["files"][0]["path"] = name
+                self.write_manifest(manifest)
+                with patch.object(handoff, "git", side_effect=AssertionError("must not fetch or inspect Git")):
+                    code, result = self.receipt("--fetch")
+                self.assertEqual(code, 1)
+                self.assertFalse(result["received"])
+                self.assertIn("nonportable path component", result["manifest_error"])
+        for name in ("console.txt", "COM10.txt", "LPT0.txt", "dir.with.dots/file name.txt"):
+            with self.subTest(valid_path=name):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["files"][0]["path"] = name
+                handoff.validate_manifest(manifest)
+
+    def test_case_equivalent_duplicates_rejected_on_every_host(self):
+        for names in (("payload.txt", "PAYLOAD.TXT"),
+                      ("Dir/payload.txt", "dir/PAYLOAD.txt")):
+            with self.subTest(paths=names):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["files"] = [dict(manifest["files"][0], path=name) for name in names]
+                self.write_manifest(manifest)
+                self.commit()
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                with patch.object(handoff, "git", side_effect=AssertionError("must not fetch or inspect Git")):
+                    code, result = self.receipt("--fetch")
+                self.assertEqual(code, 1)
+                self.assertFalse(result["received"])
+                self.assertIn("duplicate file path", result["manifest_error"])
+
     def test_declared_bytes_and_hash_checked_even_in_clean_checkout(self):
         for field, value in (("bytes", 0), ("sha256", "0" * 64)):
             with self.subTest(field=field):
