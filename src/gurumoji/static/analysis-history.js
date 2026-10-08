@@ -48,7 +48,9 @@
     node('selected').hidden=true;node('empty').hidden=false;node('filters').reset();
     node('dialog').showModal();node('close').focus();
     if(!state.itemId){notice('分析対象の会話を選択してください。');return;}
+    const epoch=state.epoch;
     await loadRuns(options.runId||'');
+    if(epoch===state.epoch&&node('dialog').open&&options.runId===state.runId&&typeof options.entryId==='string')await loadEntry(options.entryId);
   }
   async function loadRuns(preferred='') {
     const stamp=token(),request=++state.listRequest;notice('保存済み実行を取得しています…');
@@ -162,6 +164,14 @@
   }
   async function loadSource(utteranceId,detailRequest=state.detailRequest) {
     const stamp=token(),request=++state.sourceRequest,host=node('source');if(!host)return;
+    const opener=document.activeElement,positions=[node('dialog'),node('detail')].map(element=>({element,top:element.scrollTop,left:element.scrollLeft}));
+    const back=()=>{
+      if(!current(stamp)||detailRequest!==state.detailRequest)return;
+      ++state.sourceRequest;host.hidden=true;host.replaceChildren();
+      if(opener?.isConnected)opener.focus({preventScroll:true});
+      for(const position of positions){position.element.scrollTop=position.top;position.element.scrollLeft=position.left;}
+    };
+    const backButton=()=>button('根拠を閉じて選択位置へ戻る',back);
     host.hidden=false;host.replaceChildren(el('p','固定原文を取得しています…'));
     try {
       const expectedVersion=state.version;
@@ -173,8 +183,8 @@
       for(const [key,title] of [['initial','初期ラベル'],['selected','選択版ラベル'],['latest','最新ラベル']])host.append(el('h4',`${title} · v${text(data.versions?.[key])}`),el('pre',data.labels?.[key]));
       if(source.text_truncated)host.append(el('p','原文は表示上限により一部を省略しています。全文ではありません。','analysis-history-audit'));
       if(data.truncated_fields?.length)host.append(el('p',`表示上限による省略: ${text(data.truncated_fields)}`,'field-note'));
-      host.append(el('p',`記録: ${text(data.audit?.message)}`,'field-note'),button('固定原文を閉じる',()=>{++state.sourceRequest;host.hidden=true;host.replaceChildren();}));host.scrollIntoView({block:'nearest'});
-    }catch(error){if(current(stamp)&&request===state.sourceRequest&&detailRequest===state.detailRequest)host.replaceChildren(el('p',error.message));}
+      host.append(el('p',`記録: ${text(data.audit?.message)}`,'field-note'),backButton());host.scrollIntoView({block:'nearest'});host.querySelector('button').focus({preventScroll:true});
+    }catch(error){if(current(stamp)&&request===state.sourceRequest&&detailRequest===state.detailRequest){host.replaceChildren(el('p',error.message),backButton());host.querySelector('button').focus({preventScroll:true});}}
   }
   function slideCurrent(stamp,request) {return current(stamp)&&request===state.slidesRequest&&state.tab==='slides';}
   async function loadSlideTemplates() {

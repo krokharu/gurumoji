@@ -114,17 +114,53 @@
         </div>
       </form>
     </section>
+    <section class="orchestration-output orchestration-asset-plan" aria-labelledby="orchestration-asset-title">
+      <h3 id="orchestration-asset-title">保存した根拠をつなぎ、局所分析 <span class="orchestration-kind">CODE</span></h3>
+      <p class="field-note">採用テーマの根拠、単位表、質的比較を選びます。表示の取得は計算しません。入力・対象集合・依存する処理を確認してから、ローカルのコード処理を明示的に実行します。</p>
+      <p id="orchestration-asset-availability"></p>
+      <button id="orchestration-asset-load" type="button" class="secondary-button">利用できる保存根拠を確認</button>
+      <button id="orchestration-asset-next" type="button" class="secondary-button" hidden>次の保存根拠を確認</button>
+      <p id="orchestration-asset-message" role="status" aria-live="polite" tabindex="-1"></p>
+      <form id="orchestration-asset-form" hidden>
+        <label class="field"><span id="orchestration-asset-method-label">保存根拠の処理方式</span><select id="orchestration-asset-method" aria-labelledby="orchestration-asset-method-label"></select></label>
+        <fieldset><legend>今回使う保存参照と役割</legend><div id="orchestration-asset-inputs"></div></fieldset>
+        <p id="orchestration-asset-scope" class="field-note"></p>
+        <div id="orchestration-asset-parameters" class="orchestration-form-grid"></div>
+        <p class="field-note">計算の分母・欠測・未処理・不明・除外は保存結果で確認します。観測されたゼロとは別です。質的関係の提案と研究者の採否、同じ親根拠の再読と独立検証を区別します。</p>
+        <button id="orchestration-asset-add" type="submit" class="secondary-button">この処理を計画に追加</button>
+      </form>
+      <ol id="orchestration-asset-steps" class="orchestration-asset-steps" aria-label="確認する処理と依存"></ol>
+      <button id="orchestration-asset-clear" type="button" class="secondary-button" hidden>計画を取り消す</button>
+      <button id="orchestration-asset-review" type="button" class="secondary-button" hidden>計画全体を確認</button>
+      <div id="orchestration-asset-confirmation" hidden><p id="orchestration-asset-summary"></p><button id="orchestration-asset-execute" type="button" class="primary-button">確認した計画をローカルで実行</button></div>
+      <details id="orchestration-participant" hidden>
+        <summary>会話内の話者と参加者の対応を研究者が記録する</summary>
+        <p class="field-note">固定された一つの会話の話者について、同じ人物として集約する参加者を明示します。保存済み単位表の独立した確認記録として、この対応表そのものを保存します。既存のTA自由記述メモから対応を推測しません。訂正すると派生した入力が古くなるため、保存根拠を再取得して接続を確認してください。</p>
+        <p id="orchestration-participant-status"></p>
+        <button id="orchestration-participant-prepare" type="button" class="secondary-button" hidden>対応を記録する単位表の保存を、計画に追加</button>
+        <p id="orchestration-participant-message" role="status" aria-live="polite" tabindex="-1"></p>
+        <form id="orchestration-participant-form">
+          <div id="orchestration-participant-assignments"></div>
+          <label class="field">参加者対応の記録者<input id="orchestration-participant-actor" required maxlength="200" autocomplete="off"></label>
+          <label id="orchestration-participant-author-field" class="check-row" hidden><input id="orchestration-participant-author" type="checkbox">私はこの対応表の記録者本人として、訂正を記録します</label>
+          <label class="field"><span id="orchestration-participant-decision-label">対応の判断</span><select id="orchestration-participant-decision" aria-labelledby="orchestration-participant-decision-label" required><option value="">判断を選択</option><option value="adopt">採用</option><option value="reject">不採用</option><option value="defer">保留</option></select></label>
+          <label class="field">対応を判断した理由<textarea id="orchestration-participant-reason" required rows="3" maxlength="2000"></textarea></label>
+          <button id="orchestration-participant-review" type="submit" class="secondary-button">対応表と記録内容を確認</button>
+          <div id="orchestration-participant-confirmation" hidden><p id="orchestration-participant-summary"></p><button id="orchestration-participant-save" type="button" class="primary-button">確認した対応表を研究者記録として保存</button></div>
+        </form>
+      </details>
+    </section>
     <section class="orchestration-output orchestration-human-record" aria-labelledby="orchestration-human-title">
       <h3 id="orchestration-human-title">研究者の確認・判断を記録</h3>
-      <p class="field-note">保存済みの候補全体またはテーマについて、一つの段階ずつ原文メモと判断を残します。AIの提案・表示・既読を、研究者の確認や採用とみなしません。</p>
+      <p class="field-note">候補全体・テーマ・関係グラフ・質的比較や再利用の保存結果について、表示された一つの段階ずつ原文メモと判断を残します。AIの提案・表示・既読を、研究者の確認や採用とみなしません。</p>
       <p id="orchestration-human-availability"></p>
-      <button id="orchestration-human-load" type="button" class="secondary-button">保存済み候補と研究者記録を確認</button>
-      <button id="orchestration-human-next" type="button" class="secondary-button" hidden>次の候補・テーマを確認</button>
-      <button id="orchestration-human-evidence" type="button" class="secondary-button">候補の原文・根拠を読む</button>
+      <button id="orchestration-human-load" type="button" class="secondary-button">保存対象と研究者記録を確認</button>
+      <button id="orchestration-human-next" type="button" class="secondary-button" hidden>次の保存対象を確認</button>
+      <button id="orchestration-human-evidence" type="button" class="secondary-button">対象の原文・根拠を読む</button>
       <p id="orchestration-human-message" role="status" aria-live="polite" tabindex="-1"></p>
       <form id="orchestration-human-form" hidden>
         <div class="orchestration-form-grid">
-          <label class="field"><span id="orchestration-human-asset-label">保存済み候補</span><select id="orchestration-human-asset" required aria-labelledby="orchestration-human-asset-label"></select></label>
+          <label class="field"><span id="orchestration-human-asset-label">保存済みの対象</span><select id="orchestration-human-asset" required aria-labelledby="orchestration-human-asset-label"></select></label>
           <label class="field"><span id="orchestration-human-target-label">判断する対象</span><select id="orchestration-human-target" required aria-labelledby="orchestration-human-target-label"></select></label>
           <label class="field"><span id="orchestration-human-step-label">今回記録する段階</span><select id="orchestration-human-step" required aria-labelledby="orchestration-human-step-label"></select></label>
           <label class="field">記録者の名前<input id="orchestration-human-actor" required maxlength="200" autocomplete="off"></label>

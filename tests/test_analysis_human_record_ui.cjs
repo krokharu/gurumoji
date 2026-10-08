@@ -189,6 +189,113 @@ test('unknown schema, cancelled run and closed/late read fail honestly without l
  const cancelled=await b.send(['cancel']);h.fixture(cancelled.run);h.evaluate('orchestrationState.run=window.fixture;renderAnalysisOrchestration()');assert.equal(node(h,'review').disabled,true);assert.equal(node(h,'source').value,source);
  h.click('#orchestration-human-load');const read=await f.respond(pending(h));assert.equal(read.data.enabled,false);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,0);
 });
+
+const rawTargetsPython=String.raw`
+import sys,json,hashlib
+sys.path[:0]=['src','tests']
+from flask import Flask
+import test_analysis_typed_assets as typed
+from test_analysis_qualitative_assets import QualitativeAssetTests
+from test_table_pilot_routes import TablePilotFactoryTests
+from gurumoji.analysis_store import AnalysisStore,canonical
+from gurumoji.web.analysis_orchestration_routes import register_orchestration_routes
+# Give the existing invented fixture its real Handler source revisions before
+# publication. Never change library revisions after immutable packages exist.
+original_setup=typed.TypedHandlerIntegrationTests.setUp
+def setup_versions(self):
+ original_setup(self)
+ with self.fixture.connect() as db:db.execute("UPDATE library_items SET revision_count=1,analysis_revision=1 WHERE id='TEST-conversation'")
+typed.TypedHandlerIntegrationTests.setUp=setup_versions
+q=QualitativeAssetTests()
+try:q.setUp()
+finally:typed.TypedHandlerIntegrationTests.setUp=original_setup
+try:
+ kind=sys.argv[1]
+ if kind=='qualitative_bundle':
+  scope={key:q.ta['scope'][key] for key in ('scope_id','manifest_hash')}
+  plan=dict(version='asset-plan-1',plan_id='TEST-UI-qualitative-seed',plan_version=1,steps=[dict(step_id='comparison',method_id='qualitative_compare',parameters=dict(proposals=[]),scope=scope,inputs=[q.ref('candidate',q.ta),q.ref('original',q.original,role='evidence_context',original=True)])])
+  q.service.register_asset_plan('TEST-conversation',q.run['run_id'],plan);q.service._drain_tasks(q.run['run_id'])
+  with q.t.fixture.connect() as db:
+   task=q.service._tasks(db,q.run['run_id'])[0]
+  assert task['status']=='succeeded',task
+  asset=AnalysisStore(q.t.fixture.path,q.t.fixture.connect).connected_output_descriptor(task['table_store_run_id'])
+ else:asset=q.graph
+ namespace,traces,connections=TablePilotFactoryTests().reader_namespace(q.t.fixture.path,source_hash=q.run['input_hash'],driver=q.service)
+ calls=[]
+ def no_execution(*a,**k):calls.append(True);raise AssertionError('Human record UI does not execute a model or method')
+ q.service.method_runner=no_execution;q.service.agent_runner=no_execution
+ app=Flask(__name__);register_orchestration_routes(app,lambda:q.service,no_execution,table_reader=namespace['analysis_table_pilot_reader']);client=app.test_client()
+ def inspect():
+  fresh=AnalysisStore(q.t.fixture.path,q.t.fixture.connect);packages,_=fresh._human_packages();sources=[]
+  for package in packages:
+   files=fresh.verified_package(package['run_id'])[3];sources.append(files['human/source.txt'].decode('utf-8'))
+  return dict(count=len(packages),sources=sources,computations=len(calls),db_hash=hashlib.sha256(q.t.fixture.path.read_bytes()).hexdigest())
+ print(json.dumps(dict(run=q.service.status('TEST-conversation',q.run['run_id']),url=f'/api/library/TEST-conversation/analysis/orchestration/{q.run["run_id"]}/human-records',asset_key=asset['asset_key'],inspection=inspect())),flush=True)
+ for line in sys.stdin:
+  method,url,body=json.loads(line);before=inspect();response=client.open(url,method=method,data=canonical(body) if body is not None else None,content_type='application/json')
+  print(json.dumps(dict(status=response.status_code,data=response.get_json(),cache=response.headers.get('Cache-Control'),before=before,after=inspect()),ensure_ascii=False),flush=True)
+finally:q.doCleanups()
+`;
+async function rawTargetsBridge(t,kind){
+ const child=spawn(process.env.GURUMOJI_TEST_PYTHON||'python',['-u','-c',rawTargetsPython,kind],{cwd:root,env:{...process.env,PYTHONIOENCODING:'utf-8'},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',bytes=>stderr+=bytes);const lines=readline.createInterface({input:child.stdout})[Symbol.asyncIterator]();
+ const read=async()=>{const line=await lines.next();assert(!line.done,stderr);return JSON.parse(line.value);};const ready=await read();t.after(async()=>{child.stdin.end();await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));});return {...ready,send:async command=>{child.stdin.write(JSON.stringify(command)+'\n');return read();}};
+}
+for(const kind of ['relation_graph','qualitative_bundle'])test(`actual generic Human GET -> normal ${kind} form -> POST/source Store/fresh reload and exact duplicate`,async t=>{
+ const b=await rawTargetsBridge(t,kind),h=await createHarness();t.after(()=>h.close());Object.defineProperty(h.w.crypto,'subtle',{value:crypto.webcrypto.subtle});h.w.TextEncoder=TextEncoder;h.fixture(b.run);h.evaluate('orchestrationAdopt(window.fixture,"TEST-conversation");orchestrationNode("live").showModal()');
+ const respond=async request=>{const result=await b.send([request.options.method||'GET',request.url,request.options.body?JSON.parse(request.options.body):null]);h.reply(request,result.data,result.status);await h.flush();return result;};
+ h.click('#orchestration-human-load');const catalogue=await respond(pending(h));assert.equal(catalogue.status,200,JSON.stringify(catalogue.data));assert.equal(catalogue.before.db_hash,catalogue.after.db_hash);assert.equal(catalogue.before.count,catalogue.after.count);assert.equal(catalogue.after.computations,0);assert.equal(catalogue.cache,'no-store');
+ const option=catalogue.data.options.find(option=>option.target_kind===kind&&Object.entries(b.asset_key).every(([key,value])=>option.asset_key[key]===value));assert(option,JSON.stringify(catalogue.data));h.change(node(h,'asset'),JSON.stringify(option.asset_key));assert.equal(node(h,'stages').children.length,1);h.change(node(h,'step'),option.human_steps[0].step_id);
+ if(option.human_steps[0].latest_record){node(h,'author-confirm').checked=true;node(h,'author-confirm').dispatchEvent(new h.w.Event('change',{bubbles:true}));}else h.change(node(h,'actor'),'TEST-ui-researcher');
+ const source='TEST ONLY 研究者が原文に照らした独立した記録\n  日本語と空白を保存する\n';h.change(node(h,'source'),source);h.change(node(h,'decision'),'defer');h.change(node(h,'reason'),'TEST ONLY 解釈を確定せず保留する');await review(h);h.click('#orchestration-human-save');h.click('#orchestration-human-save');const request=pending(h,'POST'),body=JSON.parse(request.options.body);assert.deepEqual(body.record.target,option.target);assert.deepEqual(body.record.allowed_step_ids,[option.human_steps[0].step_id]);assert.equal(body.record.actor.kind,'researcher');assert.equal(body.source_text,source);assert.equal(body.expected_state_revision,option.expected_state_revision);
+ const saved=await respond(request);assert.equal(saved.status,201,JSON.stringify(saved.data));assert.equal(saved.after.count,b.inspection.count+1);assert(saved.after.sources.includes(source));assert.equal(saved.after.computations,0);await respond(pending(h));assert.equal(node(h,'source').value,source);
+ const duplicate=await b.send(['POST',request.url,body]);assert.equal(duplicate.status,200);assert.equal(duplicate.data.duplicate,true);assert.equal(duplicate.after.count,saved.after.count);
+});
+
+// C0 agreed extension proposal only; these are UI fixtures, not Store adoption
+// or a proof of the pending backend GET implementation.
+for(const [kind,stepId,title] of [['relation_graph','manual-interaction-review','関係を原文に照らして確認'],['qualitative_bundle','qualitative-interpretation-review','比較・再利用の質的解釈を確認']])test(`proposal DOM ${kind}: one exact raw-byte target and original memo, no automatic save`,async t=>{
+ const f=await setup(t),{h,metadata}=f,option=structuredClone(metadata.options[0]);
+ option.asset_key={...option.asset_key,artifact_id:`TEST-${kind}`,output_name:kind==='relation_graph'?'relation_graph':'claim_set'};
+ option.target_kind=kind;option.label=kind==='relation_graph'?'保存された関係グラフ':'保存された質的比較';
+ option.target={domain:'raw-bytes-v1',...option.asset_key,version:1,content_hash:'sha256:'+('c'.repeat(64))};
+ option.human_steps=[{step_id:stepId,label:title,latest_record:null,next_revision:1,next_supersedes_record_ref:null}];
+ h.click('#orchestration-human-load');h.reply(pending(h),{...metadata,options:[...metadata.options,option]});await h.flush();
+ h.change(node(h,'asset'),JSON.stringify(option.asset_key));
+ assert.equal(node(h,'stages').children.length,1);assert.equal(node(h,'step').value,'');assert.match(node(h,'availability').textContent,/一つの確認/);
+ const source=fill(h,stepId,'defer','TEST ONLY 元の記録\n  日本語と空白をそのまま保持\n');await review(h);
+ const payload=JSON.parse(h.evaluate('JSON.stringify(orchestrationHumanDraft().payload)'));
+ assert.deepEqual(payload.record.target,option.target);assert.deepEqual(payload.asset_key,option.asset_key);assert.deepEqual(payload.record.allowed_step_ids,[stepId]);
+ assert.equal(payload.source_text,source);assert.equal(payload.record.actor.kind,'researcher');assert.equal(payload.record.decision,'defer');
+ assert.equal(payload.record.record_ref.content_hash,'sha256:'+crypto.createHash('sha256').update(source,'utf8').digest('hex'));
+ assert.equal(payload.expected_state_revision,option.expected_state_revision);assert.match(node(h,'summary').textContent,new RegExp(title));
+ assert.equal(h.requests.filter(request=>request.options.method==='POST').length,0);
+ for(const bad of [{...option,target_kind:'unknown'},{...option,target:{...option.target,artifact_id:'other'}},{...option,human_steps:[{...option.human_steps[0],step_id:'ta-p1'}]}]){
+  h.click('#orchestration-human-load');h.reply(pending(h),{...metadata,options:[bad]});await h.flush();
+  assert.equal(node(h,'review').disabled,true);assert.equal(node(h,'source').value,source);assert.match(node(h,'message').textContent,/未対応/);
+ }
+});
+test('proposal DOM dedicated participant table creates exact source bytes; TA memo is never converted, 409 retains assignments',async t=>{
+ const f=await setup(t),{h,metadata}=f,option=structuredClone(metadata.options[0]);
+ const taMemo=fill(h,metadata.options[0].human_steps[0].step_id,'defer','TEST ONLY 原文メモを対応表に変換しない');
+ option.asset_key={...option.asset_key,artifact_id:'TEST-unit-table',output_name:'tables/table.json'};option.target_kind='participant_mapping';option.label='TEST ONLY 保存した単位表';
+ option.target={domain:'raw-bytes-v1',...option.asset_key,version:1,content_hash:'sha256:'+('d'.repeat(64))};option.owner_item_id='TEST-conversation';option.owner_run_id=metadata.run_id;
+ option.human_steps=[{step_id:'participant-mapping-review',label:'話者と参加者の対応を確認',latest_record:null,next_revision:1,next_supersedes_record_ref:null}];
+ const context={enabled:false,reason_code:'participant_mapping_missing',human_record_option:option,speakers:[{conversation_id:'TEST-conversation',speaker_id:'TEST-A'},{conversation_id:'TEST-conversation',speaker_id:'TEST-B'}],known_participants:[],confirmed_mapping:null};
+ h.fixture({generation:metadata.generation,participant_context:context});h.evaluate('orchestrationAssetState.options=window.fixture;orchestrationParticipantRender()');
+ const inputs=h.document.querySelectorAll('#orchestration-participant-assignments input');assert.equal(inputs.length,2);assert.equal(inputs[0].value,'');assert.equal(node(h,'source').value,taMemo);
+ h.change(inputs[0],'参加者A');h.change(inputs[1],'参加者A');h.change(h.document.getElementById('orchestration-participant-actor'),'TEST-mapping-researcher');h.change(h.document.getElementById('orchestration-participant-decision'),'adopt');h.change(h.document.getElementById('orchestration-participant-reason'),'TEST ONLY 同一人物であると明示して記録');
+ h.click('#orchestration-participant-review');for(let i=0;i<100&&h.document.getElementById('orchestration-participant-confirmation').hidden;i++)await new Promise(resolve=>setTimeout(resolve,5));
+ assert.equal(h.document.getElementById('orchestration-participant-confirmation').hidden,false);h.click('#orchestration-participant-save');h.click('#orchestration-participant-save');
+ const request=pending(h,'POST'),body=JSON.parse(request.options.body),assignments=[{conversation_id:'TEST-conversation',speaker_id:'TEST-A',participant_id:'参加者A'},{conversation_id:'TEST-conversation',speaker_id:'TEST-B',participant_id:'参加者A'}];
+ assert.equal(body.source_text,JSON.stringify({participant_mapping:assignments}));assert.equal(body.record.record_ref.content_hash,'sha256:'+crypto.createHash('sha256').update(body.source_text,'utf8').digest('hex'));assert.deepEqual(body.record.target,option.target);assert.deepEqual(body.record.allowed_step_ids,['participant-mapping-review']);assert.equal(body.record.actor.kind,'researcher');assert.equal(body.expected_state_revision,option.expected_state_revision);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,1);
+ h.reply(request,{error:'対応対象の保存版が更新されています',reason_code:'revision_conflict',field:'expected_state_revision'},409);await h.flush();assert.equal(inputs[0].value,'参加者A');assert.equal(h.document.getElementById('orchestration-participant-reason').value,'TEST ONLY 同一人物であると明示して記録');assert.equal(h.document.getElementById('orchestration-participant-review').disabled,true);assert.match(h.document.getElementById('orchestration-participant-message').textContent,/保持/);assert.equal(node(h,'source').value,taMemo);
+});
+test('proposal DOM participant target is routed to structured form; unknown or multiple-conversation context is unavailable',async t=>{
+ const f=await setup(t),{h,metadata}=f,option=structuredClone(metadata.options[0]);option.asset_key={...option.asset_key,artifact_id:'TEST-projection',output_name:'tables/table.json'};option.target_kind='participant_mapping';option.target={domain:'raw-bytes-v1',...option.asset_key,version:1,content_hash:'sha256:'+('e'.repeat(64))};option.human_steps=[{step_id:'participant-mapping-review',label:'参加者対応',latest_record:null,next_revision:1,next_supersedes_record_ref:null}];
+ h.click('#orchestration-human-load');h.reply(pending(h),{...metadata,options:[...metadata.options,option]});await h.flush();assert.equal(node(h,'target').options.length,2);assert.equal(node(h,'stages').children.length,4);
+ const context={human_record_option:{...option,owner_item_id:'TEST-conversation',owner_run_id:metadata.run_id},speakers:[{conversation_id:'TEST-conversation',speaker_id:'TEST-A'},{conversation_id:'OTHER-conversation',speaker_id:'TEST-B'}],known_participants:[]};h.fixture({generation:metadata.generation,participant_context:context});h.evaluate('orchestrationAssetState.options=window.fixture;orchestrationParticipantRender()');assert.equal(h.document.getElementById('orchestration-participant-form').hidden,true);assert.match(h.document.getElementById('orchestration-participant-status').textContent,/確認できません/);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,0);
+});
+
 test('V3 real loopback Flask API, production CSS, Edge 1440/390 pointer and Tab/Enter', {skip:process.env.GURUMOJI_RUN_UI_BROWSER!=='1'},async t=>{
  const {chromium}=require('playwright'),browser=await chromium.launch({channel:'msedge',headless:true});t.after(()=>browser.close());
  for(const width of [1440,390]){
@@ -198,7 +305,7 @@ test('V3 real loopback Flask API, production CSS, Edge 1440/390 pointer and Tab/
   page.on('response',r=>{if(r.request().method()==='POST'&&r.url().endsWith('/human-records'))postStatuses.push(r.status());});
   await page.addInitScript("sessionStorage.setItem('gurumoji.bootSplashSeen','1')");await page.goto(b.base);
   await page.waitForFunction('typeof orchestrationAdopt === "function"');await page.evaluate(run=>{orchestrationAdopt(run,'TEST-conversation');orchestrationNode('live').showModal();},b.run);
-  await page.getByRole('button',{name:'保存済み候補と研究者記録を確認',exact:true}).click();await page.locator('#orchestration-human-form').waitFor({state:'visible'});
+  await page.getByRole('button',{name:'保存対象と研究者記録を確認',exact:true}).click();await page.locator('#orchestration-human-form').waitFor({state:'visible'});
   await page.locator('#orchestration-human-stages li').filter({hasText:/データに精通する/}).waitFor();
   if(process.env.GURUMOJI_UI_ARTIFACT_DIR){fs.mkdirSync(process.env.GURUMOJI_UI_ARTIFACT_DIR,{recursive:true});await page.locator('#orchestration-human-title').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(process.env.GURUMOJI_UI_ARTIFACT_DIR,`human-record-fields-${width}.png`)});}
   const step=page.getByLabel('今回記録する段階',{exact:true});const first=await step.locator('option').nth(1).getAttribute('value');await step.selectOption(first);
