@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, Flask, Response, jsonify, request
 
-from ..analysis_core import AnalysisContractError
+from ..analysis_core import AnalysisContractError, TABLE_PILOT_MAX_BYTES
 from ..analysis_store import StoreConflict
 
 
@@ -17,8 +17,9 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
                                   history_viewer: Callable[[], Any] | None = None) -> None:
     blueprint = Blueprint("analysis_orchestration", __name__)
 
-    def payload() -> dict:
-        if request.content_length and request.content_length > 64 * 1024:
+    def payload(max_bytes=64 * 1024) -> dict:
+        if ((request.content_length and request.content_length > max_bytes)
+                or len(request.get_data(cache=True)) > max_bytes):
             raise AnalysisContractError("実行条件が大きすぎます。")
         value = request.get_json(silent=True)
         if not isinstance(value, dict):
@@ -34,7 +35,8 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     def contract_error(exc):
         conflict = exc.code in {"revision_conflict", "request_conflict", "active_run",
                                 "provider_unavailable", "resume_blocked", "uncertain_execution",
-                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch"}
+                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch",
+                                "table_run_stopped", "table_run_unavailable", "table_task_limit"}
         return jsonify(error=str(exc), reason_code=exc.code, field=exc.field), 409 if conflict else 400
 
     @blueprint.errorhandler(StoreConflict)
@@ -96,6 +98,18 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/cancel")
     def cancel(item_id, run_id):
         return jsonify(run=public_run(item_id, service().cancel(item_id, run_id)))
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot")
+    def table_pilot_options(item_id, run_id):
+        response = viewer_response(service().table_pilot_options(item_id, run_id, offset=request.args.get("offset", "0")))
+        if len(response.get_data()) > TABLE_PILOT_MAX_BYTES:
+            raise AnalysisContractError("選択用の登録情報が上限を超えています。", code="table_selection_byte_limit")
+        return response
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot/<method_id>")
+    def table_pilot_register(item_id, run_id, method_id):
+        task = service().register_table_pilot(item_id, run_id, method_id, payload(TABLE_PILOT_MAX_BYTES))
+        return jsonify(task=task), 200 if task["registration_duplicate"] else 202
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
     def resume(item_id, run_id):

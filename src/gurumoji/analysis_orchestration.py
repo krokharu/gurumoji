@@ -314,6 +314,7 @@ class AnalysisOrchestrationService:
         self.memory_manager = memory_manager
         self.expert_provider = expert_provider
         self.table_store = table_store
+        self._table_validation_lock = threading.Lock()
         self._budget_factory, self._budget_clock = budget_factory, budget_clock
         self._run_budgets: dict[str, OrchestrationBudget] = {}
         if initial_builder is not None and source_fingerprint is None:
@@ -1104,26 +1105,122 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
         return True
 
-    def register_table_pilot(self, item_id, run_id, method_id, request):
-        """Explicit local code opt-in; normal Core/Pack readers remain unchanged."""
+    def _table_run(self, db, item_id, run_id):
         if self.table_store is None:
             raise _error("表pilotのStore接続がありません。", "table_pilot_disabled")
+        item = self.find_item(item_id)
+        if item is None:
+            raise LookupError("会話が見つかりません。")
+        run = self._read_run(db, run_id, item_id)
+        if run["status"] in TERMINAL or run["cancel_requested"]:
+            raise _error("停止したrunへ発注できません。", "table_run_stopped")
+        if run["status"] not in {"queued", "running"} or run["phase"] == "initial":
+            raise _error("固定入力と実行状態を確認してください。", "table_run_unavailable")
+        if run["stale"] or (self.source_fingerprint and self.source_fingerprint(item) != run["input_hash"]):
+            raise _error("固定入力の版が更新されています。", "revision_conflict")
+        self._check_version(run)
+        self._require_budget(run)
+        if self._limit(db, run):
+            raise _error("実行上限に達しています。", "table_run_unavailable")
+        authority_path = db.execute("PRAGMA database_list").fetchone()[2]
+        from pathlib import Path
+        if Path(authority_path).resolve() != Path(self.table_store.database_file).resolve():
+            raise _error("HandlerとStoreのlibraryが異なります。", "table_store_mismatch")
+        return run
+
+    def table_pilot_options(self, item_id, run_id, *, offset=0):
+        """Read fixed context and existing permitted inputs; never adopt or execute."""
+        from .analysis_core import TABLE_PILOT_VERSION, TABLE_PILOT_MAX_BYTES
+        from .analysis_method_registry import table_pilot_slot
+        from .analysis_store import AssetBindingError
+        if not str(offset).isdigit() or int(offset) > 10000:
+            raise _error("表候補の開始位置が不正です。", "table_selection_offset")
+        offset = int(offset)
         with self._db() as db:
-            run = self._read_run(db, run_id, item_id)
-            if run["status"] in TERMINAL or run["cancel_requested"]:
-                raise _error("停止したrunへ発注できません。", "table_run_stopped")
-            self._check_version(run)
-            authority_path = db.execute("PRAGMA database_list").fetchone()[2]
-            from pathlib import Path
-            if Path(authority_path).resolve() != Path(self.table_store.database_file).resolve():
-                raise _error("HandlerとStoreのlibraryが異なります。", "table_store_mismatch")
+            run = self._table_run(db, item_id, run_id)
+            initial = self._initial(db, run["initial_id"])
+        context = {"plan_id": run_id, "plan_version": 1,
+                   "plan_hash": fingerprint({"run_id": run_id, "input_hash": run["input_hash"]}),
+                   "generation": run["generation"], "consumer_task_id": "table-selection:" + run_id,
+                   "purpose": "exploratory", "destination": "local", "cancelled": False}
+        selector = {"row_ids": [], "column_ids": [], "range_ref": None}
+        selector["selection_hash"] = fingerprint(selector)
+        result = {"version": TABLE_PILOT_VERSION, "actor": "code", "context": context,
+                  "input": {k: run[k] for k in ("initial_id", "input_hash", "source_revision", "analysis_revision")},
+                  "library_id": self.table_store.library_id(), "max_bytes": TABLE_PILOT_MAX_BYTES,
+                  "methods": [{"method_id": method, "parameter_fields": list(parameters), "slot": table_pilot_slot(method),
+                               "parameter_defaults": ({"key": "utterance_id"} if method == "table_join" else
+                                    {} if method == "table_projection" else {"status_column": "value_status",
+                                    **({"operation": "count", "group_by": "utterance_id", "unit": "utterance"}
+                                       if method == "table_aggregate" else {})})}
+                              for method, parameters in TABLE_PILOT_METHODS.items()],
+                  "scope_requirements": ["scope_id", "scope_manifest_hash"],
+                  "purposes": ["exploratory", "descriptive"], "selector": selector,
+                  "inputs": [], "offset": offset, "next_offset": None, "truncated": False}
+        # Existing Store metadata is authoritative; no inferred descriptors/policies.
+        try:
+            assets = self.table_store._connection_index()[0]
+            eligible_index = 0
+            for key in sorted(assets):
+                asset = assets[key]
+                if (asset["asset_key"]["library_id"] != result["library_id"]
+                        or asset["scope"]["conversation_ids"] != [item_id]):
+                    continue
+                binding_context = {**context, "scope_id": asset["scope"]["scope_id"],
+                                   "scope_manifest_hash": asset["scope"]["manifest_hash"]}
+                source = {"type": "frozen", **{k: asset[k] for k in ("asset_key", "content_hash", "content_domain")}}
+                ref = {k: binding_context[k] for k in ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id")}
+                ref.update(slot_id="table", input_ref_id="table-input", role="data_input", selection="selected",
+                           omission_reason=None, source=source, selector=selector)
+                receipt = self.table_store.bind_asset_inputs(method_id="table_projection", slot=table_pilot_slot("table_projection"),
+                                                            inputs=[ref], context=binding_context)
+                if receipt["decision"] != "eligible":
+                    continue
+                table = receipt["payloads"][0]["value"]
+                template = {"version": TABLE_PILOT_VERSION, "actor": "code",
+                            "parameters": {"columns": table["fields"], "row_ids": [r["row_id"] for r in table["rows"]]},
+                            "bindings": {"slot": table_pilot_slot("table_projection"), "inputs": [ref], "context": binding_context}}
+                try:
+                    self.table_store.prepare_table_pilot("table_projection", template, expected_snapshot=initial)
+                except (AnalysisContractError, AssetBindingError):
+                    continue
+                eligible_index += 1
+                if eligible_index <= offset:
+                    continue
+                candidate = {"source": source, "scope": asset["scope"], "variables": asset["variables"],
+                             "fields": table["fields"], "row_ids": template["parameters"]["row_ids"],
+                             "projection_request": template}
+                if len(result["inputs"]) >= 20 or len(canonical({**result, "inputs": result["inputs"] + [candidate]})) > TABLE_PILOT_MAX_BYTES:
+                    if not result["inputs"]:
+                        raise _error("選択用の登録情報が上限を超えています。", "table_selection_byte_limit")
+                    result["truncated"] = True
+                    result["next_offset"] = offset + len(result["inputs"])
+                    break
+                result["inputs"].append(candidate)
+        except AssetBindingError as exc:
+            raise _error("固定表の登録情報を確認してください。", "table_input_" + exc.reason) from exc
+        return result
+
+    def register_table_pilot(self, item_id, run_id, method_id, request):
+        """Explicit local code opt-in; normal Core/Pack readers remain unchanged."""
+        if not isinstance(method_id, str) or method_id not in TABLE_PILOT_METHODS:
+            raise _error("未登録の表計算です。", "table_method_unsupported")
+        with self._db() as db:
+            run = self._table_run(db, item_id, run_id)
+            self.table_store.prepare_table_pilot(method_id, request, expected_snapshot=self._initial(db, run["initial_id"]))
+            prior_ids = {t["task_id"] for t in self._tasks(db, run_id)}
             task = self._register(db, run, {"role": "statistics", "method_id": method_id,
                 "question": "固定表の局所記述", "why_now": "明示的な表pilot要求",
                 "success_criteria": "固定入力・構造・保存・現在権限を確認", "table_pilot": request},
-                phase="table_pilot")
-            return copy.deepcopy(task)
+                phase="table_pilot", reuse_existing=True)
+            if task is None:
+                raise _error("表タスクの登録上限に達しています。", "table_task_limit")
+            duplicate = task["task_id"] in prior_ids
+        if self.schedule and not duplicate:
+            self._schedule(run_id)
+        return {**copy.deepcopy(task), "registration_duplicate": duplicate}
 
-    def _register(self, db, run, intent: dict, *, phase: str, automatic=False) -> dict | None:
+    def _register(self, db, run, intent: dict, *, phase: str, automatic=False, reuse_existing=False) -> dict | None:
         task_origin = self._budget_clock()
         role = intent.get("role")
         if role not in AI_ROLES | {"statistics"}:
@@ -1197,7 +1294,7 @@ class AnalysisOrchestrationService:
         if existing:
             task = json.loads(existing[0])
             self._event(db, run["run_id"], "duplicate_suppressed", "同じ入力・目的・対象版のタスクを再発注しません。", task_id=task["task_id"])
-            return None
+            return task if reuse_existing else None
         if len(tasks) >= run["config"]["max_tasks"]:
             self._stop(db, run, "task_budget_limit")
             return None
@@ -1702,7 +1799,10 @@ class AnalysisOrchestrationService:
         with self._db() as db:
             probe = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
         if probe["method_id"] in TABLE_PILOT_METHODS:
-            return self._validate_table_received(run_id, task_id)
+            # Execution workers and the drain loop can observe the same received
+            # table concurrently; only one may save/promote it outside the DB tx.
+            with self._table_validation_lock:
+                return self._validate_table_received(run_id, task_id)
         with self._db() as db:
             run = self._read_run(db, run_id)
             task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])

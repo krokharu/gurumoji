@@ -1684,6 +1684,7 @@ def analysis_orchestration_service() -> AnalysisOrchestrationService:
                 on_complete=lambda item_id, run_id: analysis_orchestration_publication_service().finalize(item_id, run_id),
                 memory_manager=make_obsidian_management_agent(),
                 expert_provider=make_expert_agent_registry().freeze,
+                table_store=analysis_archive_store(),
             )
         return _orchestration_services[key]
 
