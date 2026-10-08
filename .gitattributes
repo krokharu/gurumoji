@@ -86,3 +86,4 @@ tests/test_obsidian_management_browser.py -text
 tests/test_saved_autonomous_analysis.py -text
 tests/test_statistical_expert_agents.py -text
 tests/test_statistical_report_acceptance.py -text
+tests/test_table_pilot_routes.py -text

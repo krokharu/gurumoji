@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "b932fe11adf0881a3d7093c2761fbee930be0e56",
+  "source_commit": "1ba673f911034a686ba63661867a8922eead8d54",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -10,8 +10,8 @@
   "files": [
     {
       "path": ".gitattributes",
-      "sha256": "14565919db655a6f2db6b655cec08afd617b6e64384c0a6d8d4f1a0cc9cebfc1",
-      "bytes": 5629
+      "sha256": "983d7698f97731675b62be8a2cd0c1428a2a4d02351ebed11989dc2d72422281",
+      "bytes": 5669
     },
     {
       "path": "AGENTS.md",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "9d96a4b65dbc9af098234d5add79de75c51098ab89c585868e60855d2efda30b",
-      "bytes": 4315
+      "sha256": "2e9816f9f9e7113007a8fcf79734f647a62d7367bba5ae653ec497a83ceda373",
+      "bytes": 5179
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -210,8 +210,8 @@
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "9ce83fc47a75089a70e71666e26071d114889f08ee2bc5eb59c36f5481c9fc69",
-      "bytes": 179987
+      "sha256": "aa68ea5e654c7810060d94098b726c65dbca32581342d5da966dd326f17ea595",
+      "bytes": 187192
     },
     {
       "path": "src/gurumoji/analysis_store.py",
@@ -220,8 +220,8 @@
     },
     {
       "path": "src/gurumoji/app.py",
-      "sha256": "2dc801f34d8975363f32ec3e9a495541263ae8bec75237d9e221372e2ce6c949",
-      "bytes": 91321
+      "sha256": "7e9f8bdc48ad4581d7d27c484a2c971488ee82bf82eada258d3e998121a6f41e",
+      "bytes": 91375
     },
     {
       "path": "src/gurumoji/method_experts.py",
@@ -250,8 +250,8 @@
     },
     {
       "path": "src/gurumoji/services/analysis_orchestration_methods.py",
-      "sha256": "02ebf20f3a59ab7fa92a48345c7e2888ae6db4594df77e0448d0ebd80fdb5fdf",
-      "bytes": 23090
+      "sha256": "73b5773dbe4c12c4ccbdf9a801e61dedfe79ff5c526aa44a8888d3e5108ee36b",
+      "bytes": 23824
     },
     {
       "path": "src/gurumoji/services/expert_agents.py",
@@ -290,8 +290,8 @@
     },
     {
       "path": "src/gurumoji/web/analysis_orchestration_routes.py",
-      "sha256": "913488cd446994ad4fb3c57bbeabecc8840bc270109e76b8ca3d9d98ad2b0883",
-      "bytes": 9257
+      "sha256": "c8ecbe79b0f239c36c75f8b79b812c7c33d7f67c39761d057369744e0ff526fc",
+      "bytes": 10295
     },
     {
       "path": "tests/dom/orchestration.test.cjs",
@@ -350,8 +350,8 @@
     },
     {
       "path": "tests/test_analysis_asset_bindings.py",
-      "sha256": "0203135828dc43e79cc02965181831731d9480a94ee976c6a4a26e884bf3f908",
-      "bytes": 57753
+      "sha256": "5fbbf5efbf93fa9487327ed7e85104c204c54f5bcc6ca4a2cef61a858579595c",
+      "bytes": 65470
     },
     {
       "path": "tests/test_analysis_core_contracts.py",
@@ -406,8 +406,7 @@
     {
       "path": "tests/test_expert_skill_bindings.py",
       "sha256": "f197cfdc9ed1dd1b6491762e6b8b8240ee1e3f4f5356fec288906049130fb217",
-      "bytes": 25339,
-      "source_sha256": "1d5c7639560bfc59c67530114d4d471920470478304d860e9513075012556849"
+      "bytes": 25339
     },
     {
       "path": "tests/test_method_experts.py",
@@ -438,6 +437,12 @@
       "path": "tests/test_statistical_report_acceptance.py",
       "sha256": "9a5b93a0c2963ca62616cfe1445ccba6037f1d8e75e45a5f8ba0df98184786f4",
       "bytes": 48263
+    },
+    {
+      "path": "tests/test_table_pilot_routes.py",
+      "sha256": "72a2d42fce27350e27332dc41e18ebb3ed91eac4da6e2516a7567d574f9ebe80",
+      "bytes": 15336
     }
-  ]
+  ],
+  "original_source_commit": "b932fe11adf0881a3d7093c2761fbee930be0e56"
 }
