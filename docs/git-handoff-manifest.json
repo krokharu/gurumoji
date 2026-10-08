@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "1ba673f911034a686ba63661867a8922eead8d54",
+  "source_commit": "3d14ddb5c45ce96ec8eb4528cf554dbd8903789d",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -10,8 +10,8 @@
   "files": [
     {
       "path": ".gitattributes",
-      "sha256": "983d7698f97731675b62be8a2cd0c1428a2a4d02351ebed11989dc2d72422281",
-      "bytes": 5669
+      "sha256": "a0b08318114178f0784d6ed1a65eb8fdfc4dc514425470ab140c711f16dfed04",
+      "bytes": 5701
     },
     {
       "path": "AGENTS.md",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "2e9816f9f9e7113007a8fcf79734f647a62d7367bba5ae653ec497a83ceda373",
-      "bytes": 5179
+      "sha256": "27fc3ed0516f3edd10bcede81e432478f8b486dad1be0c9bf66b952b69ee87f1",
+      "bytes": 6862
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -175,8 +175,8 @@
     },
     {
       "path": "scripts/check_git_handoff.py",
-      "sha256": "2d10fd5c71587c9da006cdb75aac320e41bdea1743e47c1a6dd9aea3ec0fa1e1",
-      "bytes": 2446
+      "sha256": "30c755462744e3f0df945f6fff7dad33d82b1dc6b93b6e601a7fb6bcec44b75c",
+      "bytes": 5710
     },
     {
       "path": "scripts/test_expert_agent_model.py",
@@ -210,8 +210,8 @@
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "aa68ea5e654c7810060d94098b726c65dbca32581342d5da966dd326f17ea595",
-      "bytes": 187192
+      "sha256": "54f3bdd9f849639eec8019f4ac28f84c26d70277a200ae219fcc1e42c06bcf63",
+      "bytes": 190458
     },
     {
       "path": "src/gurumoji/analysis_store.py",
@@ -220,8 +220,8 @@
     },
     {
       "path": "src/gurumoji/app.py",
-      "sha256": "7e9f8bdc48ad4581d7d27c484a2c971488ee82bf82eada258d3e998121a6f41e",
-      "bytes": 91375
+      "sha256": "20863e0d6ce820cfd8568b8a3d115c58683550f840a287e03593bcd4187b9b20",
+      "bytes": 92975
     },
     {
       "path": "src/gurumoji/method_experts.py",
@@ -269,9 +269,14 @@
       "bytes": 8131
     },
     {
+      "path": "src/gurumoji/static/analysis-orchestration.css",
+      "sha256": "8e2cad0a199020834e2e4d24bd3f8e236cc668998a3fa2b3b7add0640eb5ac2f",
+      "bytes": 13711
+    },
+    {
       "path": "src/gurumoji/static/analysis-orchestration.js",
-      "sha256": "e9709a989d8eecf4e9a4f6177323be5b2548721ce305bb42f5870c45dda21ce4",
-      "bytes": 50990
+      "sha256": "8a972437b151c14f8a11851f1ac6a3b77b3b70de239a03332df555265ce662a8",
+      "bytes": 67646
     },
     {
       "path": "src/gurumoji/static/app.js",
@@ -280,8 +285,8 @@
     },
     {
       "path": "src/gurumoji/templates/views/analysis-orchestration.html",
-      "sha256": "09608ba5a4e1d2002ef5856221560b87892c8bc442b48bf25589db224c6c7145",
-      "bytes": 14738
+      "sha256": "79c1ede18ec60f1eb02483518ea5f8a3718860dcab2b44a1bd65cb9a1889ec7d",
+      "bytes": 17183
     },
     {
       "path": "src/gurumoji/vault_registry.py",
@@ -290,8 +295,8 @@
     },
     {
       "path": "src/gurumoji/web/analysis_orchestration_routes.py",
-      "sha256": "c8ecbe79b0f239c36c75f8b79b812c7c33d7f67c39761d057369744e0ff526fc",
-      "bytes": 10295
+      "sha256": "8656f62b01dd632d4ae7ebe03ea5c9e33b5694e1ca6852933a0a4c7e311a8552",
+      "bytes": 10787
     },
     {
       "path": "tests/dom/orchestration.test.cjs",
@@ -409,6 +414,11 @@
       "bytes": 25339
     },
     {
+      "path": "tests/test_git_handoff.py",
+      "sha256": "823d966a9dde68b87e0785439378651b46e06c11077028c8f044b008bfa10297",
+      "bytes": 9740
+    },
+    {
       "path": "tests/test_method_experts.py",
       "sha256": "05ac49db2c000dc3d2c87812f8ab534530292978d01a5419fd24ea44021c44b6",
       "bytes": 29784
@@ -440,8 +450,13 @@
     },
     {
       "path": "tests/test_table_pilot_routes.py",
-      "sha256": "72a2d42fce27350e27332dc41e18ebb3ed91eac4da6e2516a7567d574f9ebe80",
-      "bytes": 15336
+      "sha256": "ed6b48cc4f44535eca11be1795555b88c595f29321e4208673cd3e1a0e79db4a",
+      "bytes": 28932
+    },
+    {
+      "path": "tests/test_table_pilot_ui.cjs",
+      "sha256": "63cbe9aa0c0cc7a872a110c123921e13ebbc0c704ed25700a576106bce5fb6e1",
+      "bytes": 18151
     }
   ],
   "original_source_commit": "b932fe11adf0881a3d7093c2761fbee930be0e56"

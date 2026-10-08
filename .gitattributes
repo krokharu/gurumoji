@@ -87,3 +87,6 @@ tests/test_saved_autonomous_analysis.py -text
 tests/test_statistical_expert_agents.py -text
 tests/test_statistical_report_acceptance.py -text
 tests/test_table_pilot_routes.py -text
+tests/test_table_pilot_ui.cjs -text
+tests/test_git_handoff.py -text
+src/gurumoji/static/analysis-orchestration.css -text
