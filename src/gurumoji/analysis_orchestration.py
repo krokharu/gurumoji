@@ -1093,7 +1093,7 @@ class AnalysisOrchestrationService:
         if completed and self._statistical_review_gate(db, run):
             completed, reason = False, "human_review_required"
         run.update(status="completed" if completed else ("cancelled" if reason == "user_stop" else "stopped"),
-                   phase="stopped", stop_reason=reason, ended_at=_now(), generation=run["generation"] + 1)
+                   phase="stopped", stop_reason=reason, ended_at=_now(), generation=run["generation"] + (0 if completed else 1))
         for task in self._tasks(db, run["run_id"]):
             if task["status"] == "queued":
                 task.update(status="cancelled", error=reason)
@@ -1142,6 +1142,8 @@ class AnalysisOrchestrationService:
                 read_initial_checkpoints(db, run["initial_id"], self.initial_builder)
             if run["status"] in TERMINAL:
                 raise _error("終了済みrunは再実行しません。新しいrunを開始してください。", "run_terminal")
+            saved_tasks=self._tasks(db,run_id)
+            safe_plan_restart=bool(run.get("asset_plan_identity")) and all(t["kind"]=="code" and t["status"] not in {"running","uncertain","cancel_requested"} for t in saved_tasks)
             uncertain = []
             for task in self._tasks(db, run_id):
                 if task["status"] in {"running", "uncertain", "cancel_requested"}:
@@ -1160,7 +1162,9 @@ class AnalysisOrchestrationService:
                 self._write_run(db, run)
                 self._event(db, run_id, "recovery_required", run["error"], task_ids=uncertain)
                 return self._public(db, run)
-            run.update(status="queued", error="", generation=run["generation"] + 1)
+            # A code-only plan with no in-flight call keeps its frozen generation;
+            # queued children and receipts remain the same persisted tasks.
+            run.update(status="queued", error="", generation=run["generation"] if safe_plan_restart else run["generation"] + 1)
             self._write_run(db, run)
         self._notify_management(run_id)
         if self.schedule:
@@ -1329,6 +1333,54 @@ class AnalysisOrchestrationService:
             self._schedule(run_id)
         return {**copy.deepcopy(task), "registration_duplicate": duplicate}
 
+    def register_asset_plan(self,item_id,run_id,value):
+        from .analysis_core import validate_asset_plan,validate_connected_request
+        from .analysis_method_registry import connected_slot
+        plan,ordered=validate_asset_plan(value); plan_hash=fingerprint(plan)
+        with self._db() as db:
+            run=self._read_run(db,run_id,item_id)
+            previous=next((p for p in run.get("asset_plans",[]) if p["plan_id"]==plan["plan_id"] and p["plan_version"]==plan["plan_version"]),None)
+            if previous:
+                if previous["plan_hash"] != plan_hash:raise _error("同じ計画版を変更できません。","asset_plan_conflict")
+                return {"identity":previous["identity"],"tasks":previous["tasks"],"duplicate":True}
+            run=self._table_run(db,item_id,run_id)
+            versions=[p["plan_version"] for p in run.get("asset_plans",[]) if p["plan_id"]==plan["plan_id"]]
+            if plan["plan_version"] != (max(versions)+1 if versions else 1):raise _error("計画版は連続です。","asset_plan_revision")
+            if len(self._tasks(db,run_id))+len(ordered)>run["config"]["max_tasks"]:raise _error("計画全体がtask予算を超えます。","asset_plan_budget")
+            identity={"plan_id":plan["plan_id"],"plan_version":plan["plan_version"],"plan_hash":plan_hash,"generation":run["generation"]}
+            run["asset_plan_identity"]=identity
+            tasks={};steps={s["step_id"]:s for s in plan["steps"]}
+            for sid in ordered:
+                step=steps[sid];method=step["method_id"]
+                context={**identity,"consumer_task_id":"asset-plan-registration:"+run_id, "purpose":"exploratory","destination":"local",
+                    "scope_id":step["scope"]["scope_id"],"scope_manifest_hash":step["scope"]["manifest_hash"],"cancelled":False}
+                selector={"row_ids":[],"column_ids":[],"range_ref":None};selector["selection_hash"]=fingerprint(selector)
+                inputs=[];deps=[]
+                for ref in step["inputs"]:
+                    if ref["selection"]=="omitted":
+                        inputs.append({**{k:context[k] for k in identity},"consumer_task_id":context["consumer_task_id"],"slot_id":"table",**copy.deepcopy(ref)})
+                        continue
+                    source=copy.deepcopy(ref["source"])
+                    if source["type"]=="from_step":
+                        parent=tasks[source.pop("step_id")];source["producer_task_id"]=parent;deps.append(parent)
+                    inputs.append({**{k:context[k] for k in identity},"consumer_task_id":context["consumer_task_id"],"slot_id":"table",
+                        **copy.deepcopy(ref),"source":source,"selector":copy.deepcopy(selector)})
+                request={"version":"connected-assets-2","actor":"code","parameters":step["parameters"],
+                    "bindings":{"slot":connected_slot(method),"inputs":inputs,"context":context}}
+                validate_connected_request(method,request)
+                if not deps:self.table_store.prepare_connected(method,request,expected_snapshot=self._initial(db,run["initial_id"]))
+                task=self._register(db,run,{"role":"statistics","method_id":method,"question":"固定資産step "+sid,
+                    "why_now":"明示的な固定資産計画","success_criteria":"全選択入力の確定・保存・現在権限を検証",
+                    "table_pilot":request,"dependencies":sorted(set(deps))},phase="table_pilot",reuse_existing=True)
+                if task is None:raise _error("計画を全て登録できません。","asset_plan_budget")
+                task.update(asset_plan_identity=identity,asset_step_id=sid,generation=run["generation"])
+                self._write_task(db,task);tasks[sid]=task["task_id"]
+            run.setdefault("asset_plans",[]).append({**plan,"identity":identity,"plan_hash":plan_hash,"tasks":tasks})
+            self._write_run(db,run)
+            self._event(db,run_id,"asset_plan_registered","選択した依存とslotを固定しました。",plan_identity=identity,tasks=tasks)
+        if self.schedule:self._schedule(run_id)
+        return {"identity":identity,"tasks":tasks,"duplicate":False}
+
     def _register(self, db, run, intent: dict, *, phase: str, automatic=False, reuse_existing=False) -> dict | None:
         task_origin = self._budget_clock()
         role = intent.get("role")
@@ -1349,9 +1401,9 @@ class AnalysisOrchestrationService:
                 raise _error("表pilotは明示的なcode接続専用です。", "table_pilot_disabled")
             request = validate_table_pilot_request(method, intent.get("table_pilot"))
             context = request["bindings"]["context"]
-            expected_plan = fingerprint({"run_id": run["run_id"], "input_hash": run["input_hash"]})
-            if (context["plan_id"] != run["run_id"] or context["plan_version"] != 1
-                    or context["plan_hash"] != expected_plan or context["generation"] != run["generation"]
+            expected_identity = run.get("asset_plan_identity") if method in CONNECTED_METHODS and context["plan_id"] == run.get("asset_plan_identity",{}).get("plan_id") else {
+                "plan_id":run["run_id"],"plan_version":1,"plan_hash":fingerprint({"run_id":run["run_id"],"input_hash":run["input_hash"]}),"generation":run["generation"]}
+            if (expected_identity is None or any(context[k] != expected_identity[k] for k in ("plan_id","plan_version","plan_hash","generation"))
                     or context["cancelled"] or any(ref["consumer_task_id"] != context["consumer_task_id"]
                                                    for ref in request["bindings"]["inputs"])):
                 raise _error("run・plan・consumer版が一致しません。", "table_plan_mismatch")
@@ -1652,6 +1704,10 @@ class AnalysisOrchestrationService:
                 limit = self._budget_reason(run, task_id)
                 row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()
                 task = json.loads(row[0])
+                if task.get("asset_plan_identity") and (canonical(task["asset_plan_identity"]) != canonical(run.get("asset_plan_identity"))
+                        or task["asset_plan_identity"]["generation"]!=run["generation"] or task.get("generation")!=run["generation"]):
+                    raise ExecutionStopped("asset_plan_changed")
+                if task.get("stale"):raise ExecutionStopped("asset_lineage_stale")
                 if not limit and task.get("started_epoch") and time.time() - task["started_epoch"] > run["config"]["call_timeout_seconds"]:
                     limit = "call_timeout"
             if limit and run["status"] not in TERMINAL:
@@ -1796,6 +1852,15 @@ class AnalysisOrchestrationService:
             task = json.loads(row[0])
             if task["status"] != "queued" or run["status"] in TERMINAL:
                 return
+            if task.get("asset_plan_identity"):
+                if (task["asset_plan_identity"]!=run.get("asset_plan_identity") or task["asset_plan_identity"]["generation"]!=run["generation"]
+                        or task.get("generation")!=run["generation"] or task.get("stale")):
+                    task.update(status="blocked",error="asset_plan_changed");self._write_task(db,task);return
+                parents={t["task_id"]:t for t in self._tasks(db,run_id)}
+                if any(parents[d].get("stale") or parents[d]["status"] in {"failed","quarantined","cancelled","blocked"} for d in task["dependencies"]):
+                    task.update(status="blocked",error="dependency_failed");self._write_task(db,task);return
+                if any(parents[d]["status"]!="succeeded" for d in task["dependencies"]):return
+                if not self._asset_dependencies_delivered(task):return
             self._check_version(run)
             limit = self._limit(db, run) or self._budget_reason(run, task_id)
             if limit:
@@ -2017,7 +2082,9 @@ class AnalysisOrchestrationService:
                 # Store and Handler must share this SQLite authority. No nested writer.
                 current = self._read_run(connection, run_id)
                 if (current["status"] in TERMINAL or current["cancel_requested"]
-                        or current["generation"] != task["generation"]):
+                        or current["generation"] != task["generation"]
+                        or (task.get("asset_plan_identity") and (task["asset_plan_identity"]!=current.get("asset_plan_identity")
+                            or task["asset_plan_identity"]["generation"]!=current["generation"]))):
                     raise _error("保存前に停止されました。", "table_cancelled")
                 self._require_budget(current, task_id)
                 self._check_version(current)
@@ -2028,14 +2095,18 @@ class AnalysisOrchestrationService:
             from .analysis_core import TABLE_PILOT_MAX_BYTES
             if len(canonical({"carrier": carrier, "provenance": provenance})) > TABLE_PILOT_MAX_BYTES:
                 raise _error("保存payloadのUTF8上限を超えました。", "table_carrier_byte_limit")
-            saved = self.table_store.save(item_id=run["item_id"], kind="ai_insights", snapshot=initial,
-                result={**raw, "parameters": {"table_pilot": prepared["request"], "task_id": task_id, "execution_run_id": run_id,
-                                            "adoption_state": "unanswered", "input_content_hash": prepared["content_hash"],
-                                            "table_pilot_provenance": provenance}},
-                datasets={"table": (carrier["fields"], carrier["rows"])},
-                request_id="table-pilot:" + task_id, input_fingerprint=prepared["content_hash"],
-                source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
-                publish=False, check_cancelled=check, commit_guard=fence)
+            # Use the Handler's existing writer lock throughout Store's commit
+            # fence. Fresh permission reads may outlast SQLite's busy timeout;
+            # the scheduler must wait outside BEGIN IMMEDIATE in that case.
+            with self.lock:
+                saved = self.table_store.save(item_id=run["item_id"], kind="ai_insights", snapshot=initial,
+                    result={**raw, "parameters": {"table_pilot": prepared["request"], "task_id": task_id, "execution_run_id": run_id,
+                                                "adoption_state": "unanswered", "input_content_hash": prepared["content_hash"],
+                                                "table_pilot_provenance": provenance}},
+                    datasets={"table": (carrier["fields"], carrier["rows"])},
+                    request_id="table-pilot:" + task_id, input_fingerprint=prepared["content_hash"],
+                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
+                    publish=False, check_cancelled=check, commit_guard=fence)
             check()
             reloaded = self.table_store.read_table(saved["id"], "table")
             if fingerprint([r["values"] for r in reloaded["rows"]]) != fingerprint(carrier["rows"]):
@@ -2067,6 +2138,116 @@ class AnalysisOrchestrationService:
                     metadata.update(validation_status="quarantined", error=code, adoption_performed=False)
                     db.execute("UPDATE orchestration_results SET state_json=? WHERE task_id=?", (_json(metadata), task_id))
                 self._event(db, run_id, "table_pilot_quarantined", code, task_id=task_id)
+        self.reconcile_asset_plan(run_id)
+
+    def _register_asset_output(self,run_id,task_id):
+        """Technical code reuse authorized by the fixed plan, never human adoption."""
+        with self._db() as db:
+            run=self._read_run(db,run_id);task=json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",(task_id,run_id)).fetchone()[0])
+            if not task.get("asset_plan_identity") or task["status"]!="succeeded" or not task.get("table_store_run_id"):return None
+            if (task.get("stale") or run["cancel_requested"] or run["status"]=="cancelled" or task["generation"]!=run["generation"]
+                    or task["asset_plan_identity"]["generation"]!=run["generation"] or task["asset_plan_identity"]!=run.get("asset_plan_identity")):return None
+            initial=self._initial(db,run["initial_id"])
+        self.table_store.revalidate_table_pilot(task["table_pilot_prepared"],expected_snapshot=initial)
+        asset=self.table_store.connected_output_descriptor(task["table_store_run_id"])
+        assets,_originals,states,links=self.table_store._connection_index()
+        key=fingerprint(asset["asset_key"]).removeprefix("sha256:"); history=states.get(key,{})
+        if history:
+            state=history[max(history)]
+            if state["revoked"] or state["status"]!="adopted":return None
+        else:
+            state={"asset_key":asset["asset_key"],"target_content_hash":asset["content_hash"],"target_domain":asset["content_domain"],
+                "state_revision":1,"policy_revision":1,"status":"adopted","allowed_purposes":["exploratory"],"send_policy":"local_only",
+                "destinations":[],"revoked":False,"review_refs":[],"reason":"Explicit fixed plan authorizes structural deterministic reuse; human meaning remains pending",
+                "updated_at":(task.get("ended_at") or task["created_at"]).replace("+00:00","Z")}
+        link={**task["asset_plan_identity"],"execution_run_id":run_id,"producer_task_id":task_id,"output_name":"tables/table.json","asset_key":asset["asset_key"]}
+        def fence(connection):
+            current=self._read_run(connection,run_id)
+            latest=json.loads(connection.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?",(task_id,)).fetchone()[0])
+            if (current["cancel_requested"] or current["status"]=="cancelled" or latest.get("stale") or latest["generation"]!=current["generation"]
+                    or task["asset_plan_identity"]["generation"]!=current["generation"] or current.get("asset_plan_identity")!=task["asset_plan_identity"]):
+                raise _error("現在の計画・停止状態が変わりました。","asset_output_fence")
+            self._check_version(current);self._require_budget(current,task_id)
+            self.table_store.revalidate_table_pilot(task["table_pilot_prepared"],expected_snapshot=initial)
+        if link not in links:
+            with self.lock:
+                self.table_store.save_connection_metadata(item_id=run["item_id"],snapshot={"asset_plan_identity":task["asset_plan_identity"],"producer_task_id":task_id},
+                    request_id="asset-output:"+task_id,metadata={"version":1,"assets":[asset],"originals":[],"states":[] if history else [state],"producer_links":[link]},commit_guard=fence)
+        return asset
+
+    def notify_asset_output(self,item_id,run_id,producer_task_id):
+        """Re-delivery has a closed deterministic receipt per selected consumer ref."""
+        with self._db() as db:self._read_run(db,run_id,item_id)
+        asset=self._register_asset_output(run_id,producer_task_id)
+        if asset is None:return {"receipts":[],"duplicate":True}
+        created=[];duplicates=[]
+        with self._db() as db:
+            run=self._read_run(db,run_id,item_id)
+            if run["cancel_requested"] or run["status"]=="cancelled":return {"receipts":[],"duplicate":True}
+            for child in self._tasks(db,run_id):
+                if child.get("asset_plan_identity")!=run.get("asset_plan_identity"):continue
+                for ref in child.get("intent",{}).get("table_pilot",{}).get("bindings",{}).get("inputs",[]):
+                    source=ref.get("source",{})
+                    if source.get("type")!="from_step" or source.get("producer_task_id")!=producer_task_id:continue
+                    identity={"version":"asset-notification-1","event":"producer_fixed","hook_version":"1",**child["asset_plan_identity"],
+                        "producer_task_id":producer_task_id,"producer_content_hash":asset["content_hash"],"consumer_task_id":child["task_id"],
+                        "slot_id":ref["slot_id"],"input_ref_id":ref["input_ref_id"]}
+                    rid=fingerprint(identity);receipts=child.setdefault("asset_receipts",{})
+                    if rid in receipts:duplicates.append(rid);continue
+                    receipts[rid]={"identity":identity,"status":"recorded"};self._write_task(db,child);created.append(rid)
+                    self._event(db,run_id,"asset_notification_received","保存済producerの通知を受領しました。",task_id=child["task_id"],receipt_id=rid,identity=identity)
+        return {"receipts":created,"duplicates":duplicates,"duplicate":not created}
+
+    @staticmethod
+    def _asset_dependencies_delivered(task):
+        """Success alone precedes the fixed Store mapping; receipts close that race."""
+        if not task.get("asset_plan_identity"):return True
+        identity=task["asset_plan_identity"]
+        receipts=task.get("asset_receipts",{})
+        for ref in task["intent"]["table_pilot"]["bindings"]["inputs"]:
+            source=ref.get("source",{})
+            if ref["selection"]!="selected" or source.get("type")!="from_step":continue
+            if not any(r.get("status")=="recorded" and isinstance(r.get("identity"),dict)
+                and set(r["identity"])=={"version","event","hook_version",*identity,"producer_task_id","producer_content_hash","consumer_task_id","slot_id","input_ref_id"}
+                and fingerprint(r["identity"])==rid and r["identity"].get("version")=="asset-notification-1"
+                and r["identity"].get("event")=="producer_fixed" and r["identity"].get("hook_version")=="1"
+                and all(r["identity"].get(k)==v for k,v in identity.items())
+                and r["identity"].get("consumer_task_id")==task["task_id"]
+                and r["identity"].get("producer_task_id")==source["producer_task_id"]
+                and r["identity"].get("slot_id")==ref["slot_id"] and r["identity"].get("input_ref_id")==ref["input_ref_id"]
+                for rid,r in receipts.items()):return False
+        return True
+
+    def reconcile_asset_plan(self,run_id):
+        """Rebuild lost delivery from durable tasks/packages using the same scheduler."""
+        assets,_originals,states,_links=self.table_store._connection_index() if self.table_store else ({},{},{},[])
+        with self._db() as db:
+            run=self._read_run(db,run_id)
+            if not run.get("asset_plan_identity") or run["cancel_requested"] or run["status"]=="cancelled":return
+            for key,asset in assets.items():
+                history=states.get(key,{})
+                if not history or asset.get("execution_run_id")!=run_id:continue
+                state=history[max(history)]
+                if not state["revoked"] and state["status"] not in {"stale","rejected","retired","unavailable"}:continue
+                row=db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",(asset["producer_task_id"],run_id)).fetchone()
+                task=json.loads(row[0]) if row else {}
+                if task and not task.get("stale"):
+                    task.update(stale=True,asset_stale_reason=state["reason"]);self._write_task(db,task)
+                    result=db.execute("SELECT state_json FROM orchestration_results WHERE task_id=?",(task["task_id"],)).fetchone()
+                    if result:
+                        meta=json.loads(result[0]);meta["stale"]=True
+                        db.execute("UPDATE orchestration_results SET state_json=? WHERE task_id=?",(_json(meta),task["task_id"]))
+                    self._event(db,run_id,"asset_descendant_stale",state["reason"],task_id=task["task_id"])
+            producers=[t["task_id"] for t in self._tasks(db,run_id) if t.get("asset_plan_identity")==run["asset_plan_identity"] and t["status"]=="succeeded" and not t.get("stale")]
+        for tid in producers:
+            try:self.notify_asset_output(run["item_id"],run_id,tid)
+            except (AnalysisContractError,ValueError,TypeError,KeyError,OSError) as exc:
+                with self._db() as db:
+                    current=json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?",(tid,)).fetchone()[0])
+                    code=getattr(exc,"code",getattr(exc,"reason","asset_reconciliation_failed"))
+                    if current.get("asset_delivery_error")!=code:
+                        current["asset_delivery_error"]=code;self._write_task(db,current)
+                        self._event(db,run_id,"asset_delivery_pending",code,task_id=tid)
 
     def _validate_result(self, db, run, task, raw):
         statistical_review = None
@@ -2578,6 +2759,7 @@ class AnalysisOrchestrationService:
         self._write_run(db, run)
 
     def _drain_tasks(self, run_id):
+        self.reconcile_asset_plan(run_id)
         with self._db() as db:
             run = self._read_run(db, run_id)
             concurrency = run["config"]["concurrency"]
@@ -2589,6 +2771,7 @@ class AnalysisOrchestrationService:
                     received = [t["task_id"] for t in self._tasks(db, run_id) if t["status"] == "received"]
                 for task_id in received:
                     self._validate_received(run_id, task_id)
+                self.reconcile_asset_plan(run_id)
                 if received:
                     self._notify_management(run_id)
                 with self._db() as db:
@@ -2607,10 +2790,11 @@ class AnalysisOrchestrationService:
                         if task["status"] != "queued" or task["task_id"] in futures.values():
                             continue
                         dependencies = [by_id[i] for i in task["dependencies"]]
-                        if any(t["status"] in {"failed", "quarantined", "cancelled", "blocked"} for t in dependencies):
+                        if any(t.get("stale") or t["status"] in {"failed", "quarantined", "cancelled", "blocked"} for t in dependencies):
                             task.update(status="blocked", error="dependency_failed")
                             self._write_task(db, task)
-                        elif all(t["status"] == "succeeded" for t in dependencies) and len(futures) < concurrency:
+                        elif (all(t["status"] == "succeeded" for t in dependencies)
+                              and self._asset_dependencies_delivered(task) and len(futures) < concurrency):
                             futures[pool.submit(self._execute, run_id, task["task_id"])] = task["task_id"]
                     active = [t for t in tasks if t["status"] in {"running", "queued", "received"}]
                     if not futures and not active:

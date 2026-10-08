@@ -95,16 +95,23 @@ def connection_method_descriptor(method_id: str) -> dict | None:
         table = {"kind": "observation_table", "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
                  "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)}, "adapter": {"adapter_id": "analysis-store-table", "version": "1"},
                  "content_domain": "raw-bytes-v1", "actor_kinds": ["code", "system"], "supported": True}
-        contracts = [connection_kind_contract("claim_set")] if method_id == "theme_evidence_table" else [table]
+        qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
+        native=connection_method_descriptor("pearson")
+        native_snapshot={"kind":"snapshot","schema":native["native_input_schema"],
+            "adapter":native["native_adapter"],"unit":"utterance","supported":True,
+            "actor_kinds":["system","code"],"content_domain":"canonical-json-v1"}
+        contracts = [connection_kind_contract("claim_set")] if method_id == "theme_evidence_table" else (
+            [connection_kind_contract("claim_set"),qualitative_bundle_contract(),connection_kind_contract("relation_graph"),
+             connection_kind_contract("snapshot"),native_snapshot,table] if qualitative else [table])
         return {"metadata_version": "analysis-connections-1", "method_id": method_id,
                 "registry_version": REGISTRY_VERSION, "method_version": "connected-assets-2", "output_names": ["table"],
-                "logical_output_kinds": ["observation_table"], "input_contracts": contracts,
+                "logical_output_kinds": ["claim_set" if qualitative else "observation_table"], "input_contracts": contracts,
                 "native_input_schema": contracts[0]["schema"], "native_adapter": contracts[0]["adapter"],
-                "original_source_types": [], "units": ["dataset_claim"] if method_id == "theme_evidence_table" else
-                    ["utterance", "conversation_speaker", "conversation", "participant"],
-                "reference_roles": ["data_input"], "input_actor_kinds": ["ai", "code", "system"],
+                "original_source_types": ["snapshot"] if qualitative else [], "units": ["dataset_claim"] if method_id == "theme_evidence_table" else
+                    ["utterance", "conversation_speaker", "conversation", "participant"]+(["dataset_claim","report_claim"] if qualitative else []),
+                "reference_roles": ["data_input","selection_basis","evidence_context"] if qualitative else ["data_input"], "input_actor_kinds": ["ai", "code", "system","researcher"] if qualitative else ["ai","code","system"],
                 "scope_modes": ["dataset"], "scope_policy": "all_included_initial", "purposes": ["exploratory"],
-                "typed_asset_adapter_supported": True, "native_adapter_supported": False}
+                "typed_asset_adapter_supported": True, "native_adapter_supported": qualitative}
     if method_id == "thematic":
         contracts = [connection_kind_contract(k) for k in
                      ("claim_set", "relation_graph", "event_sequence", "embedding_matrix", "snapshot")]
@@ -180,6 +187,8 @@ def connection_kind_contract(kind):
 def connection_output_contract(method_id, output_name, kind=None):
     """No arbitrary filename or executable schema supplied by a producer."""
     import re
+    if method_id in {"qualitative_compare","qualitative_reuse"} and output_name=="tables/table.json" and kind in {None,"claim_set"}:
+        return qualitative_bundle_contract()
     if method_id == "thematic":
         if kind in {None, "claim_set"} and re.fullmatch(r"assets/thematic_candidates_[0-9]{4}\.json", output_name):
             return connection_kind_contract("claim_set")
@@ -217,18 +226,36 @@ CONNECTED_METHODS = {
     "unit_aggregate": ("value_column", "operation", "unit", "participant_mapping"),
     "unit_join": ("keys",),
     "unit_correlation": ("x_column", "y_column", "statistic"),
+    "qualitative_compare": ("proposals",),
+    "qualitative_reuse": ("relation_ids",),
 }
 
 
+def qualitative_bundle_contract():
+    from .analysis_core import fingerprint
+    return {"kind":"claim_set","schema":{"schema_id":"gurumoji.qualitative-evidence-bundle","version":1,
+        "schema_hash":fingerprint({"version":"qualitative-evidence-1","content":"fixed typed inputs and proposed relations",
+            "payload_graph":"deduplicated fixed evidence packets and direct parent relations",
+            "relations":["support","counter","complement","conflict","incomparable"],"human_status":"human_pending","independent_validation":False})},
+        "adapter":{"adapter_id":"qualitative-evidence-bundle","version":"1"},"unit":"dataset_claim","supported":True,
+        "content_domain":"raw-bytes-v1","actor_kinds":["code"]}
+
+
 def connected_slot(method_id):
-    from .analysis_core import TABLE_PILOT_MAX_BYTES
+    from .analysis_core import TABLE_PILOT_MAX_BYTES,fingerprint
     descriptor = connection_method_descriptor(method_id)
     count = 2 if method_id == "unit_join" else 1
-    return {"slot_id": "table", "required": True, "min_items": count, "max_items": count,
-            "roles": ["data_input"], "accept_kinds": [c["kind"] for c in descriptor["input_contracts"]],
+    qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
+    slot={"slot_id": "table", "required": True, "min_items": count, "max_items": 32 if qualitative else count,
+            "roles": descriptor["reference_roles"], "accept_kinds": list(dict.fromkeys(c["kind"] for c in descriptor["input_contracts"] if c["kind"]!="snapshot")),
             "accept_schemas": [c["schema"] for c in descriptor["input_contracts"]], "accept_units": descriptor["units"],
             "scope_modes": ["dataset"], "actors": descriptor["input_actor_kinds"],
             "adapter": descriptor["native_adapter"], "purposes": ["exploratory"], "max_bytes": TABLE_PILOT_MAX_BYTES}
+    if qualitative:
+        slot["accept_source_types"]=["snapshot"]
+        slot["adapters"]=list({fingerprint(c["adapter"]):c["adapter"] for c in descriptor["input_contracts"]}.values())
+        slot["required"]=False;slot["min_items"]=0
+    return slot
 
 
 def table_pilot_slot(method_id):

@@ -709,7 +709,7 @@ def validate_human_record(record, *, candidate, required_steps, library_id, sour
     require(_connection_list(record["allowed_step_ids"], set(required_steps), empty=False)
             and len(record["allowed_step_ids"]) == 1, "human_record_step")
     require(canonical(record["scope"]) == canonical(candidate["content"]["scope"]), "human_record_scope")
-    targets = [{"domain": "ta-candidate-content-v1", "candidate_set_id": candidate["content"]["candidate_set_id"],
+    targets = [candidate["_human_target"]] if "_human_target" in candidate else [{"domain": "ta-candidate-content-v1", "candidate_set_id": candidate["content"]["candidate_set_id"],
                 "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]}]
     targets.extend(candidate["content"]["theme_refs"])
     require(any(canonical(record["target"]) == canonical(t) for t in targets), "human_record_target")
@@ -779,7 +779,7 @@ def validate_connection_slot(slot: Any) -> dict:
     """Strict Slot metadata from common S1/r3; no persistence or resolver."""
     fields = ("slot_id", "required", "min_items", "max_items", "roles", "accept_kinds", "accept_schemas",
               "accept_units", "scope_modes", "actors", "adapter", "purposes", "max_bytes")
-    valid = _connection_object(slot, fields, ("accept_source_types",))
+    valid = _connection_object(slot, fields, ("accept_source_types","adapters"))
     if valid:
         valid = (_connection_id(slot["slot_id"]) and type(slot["required"]) is bool
                  and all(type(slot[k]) is int for k in ("min_items", "max_items", "max_bytes"))
@@ -796,8 +796,8 @@ def validate_connection_slot(slot: Any) -> dict:
                  and _connection_adapter(slot["adapter"])
                  and _connection_list(slot["purposes"], CONNECTION_PURPOSES, empty=False))
     if valid:
-        valid = ("accept_source_types" not in slot if slot["accept_kinds"] else
-                 _connection_list(slot.get("accept_source_types"), ORIGINAL_SOURCE_TYPES, empty=False))
+        valid = (_connection_list(slot["accept_source_types"],ORIGINAL_SOURCE_TYPES,empty=False) if "accept_source_types" in slot else bool(slot["accept_kinds"]))
+        if "adapters" in slot:valid=valid and isinstance(slot["adapters"],list) and bool(slot["adapters"]) and all(_connection_adapter(a) for a in slot["adapters"])
     if not valid:
         raise AnalysisContractError("入力slotの型・条件が不正です。", code="connection_slot_invalid")
     return json.loads(canonical(slot))
@@ -890,9 +890,9 @@ def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
         if candidate["purpose"] not in CONNECTION_PURPOSES or candidate["meaning_status"] not in {"declared", "unknown"} or candidate["human_review_state"] not in {"structural_checked", "human_pending", "human_reviewed"}:
             return result("rejected", "purpose_or_review_invalid")
         if candidate["source_type"] == "original":
-            if (set(candidate) != set(fields) | {"source_ref"} or slot["accept_kinds"]
+            if (set(candidate) != set(fields) | {"source_ref"}
                     or not _connection_source_ref(candidate["source_ref"])
-                    or candidate["source_ref"]["target_type"] not in slot["accept_source_types"]):
+                    or candidate["source_ref"]["target_type"] not in slot.get("accept_source_types",[])):
                 return result("rejected", "original_source_invalid")
         elif candidate["source_type"] == "artifact":
             if (set(candidate) != set(fields) | {"kind", "content_hash", "content_domain"}
@@ -903,7 +903,7 @@ def assess_connection_inputs(slot: Any, inputs: Any, descriptor: Any) -> dict:
         else: return result("rejected", "source_type")
         if (candidate["schema"] not in slot["accept_schemas"] or candidate["unit"] not in slot["accept_units"]
                 or candidate["scope_mode"] not in slot["scope_modes"] or actor["kind"] not in slot["actors"]
-                or candidate["adapter"] != slot["adapter"] or candidate["purpose"] not in slot["purposes"]):
+                or candidate["adapter"] not in slot.get("adapters",[slot["adapter"]]) or candidate["purpose"] not in slot["purposes"]):
             return result("rejected", "slot_incompatible")
         contracts = descriptor.get("input_contracts")
         contract = next((c for c in contracts or [] if c["schema"] == candidate["schema"]
@@ -1015,6 +1015,18 @@ def validate_connected_request(method_id, request):
     require(method_id in CONNECTED_METHODS and _connection_object(request, ("version", "actor", "parameters", "bindings")), "connected_request")
     require(request["version"] == "connected-assets-2" and request["actor"] == "code", "connected_actor_version")
     require(_connection_object(request["parameters"], CONNECTED_METHODS[method_id]), "connected_parameters")
+    parameters=request["parameters"]
+    qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
+    if method_id=="theme_evidence_table":require(_connection_id(parameters["theme_id"]),"connected_theme_id")
+    elif method_id=="unit_projection":require(_connection_list(parameters["columns"],empty=False) and _connection_list(parameters["unit_ids"],empty=False),"connected_projection")
+    elif method_id=="unit_aggregate":require(_connection_id(parameters["value_column"]) and parameters["operation"] in {"count","sum","mean"}
+        and parameters["unit"] in {"conversation_speaker","conversation","participant"} and
+        (parameters["participant_mapping"] is None if parameters["unit"]!="participant" else isinstance(parameters["participant_mapping"],dict)),"connected_aggregate")
+    elif method_id=="unit_join":require(_connection_list(parameters["keys"],empty=False) and "unit_id" in parameters["keys"],"connected_join")
+    elif method_id=="unit_correlation":require(all(_connection_id(parameters[k]) for k in ("x_column","y_column"))
+        and parameters["x_column"]!=parameters["y_column"] and parameters["statistic"] in {"pearson","spearman"},"connected_correlation")
+    elif method_id=="qualitative_compare":require(isinstance(parameters["proposals"],list) and len(parameters["proposals"])<=64,"connected_proposals")
+    elif method_id=="qualitative_reuse":require(_connection_list(parameters["relation_ids"],empty=False),"connected_reuse")
     bindings = request["bindings"]
     require(_connection_object(bindings, ("slot", "inputs", "context")) and canonical(bindings["slot"]) == canonical(connected_slot(method_id)), "connected_slot")
     context = bindings["context"]
@@ -1024,19 +1036,26 @@ def validate_connected_request(method_id, request):
             and all(_connection_id(context[k]) for k in ("plan_id", "consumer_task_id", "scope_id"))
             and all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash")), "connected_context_identity")
     refs = bindings["inputs"]; seen = set()
-    require(isinstance(refs, list) and len(refs) == bindings["slot"]["min_items"], "connected_cardinality")
+    require(isinstance(refs, list) and (1<=len(refs)<=32 if qualitative else len(refs)==bindings["slot"]["min_items"]), "connected_cardinality")
     for ref in refs:
-        require(_connection_object(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "slot_id", "input_ref_id", "role", "selection", "omission_reason", "source", "selector")), "connected_ref")
-        require(ref["selection"] == "selected" and ref["role"] == "data_input" and ref["omission_reason"] is None and ref["slot_id"] == "table"
+        require(_connection_object(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "slot_id", "input_ref_id", "role", "selection", "omission_reason"),("source","selector")), "connected_ref")
+        require(ref["role"] in bindings["slot"]["roles"] and ref["slot_id"] == "table"
                 and _connection_id(ref["input_ref_id"]) and ref["input_ref_id"] not in seen
                 and all(type(ref[k]) is type(context[k]) and ref[k] == context[k] for k in ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id")), "connected_ref_identity")
-        seen.add(ref["input_ref_id"]); source = ref["source"]
+        seen.add(ref["input_ref_id"])
+        if ref["selection"]=="omitted":
+            require(qualitative and _connection_id(ref["omission_reason"]) and "source" not in ref and "selector" not in ref,"connected_omission");continue
+        require(ref["selection"]=="selected" and ref["omission_reason"] is None and "source" in ref and "selector" in ref,"connected_selected")
+        source = ref["source"]
         require(isinstance(source, dict), "connected_source")
         if source.get("type") == "frozen":
             require(_connection_object(source, ("type", "asset_key", "content_hash", "content_domain"))
                 and _connection_object(source["asset_key"], ("library_id", "store_run_id", "artifact_id", "output_name"))
                 and all(_connection_id(v) for v in source["asset_key"].values()) and _connection_hash(source["content_hash"])
                 and source["content_domain"] in HASH_DOMAINS, "connected_frozen")
+        elif source.get("type")=="original":
+            require(qualitative and _connection_object(source,("type","source_ref")) and _connection_source_ref(source["source_ref"])
+                and source["source_ref"]["target_type"]=="snapshot","connected_original")
         else:
             require(_connection_object(source, ("type", "producer_task_id", "output_name")) and source["type"] == "from_step"
                 and all(_connection_id(source[k]) for k in ("producer_task_id", "output_name")), "connected_from_step")
@@ -1046,3 +1065,53 @@ def validate_connected_request(method_id, request):
                 and selector["selection_hash"] == fingerprint({k:v for k,v in selector.items() if k != "selection_hash"}), "connected_selector")
     require(len(canonical(request)) <= TABLE_PILOT_MAX_BYTES, "connected_byte_limit")
     return json.loads(canonical(request))
+
+
+def validate_asset_plan(value):
+    """Freeze selected dependencies before any task is registered or executed."""
+    from .analysis_method_registry import CONNECTED_METHODS, connection_output_contract, connected_slot
+    def require(ok,code):
+        if not ok: raise AnalysisContractError("資産計画が不正です。",code=code)
+    require(_connection_object(value,("version","plan_id","plan_version","steps")) and value["version"] == "asset-plan-1"
+        and _connection_id(value["plan_id"]) and type(value["plan_version"]) is int and value["plan_version"] >= 1
+        and isinstance(value["steps"],list) and 1 <= len(value["steps"]) <= 32, "asset_plan_shape")
+    steps={}; dependencies={}
+    for step in value["steps"]:
+        require(_connection_object(step,("step_id","method_id","parameters","inputs","scope")) and _connection_id(step["step_id"])
+            and step["step_id"] not in steps and step["method_id"] in CONNECTED_METHODS
+            and _connection_object(step["parameters"],CONNECTED_METHODS[step["method_id"]]), "asset_plan_step")
+        require(_connection_object(step["scope"],("scope_id","manifest_hash")) and _connection_id(step["scope"]["scope_id"])
+            and _connection_hash(step["scope"]["manifest_hash"]), "asset_plan_scope")
+        slot=connected_slot(step["method_id"]);qualitative=step["method_id"] in {"qualitative_compare","qualitative_reuse"}
+        require(isinstance(step["inputs"],list) and (1<=len(step["inputs"])<=32 if qualitative else len(step["inputs"])==slot["min_items"]), "asset_plan_cardinality")
+        refs=set(); deps=[]
+        for ref in step["inputs"]:
+            require(_connection_object(ref,("input_ref_id","role","selection","omission_reason"),("source",))
+                and _connection_id(ref["input_ref_id"]) and ref["input_ref_id"] not in refs
+                and ref["role"] in slot["roles"], "asset_plan_input")
+            refs.add(ref["input_ref_id"])
+            if ref["selection"]=="omitted":
+                require(qualitative and "source" not in ref and _connection_id(ref["omission_reason"]),"asset_plan_omission");continue
+            require(ref["selection"]=="selected" and ref["omission_reason"] is None and isinstance(ref.get("source"),dict),"asset_plan_selected")
+            source=ref["source"]
+            if source.get("type") == "from_step":
+                require(_connection_object(source,("type","step_id","output_name")) and _connection_id(source["step_id"])
+                    and source["output_name"] == "tables/table.json", "asset_plan_output")
+                deps.append(source["step_id"])
+            else: require(source.get("type") in ({"frozen","original"} if qualitative else {"frozen"}), "asset_plan_source")
+        steps[step["step_id"]]=step; dependencies[step["step_id"]]=set(deps)
+    ordered=[]; visiting=set(); visited=set()
+    def visit(sid):
+        require(sid in steps,"asset_plan_dependency_missing")
+        require(sid not in visiting,"asset_plan_cycle")
+        if sid in visited:return
+        visiting.add(sid)
+        for parent in sorted(dependencies[sid]):
+            visit(parent)
+            output=connection_output_contract(steps[parent]["method_id"],"tables/table.json")
+            slot=connected_slot(steps[sid]["method_id"])
+            require(output is not None and output["kind"] in slot["accept_kinds"] and output["schema"] in slot["accept_schemas"],"asset_plan_capability")
+        visiting.remove(sid);visited.add(sid);ordered.append(sid)
+    for sid in steps:visit(sid)
+    require(len(canonical(value)) <= TABLE_PILOT_MAX_BYTES,"asset_plan_byte_limit")
+    return json.loads(canonical(value)),ordered

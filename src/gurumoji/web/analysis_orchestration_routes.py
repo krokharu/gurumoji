@@ -36,7 +36,7 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.errorhandler(AnalysisContractError)
     def contract_error(exc):
-        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run",
+        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run", "asset_plan_conflict", "asset_plan_revision",
                                 "provider_unavailable", "resume_blocked", "uncertain_execution",
                                 "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch",
                                 "table_run_stopped", "table_run_unavailable", "table_task_limit"}
@@ -123,6 +123,16 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
     def resume(item_id, run_id):
         return jsonify(run=public_run(item_id, service().resume(item_id, run_id, payload()))), 202
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans")
+    def asset_plan_register(item_id,run_id):
+        outcome=service().register_asset_plan(item_id,run_id,payload(TABLE_PILOT_MAX_BYTES))
+        return jsonify(outcome),200 if outcome["duplicate"] else 202
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/notifications/<producer_task_id>")
+    def asset_plan_notification(item_id,run_id,producer_task_id):
+        if payload():raise AnalysisContractError("通知は保存済producerだけを指定してください。",code="asset_notification_body")
+        return jsonify(service().notify_asset_output(item_id,run_id,producer_task_id))
 
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
     def human_record_options(item_id, run_id):

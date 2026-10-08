@@ -373,7 +373,10 @@ def run_connected_method(method_id, snapshot):
     from ..research_analysis import run_connected_table
     import copy
     prepared = snapshot["table_pilot"]; task=snapshot["orchestration_task"]
-    result = run_connected_table(method_id,copy.deepcopy(prepared["tables"]),copy.deepcopy(prepared["request"]["parameters"]))
+    if method_id in {"qualitative_compare","qualitative_reuse"}:
+        from .group_analysis import run_qualitative_asset_method
+        result=run_qualitative_asset_method(method_id,copy.deepcopy(prepared["tables"][0]),copy.deepcopy(prepared["request"]["parameters"]),task)
+    else:result = run_connected_table(method_id,copy.deepcopy(prepared["tables"]),copy.deepcopy(prepared["request"]["parameters"]))
     return {"summary":"固定資産の登録計算。探索用・意味妥当性は未評価。","claims":[],"method_id":method_id,
         "method_version":"connected-assets-2","dataset_version":task["dataset_version"],"research_mode":"exploratory",
         "status":"computed","analysis_unit":result["unit_contract"]["unit"],

@@ -18,6 +18,9 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         self.config_patch.start(); self.addCleanup(self.config_patch.stop)
         self.service = app.analysis_orchestration_service()
         self.service.schedule = False
+        # This legacy general-agent fixture supplies no expert_report. Typed
+        # knowledge/outputs are exercised by test_analysis_typed_assets instead.
+        self.service.expert_provider = None
         self.calls = []
 
     def payload(self, request_id="integration-run-request-0001"):

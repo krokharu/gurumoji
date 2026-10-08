@@ -1381,7 +1381,7 @@ def run_connected_table(method_id, tables, parameters):
                           "source_utterance_ids": sorted({s for r in pairs for s in sources[r["unit_id"]]})}],
                 "unit_contract": {**{k:source[k] for k in ("input_hashes", "definition_adoption_refs", "scope")},
                     "source_utterances":source.get("source_utterances",{}),
-                    "version":"unit-table-2", "unit":unit, "sources":sources, "variables":list(variables.values()),
+                    "version":"unit-table-2", "unit":"report_claim", "sources":sources, "variables":[],
                     "denominators":source["denominators"]}, "population": {"denominator":len(rows),"calculation_denominator":len(pairs)}}
     else: require(False, "method")
     return {"fields": fields, "rows":rows, "population": {"denominator":sum(r["value_status"] != "excluded" for r in rows),
