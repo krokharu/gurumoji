@@ -40,7 +40,7 @@ C0が管理・割当・受入を担当し、Orca側LunaはDot応答と作業有�
 
 Dot #25 / Draft PR #26 の固定 `6534303820148b6b679e35e1ccd9ea7dbd4792a7` から `src/gurumoji/services/analysis_unit_groups.py` と `tests/test_analysis_unit_groups.py` だけを選別し、共有 `deaa6751a566c7c22a8f1e205e26165e28b74bb3` へ統合した。Issue #25 の確認済み契約 [6068361583](https://github.com/krokharu/gurumoji/issues/25#issuecomment-6068361583) と公開候補の bytes / SHA-256 / blob を固定 fetch/readback で照合した。
 
-Windows / Python 3.13.7 の `PYTHONPATH=src;tests python -m unittest test_analysis_unit_groups -v` は14件成功。別3会話合成例で count / sum / mean、発話加重平均5.25、projection原分母と現在context、qualified対応、異なる変数定義の拒否が成功。helperは原snapshot evidence対応・現在権限・実HC採択を認定しない。実複数会話Handler保存/fresh橋、実DB/Vault/モデル、PNG接続は未実行で、engineering_holdを維持する。
+Windows / Python 3.13.7 の `$env:PYTHONPATH='src;tests'; python -m unittest test_analysis_unit_groups -v` は14件成功。別3会話合成例で count / sum / mean、発話加重平均5.25、projection原分母と現在context、qualified対応、異なる変数定義の拒否が成功。helperは原snapshot evidence対応・現在権限・実HC採択を認定しない。実複数会話Handler保存/fresh橋、実DB/Vault/モデル、PNG接続は未実行で、engineering_holdを維持する。
 
 共有frontend14の凍結bytes・未stage・index内容を保護した。最終S6 backend `178bc53b136394784fd89f982c1f8dd403519ee2`（基点 `2805d9987fe9831058e66385a56c3f2cdef049a9`、明示6file、patch SHA-256 `afafcb2f91e88c1f2d8faf7751c88f52a6aecef9a22a316965930b606dd9084e`）は読取り受領済みで独立レビュー待ち。通常合格後の共有統合ownerはWindows担当、画面→保存→fresh/Edge受入はfrontend担当、通常push/Dot通知はLuna。私有履歴・未コミットfrontendは公開候補に含めない。
 
