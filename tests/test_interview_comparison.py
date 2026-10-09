@@ -240,6 +240,52 @@ class InterviewComparisonApiTests(unittest.TestCase):
         self.assertEqual(result["comparison"]["emotion_comparison"], data["emotion_comparison"])
 
 
+    def test_zero_target_not_applicable_survives_save_fresh_exports(self):
+        self.add_item("empty_target", "対象発話なし", "合成比較", [])
+        self.add_item("observed_target", "対象発話あり", "合成比較", ["合成の発話"], [{
+            "ser-a": {"model_name": "Same display", "label": "sad"},
+            "ser-b": {"model_name": "Same display", "label": "sad"},
+        }])
+        selection = {"item_ids": ["empty_target", "observed_target"], "allow_different_content": False}
+        url = "/api/library/interview-comparison"
+        compared = self.client.post(url, json=selection)
+        self.assertEqual(compared.status_code, 200, compared.get_json())
+        data = compared.get_json()
+        observation = data["interviews"][0]["emotion_observation"]
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["interviews"][0]["included_segment_count"], 0)
+        self.assertEqual(observation["target_count"], 0)
+        self.assertEqual([model["model_id"] for model in observation["models"]], ["ser-a", "ser-b"])
+        expected = {"observed_count": 0, "missing_prediction_count": 0,
+                    "status": "not_applicable", "source": "analysis.segments[].emotion_details"}
+        self.assertEqual(observation["any_model"], expected)
+        for model in observation["models"]:
+            self.assertEqual({key: model[key] for key in expected}, expected)
+        self.assertEqual(observation["legacy_any_model_coverage"], {
+            "percent": 0.0, "scope": "all_timeline_segments",
+            "source": "analysis.automatic.data_quality.emotion_coverage_percent",
+        })
+        saved = self.client.post(url + "/runs", json={
+            **selection, "request_id": "emotion-observation-zero-0001",
+            "input_fingerprints": data["input_fingerprints"],
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        store = app.analysis_archive_store()
+        _snapshot, result, _manifest, content = store.verified_package(saved.get_json()["run"]["id"])
+        self.assertEqual(result["comparison"]["interviews"], data["interviews"])
+        self.assertEqual(result["comparison"]["emotion_comparison"], data["emotion_comparison"])
+        self.assertEqual(json.loads(content["result.json"])["comparison"]["interviews"], data["interviews"])
+        table = json.loads(content["tables/comparison_interviews.json"])
+        self.assertEqual(table["rows"][0]["values"]["emotion_observation"], observation)
+        csv_rows = list(csv.DictReader(io.StringIO(content["tables/comparison_interviews.csv"].decode("utf-8-sig"))))
+        self.assertEqual(csv_rows[0]["included_segment_count"], "0")
+        self.assertNotIn("emotion_observation", csv_rows[0])
+        emotion_rows = list(csv.DictReader(io.StringIO(content["tables/comparison_emotions.csv"].decode("utf-8-sig"))))
+        for row in emotion_rows:
+            if row["item_id"] == "empty_target":
+                self.assertEqual((int(row["count"]), float(row["rate_per_100_segments"])), (0, 0.0))
+
+
 class EmotionObservationTests(unittest.TestCase):
     @staticmethod
     def detail(model="ser-a", name="Synthetic SER", label="sad", **extra):
@@ -392,13 +438,32 @@ class EmotionObservationTests(unittest.TestCase):
         for rows, coverage in (([], 0.0), ([self.segment(excluded=True)], 100.0),
                                ([self.segment(text="")], 50.0)):
             with self.subTest(rows=rows):
-                observation = self.observation(self.projection(rows, coverage=coverage))
+                other = self.projection([self.segment(details=[
+                    self.detail("ser-a", "Same display"), self.detail("ser-b", "Same display")])])
+                data = self.compare(self.projection(rows, coverage=coverage), other)
+                observation = data["interviews"][0]["emotion_observation"]
                 self.assertEqual(observation["target_count"], 0)
-                for counts in [observation["any_model"], *observation["models"]]:
-                    self.assertEqual((counts["observed_count"], counts["missing_prediction_count"]), (0, 0))
-                    self.assertEqual(counts["status"], "known")
-                    self.assertNotIn("percent", counts)
-                self.assertEqual(observation["legacy_any_model_coverage"]["percent"], coverage)
+                self.assertEqual([model["model_id"] for model in observation["models"]], ["ser-a", "ser-b"])
+                expected = {"observed_count": 0, "missing_prediction_count": 0,
+                            "status": "not_applicable", "source": "analysis.segments[].emotion_details"}
+                self.assertEqual(observation["any_model"], expected)
+                for counts in observation["models"]:
+                    self.assertEqual({key: value for key, value in counts.items()
+                                      if key not in {"model_id", "model_name"}}, expected)
+                self.assertEqual(observation["legacy_any_model_coverage"], {
+                    "percent": coverage, "scope": "all_timeline_segments",
+                    "source": "analysis.automatic.data_quality.emotion_coverage_percent",
+                })
+                self.assertEqual(data["interviews"][1]["emotion_observation"]["any_model"]["status"], "known")
+
+    def test_zero_target_without_model_catalog_is_not_applicable(self):
+        observation = self.compare(self.projection([]))["interviews"][0]["emotion_observation"]
+        self.assertEqual(observation["target_count"], 0)
+        self.assertEqual(observation["models"], [])
+        self.assertEqual(observation["any_model"], {
+            "observed_count": 0, "missing_prediction_count": 0,
+            "status": "not_applicable", "source": "analysis.segments[].emotion_details",
+        })
 
     def test_missing_or_invalid_legacy_coverage_stays_unknown_without_back_calculation(self):
         for coverage in (None, "50", True, -1, 101, 10 ** 400, float("inf"), float("nan"), {}):

@@ -89,7 +89,8 @@ def _emotion_observations(
             return {
                 "observed_count": count if known else None,
                 "missing_prediction_count": len(included) - count if known else None,
-                "status": "known" if known else "unknown",
+                # An empty target is inapplicable, not evidence of a model result.
+                "status": ("not_applicable" if not included else "known" if known else "unknown"),
                 "source": "analysis.segments[].emotion_details" if known else "unknown",
             }
 
