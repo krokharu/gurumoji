@@ -17,6 +17,9 @@ from .media_files import is_unc_path, is_video_path
 FRAME_BYTES = 2 * 1024 * 1024
 TOTAL_BYTES = 32 * 1024 * 1024
 BUDGET_SECONDS = 30
+# Match the existing accepted MP4/M4V/MOV/MKV containers. In particular, do
+# not auto-open playlists/concat scripts disguised with a video extension.
+VIDEO_DEMUXERS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm"
 
 
 def media_identity(path):
@@ -59,6 +62,10 @@ def verify_media_unchanged(row, path, identity, media_directory, path_is_within)
 
 def _run_bounded(args, deadline, check_cancelled):
     """Drain pipes with hard byte caps and a single shared extraction deadline."""
+    if check_cancelled:
+        check_cancelled()
+    if time.monotonic() >= deadline:
+        raise ExportError("frame_timeout", 408, frame_status="failed")
     process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     buffers = [bytearray(), bytearray()]
@@ -128,7 +135,8 @@ def extract_frames(row, rows, options, *, media_directory, path_is_within, check
             dimension = options["max_dimension"]
             result, data, stderr = _run_bounded([
                 ffmpeg, "-hide_banner", "-loglevel", "info", "-nostdin", "-copyts",
-                "-ss", str(timestamp), "-protocol_whitelist", "file,pipe", "-i", str(path), "-map", "0:v:0", "-an", "-sn", "-dn",
+                "-ss", str(timestamp), "-protocol_whitelist", "file", "-format_whitelist", VIDEO_DEMUXERS,
+                "-i", str(path), "-map", "0:v:0", "-an", "-sn", "-dn",
                 "-vf", f"scale=w='min({dimension},iw)':h='min({dimension},ih)':force_original_aspect_ratio=decrease,showinfo",
                 "-frames:v", "1", "-c:v", "mjpeg", "-q:v", "3", "-f", "image2pipe", "pipe:1",
             ], deadline, check_cancelled)
@@ -143,7 +151,9 @@ def extract_frames(row, rows, options, *, media_directory, path_is_within, check
             total += len(data)
             if total > TOTAL_BYTES:
                 raise ExportError("frame_total_limit", 422, frame_status="partial")
-            match = re.search(rb"\bpts_time:([+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)", stderr)
+            # Only showinfo records are decoder observations; unrelated stderr
+            # containing pts_time must not be mistaken for a decoded frame PTS.
+            match = re.search(rb"\[Parsed_showinfo_[^\]]+\][^\r\n]*\bpts_time:([+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)", stderr)
             actual = float(match[1]) if match else None
             if actual is not None and (not math.isfinite(actual) or actual < 0):
                 actual = None
@@ -158,6 +168,10 @@ def extract_frames(row, rows, options, *, media_directory, path_is_within, check
             check_cancelled()
         if time.monotonic() >= deadline:
             raise ExportError("frame_timeout", 408, frame_status="failed")
+    except ExportError as exc:
+        if items and exc.status == 422 and exc.frame_status == "failed":
+            raise ExportError(exc.reason, exc.status, frame_status="partial") from exc
+        raise
     except InterruptedError as exc:
         raise ExportError("frame_cancelled", 422, frame_status="cancelled") from exc
     except (OSError, ImportError, ValueError, subprocess.SubprocessError) as exc:
