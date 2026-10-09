@@ -253,3 +253,86 @@ updated: 2026-10-05
 - 最低3回後のCore判断、新規の型付き全件JSON/共有CSV、Google Drive有効時の`data/analysis_store`保持を説明。分析本体は共有実装を使い、Colab専用の停止制御・保存先・再計算経路を追加しない。
 - Windowsの隔離保存先`output/colab-update-test`、`PYTHONPATH=src;tests`で`.venv/Scripts/python.exe -m unittest test_colab -q`を実行し、15件成功、1.278秒。全コードセルのcompileと出力/実行履歴なし、更新前のプロセス/編集保護、合成HTTP応答の不正・切断・入力枠不足、CPU/未取得値の保持、既存Colab用Web/securityの境界を確認。`git diff --check`も成功。
 - 実Colab GPU、Ollamaの実モデル推論、apt/pipのインストール、Driveマウント、全量自律分析は未実行。テストのHTTP/Gitはmockで、既存Windowsのモデル・設定・利用者DB/Vaultへ変更なし。配布は既存origin/mainへのsource pushのみで、利用者のColabセッションを直接更新・再起動していない。
+
+### 同日：プログラムとマーラータン分析データをDriveへ保存
+
+- 利用者指定の[Driveフォルダー](https://drive.google.com/drive/folders/1TeCym1pulQdMUIrg0HxlU0XCaMo0RTlq)へ、[プログラム＋分析データZIP](https://drive.google.com/file/d/1pwGblwEnTyfXPqUz6XSOxnq3miVJu6wg/view?usp=drivesdk)を新規アップロードした。プログラムは`75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`のGit追跡ファイル907件を`program/`へ、成功したrun `run_008cbf3502d7400e94876c47734b1325`の試験用DB、固定入力・結果・JSON表/CSV・検証記録を`analysis-data/`へまとめた。既存Driveファイルの上書き・共有設定変更なし。
+- 元の試験DBは読取専用でSQLite backupし、1インタビュー・正常終了・Core判断3回を照合。DB quick_check、保存artifactのhash、ZIP全922ファイルのCRC/manifest hashを確認した。アップロード後のDriveメタデータで指定親フォルダー・ファイル名・26,716,952 bytesの一致を確認。Drive応答にはchecksumが返らず、遠隔bytesのhash比較は未実施。ローカルSHA-256は`ee9c3ee5d3e1d62f788317dce80dcb8536a8c2af7366d430132e8537afcaa903`。確認記録は`output/drive-export/bundle-verification.json`と`drive-upload-verification.json`。
+- 設定の秘密値、モデル、仮想環境、媒体、個人Vault、Git履歴は含めない。323発話を保持するがAI各回の入力は48発話、成功試験には回答量の制限指示がある。元のcollector失敗報告と最終再検証を両方保持し、READMEで区別した。利用者の原本DB/Vaultへの書込み、別環境への展開・自動取込・再推論は未実行。DB内の試験当時の絶対パスは保持し、可搬なアプリ復元を検証済みとは扱わない。
+
+### 同日：3回反復の保存内容を点検
+
+- 利用者への内容説明のため、上記成功runの試験DBを読取専用で照合。Core3回の原応答hashは全て`sha256:1807e2c811a0ed49a671df26d18f4fac6336ce05d5efa7b361f997b7d276079a`で一致し、要約・主張3件・代替説明3件・未解決点3件・作業案・終了案が同じ。view_versionも全て1。独立verificationの24主張が後続Coreの見解へ反映されたという根拠はない。3回目でも情報不足を記載しつつquestion_satisfiedで停止している。
+- 既存のpassedは通信・採用回数・正常終了・保存の動作判定で、回答の新規性や研究上の十分性を判定していない。最低回数の制御は確認できるが、分析内容が深化するループを確認済みとは扱わない。次の調査対象は同一応答の検知、独立検証の採否、情報不足と終了判断の整合性。今回コード変更・再推論・原本DB/Vault書込み・Drive成果物更新は行っていない。
+
+### 同日：反復の進展検知と専門家結果の採否を実装
+
+- 利用者の修正依頼を受け、`main / 75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`を基点としたローカル未コミット変更。既存Handler/adapterへ進展比較と`result_assessments`を追加し、新しい実provider契約を`core-handler-prompts-5-progress`/`core_progress_version=1`へ更新した。API側でprogress=0を指定してもresolverが1へ固定する。SQL列・旧run・封印済み成果物は変更しない。
+- 同じ主張・根拠・代替説明・未解決・作業案、過去の状態への循環、要約/ID/順序だけの変更は採用判断へ加算せず`no_progress`で停止する。別IDで生成された同じ役割/範囲/版/hashの専門家結果も新しい根拠にしない。新しい専門家結果は実在IDへの採否・理由・影響を必須にし、無視した応答を隔離して`unreviewed_results`で停止。未評価の21件以上の結果を20件ずつ提示し、古い未評価結果を落とさない。原応答・重複元decision・停止イベントは保存する。
+- 画面と実試験スクリプトの判定は採用判断数を使用し、実通信回数と区別する。重複停止で固定成果物のfinalize/公開が呼ばれないこと、読取で再推論されないこと、デスクトップ/スマホ幅で停止理由・採用数・停止後の操作を確認した。設計判断はADR-125追記、現行契約は[[20-Modules/analysis-orchestration]]。
+- 検証: 関連9モジュールのunittest 142件成功（27.945秒）。追加した実app組立ての重複停止/公開抑止1件も成功（1.068秒）。DOM 27件成功、隔離した実ブラウザー1件成功（1440/390px、1.197秒）。Python compile、JS構文、git diff --check成功。初回の化粧変更テストはview更新による不要レビューの再生成でcall_budget_limitとなり失敗し、view版の比較も正規化して再検証した。
+- すべて合成入力/一時DB・Vault/合成APIで検証。実AI再分析、全体suite、実Vault公開、Git commit/push、Driveの修正版ZIP更新は未実行。利用者の原本DB/Vault・既存分析記録には書き込まない。新しい採否理由の内容妥当性と、意味が等しい任意の言い換えの検出は未保証。最終コードhashとコマンド・成功/未実行範囲は`output/orchestration-progress-fix/verification.json`へ記録する。
+
+### 同日：初回のラベル・尺度作成を専門エージェントへ必須発注
+
+- 利用者の「初回に必ずラベル/尺度を出力」「Coreではなく専門エージェントが作成」の指定を反映。基点は同じ`75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`、ローカル未コミット。現行adapterを`core-handler-prompts-6-initial-labels`へ変更し、実provider resolverが`initial_label_definitions_version=1`を固定する。初期保存後、会話解釈専門エージェントの専用`label-design-v1`タスクを最初のCore実行前に発注する。
+- 1〜12件の尺度候補について名称/安定ID/版、測定対象、型と尺度水準、その理由、値の意味/判定基準、判定規則、欠測条件、推奨集計、提示された発話根拠を検証。空/不正な定義なら原応答を隔離し`initial_labels_missing`で停止してCoreを実行しない。名義/順序尺度の平均指定、値の重複、数値順序の逆転、未提示根拠も拒否。保存hashと作成主体をCore実行前に再確認し、中断後は保存済み結果を再利用する。
+- 定義はAI下書きとして台帳と固定JSONに保存し、Coreは結果の採否/統合を担当。画面に専用の読取ボタンを追加し、Markdown書き出しにも定義節を追加した。発話の既存ラベル/コードブック版/研究者本文は変更せず、候補尺度を実行可能な手動測定へ自動登録しない。独立検証のblind packetにも渡さない。契約と判断を[[20-Modules/analysis-orchestration]]、ADR-125追記へ記録。
+- 検証: 関連9モジュール150 tests成功（29.795秒）。最後の作成主体/所有権guard追加後、初回尺度と実app保存の11 testsも成功（5.466秒）。DOM 28件成功（18.206秒）、実ブラウザーで尺度閲覧1件成功（1440/390px、1.347秒）、Python compile/JS構文/git diff --check成功。すべて合成データ・一時DB/Vault/合成API。実AI再分析、全体suite、実Vault公開、Git commit/push、Driveの修正版ZIP更新は未実行。利用者の原本DB/Vault・既存の分析結果へ書込みなし。出力内容の研究上の妥当性は別途研究者が確認する。検証記録は同じ`output/orchestration-progress-fix/verification.json`の`initial_label_specialist_revision`に保持する。
+
+### 同日：マーラータン実データで尺度出力・反復を試験
+
+- 利用者のテスト依頼に基づき、323発話の原本DBを読取専用でコピーし、各呼び出し48発話/8,000文字/索引48件でLM Studioの実推論を実施。初回の120発話/全索引では65,827 tokensとなり、ロード枠32,768を超えてHTTP 400。48発話の初期版でも2回目Coreで入力32,466/出力302 tokensとなり応答途中終了した。全323発話をAIへ渡した試験とは扱わない。
+- 実データで確認した入力の重複、ID誤写、尺度型と値の不一致、欠測の通常値化、空の追加理由を、既存context/adapter/純粋validatorで修正。最終adapterは`core-handler-prompts-10-complete-intents`。全量snapshot/hashは保持し、AIパケットの重複メタデータを省く。尺度設計には既存AIラベルを渡さず、後続は変更可能なラベル欄だけを渡す。実在ID/節/依存taskと型別生成、必須理由の空文字禁止をschemaにも適用し、不正原回答の事後置換は行わない。共有schemaコンテナーの制約が別フィールドへ漏れる問題も新テストで検出し、JSON往復コピーで分離した。
+- Qwen3 8Bは順序尺度と分類の混同、category型で数値を出す、欠測をlevelsへ混ぜる等の応答があり、全試行不合格。GPT-OSS 20Bへ切替え、最初の試行は尺度2件を保存したがCoreのwhy_now空欄で停止。失敗記録は`output/malatang-specialist-labels`の各日時ディレクトリーに保持する。モデルはこの試験だけで指定し、アプリ設定は変更しない。試験用にロードしたモデルは終了後にアンロードした。
+- 最終run `run_d2de4cc5ac524ed399b8fbf8b9133ba8`（`20261005T064634Z-c6017726`）: ローカルGPT-OSS 20B、32,768 context、実AI6呼び出し、176.33秒。専門エージェントが初回に「辛さの好み」（順序1〜5）と「価格に対する懸念度」（順序1〜3）を作成し、値の意味/判定基準/欠測条件/根拠と共に保存。最初のCore開始より前の終了時刻、作成主体、catalog/原結果/hashの一致を確認した。Core3回の採用判断、批判者1回、追加解釈1回がある。独立verificationはこのrunで未実行。
+- **最終の厳格判定はfailed**。3回目は2回目と同じ追加作業を提案し、同じタスクを再発注せず`no_new_tasks`で停止した。原応答hashは3種類だが進展signatureは2種類で、2/3回目の採否は新しいresult IDへdefer/impact=none。Coreの根拠付きclaimsは全3回とも0件で、専門家結果を主張へ統合した十分な分析とは扱わない。採用数3は新しい専門家結果の評価を含む動作記録であり、内容深化/研究上の十分性/正常完了の保証ではない。固定成果物の自動保存・Vault公開はskipped。終了判定を成功に変えない。
+- 原本のsource stampは試験前後で一致。保存原結果全件のhash、全量根拠323件、尺度catalog、JSON/Markdownの既存読取ルート、閲覧での再推論なしを照合。尺度は未検証AI下書きで、科学的な尺度妥当性の検証・全量分析・実Vault公開・Git commit/push・Drive更新は未実行。関連9モジュール153 tests成功（31.586秒）、Python compile/git diff --check成功。未コミット変更のコードhashと実試験は同ディレクトリーの`result.json`、`verification.json`、尺度は`initial-labels.json`、全台帳は`analysis-history.json`/`analysis-history.md`へ保持する。
+
+
+## 2026-10-05 Windows 専門知識の入力調整を具体化
+
+- 利用者の「エージェント専門知識などでも調整出来るか」に対し、既存コードを確認して[[40-Design/expert-knowledge-production-plan]]の「小型モデルに合わせた専門知識の調整案」へ追記した。担当専門家・手法・段階・対象条件で選択し、必須契約、作業別の知識、具体例、詳細資料を段階取得する提案。現在の短いbrief経路と全件Pack経路を区別し、反復Coreへの未接続も明記した。
+- 現行`method_experts.ai_context()`は1500文字以内のbriefと許可段階・文献IDを通常AI見解へ渡す。Pack readerは承認済みclaimを全件渡し、問い合わせ別の順位付けは未実装。部分取得では必須の例外・禁止事項・対立知識を審査済みの選択条件で保持し、根拠ID/hash・送信条件を再検証する。Coreの入力枠超過は別経路なので、まずCore報告の縮約と送信前予算を整える。
+- 検証は既存Pack readerの9 tests成功、専門家定義・適用・AI補助の28 tests成功、対象文書の差分確認成功。専門家テストの直接discoverは旧`import app`で読込失敗し、現行`gurumoji`モジュールのaliasを設定した隔離起動で28件を実行した。一時data/output/backupsを使い、実AI・原本DB・研究者Vaultへ書込みなし。今回は計画のみを変更し、知識パケットの部分取得、本番prompt、モデル別予算制御、DB変更、実AIによる効果測定は未実行。
+
+## 2026-10-05 Windows 小型モデルの資料処理と分析を実測
+
+- 利用者のテスト依頼に基づき、既存未コミット変更を含む`main / 75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`で実施。既存ローカルQwen3 8B / Q4_K_Mを試験専用IDでロードし、実ロード枠8,192、parallel 1、GPU全配置、reasoning offで使用。設定モデルは変更せず、試験後は自分がロードしたinstanceだけをアンロードした。
+- [資料試験スクリプト](../../../scripts/test_small_model_documents.py)を追加。Software Vaultの計画1文書に対し、保存先3問と尺度・blind・予算3問を、節選択・行選択・全文の4ケースで確認した。対象と原文範囲は試験コードが明示選択しており、アプリの自動検索・モデル別予算制御を実装した試験ではない。
+- 最終資料試験は**2ケース合格、2ケース不合格**。保存先の問いは全文7,094 tokensと該当節1,364 tokensで同じ内容上の回答となり、入力は80.8%減。SQLite/Software Vault等の別名は内容評価で照合し、指定表記に一致しないことは別項目に保持した。手順の節選択1,680 tokensでは尺度作成者の引用が報告者の説明にとどまり、行選択884 tokensではblindの引用が「契約を維持する」にとどまった。値は正答でも、回答を直接支える引用として不合格。全資料を理解した保証や幅広い品質評価にはしない。
+- 初回試験の別名を不正解にする判定を修正し、内容と表記を分離した。また原文一致だけでなく、引用が回答を支える条件を追加した。初回と中間の試行・原応答は残し、最終判定へ上書きしていない。[最終資料記録](../../../output/small-model-documents/20261005T101227Z-61970bc1/result.json)にはprompt、応答、元文書hashと範囲、script版、usage、判定を保持。HTTPエラー本文の保存は秘密値保護のため除去し、最後の変更はcompileで確認した。実呼出時のscript hashは記録に残り、この最後のエラー分岐変更後の再推論は行っていない。
+- マーラータンは原本を読取専用でSQLite backupし、AI各回24/323発話、未提示299発話で既存フローを実行。run `run_f8e0567391874d5b846cffa1fc1a4d5e`は初期AI3役とコード統計3手法が保存されたが、Core初期ルーティングでHTTP 400となり`recovery_required`。Core統合0回、尺度0件、厳格判定failed。保存入力から再構成した1token出力の容量確認でも8K枠超過を確認した。この確認は台帳のtask再試行や分析の完了とは扱わない。
+- [分析結果](../../../output/small-model-analysis-8k/20261005T100713Z-dc99b41c/result.json)、[容量確認](../../../output/small-model-analysis-8k/20261005T100713Z-dc99b41c/core-capacity-probe.json)、[検証記録](../../../output/small-model-analysis-8k/20261005T100713Z-dc99b41c/verification.json)を保持。コピーDBのquick_check、保存結果6件のhash、元のsource stamp一致、資料入力と文書hash、対象分析コードhash、容量確認によるコピーDB変更なしを確認。`output`はローカルの未追跡成果物であり共有先への配置は未実行。
+- 結論は「限定した資料の設問には答えられるが、根拠引用の安定性と既存分析フローは未合格」。本番の入力調整・自動モデル切替は依然未実装。次は[[40-Design/model-context-and-work-memory-plan]]のP1の送信前予算判定と、P2のCore初期ルーティング専用契約・報告縮約を優先する。全323発話のAI分析、32K/他モデルとの比較、研究上の妥当性、実Vault公開、Drive更新、commit/push、全体unit/DOM/browser suiteは未実行。原本DB・研究者所有のVaultへ書込みなし。
+
+## 2026-10-05 Windows モデル別コンテキストと作業記録の計画
+
+- 利用者の計画作成依頼に対し、[[40-Design/model-context-and-work-memory-plan]]を提案として保存し、AI入口と索引から参照可能にした。基点は`main / 75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`、既存未コミット変更を含むコードを調査。Anthropic、Agent Skills、LM Studio、LangGraph、長文評価の一次資料を参照した。
+- パラメーター数と実ロード枠・役割別能力を分け、入力予算、段階取得、全発話の分割提示、初回途中の尺度要求、結果採否と差分の保存を5段階で提案。直近のマーラータン試験は48/323発話、Core主張数0/0/0、厳格判定failedのままで、コンテキスト改善だけで統合問題が解決するとは扱わない。
+- 設計判断と開発引継ぎはSoftware Vault、分析の再開状態は既存DB、全件結果は既存成果物へ分担。今回は文書のみ変更し、実装・DB変更・再推論・モデルロード・実Vault公開・Drive更新・commit/pushは未実行。原本DB・研究者所有のVaultへ書込みなし。次の実装単位はP0〜P1の計測と実行前予算判定。
+- 文書検証は成功。frontmatter、提案ステータス、note_id一意性、ローカル参照9件・Vault参照5件・入口参照3件、UTF-8、空白と対象差分を確認。実装テストは今回未実行。
+
+## 2026-10-05 Windows モデル別コンテキスト計画の実装と専門知識の選択
+
+- 利用者の「プランを実行して」に基づき、`main / 75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b`の既存未コミット変更を維持して実装。設計は[[40-Design/model-context-and-work-memory-plan]]、専門知識は[[40-Design/expert-knowledge-production-plan]]、使用契約は[[20-Modules/analysis-orchestration]]。モデルのパラメーター数と実ロード枠を分け、LM Studioのロード済みhandleのtemplate/tokenizer・実枠・設定hashで入力を計測する。出力予約と512tokenの余裕を確保し、超過時は送信前に分割または保留する。SDK探索はモデルを自動ロードしない。
+- `model_context_version=1`の新規runで段階別の入力・出力契約を使う。初期全役割の全発話ページ、途中の尺度要求の保存、Handler集約、Coreの担当指示、専門家の尺度下書き、Core統合の順。所有発話と前後の境界を別に記録する。統合は未評価結果の順序付きbatchと、その結果が引用した原文を取得する。未読結果に属する批判は提示しない。入力manifest・提示ID・未読数・評価対象・専門家brief・予算・hashは既存DBのtask JSONと原結果へ保存し、設計理由はSoftware Vaultに保存する。SQL列の削除・改名・型変更はない。
+- `expert_step_ids`は既存定義のAI利用を許可した手順だけを選択し、適用範囲・必須入力・未解決事項・禁止結論を残す。選択briefは解釈経路へ接続し、独立検証のblind入力を維持する。Knowledge Pack v2のライブラリAPIは、審査済み選択方針・root・全claim hash・依存関係を検証し、claim全体を取得する。v1と既存の承認・権利検査を維持する。実Packの選択方針の承認や本番の自動選択は未実施。
+- 最終v21の関連10モジュールの**159 unittest成功（36.893秒）**。8K/16K/32Kの合成容量境界、未送信時の0推論、323発話の各役割での非重複所有、提示原文とcitationの一致、要件分割、未評価結果保持、再開時の保存結果再利用、専門知識の条件・例外・依存関係の保持を確認。統計schemaを全件専用とラベル集計の枝に分け、部分発話で全件専用コードを再実行する指定を生成させない。旧テストの2枝固定を3枝へ更新した。主張のない批判・尺度要求の根拠取得と、3結果・2批判への4096token出力予約も回帰対象とした。
+- Qwen3-8B / Q4_K_M、GPU全配置、parallel 1、reasoning offを試験専用instanceで使用。8K全体試験はcriticの1600token出力上限で途中終了。3200予約では元ページを送信前に拒否し、分割した子ページの単発契約検証は成功した。16Kのv16全体試験は初期AI42ページとコード3件が成功し、各AI役割へ323発話を提示、Core担当指示と尺度下書きも成功したが、Core統合の1600token出力上限で停止した。[v16記録](../../../output/model-context-plan-16k/20261005T110549Z-50921e4b/result.json)。出力予約と未読批判の範囲を修正したv17はCore39回を採用した後、全件専用統計への部分範囲指定を`method_scope_unavailable`として隔離し停止した。[v17記録](../../../output/model-context-plan-16k/20261005T112701Z-c8c96163/result.json)。いずれも原本source stampは一致し、全体合格にはしていない。v17実行時コードは同試験内`code-v17`に保存した。
+- 根拠発話を取り直すv18の単発Core契約検証は成功。7発話・評価対象2結果、入力5238＋schema2874＋出力3200＋余裕512で16,384以下。読取専用コピーDBのhashも一致した。[単発記録](../../../output/model-context-plan-16k/core-quote-hydration-v18.json)。引用付きclaimsの構文合格でも、限られた提示から「懸念や否定的な意見は見られません」と述べるsummaryは全資料の研究結論として承認しない。
+- 同じ結果batch・原文・現在見解・catalog・schema・systemで、処理済み初期報告を両側から除いて管理情報だけを比較すると、template入力は7,778→5,238token、**32.7%減**。追加推論0、コピーDB不変。[管理情報の計測](../../../output/model-context-plan-16k/metadata-only-count-comparison-v19.json)。初期報告の省略も含む比較は26,003→5,238token、79.9%減だったが、この値を管理情報だけの削減率にしない。[先行比較](../../../output/model-context-plan-16k/metadata-count-comparison-v19.json)。単一packetの比較であり、全runの総token・処理時間が同率で減ったという意味ではない。
+- v19の16K全体試験は1358.45秒、AI68回・コード3件、初期42ページで各AI役割へ323/323発話を提示し、専門家の序数尺度2件を出力した。Core23回を採用した後、24回目の3200token出力上限で`recovery_required`となり全体判定はfailed。[全体結果](../../../output/model-context-plan-16k/20261005T121254Z-d141cdaf/result.json)、[回ごとの作業](../../../output/model-context-plan-16k/20261005T121254Z-d141cdaf/rounds.md)、[完全な採否・根拠・予算と整合性検査](../../../output/model-context-plan-16k/20261005T121254Z-d141cdaf/verification.json)。全役割の所有発話は非重複、全packetの入力＋schema＋出力予約＋余裕は実枠以下、結果hash・manifest hash・リンク・元source stamp・SQLite quick_checkは一致、同じ保存結果の二重評価は0だった。実行版のソースは同試験の`code-v19`へ保存し、試験reportの4ファイルhashと一致した。
+- 尺度下書き`def_001`/`def_002`は、`missing_rule=null_with_reason`としながらlevel 1に「未読・欠測」を入れ、「マーラタンを食べる理由がない」「根付かない」を高評価として扱っている。この矛盾を研究用尺度として不合格とした。AI下書きの構文合格であり、人が確認した尺度・発話への数値付与・研究上の解釈を確定したものではない。
+- v20では主張以外の批判・尺度要求の根拠も取得する修正を追加。停止後の単発packetはまだ3200token出力上限で不合格だった。[v20記録](../../../output/model-context-plan-16k/critic-source-hydration-v20.json)。最終v21は出力予約を結果数・提示批判数に応じて増やし、批判応答・ラベル決定の配列上限も実提示ID数に合わせた。停止した24回目の場面を**読取専用の新規単発packet**として実行すると、9発話・3結果・2批判応答・4主張、入力8921＋schema2840＋出力4096＋余裕512＝16,369 ≤ 16,384で契約検証成功、コピーDB hashも一致した。[v21記録](../../../output/model-context-plan-16k/core-output-reservation-v21.json)。元runは再開していない。v21の全体再試験と研究上の品質合格には読み替えない。
+- 最終adapterは`core-handler-prompts-21-context-contracts`。品質合格前なので既定`model_context_version=0`を維持する。P4の役割別品質認定、cloud計測、料金・サイズからの自動モデル割当、一般検索cache、32K実推論比較、UIの新規検証、本番Pack承認・自動選択、v21全体再試験は今回未完了または未実行。次は尺度の欠測・方向・重複水準を専門家レビューで検証し、合格した役割・モデル構成で全体試験する。
+- 原本DBと研究者所有Vaultは読取のみ。試験DBを`output`内に分離し、実Vaultへの公開、Drive更新、commit/push、クラウド配置は行っていない。実験で自分がロードした`qwen/qwen3-context-plan-16k-test`だけを終了時にアンロードした。Python compile、対象文書のローカル参照25件、UTF-8、`git diff --check`も成功。最終追記の参照と差分を再確認して受け渡す。
+
+## 2026-10-05 Windows: ???????????????
+
+- ???????????????????????????????Handler????????Core??????Handler?????????????main/75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b???????????4?????/????/????/????3????????????6??? ? initial_analysis_report ? Core?initial_routing ? ????label-design-v1 ? ??Core???????????iteration=0???????????Core???????????SQL?????run????????
+- ??v11??AI???????????????????/???claims?????????codes???????????????????????????v12???/???????claims???????????????????????????????????????????????????????????????????????????????
+- ??adapter?core-handler-prompts-12-initial-evidence???9?????162 unittest???37.891???DOM28?????????/????????????1????2.257???Python compile/JS syntax/git diff --check????????????????????????????????????????????????????????????????????
+- ?????: output/malatang-initial-specialists/20261005T091842Z-70c6bdb6?run_f6eb195fce2f47e0bee69b6bf397ad39?????GPT-OSS-20B/32K??323???????AI???48???275??????????????323???????????3??/????5????????????codes??323????????????1???????????/hash/??????Core???????????????????????????????????????5????AI?????????????1??????????????????7???????????????????
+- ???????????????????????failed??AI10???/???3?/????Core3??590.84??Core???claims=0????result_assessments?7/1/1??????????????????????3????????????????????1?????no_new_tasks??????????????????????????????????????????????????????????/????/??????????????
+- ??source stamp???????????hash????????hash????????????/??/????JSON?Markdown/verification.json????????????????????AI??????Vault???skipped????????????????????????????????????????????/?Vault??????AI???Git commit/push?Drive????????????ADR-125???20-Modules/analysis-orchestration?

@@ -5,7 +5,7 @@ title: Software Vault 索引
 summary: Software Vaultのフォルダー別・目的別入口をまとめる詳細索引。
 status: current
 verified: 2026-09-27
-updated: 2026-10-02
+updated: 2026-10-05
 tags:
   - gurumoji/program
 ---
@@ -28,5 +28,6 @@ Gurumojiの4 Vaultのうち、プログラムの構造・保存契約・手法�
 | 設計 | [[40-Design/obsidian-plan]]、[[40-Design/program-vault-rules]]、[[40-Design/storage-policy]]、[[40-Design/sync-contract]]、[[40-Design/method-rules]]、[[40-Design/ui-ux-issues]]、[[40-Design/video-ui-redesign-plan]]、[[40-Design/quantification-statistics-plan]]、[[40-Design/core-handler-routing-reorganization-plan]]、[[40-Design/analysis-execution-ux-plan]] | 正本の分類、ID・同期、手法の登録規約、UI/UXの問題点、動画処理・確認画面UI改善設計図、発話の数値化とjamovi型統計の自動実行計画、コア再編案、分析実行UXと段階分析（提案） |
 | UI設計知識 | [[40-Design/ui-design-knowledge]]、[[40-Design/ui-design-contract]]、[[40-Design/ui-design-implementation-plan]] | 作業別の研究・prompt索引、設計意図と保持条件、未実装の改善計画。静止案は実画面・利用者評価と区別 |
 | 分析手法・知識 | [[50-Analysis-Methods/00-Index]] | 手法の定義・限界・オーケストレーター契約、専門家定義、共通知識、文献・調査記録 |
+| モデルと作業記憶 | [[40-Design/model-context-and-work-memory-plan]] | 実入力予算・全量分割・専門知識選択・DB来歴の試験実装と、役割別品質の評価状況 |
 | 変更履歴 | [[70-Changes/app-py-phase5]] | 構造変更の記録、互換性、機械可読の移動先データ |
 | テンプレート | [[90-Templates/method-registration]]、[[90-Templates/research-result]]、[[90-Templates/research-memo]] | 登録票。検索の既定対象外 |

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import app
 import test_content_analysis as support
+from test_analysis_orchestration import draft_label_definition
 
 
 class OrchestrationIntegrationTests(unittest.TestCase):
@@ -26,6 +27,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 "analysis_revision": value["item"]["analysis_revision"],
                 "question": "合成会話の発話内容と参加量を観察する", "provider": "lmstudio",
                 "provider_policy": "local_only", "stop_mode": "auto", "max_iterations": None,
+                "specialist_orchestration_version": 0,
                 "time_limit_seconds": None, "max_calls": 20, "max_tasks": 40}
 
     def response(self, provider, key, model, system, prompt, schema_name, schema, check, usage, base, timeout_seconds=240):
@@ -37,6 +39,15 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                "reported": True, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15})
         evidence_id = context["raw_evidence"][0]["evidence_id"]
         claim = {"claim_id": "observed-price", "text": "合成会話に価格の発話がある", "kind": "observation", "evidence_ids": [evidence_id]}
+        if context.get("task", {}).get("phase") == "initial_routing":
+            return {"summary": "全担当の尺度要件を専門家へ振り分ける", "claims": [],
+                    "intents": [{"role": "interpretation", "kind": "analysis", "result_id": "", "initial_sections": [],
+                        "question": "理由の具体性の尺度を設計する", "why_now": "初回分析が尺度の必要性を報告した",
+                        "success_criteria": "基準、欠測、尺度水準を原文に対応させる", "method_id": "label-design-v1",
+                        "label_field": "", "evidence_ids": [], "importance": "high", "importance_reason": "尺度待ちを解消する",
+                        "dependencies": [], "label_dependent": False, "replicate_id": ""}],
+                    "alternatives": [], "unresolved": [], "stop": None,
+                    "critique_responses": [], "label_decisions": [], "result_assessments": []}
         if role == "core":
             intents = []
             if context["task"]["iteration"] == 1:
@@ -49,10 +60,18 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                            for target in ("interpretation", "statistics", "verification")]
             return {"summary": "発話の観察は支持されるが、人物属性を推定しない。", "claims": [claim],
                     "intents": intents, "stop": None if intents else {"reason": "question_satisfied", "summary": "対象範囲で回答", "unresolved": []},
-                    "critique_responses": [], "label_decisions": []}
+                    "critique_responses": [], "label_decisions": [],
+                    "result_assessments": [{"result_id": rid, "disposition": "adopt",
+                        "reason": "保存済み専門家結果と原文を比較した", "impact": "観察を合成会話の範囲に限定する"}
+                        for rid in context.get("iteration_review", {}).get("pending_result_ids", [])]}
         result = {"summary": "合成会話の原文を確認", "claims": [claim], "analysis_requests": [], "label_patches": []}
+        if context.get("task", {}).get("method_id") == "label-design-v1":
+            result["label_definitions"] = [draft_label_definition(evidence_id)]
+        if context.get("task", {}).get("phase") == "initial_analysis":
+            result["label_requirements"] = [{"requirement_id": role + "_specificity", "kind": "scale", "name": "理由の具体性",
+                "analysis": "理由の段階別分布", "reason": "段階と欠測を区別するため", "evidence_ids": [evidence_id]}]
         if role == "critic":
-            result.update(review_status="no_issues", reviewed_scope="限定的な観察と終了案", limitations="合成会話のみ", issues=[])
+            result.update(review_status="no_issues", reviewed_scope="初回の測定計画" if context.get("task", {}).get("phase") == "initial_analysis" else "限定的な観察と終了案", limitations="合成会話のみ", issues=[])
         return result
 
     def start(self, payload=None):
@@ -70,6 +89,10 @@ class OrchestrationIntegrationTests(unittest.TestCase):
             self.assertEqual(set(c[0] for c in self.calls), {"core", "interpretation", "verification", "critic"})
             self.assertTrue(all(e["utterance_id"] != "x1" for c in self.calls for e in c[1].get("raw_evidence", [])))
             self.assertTrue(any(t["role"] == "statistics" and t["status"] == "succeeded" for t in value["tasks"]))
+            requirements = value["initial_analysis_report"]["label_requirements"]
+            missing_codes = next(r for r in requirements if r["requirement_id"] == "codes_for_frequency")
+            self.assertEqual(missing_codes["sources"][0]["role"], "statistics")
+            self.assertIn("全件が欠測", missing_codes["reason"])
             self.assertEqual(value["usage"]["total_tokens"], 15 * len(self.calls))
             before = len(self.calls)
             for _ in range(3):
@@ -96,6 +119,38 @@ class OrchestrationIntegrationTests(unittest.TestCase):
             self.service.run(rid)
         model.assert_not_called()
 
+    def test_new_http_runs_delegate_reviews_and_keep_owned_exports_read_only(self):
+        def response(*args, **kwargs):
+            context = json.loads(args[4]); role = args[5].removeprefix("analysis_orchestration_")
+            if role == "orchestrator":
+                args[7]()
+                args[8]({"provider": args[0], "model": args[2], "request_count": 1,
+                         "reported": True, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15})
+                self.calls.append((role, context, args[0], args[2]))
+                return {"summary": "Scoped review", "claims": [], "intents": [], "alternatives": [], "unresolved": [],
+                        "stop": None, "label_decisions": [], "critique_responses": [],
+                        "result_assessments": [{"result_id": rid, "disposition": "defer", "reason": "Draft review", "impact": "Keep tentative"}
+                            for rid in context["iteration_review"]["pending_result_ids"]]}
+            raw = self.response(*args, **kwargs)
+            if role == "core" and context["task"]["phase"] == "core":
+                raw.update(intents=[], result_assessments=[], alternatives=["A bounded alternative"])
+                raw["stop"] = {"reason": "question_satisfied", "summary": "Bounded synthesis", "unresolved": []}
+            return raw
+        payload = self.payload(); payload.pop("specialist_orchestration_version")
+        before = self.client.get(self.fixture.url).get_json()["item"]
+        with patch.object(app, "call_orchestration_ai_json", side_effect=response):
+            rid = self.start(payload); self.service.run(rid)
+            export = self.client.get(self.url + "/" + rid + "/export.json").get_json()
+        run = export["run"]
+        self.assertEqual(run["status"], "completed", run.get("error"))
+        self.assertEqual(run["config"]["specialist_orchestration_version"], 1)
+        self.assertEqual(run["completed_core_iterations"], 2)
+        reviews = [d for d in export["decisions"] if d.get("role") == "orchestrator"]
+        self.assertTrue(reviews)
+        self.assertTrue(all(not d["result_assessments"] for d in export["decisions"] if d.get("role", "core") == "core"))
+        self.assertTrue(all(not c[1].get("results") and c[1].get("domain_reports") for c in self.calls if c[0] == "core" and c[1]["task"]["phase"] == "core"))
+        self.assertEqual(self.client.get(self.fixture.url).get_json()["item"], before)
+
     def test_actual_transport_has_no_hidden_retry(self):
         with patch.object(app.ai_client, "post_json", side_effect=app.ai_client.RetryableApiError("synthetic transient")) as post:
             with self.assertRaises(app.ai_client.RetryableApiError):
@@ -121,7 +176,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 # completed immutable output before the first Core decision.
                 initial = self.service.result("content", rid)["initial"]
             result = self.response(*args)
-            if role == "interpretation":
+            if role == "interpretation" and context["task"]["method_id"] != "label-design-v1" and context["task"]["phase"] != "initial_analysis":
                 source = context["raw_evidence"][0]
                 result["label_patches"] = [{
                     "utterance_id": source["utterance_id"], "field": "theme",
@@ -149,7 +204,9 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         self.assertEqual(exported["run"]["status"], "completed", exported["run"])
         self.assertIsNotNone(initial)
         self.assertEqual(exported["initial"], initial)
-        results = [entry for entry in exported["raw_results"] if entry["raw"].get("method_id") == "label_frequency"]
+        task_phases = {task["task_id"]: task["phase"] for task in exported["run"]["tasks"]}
+        results = [entry for entry in exported["raw_results"] if entry["raw"].get("method_id") == "label_frequency"
+                   and task_phases[entry["task_id"]] != "initial_analysis"]
         self.assertEqual(len(results), 2)
         self.assertEqual([r["raw"]["annotation_version"] for r in results], [0, 1])
         self.assertEqual(results[0]["raw"]["rows"], [])

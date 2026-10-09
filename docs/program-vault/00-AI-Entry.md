@@ -4,7 +4,7 @@ note_type: ai-entry
 title: AI向けタスク別入口
 summary: AIが変更対象に応じて必要最小限のSoftware Vaultノートとコードへ進むための入口。
 status: current
-updated: 2026-10-02
+updated: 2026-10-05
 feature: development-workflow
 tags:
   - gurumoji/program
@@ -19,6 +19,7 @@ tags:
 | --- | --- | --- |
 | Vault構造、同期、移行、ノート所有権、生成物の保存 | [[20-Modules/obsidian-integration]] | [[30-Data/four-vaults-v1]]、対象モジュール、適用時は `gurumoji-obsidian-memory` の参照資料 |
 | 分析手法、専門家定義、AIプロンプトの制約 | [[50-Analysis-Methods/00-Index]] | [[40-Design/method-rules]]、対象の手法ノートと実装 |
+| モデル別入力予算、ルールとスキルの段階取得、作業記録の分担 | [[40-Design/model-context-and-work-memory-plan]] | 提案と現行実装を区別し、対象のAI設定・adapter・分析Handler・保存契約だけを読む |
 | 構成、設定、起動経路、保存先 | [[10-Architecture/system-map]] | 対象モジュールと設定 |
 | Web UIの設計・改善・評価 | [[40-Design/ui-design-knowledge]] | [[40-Design/ui-design-contract]]の対象節、[[20-Modules/ui-screens]]、対象コード。受入は[[50-Tests/ui-design-scenarios]]と[[50-Tests/ui-design-acceptance]]から選ぶ |
 | 個別モジュール、API、UI | [[20-Modules/module-map]] | 対象コードと隣接テスト。画面導線は [[20-Modules/ui-screens]] |

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from typing import Any
 
@@ -236,6 +237,76 @@ def validate_definitions(values: list[dict[str, Any]], *, require_version: bool 
         ids.add(identifier)
         columns.update(names)
     return normalized
+
+
+def validate_label_definitions(values: Any, *, evidence_ids: set[str]) -> None:
+    """Validate specialist-authored draft coding scales, not executable measurements.
+
+    Manual measurement_rule supports deterministic source columns only; these
+    qualitative drafts must never be installed as executable/adopted definitions.
+    """
+    def invalid():
+        raise AnalysisContractError("初回の専門家によるラベル・尺度定義が不足または不正です。",
+                                    code="initial_label_definitions_invalid")
+    if not isinstance(values, list) or not 1 <= len(values) <= 12:
+        invalid()
+    identifiers = set()
+    for value in values:
+        if not isinstance(value, dict):
+            invalid()
+        for key in ("definition_id", "name", "description", "measurement_justification", "decision_rule", "missing_criteria"):
+            if not isinstance(value.get(key), str) or not value[key].strip():
+                invalid()
+        identifier = value["definition_id"]
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{2,63}", identifier) or identifier in identifiers:
+            invalid()
+        identifiers.add(identifier)
+        if (type(value.get("version")) is not int or value["version"] != 1
+                or value.get("unit_of_analysis") != "utterance" or value.get("missing_rule") != "null_with_reason"):
+            invalid()
+        level, dtype = value.get("measurement_level"), value.get("data_type")
+        if not isinstance(level, str) or not isinstance(dtype, str) or level not in MEASUREMENT_LEVELS or dtype not in {"category", "number", "boolean"}:
+            invalid()
+        if level == "ordinal" and dtype != "number":
+            invalid()
+        method = value.get("recommended_analysis")
+        if not isinstance(method, str) or method not in {"frequency", "ordinal_distribution", "descriptive"}:
+            invalid()
+        if ((method == "ordinal_distribution" and level != "ordinal")
+                or (method == "descriptive" and level not in {"interval", "ratio"})):
+            invalid()
+        if not isinstance(value.get("unit"), str):
+            invalid()
+        if level in {"interval", "ratio"} and (dtype != "number" or not value["unit"].strip()):
+            invalid()
+        refs = value.get("evidence_ids")
+        if not isinstance(refs, list) or not 1 <= len(refs) <= 80 or any(not isinstance(ref, str) or ref not in evidence_ids for ref in refs):
+            invalid()
+        levels = value.get("levels")
+        if not isinstance(levels, list) or len(levels) > 50 or (level in {"nominal", "ordinal"} and len(levels) < 2):
+            invalid()
+        seen, numeric = set(), []
+        for entry in levels:
+            if not isinstance(entry, dict) or any(not isinstance(entry.get(key), str) or not entry[key].strip()
+                                                  for key in ("meaning", "criteria")):
+                invalid()
+            item = entry.get("value")
+            if isinstance(item, str) and item.strip().casefold() in {"欠測", "未読", "missing", "null", "none", "n/a"}:
+                invalid()
+            if ((dtype == "category" and (not isinstance(item, str) or not item.strip()))
+                    or (dtype == "boolean" and type(item) is not bool)
+                    or (dtype == "number" and (type(item) not in {int, float} or not math.isfinite(item)))):
+                invalid()
+            identity = ("number", item) if dtype == "number" else canonical(item)
+            if identity in seen:
+                invalid()
+            seen.add(identity)
+            if dtype == "number":
+                if level == "ratio" and item < 0:
+                    invalid()
+                numeric.append(item)
+        if level == "ordinal" and dtype == "number" and numeric != sorted(numeric):
+            invalid()
 
 
 def eligibility_assessment(definitions: list[dict[str, Any]], *, segment_count: int) -> dict[str, Any]:

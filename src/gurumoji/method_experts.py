@@ -555,6 +555,40 @@ class ExpertCatalog:
                 "missing_references": missing_references, "missing_notes": missing_notes,
                 "notes": sorted(path for path, _ in parts)}
 
+    def context_excerpt(self, relative: Path, headings: tuple[str, ...]) -> dict:
+        """Read only named common-knowledge sections from registered roots.
+
+        Rehash bytes on each retrieval, including when timestamps are unchanged.
+        Neither the caller nor an LLM can supply an arbitrary research-note path.
+        """
+        if relative not in {
+            COMMON_DIR / "01-Evidence-and-Claims.md",
+            COMMON_DIR / "04-AI-Assistance-Boundaries.md",
+        }:
+            raise ExpertDefinitionError("AI参照が許可されていない知識ノートです。")
+        path = self._resolve(relative).resolve()
+        if not any(path.is_relative_to(root.resolve()) for root in (self.root, self.local_root)):
+            raise ExpertDefinitionError("知識ノートが登録先の外を参照しています。")
+        try:
+            data = path.read_bytes()
+            props, body = unpack(data.decode("utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError, yaml.YAMLError):
+            raise ExpertDefinitionError("知識ノートを読み込めません。") from None
+        if props.get("note_type") != "common-knowledge" or props.get("status") != "current" or not props.get("note_id"):
+            raise ExpertDefinitionError("知識ノートのID・種別・状態を確認してください。")
+        sections = {}
+        for match in re.finditer(r"^## ([^\n]+)\n(.*?)(?=^## |\Z)", body, re.M | re.S):
+            if match[1].strip() in headings:
+                text = re.sub(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]", lambda m: m[2] or m[1], match[2].strip())
+                sections[match[1].strip()] = text
+        if set(sections) != set(headings):
+            raise ExpertDefinitionError("必須の知識節がありません。")
+        self.read_log.append("context:" + relative.as_posix())
+        return {"note_id": props["note_id"], "path": relative.as_posix(),
+                "vault_kind": "local_knowledge" if path.is_relative_to(self.local_root.resolve()) else "software",
+                "revision": str(props.get("updated") or ""),
+                "source_sha256": hashlib.sha256(data).hexdigest(), "sections": sections}
+
     def review(self, expert_id: str, analysis: dict, *, role: str = "主", method_id: str = "",
                selection: str = "researcher", context: dict | None = None) -> dict:
         base = {"expert_id": expert_id, "role": role, "method_id": method_id, "selection": selection,
@@ -697,7 +731,7 @@ def ai_block_reason(experts: dict | None) -> str:
     return _text(ai.get("reason")) if ai.get("mode") == "blocked" else ""
 
 
-def ai_context(experts: dict | None, catalog: ExpertCatalog | None = None) -> dict | None:
+def ai_context(experts: dict | None, catalog: ExpertCatalog | None = None, *, step_ids: list[str] | None = None) -> dict | None:
     """Short, method-specific instructions for AI insights; no note text or literature is included."""
     ai = (experts or {}).get("ai") or {}
     if ai.get("mode") != "expert":
@@ -712,13 +746,47 @@ def ai_context(experts: dict | None, catalog: ExpertCatalog | None = None) -> di
                     if review.get("expert_id") == ai["expert_id"]), {})
     resolved = {reference["id"] for reference in primary.get("references", [])}
     allowed = set(ai.get("steps") or [])
+    if not definition["ai_assist"]["allowed"] or not allowed.issubset(set(definition["ai_assist"]["steps"])):
+        raise ExpertDefinitionError("この専門家で許可されていないAI補助手順です。")
+    if step_ids is not None:
+        if not isinstance(step_ids, list) or not step_ids or any(step not in allowed for step in step_ids):
+            raise ExpertDefinitionError("許可されたAI補助手順だけを選択してください。")
+        allowed = set(step_ids)
     steps = [{"id": step["id"], "title": step["title"],
               "basis": [value for value in step["basis"] if REFERENCE_ID.match(str(value)) and value in resolved]}
              for step in definition["procedure"] if step["id"] in allowed]
+    entry = catalog.index()[definition["expert_id"]]
+    relative = EXPERTS_DIR / entry["folder"] / DEFINITION_NOTE
+    note = catalog._note(relative)
     return {"expert_id": definition["expert_id"], "title": definition["title"],
+            "source": {"note_id": note["props"].get("note_id"), "path": relative.as_posix(),
+                       "source_sha256": note["sha256"], "revision": definition["definition_version"],
+                       "vault_kind": "software" if entry["source"] == "base" else "local_knowledge"},
             "definition_version": definition["definition_version"], "knowledge_hash": ai["knowledge_hash"],
             "fingerprint": ai["fingerprint"], "brief": _text(definition["ai_assist"]["brief"]),
-            "steps": steps, "prohibited_conclusions": definition["prohibited_conclusions"][:8]}
+            "steps": steps, "prohibited_conclusions": definition["prohibited_conclusions"],
+            "scope": definition["scope"], "out_of_scope": definition["out_of_scope"],
+            "required_inputs": definition["required_inputs"],
+            "applicability_checks": definition["applicability_checks"], "open_issues": definition["open_issues"]}
+
+
+def orchestration_context(*, stage: str, brief: dict | None = None, catalog: ExpertCatalog | None = None) -> dict:
+    """Deterministic bounded retrieval; retain conditions, prohibitions and limits.
+
+    No LLM summarization, full-Vault traversal, or researcher-owned note input.
+    A method brief is supplied only after its existing permission/version checks.
+    """
+    catalog = catalog or default_catalog()
+    sources = [catalog.context_excerpt(COMMON_DIR / "01-Evidence-and-Claims.md",
+                 ("記述の4区分", "2種類の根拠を分ける", "作らないもの", "人の確認が必要な箇所")),
+               catalog.context_excerpt(COMMON_DIR / "04-AI-Assistance-Boundaries.md",
+                 ("AIに任せてよいこと・いけないこと",))]
+    if sum(len(json.dumps(row, ensure_ascii=False)) for row in sources) + len(json.dumps(brief, ensure_ascii=False)) > 8000:
+        raise ExpertDefinitionError("必須の知識が入力上限を超えています。手順の担当範囲を分割してください。")
+    return {"version": 2, "stage": stage, "status": "method_brief" if brief else "common_rules_only",
+            "brief": brief, "sources": sources,
+            "not_loaded": ["unselected_experts", "literature_full_text", "researcher_notes", "vault_history"],
+            "read_scope": "named_sections_and_permitted_method_steps"}
 
 
 def compact_review(review: dict) -> dict:
