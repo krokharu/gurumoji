@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "46d4177cb8de91eacc117ae63aea7a35f2fac5fd",
+  "source_commit": "b23a3ae458544f43a798c41c71f4fbe60588dce0",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -10,8 +10,8 @@
   "files": [
     {
       "path": ".gitattributes",
-      "sha256": "1148a4be155562f88e8461914f3e3615cd06d5af159edd603cc0adc210259e6c",
-      "bytes": 7398
+      "sha256": "22b7ebda94b7f222b46a4580e1de03f707dd448e88e776a4c62f3a4fafaffab3",
+      "bytes": 7915
     },
     {
       "path": "AGENTS.md",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "66a32e0ca55e0cc54493fb4a2e709ba80c60836431fe5b28cef36eaae6a836f3",
-      "bytes": 25721
+      "sha256": "963cd00b7318d500def7c5c12a68f7d6258353724e3e438cec255bc277fcbafb",
+      "bytes": 26988
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -335,18 +335,18 @@
     },
     {
       "path": "src/gurumoji/static/app.js",
-      "sha256": "b4a12aa619338af7c2a340dfd0684033b49ee0baf947594dec66ec83bbe194d4",
-      "bytes": 451774
-    },
-    {
-      "path": "src/gurumoji/templates/views/analysis.html",
-      "sha256": "9ad1c7191ebc4c5d9ecb258b279f1222fad687b7ed2e3af60270955bb8c9912e",
-      "bytes": 15877
+      "sha256": "d92eebd8620d526aff179319c35ac3331df7654b31d169ed63d99faffeb2ee60",
+      "bytes": 452831
     },
     {
       "path": "src/gurumoji/templates/views/analysis-orchestration.html",
       "sha256": "adc72cea492ed46b7ed2211872f8a2ce389eb29c02bf16cda1ee971cf47c667d",
       "bytes": 27017
+    },
+    {
+      "path": "src/gurumoji/templates/views/analysis.html",
+      "sha256": "9ad1c7191ebc4c5d9ecb258b279f1222fad687b7ed2e3af60270955bb8c9912e",
+      "bytes": 15877
     },
     {
       "path": "src/gurumoji/vault_registry.py",
@@ -369,6 +369,11 @@
       "bytes": 12518
     },
     {
+      "path": "tests/dom/ai-export-keyboard.test.cjs",
+      "sha256": "289ea7583e7d38badf613b0bcd2e5a07ad4d674a6d6a231591b4ff7fbdc91eef",
+      "bytes": 5905
+    },
+    {
       "path": "tests/dom/analysis-history.test.cjs",
       "sha256": "a432f426f2246220042cd062899c8fd13cbe184096a7cb36f9c546b2fd1fce06",
       "bytes": 19631
@@ -377,6 +382,16 @@
       "path": "tests/dom/orchestration.test.cjs",
       "sha256": "e5d82e0bbc37897a6ff5f2dbab1c3760be5aec230db81b50749dfadcb8c4f9a0",
       "bytes": 31523
+    },
+    {
+      "path": "tests/fixtures/expert_reader_history/6f1d532c5a0ce995b03e3dca191f358eeed6d42f/expert_agents.py",
+      "sha256": "7cccfdd6188cd6b25641c673516c9012d83a7bd90c43b1c5bb0f86e49a74bff8",
+      "bytes": 45572
+    },
+    {
+      "path": "tests/fixtures/expert_reader_history/hashes.json",
+      "sha256": "de166ec63dcdb75f44ab12bff1c1437feddbd7ac5eb57efe108323a84b8d76ad",
+      "bytes": 372
     },
     {
       "path": "tests/fixtures/expert_skill_history/2907391b55989579935134403f2d12010f73514e/30-Data/analysis-asset-connection-v1.md",
