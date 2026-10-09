@@ -3,7 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {createHarness} = require('./harness.cjs');
 
-const known = (observed, missing) => ({status:'known', source:'segments.emotion_details', observed_count:observed, missing_prediction_count:missing});
+const known = (observed, missing) => ({status:'known', source:'analysis.segments[].emotion_details', observed_count:observed, missing_prediction_count:missing});
 const observation = (value, models=[]) => ({version:1, target_scope:'included_nonempty_segments', target_count:100, any_model:value, models});
 
 // Exercise the shipped selection and POST/render path, with offline synthetic responses.

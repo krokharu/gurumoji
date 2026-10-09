@@ -225,10 +225,10 @@
         && count(observation.target_count);
       const appendRow = (label, value) => {
         const n = validScope ? observation.target_count : null;
-        const known = n > 0 && value?.status === 'known' && value.source === 'segments.emotion_details'
+        const known = n > 0 && value?.status === 'known' && value.source === 'analysis.segments[].emotion_details'
           && count(value.observed_count) && count(value.missing_prediction_count)
           && value.observed_count + value.missing_prediction_count === n;
-        const empty = n === 0 && value?.status === 'not_applicable' && value.source === 'segments.emotion_details'
+        const empty = n === 0 && value?.status === 'not_applicable' && value.source === 'analysis.segments[].emotion_details'
           && value.observed_count === 0 && value.missing_prediction_count === 0;
         const row = element('tr');
         const title = element('th', '', `${item.source_name || item.item_id} / ${label}`);
