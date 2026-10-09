@@ -1893,6 +1893,11 @@ class AnalysisOrchestrationService:
                 "unrelated_results_not_delivered": unrelated_results,
                 "unrelated_result_metadata": "not_delivered", "full_results_preserved": True,
                 "omission_is_body_read": False}
+        if history_scoped and sum("content" in row and row.get("role") != "core"
+                                  and row.get("task_id") not in dependencies for row in accepted) >= 2:
+            # Bind the adapter's reversible metadata projection to this exact
+            # validated delivery and order. Never rewrite the saved/full rows.
+            context["_result_metadata_hash"] = fingerprint(accepted)
         gate = self._statistical_review_gate(db, run)
         if gate:
             context["statistical_review_gate"] = gate
