@@ -16,6 +16,13 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 
 # 17専門家の段階別充足・不足表
 
+### 2026-10-10 08:04 JST — 17専門家CPU境界を固定受入、意味品質と本人採否を分離
+
+- 公開固定 `2b9f07a7ef52ca5aba026fefa1f19cfbe0e491c4`（親4d92）の方法レビュー＋新合成testの2pathを選別。Linux18unique PASS、別作者Windows18＋独立4境界PASS、証拠924file＋固定Git対応894sourceを照合した。反復を成功件数へ加算しない。原410doc行、17定義・入力source hash、AI許可9／禁止8／106段階と既存production／Core testsを保持する。
+- 9許可専門家では、不適切な一般化・因果・信頼性主張も構造的には `accepted_unreviewed_draft` となる限界を再現した。テストPASSはその境界確認であり、負例の意味上の合格ではない。禁止8のAI拒否、型付きsource／producer／未読、数値binding改変拒否は別に確認。独立C1は実Handler→隔離SQLite→freshでも未確認draft・採択decision空を保持。archive Store全統合、実モデル出力・方法意味品質・研究者本人の採否はこの票で未受入。
+- 別の実G0.5b/c raw比較18件は全plan FAIL、code／explanation0、原応答拒否5、既知235132tokensとして閉鎖。事後CPU再計数の整合成功を実測時配列の保存に置換しない。cache UNKNOWN／正式比較HOLD／currentPack暫定を維持する。Gemma全323件のCore最終入力は合成31wireの1件が24624>24576で容量FAIL、実モデル成功は未確認。Dot同backend ownerが可逆wire修正を継続し、入力上限拡大・本文切捨て・未読の読了化を行わない。PNG延期と人の採否待ちを維持する。
+
+
 G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowledge）の一Markdown正本。定義の存在、方法論の適否、実行接続、人の採否を別判定で保持し、17×段階のノートを量産しない。書式は [[90-Templates/knowledge-evaluation]]、表示補助は [[50-Analysis-Methods/50-Knowledge-Evaluation/knowledge-readiness.base]]。
 
 ## 固定対象と確認範囲

@@ -11,6 +11,9 @@ stage: methodology-review
 expert_ids: [exp-qualitative-content-analysis, exp-thematic-analysis, exp-framework-method, exp-scat, exp-m-gta, exp-kj-method, exp-quantitative-text-analysis, exp-focus-group-interaction, exp-participation-balance, exp-conversation-timing, exp-descriptive-statistics, exp-group-comparison-statistics, exp-correlation, exp-embedding-topic-exploration, exp-speech-emotion-recognition, exp-japanese-text-preprocessing, exp-cross-session-comparison]
 case_ids: [M33-01-N, M33-01-X, M33-02-N, M33-02-X, M33-03-N, M33-03-X, M33-04-N, M33-04-X, M33-05-N, M33-05-X, M33-06-N, M33-06-X, M33-07-N, M33-07-X, M33-08-N, M33-08-X, M33-09-N, M33-09-X, M33-10-N, M33-10-X, M33-11-N, M33-11-X, M33-12-N, M33-12-X, M33-13-N, M33-13-X, M33-14-N, M33-14-X, M33-15-N, M33-15-X, M33-16-N, M33-16-X, M33-17-N, M33-17-X]
 base_commit: 89aa95844d911ea8e1abee6337cc4f4b229e439d
+cpu_probe_base_commit: 4d92d0a45dcede55ebb1c991343fe12a2a8295f3
+cpu_probe_state: observed_contract_only
+cpu_probe_date: 2026-10-09
 updated: 2026-10-09
 review_timezone: UTC
 tags: [gurumoji/analysis, gurumoji/evaluation]
@@ -19,6 +22,9 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 # 17専門家の方法論レビューと研究者採否票
 
 [Issue #33](https://github.com/krokharu/gurumoji/issues/33)、C0 R9 `task_4de195d99437` の文書レビュー。基点は公開 `89aa95844d911ea8e1abee6337cc4f4b229e439d`。**AIレビューは候補支援の適合性と不足の指摘であり、研究者による方法の採用・精読・確定解釈ではない。** 17専門家すべての研究者採否は未回答のままとする。
+
+
+> **G5追加の読分け（2026-10-09 UTC）**: 元の17節と「今回の読了範囲」「本作業の検証」は公開R9文書の履歴を保持する。下記の「G5 CPU局所観測」と末尾のG5追加だけが `task_76c0456ec081` の新実測で、コード・定義の基点は `4d92d0a45dcede55ebb1c991343fe12a2a8295f3`。今回は一次資料を新たに読んでおらず、以前の部分読了・未読を引き継ぐ。構造受理、方法論的に不適切な合成負例、実モデルの意味品質、研究者採否を別々に記録する。
 
 ## 結論と判定の境界
 
@@ -64,6 +70,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 相談の遅れは心理的な不安でなく、勤務配置や単純な多忙による可能性もある。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-01-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。外部根拠ID／別profile hash／研究者stepは拒否。意味品質・本人採否は別判定で、負例の意味は不適切（FAIL）。頻度=人数・重要性、未実施信頼性の主張は禁止。
+
 ## 02. テーマ分析
 
 - **固定定義**: `exp-thematic-analysis`／`expert-thematic-analysis-definition`／D2／[01-Expert](../10-Experts/thematic-analysis/01-Expert.md) raw SHA-256 `26dfcdfe87323ed33fe232c8c36489f24453adb58c2b2feaa48083996147ecdc`
@@ -83,6 +91,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 個人の評価不安だけでなく、先輩の多忙や組織の相談規範が語りを組織しているかもしれない。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-02-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。型/根拠/step拒否境界は維持。意味品質・本人採否は別判定で、負例FAIL。質問項目や最多クラスタはテーマ確定・重要性の証拠ではない。
+
 ## 03. フレームワーク法
 
 - **固定定義**: `exp-framework-method`／`expert-framework-method-definition`／D1／[01-Expert](../10-Experts/framework-method/01-Expert.md) raw SHA-256 `4d8fb1c4d26acd84d9f9486c52aa0b6e2b4f6f5427571a5b6b1289508a651d2f`
@@ -100,6 +110,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-03-X（禁止・不適合）**: 件数ヒートマップだけをチャート化済み、空セルを不在の証拠、13/20を母集団の支持率とする。
 - **代替説明**: ケース差は職場差でなく、面接者の追問・語りの長さ・経験期間の差かもしれない。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-03-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。実製品gateは話者数のまま。意味品質・本人採否は別判定で、負例FAIL。要約・文脈・ケース定義と件数は別、一般化は不可。
 
 ## 04. SCAT
 
@@ -119,6 +131,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 声をかけない理由は遠慮ではなく、別の相談経路が既にあるためかもしれない。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-04-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。研究者stepをperformedに入れると拒否。意味品質・本人採否は別判定で、負例FAIL。許可段階はscat-p2/p6、欄の存在は理論生成の許可ではない。
+
 ## 05. M-GTA
 
 - **固定定義**: `exp-m-gta`／`expert-m-gta-definition`／D1／[01-Expert](../10-Experts/m-gta/01-Expert.md) raw SHA-256 `fbeae854b1726cd8cdb5a63b02b0b636fe8f7a4db53c6795466ca7ab2a614b40`
@@ -136,6 +150,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-05-X（禁止・不適合）**: 焦点者なしに語句を細切れ自動コード化してM-GTAと呼ぶ、検索結果が増えないことを理論的飽和とする。
 - **代替説明**: 相談増加は心理的安心よりも、担当変更・勤務時間の重なりで説明できるかもしれない。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-05-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。分析前提の意味充足は未検査。意味品質・本人採否は別判定で、負例FAIL。概念/焦点者・理論的サンプリング/飽和は研究者責務。
 
 ## 06. KJ法
 
@@ -155,6 +171,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 類似ラベルの多さは独立した支持でなく、同調、質問の反復、ラベルの切り方でも生じる。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-06-N/Xを下記G5一覧の条件で確認。入力あり非blocked/0件blocked、全10手順researcher、expert_ai_unavailable。意味品質・本人採否は別判定で、二ラベル化・表札/孤立ラベル・KJ完成の意味判断NOTRUN。
+
 ## 07. 計量テキスト分析
 
 - **固定定義**: `exp-quantitative-text-analysis`／`expert-quantitative-text-analysis-definition`／D1／[01-Expert](../10-Experts/quantitative-text-analysis/01-Expert.md) raw SHA-256 `9258b86f28c19ba88c338591a3e8802ef8d1bb6255a959ec0d18d14d3c453fcb`
@@ -172,6 +190,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-07-X（禁止・不適合）**: 「4回だから4人の懸念」「最頻語が最重要」「共起が原因」を出す。4回を支持人数へ変換しない。
 - **代替説明**: 司会の質問語の反復、引用、長い発話、分割・ストップ語の差でも頻度は変わる。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-07-N/Xを下記G5一覧の条件で確認。4/2/2を実計数、fallback/研究利用不可を明示、状態needs_attention。意味品質・本人採否は別判定で、人数・重要性・因果の意味検出NOTRUN。TF4≠観測話者2を確認。
 
 ## 08. フォーカスグループ相互作用
 
@@ -192,6 +212,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 相づちは継続促進、不同意を和らげる前置き、司会への儀礼的応答でもあり得る。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-08-N/Xを下記G5一覧の条件で確認。両文ともaccepted_unreviewed_draft。typed FGIの意味拒否結果とは別。意味品質・本人採否は別判定で、負例FAIL。連鎖と機能・司会影響の研究者確認は未実施。
+
 ## 09. 発話量・参加バランス
 
 - **固定定義**: `exp-participation-balance`／`expert-participation-balance-definition`／D1／[01-Expert](../10-Experts/participation-balance/01-Expert.md) raw SHA-256 `3b01cd0aff930a6cada9b26dd0075daa4bbd59d777f6a39be13eb6e1081e0bb6`
@@ -209,6 +231,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-09-X（禁止・不適合）**: 名簿なしで「参加者全員が均等」、低発話から無関心、司会除外後1人の指標から公平性を結論する。
 - **代替説明**: 指名の偏り、通訳、説明担当の役割、話者分離の誤りでも分布は変わる。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-09-N/Xを下記G5一覧の条件で確認。計算された観測分布と名簿未確認を保持。単独指標の既知制約を再現。意味品質・本人採否は別判定で、公平性・全員均等・低発話=無関心の意味判断NOTRUN。
 
 ## 10. 会話の時間構造
 
@@ -228,6 +252,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 相づち、同時開始、録音欠落、segment境界誤差が同じ時間値を作り得る。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-10-N/Xを下記G5一覧の条件で確認。gap/overlap候補を算出。欠測から不存在へ昇格せず、gap出力は発話IDなし。意味品質・本人採否は別判定で、重なり=対立・無音=熟考/同意の意味判断NOTRUN。
+
 ## 11. 記述統計・度数
 
 - **固定定義**: `exp-descriptive-statistics`／`expert-descriptive-statistics-definition`／D2／[01-Expert](../10-Experts/descriptive-statistics/01-Expert.md) raw SHA-256 `08c12a57476204ac9dad8520427a4268ad67ed8eec6a35d319334f61890cbdc7`
@@ -245,6 +271,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-11-X（禁止・不適合）**: 欠測時間を0秒、1人の100発話を100人、文字/分を理解度とする。欠測は変数ごとの状態を保持する。
 - **代替説明**: 質問形式、長い説明1件、話者分離誤り、欠測が特定話者に偏ることでも要約値は変わる。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-11-N/Xを下記G5一覧の条件で確認。固定セル受理＋負例散文accepted_unreviewed_draft。hash改変/行改変は拒否。意味品質・本人採否は別判定で、負例FAIL。発話単位と人単位の混同。数値一致は独立性保証でない。
 
 ## 12. クロス集計・群間比較
 
@@ -265,6 +293,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 発言機会、司会の役割、同一人の反復、群サイズ・分散の偏りが群差を作る。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-12-N/Xを下記G5一覧の条件で確認。固定count/分母受理＋負例散文accepted_unreviewed_draft。実行したのはcrosstabsのみ。意味品質・本人採否は別判定で、負例FAIL。未実行のANOVA/Welch/補正を主張、方法名と計算の不一致。
+
 ## 13. 相関
 
 - **固定定義**: `exp-correlation`／`expert-correlation-definition`／D2／[01-Expert](../10-Experts/correlation/01-Expert.md) raw SHA-256 `5a499ea69a38f176a1212ab52d4fe85b8237aaf80ba6fd1b5deed148a14642bb`
@@ -284,6 +314,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 時間と文字数の定義的な関係、役割の混合、外れ値1件、時刻誤差。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-13-N/Xを下記G5一覧の条件で確認。固定係数/N受理＋負例散文accepted_unreviewed_draft。実行したのはPearsonのみ。意味品質・本人採否は別判定で、負例FAIL。別手法・小標本精度の保証・因果断定は束縛セルから導けない。
+
 ## 14. 埋め込みによるテーマ探索
 
 - **固定定義**: `exp-embedding-topic-exploration`／`expert-embedding-topic-exploration-definition`／D2／[01-Expert](../10-Experts/embedding-topic-exploration/01-Expert.md) raw SHA-256 `82198ae33868ccbc96773fbd087359be63b1aaee3ead1375765e8779a111bf02`
@@ -301,6 +333,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **負例 M33-14-X（禁止・不適合）**: 「バスは便利」「便利ではない」が近いから合意とする、高silhouetteをTAの成功とする。
 - **代替説明**: 共通語、話者の言い回し、司会の反復、文脈補完、切詰めがクラスタを作った可能性。
 
+
+- **G5 CPU局所観測（4d92d0a）**: M33-14-N/Xを下記G5一覧の条件で確認。入力文脈の境界だけ実確認、embedding/clusterは未起動。意味品質・本人採否は別判定で、近さ=同意・silhouette=TA成功の意味判断NOTRUN。
 
 ## 15. 音声感情推定
 
@@ -320,6 +354,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: 雑音、他話者混入、短い音声、学習領域との差でも分類は変わる。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-15-N/Xを下記G5一覧の条件で確認。推定済み形式8/欠如2とモデルID維持。実音声推論ではない。意味品質・本人採否は別判定で、ang=本人感情・card精度=会話精度の意味判断NOTRUN。
+
 ## 16. 日本語テキスト前処理
 
 - **固定定義**: `exp-japanese-text-preprocessing`／`expert-japanese-text-preprocessing-definition`／D1／[01-Expert](../10-Experts/japanese-text-preprocessing/01-Expert.md) raw SHA-256 `8576c0202b84e1f4eccee6d99d2ef33452e68e15155f8cc223a6e769f7c16bc3`
@@ -338,6 +374,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **代替説明**: ASR誤変換、句読点、辞書不足、分割mode・モデル・実効pipelineの差。
 
 
+- **G5 CPU局所観測（4d92d0a）**: M33-16-N/Xを下記G5一覧の条件で確認。簡易文字種分割/fallback/構文利用不可を保持、正式形態素と混同しない。意味品質・本人採否は別判定で、構文空=不存在・書き言葉精度=会話精度の意味判断NOTRUN。
+
 ## 17. 会話間比較
 
 - **固定定義**: `exp-cross-session-comparison`／`expert-cross-session-comparison-definition`／D1／[01-Expert](../10-Experts/cross-session-comparison/01-Expert.md) raw SHA-256 `8f19105b11a2d3c208b892ad12285a648620e0e6083fcb39ced85d77119c837a`
@@ -354,6 +392,8 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 - **正常例 M33-17-N（合成設計）**: 同じ質問設計の2グループを同じ前処理・観測分母で比較し、特徴語差の元発話IDへ戻る。結論はこの2会話に限定する。
 - **負例 M33-17-X（禁止・不適合）**: 発話を独立標本として検定、質問の違いを属性差と断定、反復参加者の会話を自動的に独立とする。
 - **代替説明**: 司会語彙、会話長、コード定義、モデルや推定カバー率の差でも比較値は変わる。
+
+- **G5 CPU局所観測（4d92d0a）**: M33-17-N/Xを下記G5一覧の条件で確認。既知の分母/coverage差を再現。会話数1はcmp-a1 blocked。意味品質・本人採否は別判定で、観測差から感情差・反復参加の独立性を結論する意味判断NOTRUN。
 
 ## 次の実装候補：最大3群、いずれも未着手
 
@@ -408,3 +448,80 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 4. 研究者名・判断日：＿＿＿＿
 
 この票は方法選択の記録案であり、01のAI許可段階を広げたり禁止8分野を解除したりしない。実runの対象hashに束縛した本人記録や、各研究者段階の実施記録を代行しない。技術的な解除と方法論の採用は別々に判断する。
+
+## G5追加：17専門家の合成CPU受付と限界（2026-10-09 UTC）
+
+### 範囲・出典・判定語
+
+正式票 [6090396377](https://github.com/krokharu/gurumoji/issues/33#issuecomment-6090396377)、文書取込許可 [6090472933](https://github.com/krokharu/gurumoji/issues/33#issuecomment-6090472933)、受領 [6090501327](https://github.com/krokharu/gurumoji/issues/33#issuecomment-6090501327) に対応する。コード/test基点は `4d92d0a45dcede55ebb1c991343fe12a2a8295f3`、parent `95a33e9acb85348f1c94982b6ff75abee090d9ff`、tree `1fbb7a35b2826dbdb77e9faf817e43373ca08ba9`。文書だけを公開 `2793c91d844331f01c25b1e7fd917a1b47f4175a` の同pathから取り込み、初期blob `5f293a4f586e853943b2196f7da66fc54a70c395`／81,183 bytes／raw SHA-256 `8a82aadb1c827d15eb931327307c0bcd0a1de129d6676bf59e525f9671059c7d` を照合後に今回の追記を行った。merge/cherry-pickや別branchの修正の取込はない。G5-A/B/Cの後続修正版をこの4d92コードへ混ぜず、本文に残る古いSER閾値・参加分母・統計注記・Framework説明の観測を修正版の再受入と区別する。
+
+- **試験PASS**は、具体的入力に対する現在の受付・拒否・既知限界がassertionと一致したことだけ。既知不適切散文が通ることをPASSとして検出しても、その散文の意味は**不適切（FAIL）**であり、意味品質の合格ではない。
+- **accepted_unreviewed_draft**は今回の観測分類。製品に新しい保存statusを足していない。手書きの合成応答を既存validatorへ渡し、モデル呼出しは0。正常案も研究者が採用した結果ではない。実モデルの意味品質は全17でNOTRUN、研究者採否は未回答・HumanRecord入力0。
+- AI許可9／禁止8は実Catalogからassertする。禁止8分野はCatalogの条件・code/human契約と必要最小の純関数だけを通し、Registryも `expert_ai_unavailable` を返す。これはLLMを起動した試験ではない。
+- C1は渡した根拠ID・profile/knowledge hash・許可stepの一致を検査する。`actor_id`、散文とstepの意味対応、入力本文hashとの意味束縛は直接検証しない。今回のsource ID/version/hash・合成実行主体はfixture/receiptに固定し、この外側の保持と製品内の検証を混同しない。入力packetの本文・data_version不変は別にassertした。
+- 統計は実既存Python計算、全対象/除外、変数ごとの欠測、manifest/rows hash、9キーセルbindingを確認した。計算済み値からの説明と未実行手法を散文で主張する負例を分離する。同run DB台帳、実配送receipt、Store保存後の再読込はNOTRUNで、保存来歴を検証済みとは記載しない。
+- 過去のregistry・CPU件数は歴史資料であり、今回18件へ加算しない。一次資料は新しく閲覧していない。各行の「R9読了」は上の元17節の読了範囲を指し、未読原典を読了へ変更しない。PNG延期、G0.5/M/G5/研究者採否の独立HOLDは維持する。
+
+### 17分野の具体的normal/negative入力と結果
+
+N/Xは同番号のM33ケース。各専門家1行で、局所試験名は `tests/test_expert_methodology_acceptance.py::ExpertMethodologyAcceptanceTests.test_NN_*`。共通test18は17定義と9/8権限、知識note ID/raw hash、profile/bundle hashを照合する。Catalogのreadyは人の確認を含まず、human_reviewはhumanのまま。
+
+| No./専門家 | normal入力 | negative入力 | 実行経路 | 実観測 | 意味判断 | 権限根拠・一次資料の読了状態 | NOTRUN・次owner/解除条件 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 質的内容分析 | u1「聞きたいが先輩が接客中」→研究者定義の相談機会制約の候補 | 「12発話=12人の最重要課題、κ未計算だが確認済み」 | C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。外部根拠ID／別profile hash／研究者stepは拒否 | 負例の意味は不適切（FAIL）。頻度=人数・重要性、未実施信頼性の主張は禁止 | §01 Mayring §1–7等はR9部分読了、他原典は未読。01の単位/AI brief/研究者step | 研究者: 単位・カテゴリー規則・前後文脈・信頼性を確認 |
+| 02 テーマ分析 | u1評価不安/u2援助経験→「能力評価への警戒と相談の許可感」の候補 | 質問項目をそのまま最重要・研究者確定テーマとする | C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。型/根拠/step拒否境界は維持 | 負例FAIL。質問項目や最多クラスタはテーマ確定・重要性の証拠ではない | §02 Braun/Clarke掲載pp.81–88,94–96等はR9部分読了、2021本文未読。01研究者ta-p4以降 | 研究者: 全体・反例照合。typed TA/保存採否は別試験までNOTRUN |
+| 03 Framework | A/B×相談機会/支援相手セルにu1/u2要約、語られない支援は保留 | 件数だけでcharting完了、空セル=不在、13/20=母集団支持率 | C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。実製品gateは話者数のまま | 負例FAIL。要約・文脈・ケース定義と件数は別、一般化は不可 | §03 Gale PDF pp.1–7の記載範囲はR9部分読了、Ritchie/Goldsmith本文未読。01 fw-p6/研究者解釈 | 研究者: ケース・枠組みを確定。別branchのG5-Cを今回へ取込まず |
+| 04 SCAT | u1「忙しそう」〈1〉と観察/推測の疑問〈5〉候補のみ | AIで〈2〉〜〈4〉と完成理論を生成し実施済みとする | C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。研究者stepをperformedに入れると拒否 | 負例FAIL。許可段階はscat-p2/p6、欄の存在は理論生成の許可ではない | §04 大谷2011 pp.155–160記載範囲はR9部分読了、表視覚/2008本文未読。01 actor/brief | 研究者: 〈2〉〜〈4〉・ストーリーライン・理論。専用型は今回追加なし |
+| 05 M-GTA | 新人の相談過程、定義「相談の許可感」の具体例/反対例u1/u2 | 焦点者なしの細切れ自動コード化、検索増加なし=理論的飽和 | C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。分析前提の意味充足は未検査 | 負例FAIL。概念/焦点者・理論的サンプリング/飽和は研究者責務 | §05 公式Q&A2項目はR9実読、2007本文/書籍未読。01 mgta-p4/p5とhuman steps | 研究者: 焦点者・概念定義・採らない解釈・飽和根拠 |
+| 06 KJ | u1「価格はよいが予約が難しい」の入力条件をCatalogへ | 対象0件→kj-a2 fail。自動cluster=KJ完成の意味検証器はない | Catalog.review→Registry禁止確認 | 入力あり非blocked/0件blocked、全10手順researcher、expert_ai_unavailable | 二ラベル化・表札/孤立ラベル・KJ完成の意味判断NOTRUN | §06 手引pp.102–106/2003論文選択頁はR9部分読了、原典書籍未読。01全step researcher | 研究者の実ラベル/編成記録が必要。専用機能なし、AI代行禁止 |
+| 07 計量テキスト | u1「費用」3回＋u2 1回→TF4/DF2/観測話者2 | 同じ4回を4人・最重要・原因にする推論は実行しない。fallback入力でqta-a3 fail | _linguistic_analysisを明示fallback＋Catalog | 4/2/2を実計数、fallback/研究利用不可を明示、状態needs_attention | 人数・重要性・因果の意味検出NOTRUN。TF4≠観測話者2を確認 | §07 樋口2004/2017の列挙節はR9部分読了、全論文/書籍未読。01コード/研究者分離 | 正式解析器の別受入、研究者による否定/引用/KWIC確認 |
+| 08 FGI | u1毎週対面→u2月1提案→u3変更→u4応答を不同意/変更候補へ | 相づちだけで全員合意、沈黙=同意、人確認済みと断定 | 既定C1 request_packet→validate_report | 両文ともaccepted_unreviewed_draft。typed FGIの意味拒否結果とは別 | 負例FAIL。連鎖と機能・司会影響の研究者確認は未実施 | §08 Grønkjær/Hermann列挙頁はR9部分読了、全原典精読でない。01 fgi-p3/p5 | 研究者: 連鎖/儀礼応答/意味。typed S1・Handler/StoreはNOTRUN |
+| 09 参加バランス | 観測A/B各30秒→Gini0/evenness1/HHI.5、名簿なし | singleton helper→0/1/1かつcomputed。Catalog話者1はpart-a1 blocked | _participation_balance＋Catalog | 計算された観測分布と名簿未確認を保持。単独指標の既知制約を再現 | 公平性・全員均等・低発話=無関心の意味判断NOTRUN | §09 WoolleyはR9 Abstractのみ、測定詳細未読。Grønkjær p.25部分。01 denominator制約 | C0: 基点のsingleton境界を別票で判断。研究者: 名簿/役割/発言機会 |
+| 10 会話時間 | u1[0,2],u2[5.5,7],u3[6.5,8]→gap3.5/overlap.5 | 全time_unknown→候補空、20中11時刻不正→time-a1/a2 fail | _long_gaps/_overlap_candidates＋Catalog | gap/overlap候補を算出。欠測から不存在へ昇格せず、gap出力は発話IDなし | 重なり=対立・無音=熟考/同意の意味判断NOTRUN | §10 Levinson/Torreira列挙節/Table2はR9部分読了、音声/原コーパス未確認。01 code/human分離 | 研究者: 音声/境界/相づち。C0: gap出典IDの不足は別票 |
+| 11 記述統計 | 5発話＋除外1、時間有効N4/欠測1/平均4.25、文字N5/欠測0 | 同じ話者の各発話をそれぞれ別人として集計した | 実descriptive_statistics→manifest→9キーbinding→validate_report | 固定セル受理＋負例散文accepted_unreviewed_draft。hash改変/行改変は拒否 | 負例FAIL。発話単位と人単位の混同。数値一致は独立性保証でない | §11 JARS列挙頁/SciPy APIはR9部分読了。01 desc-p2/codeとhuman target/missing | 研究者: 対象・欠測・独立単位。保存/本人記録はNOTRUN |
+| 12 群比較 | 同じ5発話の話者×質問候補crosstab、total分母5、除外1 | 標準ANOVAの結果はWelch法による群間比較であり、多重比較補正済みである | 実crosstabs→manifest→9キーbinding→validate_report | 固定count/分母受理＋負例散文accepted_unreviewed_draft。実行したのはcrosstabsのみ | 負例FAIL。未実行のANOVA/Welch/補正を主張、方法名と計算の不一致 | §12 SciPy/rstatix等とDelacre列挙頁はR9部分読了、全simulation/原著未読。07計算binding | 研究者/C0: 前提・独立性・方式の意味照合。追加計算/保存はNOTRUN |
+| 13 相関 | 同じ5発話の時間×文字数Pearson、完全ペアN4/欠測1 | Spearman近似はこの小標本でも必ず正確、説明変数が結果を引き起こした | 実pearson→manifest→9キーbinding→validate_report | 固定係数/N受理＋負例散文accepted_unreviewed_draft。実行したのはPearsonのみ | 負例FAIL。別手法・小標本精度の保証・因果断定は束縛セルから導けない | §13 SciPy API/Bishara列挙頁はR9部分読了、全条件/原著未読。01 cor-p2/codeと研究者解釈 | 研究者: 散布/外れ値/独立性。Spearmanや定数列の追加probeはNOTRUN |
+| 14 埋め込み探索 | 同一話者「駅まで歩く」「バスの本数」を文脈連結、元ID維持 | 別話者なら連結しない、保存結果stale=True→emb-a1 blocked | _contextual_texts＋Catalog | 入力文脈の境界だけ実確認、embedding/clusterは未起動 | 近さ=同意・silhouette=TA成功の意味判断NOTRUN | §14 E5論文/card/Chang列挙範囲はR9部分読了、全appendix未読。01モデル計算と研究者命名 | モデル実行の別許可・固定版と代表/境界例の研究者評価が必要 |
+| 15 音声感情 | 合成10区間中ang3/hap2/sad1/neu2、空2をparserへ | 空labelは欠如。coverage .5%→現ser-a1 min1/a2 min80 fail | analysis_emotion_entries＋Catalog | 推定済み形式8/欠如2とモデルID維持。実音声推論ではない | ang=本人感情・card精度=会話精度の意味判断NOTRUN | §15公式model card記載部はR9実読、JTES本文/実会議性能未確認。01 ser-p3/p4 researcher | C0: .5%説明差は別票。研究者: 音質/参照ラベル。実推論別許可 |
+| 16 日本語前処理 | 「ええと、予約は、取り直しました」の表層offsetとu1を保持 | 強制regex fallback→pre-a1/pre-a2 fail、構文edges=[] | _analyze_with_fallback/_linguistic_analysis＋Catalog | 簡易文字種分割/fallback/構文利用不可を保持、正式形態素と混同しない | 構文空=不存在・書き言葉精度=会話精度の意味判断NOTRUN | §16 GiNZA固定v5.2 README等はR9列挙範囲読了、会話独立評価なし。01 pre-p3伝達 | 固定モデル/辞書の別試験、研究者による表層・原形・正規形監査が必要 |
+| 17 会話間比較 | 同質問identityのA/B各100、coverage100/100,sad20/20→20/20 | Bだけcoverage5,sad1→全発話比20/1、coverageが出力へ継承されない | build_interview_comparison注入集計＋Catalog | 既知の分母/coverage差を再現。会話数1はcmp-a1 blocked | 観測差から感情差・反復参加の独立性を結論する意味判断NOTRUN | §17 樋口/Gale/Aarts列挙頁はR9部分読了、全章/補足未読。01会話単位/文脈 | C0: coverage伝達は別票。研究者: 設計/反復参加/モデル同一性。上流推論NOTRUN |
+
+### 今回fixtureのsource固定と保存未実行
+
+各sourceは `synthetic-M33-NN`。source versionは合成入力のcanonical JSON fingerprint、source hashも同じ完全入力から算出する。これは実研究データ・実runの入力版ではない。01のraw hash/定義版は上の各固定定義と一致し、現profile/knowledge hash、許可step、計算raw hashとセルbindingは外部検証receiptにも記録した。既存の過去hash・履歴は書き換えない。
+
+| No. | 合成source version / content hash |
+| --- | --- |
+| 01 | `sha256:b45b51a5258aff9a06ca48d312853418f083fcc8b60b89d3ba3dec55a23cba49` |
+| 02 | `sha256:af8d8ced53d0ada3d8a60ca40661d7183ea12b6be09ccc43577fb90ab68772b2` |
+| 03 | `sha256:273803efab49fa8ad4f780ab78d3f55c4470dace2dda1bec068d9c19402b5409` |
+| 04 | `sha256:87d8717f853fc9fead975efe2d81028ea5af7f0d520ee33c66957e8e44988a15` |
+| 05 | `sha256:4645d711966040fc05d47c005cc8504735c21e17f3203a3839ebde0c11ea01e6` |
+| 06 | `sha256:16c76ff984304db7a658d184a62ce16d84b4a139f9e9e990ed5c79a8e93827b7` |
+| 07 | `sha256:8cc65d66da88daa3da8f50d4feab787e8a5481effe4ef097166fe986a98d9eb2` |
+| 08 | `sha256:4d9fe0d06514287b53e470eecdf69242779815684ca92282ab5e5531b1e3c8ad` |
+| 09 | `sha256:5388abc7d52368b6bfe8eeafebb3fed78296d75e02ce4dea7ef09a649b162cb2` |
+| 10 | `sha256:db1890a5f9dcd810595f97e1dfa5a7632c20224264e7b51e5ea432ad546557c8` |
+| 11 | `sha256:a50cd47999e139672d9f00441316322e71c6e4e08fbcb608140774386f635e9d` |
+| 12 | `sha256:a50cd47999e139672d9f00441316322e71c6e4e08fbcb608140774386f635e9d` |
+| 13 | `sha256:a50cd47999e139672d9f00441316322e71c6e4e08fbcb608140774386f635e9d` |
+| 14 | `sha256:8d7342846a0ed73c7a8a9518e3aaaa9aaa875e29082894ae40ab6fcd0eeeca3c` |
+| 15 | `sha256:ab0d1fe6cac81ae6a3d98c3cef18df6f5a13301511168c88d3833693ce5105f3` |
+| 16 | `sha256:a4dccabffbd41b972a8051a23a78065bb913a7a53deed982811bcd17d92e2250` |
+| 17 | `sha256:1107db716ee2b08c68cc2381d082a209b8a3cf6e05a7e6a5445c374da8a6744b` |
+
+### Linux実行記録と未実行
+
+実行先はLinux 6.18.44 x86_64/glibc2.41、Python 3.12.14、既存SciPy 1.17.0。installなし。作者は隔離branch `dot/g5-methodology-acceptance` で実行した。初回は18 tests / PASS18 / FAIL0 / ERROR0 / SKIP0、unittest 1.323秒、wrapper全体1.662610秒、exit0。初回から失敗がなかったため途中FAILの隠蔽はない。最終test bytesの再実行も18 PASS / FAIL0 / ERROR0 / SKIP0、wrapper全体1.570130秒、exit0。途中の再確認も全件PASSで、これらを別の方法受入件数へ加算しない。
+
+再現コマンド（Linux、repo root、既存Pythonを指定）:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 /workspace/scratch/be1eb353f7eb/analysis_orchestrator_fixes/app/.venv/bin/python -B -m unittest test_expert_methodology_acceptance -v
+```
+
+初回・最終作者実行では同じsuiteをunittest runnerで実行し、socket/SQLite接続とtorch/transformers/sentence_transformers/openai/anthropic/whisper importをaudit guardで拒否した。tests自身もsocket接続を拒否し、言語解析のfallback試験では既存モデルloaderを無効にした。テストによる実モデル/SDK/GPU/外部AI/実DB/実Vault/媒体/auth/settingsの使用は0。計算用の合成dictと空の一時local override directoryだけを使う。
+
+未実行: 全app suite、TA/FGI明示typedの深い統合、Handler/Store/UI経路、実runの同run配送/永続化/再読込、実言語/embedding/音声モデル、実研究の方法妥当性・意味品質・全研究者手順と採否。実装がないKJ整理や意味検出器は未実装/人待ちとして残す。追加実行には表の条件に沿う別scopeと必要な許可が必要。別作者LinuxレビューとC0 Windows独立受入はこの作者記録と別枠で、未実施のまま返す。
+
+変更対象はこの文書と新規testの2pathのみ。production、01/07/08、API/Store/schema/SQL、研究者記録、既存tests、readiness/index/manifestは変更していない。
