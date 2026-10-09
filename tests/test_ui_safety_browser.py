@@ -120,7 +120,7 @@ class UiSafetyBrowser(unittest.TestCase):
     def assert_no_script_error(self):
         self.assertEqual(self.errors, [])
 
-    def test_autonomous_defaults_minimum_three_and_optional_caps(self):
+    def test_autonomous_specialist_delegation_and_optional_caps(self):
         self.page.evaluate("""Object.assign(analysisState, {
             itemId:'synthetic-analysis', data:{item:{id:'synthetic-analysis',source_name:'Synthetic',
             revision_count:1,analysis_revision:1},segments:[]}, config:{},annotations:{},dirty:false});
@@ -130,19 +130,61 @@ class UiSafetyBrowser(unittest.TestCase):
         self.page.locator('#orchestration-open').click()
         self.page.locator('#orchestration-question').fill('Synthetic evidence review')
         self.assertTrue(self.page.locator('input[name=orchestration_stop][value=auto]').is_checked())
-        self.assertIn('最低3回', self.page.locator('#orchestration-stop-explanation').inner_text())
+        self.assertIn('専門側', self.page.locator('#orchestration-stop-explanation').inner_text())
         payload = self.page.evaluate('orchestrationPayload()')
         self.assertEqual(payload['stop_mode'], 'auto')
         self.assertIsNone(payload['max_iterations'])
         self.assertIsNone(payload['time_limit_seconds'])
-        self.page.locator('#orchestration-iterations').fill('2')
-        self.page.locator('#orchestration-start').click()
-        self.assertIn('最低3回', self.page.locator('#orchestration-settings-message').inner_text())
+        self.page.locator('#orchestration-iterations').fill('1')
+        self.assertEqual(self.page.evaluate('orchestrationPayload().max_iterations'), 1)
+        self.assertEqual(self.page.locator('#orchestration-provider-orchestrator').count(), 1)
         self.assertTrue(self.page.locator('#orchestration-settings').is_visible())
         self.page.locator('#orchestration-iterations').fill('')
         self.page.locator('input[name=orchestration_stop][value=iterations]').check()
         self.page.locator('#orchestration-iterations').fill('1')
         self.assertEqual(self.page.evaluate('orchestrationPayload().max_iterations'), 1)
+        self.assert_no_script_error()
+
+    def test_autonomous_no_progress_shows_adopted_count_and_stops_controls(self):
+        for width in (1440, 390):
+            self.page.set_viewport_size({'width': width, 'height': 900})
+            self.page.evaluate("""Object.assign(orchestrationState, {itemId:'synthetic-analysis',runId:'synthetic-run',
+                run:{run_id:'synthetic-run',status:'stopped',phase:'stopped',iteration:3,
+                completed_core_iterations:2,stop_reason:'no_progress',tasks:[],events:[],results:[],allowed_actions:[],
+                config:{question:'Synthetic progress check',stop_mode:'auto',min_iterations:3,provider_policy:'local_only'},
+                current_view:{summary:'Synthetic bounded finding',claims:[],alternatives:[],unresolved:[]}}});
+                renderAnalysisOrchestration();document.getElementById('orchestration-live').showModal();""")
+            self.assertIn('同じ判断の繰り返し・進展なし', self.page.locator('#orchestration-stop-reason').inner_text())
+            self.assertEqual(self.page.locator('#orchestration-metrics strong').first.inner_text(), '2')
+            self.assertIn('採用済みCore判断', self.page.locator('#orchestration-metrics').inner_text())
+            self.assertTrue(self.page.locator('#orchestration-stop').is_hidden())
+            self.assertTrue(self.page.locator('#orchestration-resume').is_hidden())
+            self.page.locator('#orchestration-live-close').click()
+            self.assertFalse(self.page.locator('#orchestration-live').evaluate('(dialog) => dialog.open'))
+        self.assert_no_script_error()
+
+    def test_initial_specialist_scales_can_be_opened_on_desktop_and_mobile(self):
+        calls = []
+        def result(route):
+            calls.append(route.request.method)
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({"raw": {
+                "label_definitions": [{"name": "Synthetic scale", "measurement_level": "ordinal",
+                                       "missing_rule": "null_with_reason"}]}}))
+        self.context.route('**/orchestration/synthetic-run/results/label-result', result)
+        for width in (1440, 390):
+            self.page.set_viewport_size({'width': width, 'height': 900})
+            self.page.evaluate("""Object.assign(orchestrationState, {itemId:'synthetic-analysis',runId:'synthetic-run',
+                run:{run_id:'synthetic-run',status:'stopped',phase:'stopped',iteration:2,
+                completed_core_iterations:1,stop_reason:'no_progress',tasks:[],events:[],results:[],allowed_actions:[],
+                config:{question:'Synthetic',initial_label_definitions_version:1,provider_policy:'local_only'},
+                initial_label_catalog:{status:'ai_draft',created_by:'interpretation',result_id:'label-result',definitions:[{name:'Synthetic scale'}]}}});
+                renderAnalysisOrchestration();document.getElementById('orchestration-live').showModal();""")
+            self.assertIn('専門エージェント作成のAI下書き 1件', self.page.locator('#orchestration-conclusion-notes').inner_text())
+            self.page.locator('#orchestration-conclusion-notes button').click()
+            self.page.wait_for_function("document.getElementById('orchestration-result-content').textContent.includes('null_with_reason')")
+            self.assertIn('Synthetic scale', self.page.locator('#orchestration-result-content').inner_text())
+            self.page.locator('#orchestration-live-close').click()
+        self.assertEqual(calls, ['GET', 'GET'])
         self.assert_no_script_error()
 
     def test_keyboard_edit_save_reload_desktop_and_mobile(self):

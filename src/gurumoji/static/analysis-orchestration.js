@@ -3,10 +3,11 @@
 const orchestrationRoles = [
   {id: 'core', label: 'Core', subtitle: '問い・統合・終了判断', kind: 'ai'},
   {id: 'handler', label: 'Handler', subtitle: '発注・台帳・保存・停止', kind: 'code'},
-  {id: 'interpretation', label: '会話解釈', subtitle: 'テーマ・展開・別解', kind: 'ai'},
+  {id: 'interpretation', label: '会話解釈', subtitle: '初回のラベル・尺度設計／テーマ・別解', kind: 'ai'},
   {id: 'statistics', label: '数量・統計', subtitle: 'Python集計', kind: 'code'},
   {id: 'verification', label: '独立検証', subtitle: '原文・数値・根拠', kind: 'ai'},
-  {id: 'critic', label: '批判者', subtitle: '反証・代替説明', kind: 'ai'}
+  {id: 'critic', label: '批判者', subtitle: '反証・代替説明', kind: 'ai'},
+  {id: 'orchestrator', label: '専門オーケストレータ', subtitle: '分野別の結果評価・批判応答・追加分析', kind: 'ai'}
 ];
 const orchestrationState = {itemId: '', itemName: '', runId: '', run: null, epoch: 0, poll: null, timer: null,
   operation: '', submission: null, setup: null, setupEpoch: 0, viewerEpoch: 0, fetchedAt: null, error: '', lastSeq: null, resultRequest: 0, taskFingerprint: '', recoveryFingerprint: '', initialFingerprint: '', outputFingerprint: ''};
@@ -65,7 +66,7 @@ function orchestrationSyncForm() {
     time:'開始からの経過時間で新規発注を止めます。進行中の呼出しを必ず期限内に終える保証ではありません。',
     iterations:'Coreの結果統合から次の実行案選択までを1巡と数えます。並列タスク数や再試行回数とは別です。',
     importance:'問いへの影響を高・中・低で暫定評価します。頻度・モデルの自信とは異なり、基準は未校正です。',
-    auto:'Coreが最低3回、根拠・批判・未解決点を検討し、その後は継続・終了を判断します。時間・回数は空欄で無上限にできます。手動停止・安全上限・実行障害は最低回数より優先します。'
+    auto:'専門側が結果と批判を検討し、Coreが分野間の統合と終了を判断します。必要な追加分析を行い、時間・回数は空欄で無上限にできます。'
   }[mode]);
   for (const role of orchestrationRoles.filter(role => role.kind === 'ai')) {
     const provider = orchestrationNode(`provider-${role.id}`)?.value;
@@ -111,7 +112,6 @@ function orchestrationPayload() {
     if (!raw && !required) return null;
     const number = Number(raw);
     if (!Number.isInteger(number) || number < 1 || number > max) throw Error(`${orchestrationNode(id).closest('label').querySelector('span').textContent}を1〜${max}の整数で指定してください。`);
-    if (id === 'iterations' && mode === 'auto' && number < 3) throw Error('AIお任せの回数上限は最低3回以上にしてください。');
     return number;
   };
   const cloud = orchestrationCloudProviders();
@@ -122,6 +122,8 @@ function orchestrationPayload() {
     max_iterations:['iterations','auto'].includes(mode) ? integer('iterations', mode === 'iterations', 1000) : null,
     importance_threshold:orchestrationNode('importance').value, max_calls:integer('max-calls',true,1000), max_tasks:integer('max-tasks',true,2000),
     concurrency:integer('concurrency',true,4), research_mode:'exploratory', roles:orchestrationRoleOverrides(),
+    model_context_version:cloud.length ? 0 : 1, context_reference_version:cloud.length ? 0 : 1,
+    context_evidence_limit:24, context_text_limit:6000,
     publication_targets:orchestrationNode('publication-all').checked ? [...orchestrationPublicationTargets] : []};
 }
 async function startAnalysisOrchestration(event) {
@@ -221,14 +223,14 @@ function renderAnalysisOrchestration() {
   orchestrationText('live-title',active ? '問いから、次の分析へ' : '保存された分析の状態');
   orchestrationText('live-target',`${run.item_name || run.source_name || state.itemName || state.itemId} · Run ${run.run_id} · 入力版 ${run.source_revision ?? run.config?.source_revision ?? '不明'}`);
   orchestrationText('live-question',run.config?.question || run.question || '分析目的は未取得');
-  orchestrationText('status',`${orchestrationLabel(run.status)}${draining ? ' · 残処理の終了待ち' : ''}${run.phase ? ` · ${{core:'Coreの判断',specialists:'専門処理',stop_review:'終了前レビュー',stopped:'停止',initial:'初期分析（コード処理）'}[run.phase] || run.phase}` : ''}`);
+  orchestrationText('status',`${orchestrationLabel(run.status)}${draining ? ' · 残処理の終了待ち' : ''}${run.phase ? ` · ${{core:'Coreの判断',label_review:'\u5c3a\u5ea6\u306e\u72ec\u7acb\u30ec\u30d3\u30e5\u30fc',specialist_review:'\u5c02\u9580\u5074\u306e\u7d50\u679c\u8a55\u4fa1',specialist_followup:'\u5c02\u9580\u5074\u306e\u8ffd\u52a0\u5206\u6790',specialists:'専門処理',initial_analysis:'全担当の初回分析・尺度要件の報告',initial_routing:'Coreによる専門家への担当指示',initial_labels:'専門家によるラベル・尺度作成',stop_review:'終了前レビュー',stopped:'停止',initial:'初期分析（コード処理）'}[run.phase] || run.phase}` : ''}`);
   orchestrationText('updated',state.fetchedAt ? `最終取得 ${new Date(state.fetchedAt).toLocaleTimeString('ja-JP')}` : '未取得');
   const notice=[state.error,run.error,run.uncertain_tasks?.length ? `実行結果が不明なタスク: ${run.uncertain_tasks.join(', ')}。二重実行を避けるため、自動再発注・通常の再開はできません。` : ''].filter(Boolean).join('\n');
   setAlert(orchestrationNode('live-message'),notice,Boolean(notice));
   const usage = run.usage || {}, tasks = run.tasks || [];
   const tokenValue = usage.total_tokens ?? usage.tokens;
   const tokenLabel = ['partial','reported'].includes(usage.measurement_status) || usage.tokens_complete === false || usage.tokens_partial || usage.partial ? 'トークン（一部計測）' : 'トークン（実測）';
-  const metrics = [[run.iteration ?? null,'Core巡回'],[usage.calls ?? usage.llm_calls ?? null,`AI呼出し / ${run.config?.max_calls ?? '—'}`],[Array.isArray(run.tasks) ? tasks.length : null,'登録タスク'],[tokenValue ?? null,tokenLabel]];
+  const metrics = [[run.completed_core_iterations ?? run.iteration ?? null,run.completed_core_iterations == null ? 'Core巡回' : '採用済みCore判断'],[usage.calls ?? usage.llm_calls ?? null,`AI呼出し / ${run.config?.max_calls ?? '—'}`],[Array.isArray(run.tasks) ? tasks.length : null,'登録タスク'],[tokenValue ?? null,tokenLabel]];
   orchestrationNode('metrics').replaceChildren(...metrics.map(([value,label])=>{const node=orchestrationElement('div');node.append(orchestrationElement('strong',orchestrationNumber(value)),orchestrationElement('span',label));return node;}));
   orchestrationNode('role-core').replaceChildren(orchestrationRenderRole(orchestrationRoles[0]));
   orchestrationNode('role-handler').replaceChildren(orchestrationRenderRole(orchestrationRoles[1]));
@@ -248,7 +250,10 @@ function renderAnalysisOrchestration() {
   const canResume = Array.isArray(run.allowed_actions) ? run.allowed_actions.includes('resume') : run.can_resume === true;
   resume.hidden = !canResume; resume.disabled = Boolean(state.operation);
   orchestrationNode('refresh').disabled = Boolean(state.operation || state.poll);
-  const reasons = {question_satisfied:'問いを充足',human_review_required:'人の確認待ち',no_new_tasks:'追加タスクなし',importance_threshold:'重要度しきい値',execution_failure:'実行障害',review_incomplete:'レビュー未完了',call_timeout:'呼出し時間上限',call_budget_limit:'AI呼出し上限',task_budget_limit:'タスク上限',source_deleted:'入力データの削除',user_cancelled:'利用者停止',user_stop:'利用者停止',time_limit:'時間上限',iteration_limit:'回数上限',call_budget:'AI呼出し上限',task_budget:'タスク上限',budget_limit:'予算上限',completed:'問いを充足',no_more_evidence:'追加の証拠なし',error:'実行障害',human_review:'人の確認待ち'};
+  const reasons = {question_satisfied:'問いを充足',human_review_required:'人の確認待ち',no_new_tasks:'追加タスクなし',no_progress:'同じ判断の繰り返し・進展なし',unreviewed_results:'専門家結果の採否未完了',importance_threshold:'重要度しきい値',execution_failure:'実行障害',review_incomplete:'レビュー未完了',call_timeout:'呼出し時間上限',call_budget_limit:'AI呼出し上限',task_budget_limit:'タスク上限',source_deleted:'入力データの削除',user_cancelled:'利用者停止',user_stop:'利用者停止',time_limit:'時間上限',iteration_limit:'回数上限',call_budget:'AI呼出し上限',task_budget:'タスク上限',budget_limit:'予算上限',completed:'問いを充足',no_more_evidence:'追加の証拠なし',error:'実行障害',human_review:'人の確認待ち'};
+  reasons.initial_labels_missing='初回の専門家によるラベル・尺度出力が未完了';
+  reasons.initial_analysis_incomplete='初回の全担当の分析・尺度要件の報告が未完了';
+  reasons.initial_routing_invalid='初回のCoreによる担当指示が未完了または不正';
   orchestrationText('stop-reason',run.stop_reason ? `停止理由: ${reasons[run.stop_reason] || run.stop_reason}。保存済みの部分結果・未実施レビューを含めて確認してください。` : '利用者停止と安全上限を最優先します。研究上の結論は未確定の探索的下書きです。');
   const config = run.config || {};
   orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
@@ -256,6 +261,12 @@ function renderAnalysisOrchestration() {
   orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
   orchestrationText('conclusion',run.current_view?.summary || '統合結果はまだ保存されていません。');
   const notes=orchestrationNode('conclusion-notes');notes.replaceChildren();
+  if(run.config?.initial_label_definitions_version){
+    const catalog=run.initial_label_catalog;
+    const entry=orchestrationElement('li',catalog ? `初回のラベル・尺度: 専門エージェント作成のAI下書き ${catalog.definitions.length}件` : '初回のラベル・尺度: 専門エージェントの出力待ち');
+    if(catalog){const button=orchestrationElement('button','ラベル・尺度の定義を読む','link-button');button.type='button';button.addEventListener('click',()=>orchestrationReadResults(catalog.result_id));entry.append(button);}
+    notes.append(entry);
+  }
   for(const [key,label] of [['alternatives','代替説明'],['unresolved','未解決点']])for(const value of run.current_view?.[key] || [])notes.append(orchestrationElement('li',`${label}: ${typeof value === 'string' ? value : JSON.stringify(value)}`));
   orchestrationText('review-state',`終了前レビュー: ${{reviewed:'実施済み（研究上の結論は未確定）',pending:'待機',not_started:'未実施',not_reviewed:'未実施',incomplete:'未完了',unavailable:'実施できず'}[run.review_status] || run.review_status || '状態未取得'}${run.stale ? ' · 入力版が更新された結果です' : ''}`);
   orchestrationRenderInitial(run); orchestrationRenderOutput(run); orchestrationRenderRecovery(run); orchestrationRenderTasks(tasks); orchestrationRenderReview(run);

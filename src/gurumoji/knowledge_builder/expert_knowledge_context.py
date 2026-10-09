@@ -6,6 +6,7 @@ load a model, or expose evaluation cases/answer keys.
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import re
 import stat
@@ -340,6 +341,27 @@ class ExpertKnowledgeContext:
         except (KeyError, TypeError, ValueError, PermissionError):
             _fail()
 
+    def build_selected_expert_packet(self, expert_id: str, query: str, route: str, *, policy: dict) -> dict:
+        """Opt-in v2: a reviewed, root-pinned policy determines mandatory knowledge.
+
+        No relevance ranking or generated policy can silently replace v1. Whole
+        Claims retain applicability, exceptions, contradictions and citations.
+        """
+        full = self.build_expert_packet(expert_id, query, route)
+        selected = _selection_ids(policy, full)
+        packet = copy.deepcopy(full)
+        packet["schema_version"] = 2
+        packet["claims"] = [row for row in full["claims"] if row["claim"]["claim_id"] in selected]
+        packet["evidence"] = [row for row in full["evidence"] if row["claim_id"] in selected]
+        used = {row["source_id"] for row in packet["evidence"]}
+        packet["sources"] = {key: row for key, row in full["sources"].items() if key in used}
+        packet["selection"] = {"policy": copy.deepcopy(policy), "policy_sha256": contracts.sha256_json(policy),
+            "full_packet_sha256": full["packet_sha256"],
+            "omitted_claim_ids": sorted(set(policy["claim_hashes"]) - selected)}
+        packet["packet_sha256"] = contracts.sha256_json({key: value for key, value in packet.items() if key != "packet_sha256"})
+        validate_packet(packet)
+        return packet
+
 
 def load_expert_pack(path: str | Path, expected_pack_root: str, route: str,
                      allow_internal_candidate: bool = False) -> ExpertKnowledgeContext:
@@ -394,8 +416,72 @@ def load_local_papers_pack(
         _fail()
 
 
+def _selection_ids(policy: dict, packet: dict) -> set[str]:
+    try:
+        contracts._object(policy, {"schema_version", "pack_root_sha256", "expert_id", "stage", "claim_hashes",
+                          "required_claim_ids", "task_claim_ids", "dependencies", "reviewer"}, name="selection policy")
+        if policy["schema_version"] != 1 or policy["pack_root_sha256"] != packet["pack_root_sha256"] or policy["expert_id"] != packet["expert_id"]:
+            _fail()
+        contracts._text(policy["stage"], "stage", max_length=100)
+        hashes = policy["claim_hashes"]
+        if not isinstance(hashes, dict) or not hashes or len(hashes) > MAX_PACKET_CLAIMS:
+            _fail()
+        for key, value in hashes.items():
+            contracts._id(key, "claim_id")
+            contracts._hash(value, "claim_sha256")
+        available = {row["claim"]["claim_id"]: row["claim_sha256"] for row in packet["claims"]}
+        if packet["schema_version"] == 1 and available != hashes:
+            _fail()
+        if any(hashes.get(key) != value for key, value in available.items()):
+            _fail()
+        dependencies = policy["dependencies"]
+        if not isinstance(dependencies, dict) or set(dependencies) != set(hashes):
+            _fail()
+        for ids in [policy["required_claim_ids"], policy["task_claim_ids"], *dependencies.values()]:
+            if not isinstance(ids, list) or len(ids) != len(set(ids)) or any(ref not in hashes for ref in ids):
+                _fail()
+        reviewer = policy["reviewer"]
+        contracts._object(reviewer, {"identity", "reviewed_at", "target_sha256"}, name="selection reviewer")
+        contracts._text(reviewer["identity"], "identity")
+        contracts._text(reviewer["reviewed_at"], "reviewed_at")
+        unsigned = {key: value for key, value in policy.items() if key != "reviewer"}
+        if reviewer["target_sha256"] != contracts.sha256_json(unsigned):
+            _fail()
+        selected = set(policy["required_claim_ids"]) | set(policy["task_claim_ids"])
+        while True:
+            expanded = selected | {ref for key in selected for ref in dependencies[key]}
+            if selected == expanded:
+                break
+            selected = expanded
+        if not selected:
+            _fail()
+        return selected
+    except ExpertPackError:
+        raise
+    except (KeyError, TypeError, ValueError):
+        _fail()
+
+
 def validate_packet(packet: dict) -> dict:
     try:
+        if packet.get("schema_version") == 2:
+            selection = packet.get("selection", {})
+            contracts._object(selection, {"policy", "policy_sha256", "full_packet_sha256", "omitted_claim_ids"}, name="selection")
+            if selection["policy_sha256"] != contracts.sha256_json(selection["policy"]):
+                _fail()
+            contracts._hash(selection["full_packet_sha256"], "full_packet_sha256")
+            selected = _selection_ids(selection["policy"], packet)
+            actual = {row["claim"]["claim_id"] for row in packet["claims"]}
+            if actual != selected or selection["omitted_claim_ids"] != sorted(set(selection["policy"]["claim_hashes"]) - selected):
+                _fail()
+            unsigned = {key: value for key, value in packet.items() if key != "packet_sha256"}
+            if contracts.sha256_json(unsigned) != packet["packet_sha256"] or len(contracts.canonical_json(unsigned)) > MAX_PACKET_BYTES:
+                _fail()
+            inner = {key: copy.deepcopy(value) for key, value in packet.items() if key != "selection"}
+            inner["schema_version"] = 1
+            inner["packet_sha256"] = contracts.sha256_json({key: value for key, value in inner.items() if key != "packet_sha256"})
+            validate_packet(inner)
+            return packet
         contracts._object(packet, {"schema_version", "pack_root_sha256", "expert_id", "route", "query",
                                    "claims", "sources", "evidence", "packet_sha256"}, name="packet")
         if packet["schema_version"] != 1:
@@ -493,6 +579,10 @@ def render_agent_request(packet: dict) -> str:
         "sources": packet["sources"],
         "allowed_evidence": packet["evidence"],
     }
+    if packet["schema_version"] == 2:
+        payload["knowledge_scope"] = {"stage": packet["selection"]["policy"]["stage"],
+            "policy_sha256": packet["selection"]["policy_sha256"],
+            "omitted_claim_count": len(packet["selection"]["omitted_claim_ids"])}
     payload = _redact_local_paths(payload)
     instructions = (
         "Use only the approved Claims and their cited evidence below. Answer in Japanese. "

@@ -136,6 +136,12 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
         state = backend.status(item_id, run_id)
         value = backend.result(item_id, run_id)
         encoded = json.dumps(value, ensure_ascii=False, indent=2)
+        catalog = state.get("initial_label_catalog")
+        label_output = ("## 初回のラベル・尺度（専門エージェント作成・AI下書き）\n\n````json\n"
+                        + json.dumps(catalog, ensure_ascii=False, indent=2) + "\n````\n\n") if catalog else ""
+        report = state.get("initial_analysis_report")
+        report_output = ("## 全担当の初回分析・ラベルと尺度の要件\n\n````json\n"
+                         + json.dumps(report, ensure_ascii=False, indent=2) + "\n````\n\n") if report else ""
         text = (
             "---\nnote_type: gurumoji-analysis-history\nresearch_mode: exploratory\n---\n\n"
             "# 自律分析の保存履歴\n\n"
@@ -145,7 +151,7 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
             "独立検証や批判レビューだけで科学的な確認結果にはなりません。\n\n"
             "初期全量、タスク結果、根拠ID、ラベル版、批判とCoreの応答は以下の履歴を参照してください。"
             "原文を含む場合があるため、保存先と共有範囲を確認してください。\n\n"
-            "## 完全な保存履歴\n\n````json\n" + encoded + "\n````\n"
+            + report_output + label_output + "## 完全な保存履歴\n\n````json\n" + encoded + "\n````\n"
         )
         return Response(text, mimetype="text/markdown", headers={
             "Content-Disposition": 'attachment; filename="gurumoji-analysis-history.md"',

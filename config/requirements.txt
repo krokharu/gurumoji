@@ -22,3 +22,5 @@ ja-ginza==5.2.0
 spacy>=3.8,<3.9
 # Editable saved-run slide export (no Office/LibreOffice runtime dependency).
 python-pptx>=1.0.2,<2
+# Local orchestration context measurement; never downloads or loads models.
+lmstudio>=1.5,<2

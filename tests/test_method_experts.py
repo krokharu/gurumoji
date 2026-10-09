@@ -225,6 +225,16 @@ class KnowledgeUpdateTests(unittest.TestCase):
         self.assertNotEqual(original["knowledge_hash"], refreshed["knowledge_hash"])
         self.assertEqual(refreshed["knowledge_hash"], after["ai"]["knowledge_hash"])
 
+    def test_selected_ai_steps_keep_all_mandatory_conditions(self):
+        block = experts.review_for_analysis(synthetic("thematic", auxiliaries=()), self.catalog)
+        full = experts.ai_context(block, self.catalog)
+        selected = experts.ai_context(block, self.catalog, step_ids=[full["steps"][0]["id"]])
+        self.assertEqual(len(selected["steps"]), 1)
+        for key in ("knowledge_hash", "brief", "prohibited_conclusions", "scope", "out_of_scope", "required_inputs", "applicability_checks", "open_issues"):
+            self.assertEqual(selected[key], full[key], key)
+        with self.assertRaises(experts.ExpertDefinitionError):
+            experts.ai_context(block, self.catalog, step_ids=["unapproved"])
+
     def test_ai_context_never_combines_new_instructions_with_old_hash(self):
         analysis = synthetic("thematic", auxiliaries=())
         before = experts.review_for_analysis(analysis, self.catalog)

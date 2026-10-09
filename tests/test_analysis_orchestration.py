@@ -32,6 +32,477 @@ def critic(context, issues=None):
             "issues": issues or []}
 
 
+def assess_pending_results(context, disposition="adopt"):
+    return [{"result_id": result_id, "disposition": disposition,
+             "reason": "Compared the saved specialist result with the bounded finding",
+             "impact": "Retain the finding within the provided evidence; no population generalization"}
+            for result_id in context.get("iteration_review", {}).get("pending_result_ids", [])]
+
+
+def draft_label_definition(evidence_id):
+    return {"definition_id": "reason_specificity", "version": 1, "name": "理由の具体性",
+            "description": "発話で理由が明示される具体性を記述する未検証の候補尺度",
+            "unit_of_analysis": "utterance", "data_type": "number", "measurement_level": "ordinal",
+            "measurement_justification": "程度の順序だけを扱い、間隔が等しいとは仮定しない",
+            "unit": "段階", "decision_rule": "発話内の理由説明を根拠に分類する",
+            "levels": [{"value": 1, "meaning": "抽象的な理由", "criteria": "理由はあるが具体例や条件がない"},
+                       {"value": 2, "meaning": "具体的な理由", "criteria": "理由に具体例または条件がある"}],
+            "missing_rule": "null_with_reason", "missing_criteria": "理由が語られていない、未読、判断不能はnullと区別した理由",
+            "recommended_analysis": "ordinal_distribution", "evidence_ids": [evidence_id]}
+
+
+class InitialLabelTests(unittest.TestCase):
+    connect = lambda self: RuntimeTests.connect(self)
+    build = lambda self, item: RuntimeTests.build(self, item)
+    run_agent = lambda self, *args: RuntimeTests.run_agent(self, *args)
+    method = lambda self, *args: RuntimeTests.method(self, *args)
+    make_service = lambda self, **kwargs: RuntimeTests.make_service(self, **kwargs)
+    drive = lambda self, run: RuntimeTests.drive(self, run)
+
+    def setUp(self):
+        RuntimeTests.setUp(self)
+        self.agent = self.valid_agent
+
+    def start(self, **extra):
+        return RuntimeTests.start(self, core_progress_version=1, initial_label_definitions_version=1, **extra)
+
+    def valid_agent(self, role, context, *_):
+        if context.get("task", {}).get("method_id") == "label-design-v1":
+            return {"summary": "Draft scale", "claims": [], "label_patches": [],
+                    "label_definitions": [draft_label_definition(context["raw_evidence"][0]["evidence_id"])]}
+        return stop(result_assessments=assess_pending_results(context)) if role == "core" else critic(context)
+
+    def test_specialist_creates_scales_before_first_core_and_preserves_manual_labels(self):
+        run = self.drive(self.start())
+        self.assertEqual(self.calls[0][0], "interpretation")
+        self.assertEqual(self.calls[0][1]["task"]["method_id"], "label-design-v1")
+        self.assertEqual(self.calls[0][1]["budget"]["completed_core_iterations"], 0)
+        first = next(ctx for role, ctx, _ in self.calls if role == "core")
+        catalog = first["initial_label_catalog"]
+        self.assertEqual(catalog["created_by"], "interpretation")
+        self.assertEqual(catalog["status"], "ai_draft")
+        self.assertEqual(len(catalog["definitions"]), 1)
+        self.assertIn(catalog["result_id"], first["iteration_review"]["pending_result_ids"])
+        self.assertEqual(first["task"]["iteration"], 1)
+        export = self.service.result("conversation", run["run_id"])
+        self.assertEqual(export["run"]["initial_label_catalog"], catalog)
+        self.assertEqual(export["decisions"][0]["initial_label_result_id"], catalog["result_id"])
+        self.assertEqual(export["label_versions"], [{"annotation_version": 0, "labels": {"u1": {"codes": ["manual"]}, "u2": {"codes": []}}}])
+        self.assertEqual(run["codebook_version"], 1)
+        self.assertEqual(sum(ctx.get("task", {}).get("method_id") == "label-design-v1" for _, ctx, _ in self.calls), 1)
+
+    def test_missing_or_empty_definitions_stop_before_core_without_retry(self):
+        for value in (None, [], "later"):
+            with self.subTest(value=value):
+                self.calls.clear()
+                self.agent = lambda *_: {"summary": "Deferred", "claims": [], "label_definitions": value}
+                run = self.drive(self.start(request_id="missing-" + str(value)))
+                self.assertEqual(run["status"], "stopped")
+                self.assertEqual(run["stop_reason"], "initial_labels_missing")
+                self.assertEqual(run["completed_core_iterations"], 0)
+                self.assertEqual(run["iteration"], 0)
+                self.assertEqual([role for role, *_ in self.calls], ["interpretation"])
+                raw = self.service.result("conversation", run["run_id"])["raw_results"]
+                self.assertEqual(raw[0]["validation_status"], "quarantined")
+                self.assertEqual(raw[0]["raw"]["label_definitions"], value)
+                self.service.run(run["run_id"])
+                self.assertEqual(len(self.calls), 1)
+
+    def test_ai_packets_omit_redundant_metadata_and_keep_full_saved_evidence(self):
+        self.snapshot["analysis"]["segments"][0]["annotation"]["private_analysis_summary"] = "Unrelated stored annotation " * 100
+        run = self.drive(self.start())
+        label_context = self.calls[0][1]
+        self.assertNotIn("labels", label_context)
+        self.assertNotIn("current_view", label_context)
+        first_core = next(ctx for role, ctx, _ in self.calls if role == "core")
+        self.assertEqual(first_core["labels"]["u1"], {"codes": ["manual"]})
+        for context in (label_context, first_core):
+            self.assertNotIn("source_hash", context["raw_evidence"][0])
+            self.assertNotIn("dataset_version", context["raw_evidence"][0])
+            self.assertTrue(context["data_version"])
+            self.assertTrue(context["raw_evidence"][0]["evidence_id"])
+        result = next(r for r in first_core["results"] if r["result_id"] == run["initial_label_result_id"])
+        self.assertEqual(result["content"]["label_definitions_ref"], "initial_label_catalog")
+        self.assertNotIn("label_definitions", result["content"])
+        saved = self.service.result("conversation", run["run_id"])["initial"]["snapshot"]
+        self.assertTrue(saved["evidence"][0]["source_hash"])
+        self.assertTrue(saved["analysis"]["segments"][0]["annotation"]["private_analysis_summary"])
+
+    def test_invalid_scales_and_unread_evidence_are_not_accepted(self):
+        mutations = [lambda d: d.update(levels=[]), lambda d: d["levels"][0].update(criteria=" "),
+                     lambda d: d.update(recommended_analysis="descriptive"),
+                     lambda d: d.update(measurement_level="ratio", data_type="category"),
+                     lambda d: d.update(missing_rule="zero"), lambda d: d.update(evidence_ids=["ev_missing"]),
+                     lambda d: d.update(data_type="category", levels=[{"value": "yes", "meaning": "Present", "criteria": "Explicit"}, {"value": "欠測", "meaning": "Missing", "criteria": "No information"}]),
+                     lambda d: d["levels"][1].update(value=1), lambda d: d["levels"].reverse()]
+        for index, mutate in enumerate(mutations):
+            def agent(role, context, *args):
+                response = self.valid_agent(role, context, *args)
+                mutate(response["label_definitions"][0])
+                return response
+            self.agent = agent
+            run = self.drive(self.start(request_id=f"invalid-scale-{index}"))
+            self.assertEqual(run["stop_reason"], "initial_labels_missing", index)
+            self.assertEqual(run["completed_core_iterations"], 0)
+        self.agent = lambda role, context, *_: {"summary": "Unread scale", "claims": [],
+            "label_definitions": [draft_label_definition(context["coverage"]["evidence_index"][1]["evidence_id"])]}
+        run = self.drive(self.start(request_id="unread-scale", context_evidence_limit=1))
+        self.assertEqual(run["stop_reason"], "initial_labels_missing")
+
+    def test_restart_adopts_received_scale_result_without_second_provider_call(self):
+        run = self.start()
+        original = self.service._drain_tasks
+        def interrupted(rid):
+            original(rid)
+            with self.service._db() as db:
+                state = self.service._read_run(db, rid)
+                if state["phase"] == "initial_labels":
+                    state["status"] = "recovery_required"
+                    self.service._write_run(db, state)
+        self.service._drain_tasks = interrupted
+        paused = self.drive(run)
+        self.assertEqual(paused["status"], "recovery_required")
+        self.assertEqual(len(self.calls), 1)
+        self.service = self.make_service()
+        self.service.resume("conversation", run["run_id"], {})
+        final = self.drive(run)
+        self.assertTrue(final["initial_label_catalog"])
+        self.assertEqual(sum(ctx.get("task", {}).get("method_id") == "label-design-v1" for _, ctx, _ in self.calls), 1)
+
+    def test_core_cannot_create_or_overwrite_specialist_definitions(self):
+        def agent(role, context, *args):
+            response = self.valid_agent(role, context, *args)
+            if role == "core":
+                response["label_definitions"] = [draft_label_definition(context["raw_evidence"][0]["evidence_id"])]
+            return response
+        self.agent = agent
+        run = self.drive(self.start())
+        self.assertEqual(run["completed_core_iterations"], 0)
+        self.assertEqual(run["tasks"][-1]["error"], "label_definition_author_invalid")
+
+    def test_saved_definition_hash_is_checked_before_first_core(self):
+        original = self.service._drain_tasks
+        def tampered(rid):
+            original(rid)
+            with self.service._db() as db:
+                state = self.service._read_run(db, rid)
+                if state["phase"] == "initial_labels":
+                    row = db.execute("SELECT result_id,raw_json FROM orchestration_results WHERE run_id=?", (rid,)).fetchone()
+                    raw = json.loads(row[1])
+                    raw["label_definitions"][0]["name"] = "Changed after validation"
+                    db.execute("UPDATE orchestration_results SET raw_json=? WHERE result_id=?", (json.dumps(raw), row[0]))
+        self.service._drain_tasks = tampered
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "execution_failure")
+        self.assertEqual(run["error"], "result_integrity_mismatch")
+        self.assertEqual(run["completed_core_iterations"], 0)
+        self.assertEqual(len(self.calls), 1)
+
+
+class InitialSpecialistTests(unittest.TestCase):
+    connect = lambda self: RuntimeTests.connect(self)
+    build = lambda self, item: RuntimeTests.build(self, item)
+    run_agent = lambda self, *args: RuntimeTests.run_agent(self, *args)
+    method = lambda self, *args: RuntimeTests.method(self, *args)
+    make_service = lambda self, **kwargs: RuntimeTests.make_service(self, **kwargs)
+    drive = lambda self, run: RuntimeTests.drive(self, run)
+
+    def setUp(self):
+        RuntimeTests.setUp(self)
+        self.agent = self.valid_agent
+
+    def start(self, **extra):
+        return RuntimeTests.start(self, core_progress_version=1, initial_label_definitions_version=1,
+                                  initial_specialist_analysis_version=1, max_iterations=3, **extra)
+
+    def valid_agent(self, role, context, *_):
+        task = context.get("task", {})
+        if task.get("phase") == "initial_analysis":
+            result = critic(context) if role == "critic" else {"summary": "Independent source inspection", "claims": []}
+            if role in {"interpretation", "verification"}:
+                result["claims"] = [{"claim_id": role + "_observed", "text": "The provided synthetic utterance contains a statement",
+                                     "kind": "observation", "evidence_ids": [context["raw_evidence"][0]["evidence_id"]]}]
+            result["label_requirements"] = [{"requirement_id": role + "_reason", "kind": "scale",
+                "name": "理由の具体性", "analysis": "明示された理由の段階別分布", "reason": "段階と欠測を区別するため",
+                "evidence_ids": [context["raw_evidence"][0]["evidence_id"]]}]
+            return result
+        if task.get("phase") == "initial_routing":
+            return core("Requirements require a specialist scale", stop=None,
+                intents=[intent("interpretation", "報告された理由の具体性尺度を根拠付きで設計", method_id="label-design-v1")])
+        if task.get("method_id") == "label-design-v1":
+            return {"summary": "Draft scale", "claims": [], "label_patches": [],
+                    "label_definitions": [draft_label_definition(context["raw_evidence"][0]["evidence_id"])]}
+        if role == "core":
+            return stop(result_assessments=assess_pending_results(context),
+                        alternatives=["Bounded examination " + str(task["iteration"])])
+        return critic(context)
+
+    def test_all_roles_report_then_core_routes_then_specialist_designs_before_round_one(self):
+        run = self.drive(self.start())
+        report = run["initial_analysis_report"]
+        self.assertTrue(report["all_roles_reported"])
+        self.assertEqual({r["role"] for r in report["reports"]}, {"interpretation", "statistics", "verification", "critic"})
+        self.assertEqual({m for m, _ in self.methods}, {"participation", "conversation_dynamics", "label_frequency"})
+        self.assertEqual(len(report["reports"]), 6)
+        self.assertEqual(len(report["label_requirements"]), 1)
+        self.assertEqual(len(report["label_requirements"][0]["sources"]), 3)
+        contexts = [context for role, context, _ in self.calls if role == "core"]
+        routing, first = contexts[:2]
+        self.assertEqual(routing["task"]["phase"], "initial_routing")
+        self.assertEqual(routing["budget"]["completed_core_iterations"], 0)
+        self.assertIsNone(routing["initial_label_catalog"])
+        self.assertEqual(first["task"]["iteration"], 1)
+        self.assertEqual(first["budget"]["completed_core_iterations"], 0)
+        self.assertTrue(first["initial_label_catalog"])
+        self.assertEqual(len(first["iteration_review"]["pending_result_ids"]), 7)
+        design = next(ctx for _, ctx, _ in self.calls if ctx.get("task", {}).get("method_id") == "label-design-v1")
+        self.assertEqual(design["initial_analysis_report"], report)
+        self.assertEqual(design["routing_instruction"]["question"], "報告された理由の具体性尺度を根拠付きで設計")
+        self.assertEqual(len(design["task"]["dependencies"]), 7)
+        export = self.service.result("conversation", run["run_id"])
+        self.assertEqual(export["decisions"][0]["phase"], "initial_routing")
+        self.assertEqual(run["completed_core_iterations"], len(export["decisions"]) - 1)
+        self.assertEqual(export["label_versions"], [{"annotation_version": 0, "labels": {"u1": {"codes": ["manual"]}, "u2": {"codes": []}}}])
+        for role, ctx, _ in self.calls:
+            if ctx.get("task", {}).get("phase") == "initial_analysis":
+                self.assertNotIn("results", ctx)
+                self.assertNotIn("current_view", ctx)
+                self.assertNotIn("initial_label_catalog", ctx)
+
+    def test_unreported_requirements_stop_without_core_or_scale_task(self):
+        original = self.agent
+        def incomplete(role, ctx, *args):
+            result = original(role, ctx, *args)
+            if role == "interpretation" and ctx["task"]["phase"] == "initial_analysis":
+                result.pop("label_requirements")
+            return result
+        self.agent = incomplete
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "initial_analysis_incomplete")
+        self.assertEqual(run["completed_core_iterations"], 0)
+        self.assertFalse(any(role == "core" for role, _, _ in self.calls))
+
+    def test_invalid_routing_cannot_bypass_specialist_or_finish_analysis(self):
+        original = self.agent
+        def invalid(role, ctx, *args):
+            if ctx["task"].get("phase") == "initial_routing":
+                return stop()
+            return original(role, ctx, *args)
+        self.agent = invalid
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "initial_routing_invalid")
+        self.assertEqual(run["completed_core_iterations"], 0)
+        self.assertFalse(any(ctx.get("task", {}).get("method_id") == "label-design-v1" for _, ctx, _ in self.calls))
+
+    def test_aggregate_survives_restart_without_reissuing_initial_tasks(self):
+        original = self.service._apply_initial_routing
+        def pause(db, run, task):
+            run["status"] = "recovery_required"
+            self.service._write_run(db, run)
+        self.service._apply_initial_routing = pause
+        paused = self.drive(self.start())
+        self.assertEqual(paused["status"], "recovery_required")
+        self.service._apply_initial_routing = original
+        self.service.resume("conversation", paused["run_id"])
+        final = self.drive(paused)
+        self.assertEqual(final["initial_analysis_report"], paused["initial_analysis_report"])
+        self.assertEqual(len(self.methods), 3)
+        self.assertEqual(sum(ctx.get("task", {}).get("phase") == "initial_analysis" for _, ctx, _ in self.calls), 3)
+        self.assertEqual(sum(ctx.get("task", {}).get("phase") == "initial_routing" for _, ctx, _ in self.calls), 1)
+
+    def test_unread_scale_requirement_is_not_reported_as_an_observation(self):
+        original = self.agent
+        def unread(role, ctx, *args):
+            result = original(role, ctx, *args)
+            if role == "interpretation" and ctx["task"].get("phase") == "initial_analysis":
+                result["label_requirements"][0]["evidence_ids"] = [ctx["coverage"]["evidence_index"][1]["evidence_id"]]
+            return result
+        self.agent = unread
+        run = self.drive(self.start(context_evidence_limit=1))
+        self.assertEqual(run["stop_reason"], "initial_analysis_incomplete")
+        self.assertTrue(any(t.get("error") == "invalid_initial_requirement" for t in run["tasks"]))
+        self.assertFalse(any(role == "core" for role, _, _ in self.calls))
+
+    def test_budget_shortage_does_not_claim_all_initial_roles_ran(self):
+        run = self.drive(self.start(max_calls=2))
+        self.assertEqual(run["stop_reason"], "call_budget_limit")
+        self.assertEqual(run["completed_core_iterations"], 0)
+        self.assertFalse(run.get("initial_analysis_report"))
+        self.assertEqual(self.calls, [])
+
+    def test_initial_explanation_without_evidence_claims_is_not_an_analysis(self):
+        original = self.agent
+        def empty(role, ctx, *args):
+            result = original(role, ctx, *args)
+            if role == "verification" and ctx["task"].get("phase") == "initial_analysis":
+                result["claims"] = []
+            return result
+        self.agent = empty
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "initial_analysis_incomplete")
+        self.assertTrue(any(t.get("error") == "initial_analysis_empty" for t in run["tasks"]))
+        self.assertFalse(any(role == "core" for role, _, _ in self.calls))
+
+
+class ProgressTests(unittest.TestCase):
+    connect = lambda self: RuntimeTests.connect(self)
+    build = lambda self, item: RuntimeTests.build(self, item)
+    run_agent = lambda self, *args: RuntimeTests.run_agent(self, *args)
+    method = lambda self, *args: RuntimeTests.method(self, *args)
+    make_service = lambda self, **kwargs: RuntimeTests.make_service(self, **kwargs)
+    drive = lambda self, run: RuntimeTests.drive(self, run)
+
+    def setUp(self):
+        RuntimeTests.setUp(self)
+
+    def start(self, **extra):
+        return RuntimeTests.start(self, core_progress_version=1, **extra)
+
+    def export(self, run):
+        return self.service.result("conversation", run["run_id"])
+
+    def test_identical_empty_work_is_stopped_without_counting_duplicate(self):
+        self.agent = lambda *_: core(result_assessments=[])
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "no_progress")
+        self.assertEqual(run["status"], "stopped")
+        self.assertEqual(run["iteration"], 2)
+        self.assertEqual(run["completed_core_iterations"], 1)
+        exported = self.export(run)
+        self.assertEqual(len(exported["decisions"]), 1)
+        self.assertEqual(len(exported["raw_results"]), 2)
+        self.assertEqual(exported["raw_results"][-1]["content_status"], "no_progress")
+        self.assertEqual(exported["raw_results"][0]["raw_hash"], exported["raw_results"][1]["raw_hash"])
+        calls_before = len(self.calls)
+        self.service = self.make_service()
+        self.service.run(run["run_id"])
+        self.assertEqual(len(self.calls), calls_before)
+        self.assertEqual(len(self.export(run)["decisions"]), 1)
+
+    def test_same_stop_after_review_does_not_fake_three_progressing_decisions(self):
+        self.agent = lambda role, ctx, *_: stop(result_assessments=assess_pending_results(ctx)) if role == "core" else critic(ctx)
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "no_progress")
+        self.assertEqual(run["completed_core_iterations"], 2)
+        self.assertEqual(sum(role == "core" for role, *_ in self.calls), 3)
+        self.assertEqual(sum(role == "critic" for role, *_ in self.calls), 1)
+
+    def test_cosmetic_summary_id_punctuation_and_array_order_changes_are_not_progress(self):
+        def agent(role, ctx, *_):
+            if role != "core":
+                return critic(ctx)
+            round_number = ctx["budget"]["iteration"]
+            refs = [e["evidence_id"] for e in ctx["raw_evidence"]]
+            return stop(summary=f"Cosmetic wording {round_number}",
+                claims=[{"claim_id": str(round_number), "text": "  A bounded observation! " if round_number > 1 else "A bounded observation",
+                         "kind": "observation", "evidence_ids": refs[::-1] if round_number > 1 else refs}],
+                alternatives=["second", "first"] if round_number > 1 else ["first", "second"],
+                result_assessments=assess_pending_results(ctx))
+        self.agent = agent
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "no_progress")
+        self.assertEqual(run["completed_core_iterations"], 2)
+        self.assertEqual(len(self.export(run)["decisions"]), 2)
+
+    def test_alternating_old_findings_are_detected_as_a_cycle(self):
+        self.agent = lambda role, ctx, *_: core(alternatives=["First" if ctx["budget"]["iteration"] % 2 else "Second"], result_assessments=[])
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "no_progress")
+        self.assertEqual(run["completed_core_iterations"], 2)
+        self.assertEqual(run["iteration"], 3)
+
+    def test_normalization_preserves_sign_decimal_and_word_boundaries(self):
+        signature = self.service._core_progress_signature
+        for before, after in (("The value is -1", "The value is 1"),
+                              ("The value is 1.2", "The value is 12"),
+                              ("not able", "notable")):
+            with self.subTest(before=before, after=after):
+                self.assertNotEqual(signature({"unresolved": [before]}), signature({"unresolved": [after]}))
+
+    def test_specialist_results_cannot_be_silently_ignored_before_completion(self):
+        self.agent = lambda role, ctx, *_: stop() if role == "core" else critic(ctx)
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "unreviewed_results")
+        self.assertEqual(run["completed_core_iterations"], 1)
+        self.assertEqual(run["tasks"][-1]["error"], "result_assessment_missing")
+
+    def test_new_evidence_and_reviewed_specialist_results_allow_three_decisions(self):
+        def agent(role, ctx, *_):
+            if role != "core":
+                return critic(ctx)
+            claim = {"claim_id": "observed", "text": "Bounded observation", "kind": "observation",
+                     "evidence_ids": [ctx["raw_evidence"][0]["evidence_id"]]}
+            if ctx["budget"]["iteration"] == 1:
+                return core(claims=[claim], intents=[intent("interpretation")], result_assessments=[])
+            return stop(claims=[claim], result_assessments=assess_pending_results(ctx))
+        self.agent = agent
+        run = self.drive(self.start())
+        self.assertEqual(run["status"], "completed", run)
+        self.assertEqual(run["completed_core_iterations"], 3)
+        decisions = self.export(run)["decisions"]
+        assessed = [entry["result_id"] for decision in decisions for entry in decision["result_assessments"]]
+        specialist_ids = {r["result_id"] for r in run["results"] if r["role"] != "core" and r["validation_status"] == "valid"}
+        self.assertEqual(set(assessed), specialist_ids)
+        self.assertEqual(len(assessed), len(set(assessed)))
+        core_contexts = [ctx for role, ctx, *_ in self.calls if role == "core"]
+        self.assertEqual([ctx["budget"]["completed_core_iterations"] for ctx in core_contexts], [0, 1, 2])
+        self.assertTrue(any(r["role"] == "verification" for r in core_contexts[1]["results"]))
+
+    def test_invalid_result_assessment_references_and_blank_reasons_are_quarantined(self):
+        for bad in ("missing", "duplicate", "unknown", "blank", "core"):
+            with self.subTest(bad=bad):
+                def agent(role, ctx, *_):
+                    if role != "core":
+                        return critic(ctx)
+                    assessments = assess_pending_results(ctx)
+                    if assessments:
+                        if bad == "missing": assessments = []
+                        elif bad == "duplicate": assessments += assessments[:1]
+                        elif bad == "unknown": assessments[0]["result_id"] = "not-in-this-run"
+                        elif bad == "blank": assessments[0]["reason"] = "  "
+                        else: assessments[0]["result_id"] = next(r["result_id"] for r in ctx["results"] if r["role"] == "core")
+                    return stop(result_assessments=assessments)
+                self.agent = agent
+                run = self.drive(self.start(request_id="bad-assessment-" + bad))
+                self.assertNotEqual(run["status"], "completed")
+                self.assertEqual(run["completed_core_iterations"], 1)
+                self.assertEqual(run["tasks"][-1]["status"], "quarantined")
+
+    def test_pending_results_are_batched_without_dropping_earlier_unreviewed_results(self):
+        def agent(role, ctx, *_):
+            if role != "core":
+                return critic(ctx) if role == "critic" else {"summary": ctx["task"]["title"], "claims": []}
+            if ctx["budget"]["iteration"] == 1:
+                return core(intents=[intent("interpretation", question=f"Check distinct scope {n}") for n in range(21)], result_assessments=[])
+            return stop(result_assessments=assess_pending_results(ctx))
+        self.agent = agent
+        run = self.drive(self.start(max_calls=80, max_tasks=80))
+        self.assertEqual(run["status"], "completed", run)
+        contexts = [ctx for role, ctx, *_ in self.calls if role == "core"]
+        self.assertEqual(len(contexts[1]["iteration_review"]["pending_result_ids"]), 20)
+        self.assertEqual(contexts[1]["iteration_review"]["omitted_pending_result_count"], 1)
+        for ctx in contexts:
+            self.assertTrue(set(ctx["iteration_review"]["pending_result_ids"]) <= {r["result_id"] for r in ctx["results"]})
+        assessed = [entry["result_id"] for decision in self.export(run)["decisions"] for entry in decision["result_assessments"]]
+        self.assertEqual(len(assessed), 22)
+        self.assertEqual(len(assessed), len(set(assessed)))
+
+    def test_new_ids_for_identical_specialist_results_are_not_new_evidence(self):
+        def agent(role, ctx, *_):
+            if role != "core":
+                return {"summary": "Same saved finding", "claims": []}
+            question = "Initial examination" if ctx["budget"]["iteration"] == 1 else "Alternative examination"
+            return core(intents=[intent("interpretation", question=question)], result_assessments=assess_pending_results(ctx))
+        self.agent = agent
+        run = self.drive(self.start())
+        self.assertEqual(run["stop_reason"], "no_progress")
+        self.assertEqual(run["completed_core_iterations"], 2)
+        results = [r for r in run["results"] if r["role"] == "interpretation"]
+        self.assertEqual(len(results), 2)
+        self.assertNotEqual(results[0]["result_id"], results[1]["result_id"])
+        self.assertEqual(results[0]["raw_hash"], results[1]["raw_hash"])
+
+
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

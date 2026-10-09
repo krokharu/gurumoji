@@ -299,8 +299,13 @@ def extract_ai_token_usage(provider: str, model: str, response: dict[str, Any], 
     return result
 
 
-def json_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
-    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+def json_messages(system_prompt: str, user_prompt: str, data_messages=None) -> list[dict[str, str]]:
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    if data_messages is not None:
+        if not isinstance(data_messages, list) or any(not isinstance(value, str) for value in data_messages):
+            raise ValueError("Data messages must be a list of strings")
+        messages.extend({"role": "user", "content": value} for value in data_messages)
+    return messages
 
 
 def openai_request(
@@ -417,6 +422,8 @@ def call_ai_json(
     check_cancelled: Callable[[], None] | None = None,
     usage_callback: Callable[[dict[str, Any]], None] | None = None, base_url: str = "",
     ai_efforts: dict | None = None,
+    max_output_tokens: int | None = None,
+    data_messages: list[str] | None = None,
 ) -> dict[str, Any]:
     reasoning = effort_payload(provider, model, schema_name, ai_efforts)
     if provider == "openai":
@@ -440,6 +447,16 @@ def call_ai_json(
     else:
         raise RuntimeError(f"未対応の AI プロバイダーです: {provider}")
     url, headers, payload = request
+    if data_messages is not None:
+        messages = json_messages(system_prompt, user_prompt, data_messages)
+        if provider == "google":
+            payload["contents"] = [{"role": "user", "parts": [{"text": entry["content"]} for entry in messages[1:]]}]
+        else:
+            payload["input" if provider == "openai" else "messages"] = messages
+    if max_output_tokens is not None:
+        if type(max_output_tokens) is not int or max_output_tokens < 1 or provider != "lmstudio":
+            raise ValueError("Output reservation requires a positive local-model token limit")
+        payload["max_tokens"] = max_output_tokens
     response = post(url, headers, payload, check_cancelled=check_cancelled)
     # Usage is recorded before the completeness check: a truncated reply is still billed.
     usage = extract_ai_token_usage(provider, model, response, providers)

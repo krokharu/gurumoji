@@ -39,6 +39,41 @@ class DurableOutputIntegrationTests(unittest.TestCase):
         package = self.client.get(artifact["url"]).get_json()
         self.assertEqual(package["orchestration"]["run"]["run_id"], rid)
         self.assertTrue(package["orchestration"]["raw_results"])
+        catalog = package["orchestration"]["run"]["initial_label_catalog"]
+        self.assertEqual(catalog["created_by"], "interpretation")
+        self.assertEqual(catalog["status"], "ai_draft")
+        self.assertTrue(catalog["definitions"])
+        self.assertEqual(self.calls[0][1]["task"]["phase"], "initial_analysis")
+        first_core = next(context for role, context, *_ in self.calls if role == "core" and context["task"]["phase"] == "core")
+        self.assertEqual(first_core["initial_label_catalog"], catalog)
+        markdown = self.client.get(self.url + "/" + rid + "/export.md").get_data(as_text=True)
+        self.assertIn("初回のラベル・尺度（専門エージェント作成・AI下書き）", markdown)
+        self.assertIn("理由の具体性", markdown)
+
+    def test_repeated_core_results_never_finalize_or_publish_and_progress_cannot_be_disabled(self):
+        def repeated(*args):
+            result = self.response(*args)
+            if args[5] == 'analysis_orchestration_core' and json.loads(args[4])["task"]["phase"] != 'initial_routing':
+                result.update(intents=[], stop={'reason': 'question_satisfied', 'summary': 'Same bounded finding', 'unresolved': []})
+            return result
+        publisher = app.analysis_orchestration_publication_service()
+        with patch.object(app, 'call_orchestration_ai_json', side_effect=repeated), \
+             patch.object(publisher, 'finalize') as finalize:
+            payload = self.payload()
+            payload['core_progress_version'] = 0
+            rid = self.start(payload)
+            self.service.run(rid)
+            state = self.state(rid)
+            self.assertEqual(state['config']['core_progress_version'], 1)
+            self.assertEqual(state['status'], 'stopped', state)
+            self.assertEqual(state['stop_reason'], 'no_progress')
+            self.assertEqual(state['completed_core_iterations'], 2)
+            self.assertEqual(state['iteration'], 3)
+            self.assertNotEqual(state['publication']['save_status'], 'saved')
+            finalize.assert_not_called()
+            call_count = len(self.calls)
+            self.state(rid)
+            self.assertEqual(len(self.calls), call_count)
 
     def test_completed_statistics_are_not_repeated_after_later_initial_failure(self):
         original = self.service.initial_builder.run_stage

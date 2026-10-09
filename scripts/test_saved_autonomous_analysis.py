@@ -41,21 +41,57 @@ def source_stamp(database: Path, item_id: str) -> str:
     return hashlib.sha256(json.dumps(list(row), ensure_ascii=False).encode()).hexdigest()
 
 
-def assess_run(state: dict) -> dict:
+def assess_run(state: dict, decisions: list | None = None) -> dict:
     """Successful startup or deterministic initial analysis alone cannot pass."""
     tasks = state.get("tasks", [])
     completed = [t for t in tasks if t.get("status") == "succeeded"]
-    core = [t for t in completed if t.get("role") == "core"]
+    core = [t for t in completed if t.get("role") == "core" and t.get("phase") != "initial_routing"]
+    adopted_core_count = state.get("completed_core_iterations", len(core))
     failed = [t for t in tasks if t.get("status") in {"failed", "uncertain", "quarantined"}]
     checks = {
         "terminal_success": state.get("status") == "completed",
         "core_iteration_recorded": state.get("iteration", 0) > 0,
         "core_result_succeeded": bool(core),
-        "core_iterations_repeated": len(core) >= 2,
-        "minimum_core_iterations_satisfied": len(core) >= state.get("config", {}).get("min_iterations", 2),
+        "core_iterations_repeated": adopted_core_count >= 2,
+        "minimum_core_iterations_satisfied": adopted_core_count >= state.get("config", {}).get("min_iterations", 2),
         "ai_usage_recorded": state.get("usage", {}).get("measured_calls", 0) > 0,
         "no_failed_tasks": not failed,
     }
+    if state.get("config", {}).get("specialist_orchestration_version"):
+        reviews = [d for d in decisions or [] if d.get("role") == "orchestrator"]
+        assessed = [a["result_id"] for d in reviews for a in d.get("result_assessments", [])]
+        expected = {r["result_id"] for r in state.get("results", [])
+                    if r.get("role") not in {"core", "orchestrator"} and r.get("validation_status") == "valid" and not r.get("stale")}
+        checks.pop("core_iterations_repeated")
+        checks["minimum_core_iterations_satisfied"] = adopted_core_count >= max(1, state["config"].get("min_iterations", 0))
+        checks["specialist_results_reviewed"] = bool(expected and reviews and set(assessed) == expected and len(assessed) == len(set(assessed)))
+        checks["core_does_not_assess_individual_results"] = bool(decisions) and all(
+            not any(d.get(k) for k in ("result_assessments", "critique_responses", "label_decisions"))
+            for d in decisions or [] if d.get("role", "core") == "core")
+        checks["independent_label_review_saved"] = any(t.get("phase") == "label_review" and t.get("role") == "critic" for t in completed)
+    catalog = state.get("initial_label_catalog") or {}
+    if state.get("config", {}).get("initial_label_definitions_version"):
+        design = next((t for t in completed if t.get("role") == "interpretation"
+                       and t.get("method_id") == "label-design-v1" and t.get("result_id") == catalog.get("result_id")), None)
+        checks["initial_specialist_labels_saved"] = bool(design and catalog.get("created_by") == "interpretation"
+                                                        and catalog.get("status") == "ai_draft" and catalog.get("definitions"))
+        first_core = next((t for t in tasks if t.get("role") == "core" and t.get("phase") != "initial_routing"), None)
+        checks["initial_labels_before_core"] = bool(design and first_core and tasks.index(design) < tasks.index(first_core)
+                                                   and design.get("ended_at") and first_core.get("started_at")
+                                                   and design["ended_at"] <= first_core["started_at"])
+    if state.get("config", {}).get("initial_specialist_analysis_version"):
+        initial_tasks = [t for t in tasks if t.get("phase") == "initial_analysis"]
+        routing = next((t for t in completed if t.get("phase") == "initial_routing"), None)
+        expected = {("interpretation", "agent-v1"), ("verification", "agent-v1"), ("critic", "agent-v1"),
+                    ("statistics", "participation"), ("statistics", "conversation_dynamics"), ("statistics", "label_frequency")}
+        checks["all_initial_specialists_reported"] = bool(state.get("initial_analysis_report", {}).get("all_roles_reported")
+            and (state.get("config", {}).get("model_context_version") == 1 or len(initial_tasks) == 6)
+            and {(t.get("role"), t.get("method_id")) for t in initial_tasks} == expected
+            and all(t.get("status") == "succeeded" for t in initial_tasks))
+        checks["core_routes_after_reports_before_scale_design"] = bool(routing and design
+            and routing.get("started_at") and routing.get("ended_at") and design.get("started_at")
+            and all(t.get("ended_at") and t["ended_at"] <= routing["started_at"] for t in initial_tasks)
+            and routing["ended_at"] <= design["started_at"])
     return {"passed": all(checks.values()), "checks": checks,
             "analysis_completed": state.get("status") == "completed",
             "loop_execution_verified": all(value for key, value in checks.items() if key != "terminal_success")
@@ -63,6 +99,8 @@ def assess_run(state: dict) -> dict:
                      (state.get("status") == "stopped" and state.get("stop_reason") == "human_review_required")),
             "core_iterations_started": state.get("iteration", 0),
             "core_iterations_succeeded": len(core),
+            "core_iterations_adopted": adopted_core_count,
+            "initial_label_definition_count": len(catalog.get("definitions", [])),
             "succeeded_tasks_by_role": dict(Counter(t["role"] for t in completed)),
             "task_status_counts": dict(Counter(t.get("status", "unknown") for t in tasks)),
             "failed_task_count": len(failed)}
@@ -74,9 +112,12 @@ def main() -> int:
     parser.add_argument("--item-id", help="Required if more than one interview is saved")
     parser.add_argument("--model", help="Loaded local model; does not alter app configuration")
     parser.add_argument("--max-iterations", type=int, default=None,
-                        help="Optional hard cap; auto mode performs at least three valid Core decisions")
+                        help="Optional hard cap for Core integration rounds; specialist reviews are counted separately")
     parser.add_argument("--time-limit", type=int, default=600)
     parser.add_argument("--call-timeout", type=int, default=300)
+    parser.add_argument("--model-context", action="store_true", help="Evaluate versioned token budgets and full-source paging")
+    parser.add_argument("--max-calls", type=int, default=16)
+    parser.add_argument("--max-tasks", type=int, default=32)
     parser.add_argument("--evidence-limit", type=int, default=24,
                         help="Evidence rows per AI call; full source stays in the fixed snapshot")
     parser.add_argument("--text-limit", type=int, default=6000)
@@ -124,6 +165,21 @@ def main() -> int:
               "provider": "lmstudio", "mock_ai": False, "publication_targets": [],
               "no_think_requested": args.no_think,
               "calls": [], "not_run": ["audio transcription", "diarization", "browser UI", "Vault publication"]}
+    report["code_sha256"] = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in (
+        "scripts/test_saved_autonomous_analysis.py", "src/gurumoji/analysis_core.py",
+        "src/gurumoji/analysis_orchestration.py", "src/gurumoji/services/analysis_orchestration_adapters.py",
+        "src/gurumoji/services/model_context.py", "src/gurumoji/method_experts.py",
+        "src/gurumoji/knowledge_builder/expert_knowledge_context.py", "src/gurumoji/services/ai/client.py", "src/gurumoji/app.py")}
+    # Retain exactly the tested code bytes before any later local edits.
+    code_archive = destination / "code-v25"
+    for name, expected_hash in report["code_sha256"].items():
+        data = (ROOT / name).read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected_hash:
+            raise RuntimeError("Code changed before test archival")
+        archived = code_archive / name
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_bytes(data)
+    (code_archive / "sha256.json").write_text(json.dumps(report["code_sha256"], indent=2), encoding="utf-8")
     started = time.monotonic()
     try:
         config = app.load_token_config()
@@ -170,20 +226,27 @@ def main() -> int:
             if positional[0] != "lmstudio":
                 raise RuntimeError("External provider is prohibited in this test")
             role = positional[5].removeprefix("analysis_orchestration_")
-            context = json.loads(positional[4])
+            from gurumoji.services.model_context import restored_reference_context
+            context = restored_reference_context(positional[4], keywords.get("data_messages"))
             call = {"role": role, "iteration": context["task"].get("iteration"),
+                    "phase": context["task"].get("phase"),
+                    "task_id": context["task"]["task_id"], "method_id": context["task"].get("method_id"),
                     "evidence_count": len(context.get("raw_evidence", [])),
                     "coverage": {k: v for k, v in context.get("coverage", {}).items() if k != "evidence_index"},
-                    "prompt_characters": len(positional[3]) + len(positional[4]), "status": "running"}
+                    "prompt_characters": len(positional[3]) + len(positional[4]) + sum(len(row) for row in keywords.get("data_messages", [])),
+                    "instruction_characters": len(positional[3]) + len(positional[4]),
+                    "data_message_count": len(keywords.get("data_messages", [])), "status": "running"}
             report["calls"].append(call)
             print(f"AI {role}, iteration {call['iteration']}, evidence {call['evidence_count']}", flush=True)
             tick = time.monotonic()
             try:
                 actual_arguments = list(positional)
-                if args.no_think:
+                if args.no_think and not args.model_context:
                     actual_arguments[3] += "\n/no_think"
                 result = actual_call(*actual_arguments, **keywords)
                 call["status"] = "returned"
+                call["label_definition_count"] = len(result.get("label_definitions", []))
+                call["label_requirement_count"] = len(result.get("label_requirements", []))
                 return result
             except Exception as exc:
                 call.update(status="failed", error_type=type(exc).__name__)
@@ -210,7 +273,8 @@ def main() -> int:
                 "time_limit_seconds": args.time_limit, "call_timeout_seconds": args.call_timeout,
                   "context_evidence_limit": args.evidence_limit, "context_text_limit": args.text_limit,
                   "context_index_limit": args.index_limit,
-                "max_calls": 16, "max_tasks": 32, "concurrency": 1, "request_id": uuid.uuid4().hex})
+                "model_context_version": int(args.model_context),
+                "max_calls": args.max_calls, "max_tasks": args.max_tasks, "concurrency": 1, "request_id": uuid.uuid4().hex})
             report["start_http_status"] = response.status_code
             if response.status_code != 202:
                 report["reason_code"] = (response.get_json() or {}).get("reason_code", "start_rejected")
@@ -225,7 +289,7 @@ def main() -> int:
                 if status_response.status_code != 200 or not isinstance(status_body.get("run"), dict):
                     raise RuntimeError("The saved-run status endpoint did not return a run")
                 state = status_body["run"]
-                report.update(assess_run(state))
+                report.update(assess_run(state, service.result(item_id, run_id)["decisions"]))
                 report.update(run_status=state["status"], stop_reason=state.get("stop_reason"),
                               review_status=state.get("review_status"), usage=state.get("usage"),
                               publication=state.get("publication"))

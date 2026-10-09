@@ -1608,6 +1608,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
 def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
     check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
+    max_output_tokens=None, data_messages=None,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1629,6 +1630,8 @@ def call_orchestration_ai_json(
         extract_lmstudio=extract_lmstudio_text,
         providers=AI_MODEL_PROVIDERS, check_cancelled=check_cancelled,
         usage_callback=usage_callback, base_url=base_url,
+        max_output_tokens=max_output_tokens,
+        data_messages=data_messages,
     )
 
 

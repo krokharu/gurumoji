@@ -9,26 +9,29 @@ This module does not send data, publish notes, or change source annotations itse
 from __future__ import annotations
 
 import copy
+from difflib import SequenceMatcher
 import json
 import math
 import sqlite3
 import threading
 import time
 import uuid
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .analysis_core import (AnalysisContractError, canonical, fingerprint,
-                            validate_publication_targets, EFFECTIVE_PUBLICATION_WRITERS)
+                            validate_publication_targets, validate_label_definitions, EFFECTIVE_PUBLICATION_WRITERS)
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
     read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
 
 SCHEMA_VERSION = 1
 ROLES = {"core": "Core", "handler": "Handler", "interpretation": "会話解釈",
-         "statistics": "数量・統計", "verification": "独立検証", "critic": "批判者"}
-AI_ROLES = frozenset({"core", "interpretation", "verification", "critic"})
+         "statistics": "数量・統計", "verification": "独立検証", "critic": "批判者",
+         "orchestrator": "専門オーケストレータ"}
+AI_ROLES = frozenset({"core", "interpretation", "verification", "critic", "orchestrator"})
 INITIAL_SECTIONS = frozenset({"segments", "annotations", "automatic", "manual", "research", "config", "cautions", "classification"})
 LABEL_FIELDS = frozenset({"code", "codes", "theme", "sentiment", "dialogue_act", "importance", "review", "category"})
 METHODS = frozenset({"participation", "conversation_dynamics", "label_frequency"})
@@ -145,10 +148,17 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "provider_policy": payload.get("provider_policy", "local_only"),
               "cloud_consent": payload.get("cloud_consent") is True,
               "adapter_version": payload.get("adapter_version", "core-handler-prompts-1"),
+              "core_progress_version": payload.get("core_progress_version", 0),
+              "initial_label_definitions_version": payload.get("initial_label_definitions_version", 0),
+              "initial_specialist_analysis_version": payload.get("initial_specialist_analysis_version", 0),
+              "model_context_version": payload.get("model_context_version", 0),
+              "context_reference_version": payload.get("context_reference_version", 0),
+              "specialist_orchestration_version": payload.get("specialist_orchestration_version", 0),
+              "expert_step_ids": payload.get("expert_step_ids"),
               "template_version": payload.get("template_version", "existing-analysis-v1"),
               "template_config": payload.get("template_config", {}), "roles": payload.get("roles", {}),
               "importance_threshold": payload.get("importance_threshold", "medium"),
-              "min_iterations": 3 if mode == "auto" else 0,
+              "min_iterations": 3 if mode == "auto" and not payload.get("specialist_orchestration_version") else 0,
               "max_iterations": payload.get("max_iterations", None if mode == "auto" else 5),
               "time_limit_seconds": payload.get("time_limit_seconds", None if mode == "auto" else 300),
               "max_calls": payload.get("max_calls", 24), "max_tasks": payload.get("max_tasks", 40),
@@ -160,10 +170,19 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "context_evidence_limit": payload.get("context_evidence_limit", 120),
               "context_text_limit": payload.get("context_text_limit", 60000)}
     for key, low, high in (("max_calls", 1, 10000), ("max_tasks", 1, 20000), ("concurrency", 1, 4),
+                           ("core_progress_version", 0, 1),
+                           ("initial_label_definitions_version", 0, 1),
+                            ("initial_specialist_analysis_version", 0, 1),
+                            ("model_context_version", 0, 1),
+                            ("context_reference_version", 0, 1),
+                            ("specialist_orchestration_version", 0, 1),
                            ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000),
                            ("context_evidence_limit", 1, 120), ("context_text_limit", 1, 60000)):
         if type(config[key]) is not int or not low <= config[key] <= high:
             raise _error(f"{key}は{low}〜{high}の整数です。", field=key)
+    steps = config["expert_step_ids"]
+    if steps is not None and (not isinstance(steps, list) or not 0 < len(steps) <= 30 or any(not isinstance(step, str) or not step for step in steps) or len(set(steps)) != len(steps)):
+        raise _error("専門家の手順IDを重複のない配列で指定してください。", field="expert_step_ids")
     if type(config["context_index_limit"]) is not int or not 0 <= config["context_index_limit"] <= 120:
         raise _error("context_index_limitは0〜120の整数です。0は索引の省略なしです。", field="context_index_limit")
     for key in ("max_iterations", "time_limit_seconds"):
@@ -205,6 +224,8 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
     config["publication_targets"] = validate_publication_targets(payload.get("publication_targets", []))
     config["effective_publication_writers"] = list(EFFECTIVE_PUBLICATION_WRITERS) if config["publication_targets"] else []
     canonical(config)
+    if config["initial_specialist_analysis_version"] and not (config["initial_label_definitions_version"] and config["core_progress_version"]):
+        raise _error("初回の全専門家分析には尺度出力と結果評価の契約が必要です。", "invalid_initial_contract")
     return copy.deepcopy(config)
 
 
@@ -627,6 +648,15 @@ class AnalysisOrchestrationService:
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
         result["tasks"] = tasks
+        result["completed_core_iterations"] = self._completed_core_iterations(db, run)
+        if run["config"].get("initial_label_definitions_version"):
+            try:
+                result["initial_label_catalog"] = self._initial_label_catalog(db, run)
+            except AnalysisContractError as exc:
+                result["initial_label_catalog"] = None
+                result["initial_label_error"] = exc.code
+        if run.get("initial_analysis_report"):
+            result["initial_analysis_report"] = copy.deepcopy(run["initial_analysis_report"])
         result["events"] = [{"seq": row[0], **json.loads(row[1])} for row in db.execute(
             "SELECT seq,payload_json FROM orchestration_events WHERE run_id=? ORDER BY seq", (run["run_id"],))]
         result["usage"] = self._usage(db, run)
@@ -793,7 +823,100 @@ class AnalysisOrchestrationService:
 
     def _completed_core_iterations(self, db, run):
         # Count adopted decisions, never queued attempts or quarantined results.
-        return db.execute("SELECT COUNT(*) FROM orchestration_decisions WHERE run_id=?", (run["run_id"],)).fetchone()[0]
+        return sum(json.loads(row[0]).get("phase") != "initial_routing" and json.loads(row[0]).get("role", "core") == "core" for row in db.execute(
+            "SELECT payload_json FROM orchestration_decisions WHERE run_id=?", (run["run_id"],)))
+
+    def _pending_result_assessments(self, db, run):
+        assessed = {entry["result_id"] for row in db.execute(
+            "SELECT payload_json FROM orchestration_decisions WHERE run_id=?", (run["run_id"],))
+            for entry in json.loads(row[0]).get("result_assessments", [])}
+        return [meta["result_id"] for row in db.execute(
+            "SELECT state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],))
+            if (meta := json.loads(row[0]))["role"] not in {"core", "orchestrator"}
+            and meta["validation_status"] == "valid" and not meta.get("stale")
+            and meta["result_id"] not in assessed]
+
+    def _review_pending(self, db, run, task):
+        pending = self._pending_result_assessments(db, run)
+        if task["role"] != "orchestrator":
+            return pending
+        domain = task["intent"]["scope"]["domain"]
+        return [rid for rid in pending if self._result_domain(db, rid) == domain]
+
+    @staticmethod
+    def _result_domain(db, result_id):
+        row = db.execute("SELECT t.state_json,r.raw_json FROM orchestration_tasks t JOIN orchestration_results r ON r.task_id=t.task_id WHERE r.result_id=?", (result_id,)).fetchone()
+        task = json.loads(row[0])
+        return "labels" if task["phase"] == "initial_labels" or task.get("intent", {}).get("scope") == "label_review" or json.loads(row[1]).get("label_patches") else task["role"]
+
+    def _domain_reports(self, db, run):
+        reports = []
+        events = [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_events WHERE run_id=?", (run["run_id"],))]
+        followups = self._tasks(db, run["run_id"])
+        for (encoded,) in db.execute("SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run["run_id"],)):
+            decision = json.loads(encoded)
+            if decision.get("role") != "orchestrator":
+                continue
+            row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=?", (decision["result_id"],)).fetchone()
+            meta = json.loads(row[1])
+            if meta["validation_status"] != "valid" or fingerprint(json.loads(row[0])) != meta["raw_hash"]:
+                raise _error("専門オーケストレータ報告の整合性を確認できません。", "result_integrity_mismatch")
+            task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (meta["task_id"],)).fetchone()[0])
+            self._check_input_manifest(run, task, meta)
+            reports.append({"domain": decision["domain"], "task_id": meta["task_id"], "result_id": meta["result_id"], "raw_hash": meta["raw_hash"],
+                "source_result_ids": [a["result_id"] for a in decision["result_assessments"]],
+                "summary": decision["summary"], "claims": decision.get("claims", []),
+                "alternatives": decision.get("alternatives", []), "unresolved": decision.get("unresolved", []),
+                "dispositions": {value: sum(a["disposition"] == value for a in decision["result_assessments"]) for value in ("adopt", "reject", "defer")},
+                "annotation_version": decision["annotation_version"], "status": "ai_draft", "read_scope": "specialist_result_review"})
+            reports[-1]["deferred_followup_count"] = sum(e["type"] == "intent_deferred" and e.get("review_result_id") == meta["result_id"] for e in events)
+            statuses = [t["status"] for t in followups if t.get("parent_task_id") == task["task_id"]]
+            reports[-1]["followup_status_counts"] = {status: statuses.count(status) for status in sorted(set(statuses))}
+        return reports
+
+    @staticmethod
+    def _core_progress_signature(raw):
+        # IDs, order, punctuation and summary-only paraphrases do not add evidence.
+        def text(value):
+            # Preserve internal punctuation, signs and word boundaries: -1 and
+            # 1 or 1.2 and 12 must never be collapsed into the same assertion.
+            return " ".join(unicodedata.normalize("NFKC", value).casefold().split()).rstrip("。.!?！？")
+        def items(values):
+            return sorted({_json(value) for value in values})
+        return fingerprint({
+            "claims": items({"text": text(claim["text"]), "kind": claim["kind"],
+                              "evidence_ids": sorted(set(claim["evidence_ids"]))}
+                             for claim in raw.get("claims", [])),
+            "alternatives": sorted({text(value) for value in raw.get("alternatives", [])}),
+            "unresolved": sorted({text(value) for value in raw.get("unresolved", [])}),
+            "intents": items({**{key: intent.get(key) for key in (
+                "role", "kind", "result_id", "method_id", "label_field", "scope", "label_dependent", "replicate_id")},
+                "question": text(intent["question"]), "evidence_ids": sorted(set(intent.get("evidence_ids", []))),
+                "initial_sections": sorted(set(intent.get("initial_sections", [])))}
+                for intent in raw.get("intents", [])),
+        })
+
+    def _new_result_basis(self, db, run, history, assessments):
+        def basis(result_id):
+            row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE run_id=? AND result_id=?",
+                             (run["run_id"], result_id)).fetchone()
+            metadata = json.loads(row[1])
+            if fingerprint(json.loads(row[0])) != metadata["raw_hash"]:
+                raise _error("専門家結果のhashが一致しません。", "result_integrity_mismatch")
+            task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                        (metadata["task_id"], run["run_id"])).fetchone()[0])
+            return fingerprint({"role": metadata["role"], "raw_hash": metadata["raw_hash"],
+                "data_version": metadata["dataset_version"], "annotation_version": metadata["annotation_version"],
+                "scope": task["intent"].get("scope"), "target_version": task["intent"].get("target_version"),
+                "evidence_ids": sorted(set(task["intent"].get("evidence_ids", [])))})
+        seen = {basis(entry["result_id"]) for decision in history for entry in decision.get("result_assessments", [])}
+        fresh = []
+        for result_id in assessments:
+            key = basis(result_id)
+            if key not in seen:
+                fresh.append(result_id)
+                seen.add(key)
+        return fresh
 
     def _continue_minimum_iterations(self, db, run, reason):
         minimum = run["config"].get("min_iterations", 0)
@@ -865,6 +988,11 @@ class AnalysisOrchestrationService:
             task = json.loads(existing[0])
             self._event(db, run["run_id"], "duplicate_suppressed", "同じ入力・目的・対象版のタスクを再発注しません。", task_id=task["task_id"])
             return None
+        if run["config"].get("specialist_orchestration_version") and role == "statistics" and method in {"participation", "conversation_dynamics"} and phase != "initial_analysis":
+            reusable = next((t for t in tasks if t["role"] == "statistics" and t["method_id"] == method and t["status"] == "succeeded" and t["dataset_version"] == run["input_hash"]), None)
+            if reusable:
+                self._event(db, run["run_id"], "duplicate_suppressed", "固定入力の同じ全件集計は保存済み結果を参照し、再計算しません。", task_id=reusable["task_id"], result_id=reusable["result_id"])
+                return None
         if len(tasks) >= run["config"]["max_tasks"]:
             self._stop(db, run, "task_budget_limit")
             return None
@@ -926,15 +1054,23 @@ class AnalysisOrchestrationService:
         initial = self._initial(db, run["initial_id"])
         raw = [e for e in initial["evidence"] if not e["excluded"]]
         selected = task["intent"].get("evidence_ids", [])
+        if run["config"].get("specialist_orchestration_version") and task["role"] == "critic" and task["phase"] == "stop_review":
+            selected = sorted({ref for claim in run["current_view"].get("claims", []) for ref in claim["evidence_ids"]})
         if selected:
             raw = [e for e in raw if e["evidence_id"] in selected]
         available_count = len(raw)
         bounded, size = [], 0
         for evidence in raw:
-            if len(bounded) >= run["config"]["context_evidence_limit"] or size + len(evidence["text"]) > run["config"]["context_text_limit"]:
+            page = run["config"].get("model_context_version") and task["phase"] == "initial_analysis" and task["kind"] == "ai"
+            if not page and (len(bounded) >= run["config"]["context_evidence_limit"] or size + len(evidence["text"]) > run["config"]["context_text_limit"]):
                 break
             bounded.append(evidence); size += len(evidence["text"])
         raw = bounded
+        if run["config"].get("initial_label_definitions_version"):
+            # The immutable full snapshot keeps per-row hashes and versions.
+            # AI needs the root dataset version, source text and stable IDs only.
+            raw = [{key: entry[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
+                   for entry in raw]
         evidence_index = [{"evidence_id": e["evidence_id"], "utterance_id": e["utterance_id"]}
                           for e in initial["evidence"] if not e["excluded"]]
         index_count = len(evidence_index)
@@ -945,6 +1081,36 @@ class AnalysisOrchestrationService:
                     "complete": len(raw) == available_count, "scope": "selected" if selected else "dataset",
                     "evidence_index": evidence_index, "index_available_count": index_count,
                     "index_provided_count": len(evidence_index), "index_omitted_count": index_count - len(evidence_index)}
+        initial_report = copy.deepcopy(run.get("initial_analysis_report"))
+        scope = task["intent"].get("scope") or {}
+        if run["config"].get("model_context_version") and initial_report and "requirement_keys" in scope:
+            initial_report["full_report_hash"] = fingerprint(initial_report)
+            initial_report["label_requirements"] = [entry for entry in initial_report["label_requirements"] if fingerprint(entry) in scope["requirement_keys"]]
+            source_results = {source["result_id"] for entry in initial_report["label_requirements"] for source in entry["sources"]}
+            initial_report["reports"] = [report for report in initial_report["reports"] if report["result_id"] in source_results]
+            initial_report["requirement_scope"] = "selected; remaining requirements have separate Handler tasks"
+        if isinstance(task["intent"].get("scope"), dict) and task["intent"]["scope"].get("owned_evidence_ids"):
+            coverage["page"] = copy.deepcopy(task["intent"]["scope"])
+        if task["role"] == "interpretation" and task["phase"] == "initial_labels" and task["method_id"] == "label-design-v1":
+            return {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task),
+                    "question": run["config"]["question"], "data_version": run["input_hash"],
+                    "annotation_version": task["annotation_version"], "raw_evidence": copy.deepcopy(raw),
+                    "coverage": coverage, "research_mode": "exploratory", "execution_allowed": False,
+                    "initial_analysis_report": initial_report,
+                    "routing_instruction": copy.deepcopy(task["intent"]),
+                    "budget": {"iteration": run["iteration"], "completed_core_iterations": self._completed_core_iterations(db, run)}}
+        if task["phase"] == "initial_analysis" and task["role"] in {"interpretation", "critic"}:
+            # Initial specialists inspect the same source independently, even
+            # when a faster worker has already reported to the Handler.
+            context = {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task),
+                       "question": run["config"]["question"], "data_version": run["input_hash"],
+                       "annotation_version": task["annotation_version"], "raw_evidence": copy.deepcopy(raw),
+                       "coverage": coverage, "research_mode": "exploratory", "execution_allowed": False}
+            if task["role"] == "critic":
+                context["review_target"] = {"target_id": task["intent"]["target_id"],
+                    "target_version": task["intent"]["target_version"],
+                    "view": {"question": run["config"]["question"], "scope": "initial_analysis_plan"}}
+            return context
         # Deliberately construct the blind packet from an allowlist. Even the
         # Core-written question/success criteria may disclose its expected answer.
         if task["role"] == "verification" and task["intent"].get("kind") == "clarification":
@@ -974,10 +1140,18 @@ class AnalysisOrchestrationService:
                         "content": content if len(target[0]) <= 16000 else {"content_excerpt": target[0][:16000], "truncated": True}},
                     "blind_first": False, "execution_allowed": False, "research_mode": "exploratory"}
         if task["role"] == "verification":
-            return {"schema_version": SCHEMA_VERSION, "task": {"task_id": task["task_id"], "role": "verification"},
-                    "question": "原文から観察事実、矛盾、判断できない点を独立に確認してください。",
+            return {"schema_version": SCHEMA_VERSION, "task": {"task_id": task["task_id"], "role": "verification",
+                    **({"phase": "initial_analysis"} if task["phase"] == "initial_analysis" else {})},
+                    "question": run["config"]["question"] if task["phase"] == "initial_analysis" else "原文から観察事実、矛盾、判断できない点を独立に確認してください。",
                     "data_version": run["input_hash"], "annotation_version": task["annotation_version"],
                     "raw_evidence": copy.deepcopy(raw), "coverage": coverage, "blind_first": True,
+                    "research_mode": "exploratory"}
+        if task["phase"] == "label_review":
+            return {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task),
+                    "question": task["title"], "data_version": run["input_hash"],
+                    "annotation_version": task["annotation_version"], "raw_evidence": copy.deepcopy(raw),
+                    "coverage": coverage, "initial_label_catalog": self._initial_label_catalog(db, run),
+                    "review_target": {"target_id": task["intent"]["target_id"], "target_version": task["intent"]["target_version"]},
                     "research_mode": "exploratory"}
         public = self._public(db, run)
         accepted = []
@@ -987,10 +1161,20 @@ class AnalysisOrchestrationService:
                 content = json.loads(row[0])
                 if fingerprint(content) != result["raw_hash"]:
                     raise _error("保存済み結果のhashが一致しません。", "result_integrity_mismatch")
-                if len(row[0]) > 16000:
+                if result["result_id"] in run.get("initial_label_result_ids", [run.get("initial_label_result_id")]):
+                    content = {"summary": content.get("summary", ""), "claims": content.get("claims", []),
+                               "label_definitions_ref": "initial_label_catalog"}
+                elif len(row[0]) > 16000:
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", [])[:24], "omitted_full_result": True}
                 accepted.append({**result, "content": content})
-        accepted = accepted[-20:]
+        pending_results = self._review_pending(db, run, task) if run["config"].get("core_progress_version") else []
+        pending_batch = pending_results[:20]
+        if task["role"] in {"core", "orchestrator"} and run["config"].get("core_progress_version"):
+            batch = [result for result in accepted if result["result_id"] in pending_batch]
+            previous = [result for result in accepted if result["result_id"] not in pending_batch]
+            accepted = batch + (previous[-(20 - len(batch)):] if len(batch) < 20 else [])
+        else:
+            accepted = accepted[-20:]
         context = {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task), "question": run["config"]["question"],
                    "data_version": run["input_hash"], "annotation_version": task["annotation_version"],
                    "raw_evidence": copy.deepcopy(raw), "coverage": coverage, "research_mode": "exploratory",
@@ -998,6 +1182,7 @@ class AnalysisOrchestrationService:
                    "initial": {"initial_id": run["initial_id"], "available_sections": [section for section in initial["analysis"] if section in INITIAL_SECTIONS],
                                "full_results_preserved": True, "read_scope": "index_only"},
                    "results": accepted, "issues": public["issues"], "critique_responses": public["critique_responses"],
+                   "dependency_task_ids": [entry["task_id"] for entry in public["tasks"] if entry["status"] == "succeeded"],
                    "label_proposals": public["label_proposals"], "usage": public["usage"],
                    "budget": {"remaining_calls": run["config"]["max_calls"] - run["calls_started"],
                               "remaining_tasks": run["config"]["max_tasks"] - len(public["tasks"]),
@@ -1005,10 +1190,70 @@ class AnalysisOrchestrationService:
                               "min_iterations": run["config"].get("min_iterations", 0),
                               "completed_core_iterations": self._completed_core_iterations(db, run),
                               "deadline": run["deadline"]}, "stop_proposal": run["pending_stop"]}
+        if run["config"].get("initial_label_definitions_version"):
+            context["initial_label_catalog"] = self._initial_label_catalog(db, run)
+            if task["role"] == "core" and task["phase"] != "initial_routing" and not context["initial_label_catalog"]:
+                raise _error("初回の専門家によるラベル・尺度出力が必要です。", "initial_labels_missing")
+        if run.get("initial_analysis_report"):
+            context["initial_analysis_report"] = initial_report
+        if task["role"] in {"core", "orchestrator"} and run["config"].get("core_progress_version"):
+            context["iteration_review"] = {
+                "previous_decision_id": run["last_decision_id"],
+                "pending_result_ids": pending_batch,
+                "omitted_pending_result_count": len(pending_results) - len(pending_batch),
+                "progress_required": True,
+            }
+            if task["phase"] == "initial_routing":
+                context["iteration_review"].update(pending_result_ids=[], omitted_pending_result_count=0, progress_required=False)
+            if run["config"].get("model_context_version"):
+                unread = set(pending_results) - set(pending_batch)
+                all_issues = context["issues"]
+                context["issues"] = [issue for issue in all_issues if issue["status"] == "open" and issue["result_id"] not in unread]
+                context["issue_scope"] = {"unread_result_issue_count": sum(issue["status"] == "open" and issue["result_id"] in unread for issue in all_issues),
+                    "resolved_issue_count": sum(issue["status"] != "open" for issue in all_issues), "full_issue_index_hash": fingerprint(all_issues)}
         context["labels"] = json.loads(db.execute("SELECT payload_json FROM orchestration_label_versions WHERE run_id=? AND annotation_version=?",
                                                     (run["run_id"], task["annotation_version"])).fetchone()[0])
         included_ids = {e["utterance_id"] for e in raw}
         context["labels"] = {key: value for key, value in context["labels"].items() if key in included_ids}
+        if run["config"].get("initial_label_definitions_version"):
+            context["labels"] = {key: {field: item for field, item in value.items() if field in LABEL_FIELDS}
+                                 for key, value in context["labels"].items() if isinstance(value, dict)}
+        if run["config"].get("specialist_orchestration_version"):
+            if task["role"] == "orchestrator":
+                context["review_domain"] = task["intent"]["scope"]["domain"]
+                context["prior_domain_reports"] = [r for r in self._domain_reports(db, run)
+                    if r["domain"] == context["review_domain"] and r["annotation_version"] == task["annotation_version"]]
+                context.pop("initial_analysis_report", None)
+                context.pop("current_view", None)
+                context.pop("stop_proposal", None)
+                context.pop("critique_responses", None)
+                context["results"] = [r for r in accepted if r["result_id"] in pending_batch]
+                context["issues"] = [i for i in context["issues"] if i["result_id"] in pending_batch]
+                context["label_proposals"] = [p for p in context["label_proposals"] if p["result_id"] in pending_batch]
+                if context["review_domain"] != "labels":
+                    context["label_proposals"] = []
+                    context.pop("initial_label_catalog", None)
+                context["dependency_task_ids"] = [r["task_id"] for r in context["results"]]
+            elif task["role"] == "core" and task["phase"] != "initial_routing":
+                context["domain_reports"] = self._domain_reports(db, run)
+                context["results"] = []
+                context["issues"] = []
+                context["label_proposals"] = []
+                context["review_scope"] = "specialist_reports_not_full_raw_results"
+            elif task["role"] in {"interpretation", "critic"} and task["phase"] != "initial_analysis":
+                # New analysis reads its scoped source. Saved-result dialogue is
+                # supplied separately by the clarification contract below.
+                context.pop("initial_analysis_report", None)
+                context["results"] = []
+                context["issues"] = []
+                context["critique_responses"] = []
+                context["label_proposals"] = []
+                context["dependency_task_ids"] = task["dependencies"]
+                if not task["label_dependent"]:
+                    context.pop("initial_label_catalog", None)
+                if task["role"] == "interpretation":
+                    context.pop("current_view", None)
+                    context.pop("stop_proposal", None)
         if task["intent"].get("kind") == "clarification":
             target = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=? AND run_id=?",
                                 (task["intent"].get("result_id"), run["run_id"])).fetchone()
@@ -1053,6 +1298,24 @@ class AnalysisOrchestrationService:
 
     def _record_usage(self, run_id, task_id, usage=None, **values):
         data = dict(usage or {}, **values)
+        if "context_manifest" in data:
+            manifest = copy.deepcopy(data["context_manifest"])
+            with self._db() as db:
+                run = self._read_run(db, run_id)
+                task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                             (task_id, run_id)).fetchone()[0])
+                if manifest.get("version") != 1 or manifest.get("dataset_version") != run["input_hash"]:
+                    raise _error("入力パケットの版が一致しません。", "context_manifest_invalid")
+                pending = self._review_pending(db, run, task)
+                requested = manifest.get("requested_result_ids", [])
+                if task["role"] in {"core", "orchestrator"} and task["phase"] != "initial_routing" and (requested != pending[:len(requested)] or pending and not requested):
+                    raise _error("未評価結果の先頭から順に処理してください。", "context_manifest_invalid")
+                task["context_manifest"] = manifest
+                task["context_manifest_hash"] = fingerprint(manifest)
+                self._write_task(db, task)
+                self._event(db, run_id, "context_prepared", "入力範囲とモデルの予算を保存しました。",
+                            task_id=task_id, context_manifest_hash=task["context_manifest_hash"])
+            return
         if data.get("reported") is False:
             return
         record = {"task_id": task_id, "reported_at": _now()}
@@ -1086,6 +1349,7 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
             self._event(db, run_id, "task_started", task["title"], target=task["role"], task_id=task_id)
             context = self._context(db, run, task)
+            experts = self._initial(db, run["initial_id"])["analysis"].get("experts") if run["config"].get("model_context_version") and task["role"] == "interpretation" else None
             snapshot = self._initial(db, run["initial_id"]) if task["kind"] == "code" else None
             if snapshot is not None:
                 snapshot["orchestration_task"] = copy.deepcopy(task)
@@ -1096,9 +1360,43 @@ class AnalysisOrchestrationService:
             check()
             if task["kind"] == "code":
                 raw = self.method_runner(task["method_id"], snapshot)
+                if task["phase"] == "initial_analysis":
+                    # Existing code methods use saved participation/time/label
+                    # fields; they do not invent new research scales.
+                    raw = {**raw, "label_requirements": [],
+                           "requirement_scope": "既存の入力項目による集計。研究概念の尺度設計は専門家の報告を参照する。"}
+                    if (task["method_id"] == "label_frequency" and raw.get("denominator", 0) > 0
+                            and raw.get("missing_count") == raw["denominator"] and context["raw_evidence"]):
+                        raw["label_requirements"] = [{"requirement_id": "codes_for_frequency", "kind": "label",
+                            "name": "研究質問に対応する分類ラベル", "analysis": "研究質問に対応する分類別の度数集計",
+                            "reason": f"既存codesは対象{raw['denominator']}発話の全件が欠測で、分類別集計ができない。原文に基づく定義と、その後の発話への付与が必要。",
+                            "evidence_ids": [context["raw_evidence"][0]["evidence_id"]]}]
             else:
+                references = run["config"].get("context_reference_version") == 1
+                brief = None
+                if run["config"].get("model_context_version") and task["role"] == "interpretation" and (references or task["phase"] != "initial_labels"):
+                    from . import method_experts
+                    if method_experts.ai_block_reason(experts):
+                        raise _error("選択した専門家のAI補助条件が未成立です。", "expert_knowledge_unavailable")
+                    try:
+                        brief = method_experts.ai_context(experts, step_ids=run["config"].get("expert_step_ids"))
+                    except method_experts.ExpertDefinitionError:
+                        raise _error("専門家の定義・知識・許可手順を再確認してください。", "expert_knowledge_unavailable") from None
+                    context["expert_knowledge"] = {"version": 1, "stage": task["phase"],
+                        "status": "method_brief" if brief else "generic", "brief": brief}
+                if references:
+                    from . import method_experts
+                    try:
+                        context["expert_knowledge"] = method_experts.orchestration_context(stage=task["phase"], brief=brief)
+                    except method_experts.ExpertDefinitionError:
+                        raise _error("参照するObsidian知識のID・状態・必須節・入力上限を確認してください。", "expert_knowledge_unavailable") from None
+                    context["resources_origin"] = {"initial_id": run["initial_id"], "run_id": run["run_id"]}
                 options = {**copy.deepcopy(run["config"]), **run["config"]["roles"][task["role"]], "timeout_seconds": run["config"]["call_timeout_seconds"],
                            "deadline": run["deadline"], "research_mode": "exploratory", "provider_policy": run["config"]["provider_policy"]}
+                if run["config"].get("model_context_version") and task["role"] in {"core", "orchestrator"} and task["phase"] != "initial_routing":
+                    with self._db() as db:
+                        options["_source_evidence"] = [{key: row[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
+                            for row in self._initial(db, run["initial_id"])["evidence"] if not row["excluded"]]
                 raw = self.agent_runner(task["role"], context, options, check,
                                         lambda usage=None, **kw: self._record_usage(run_id, task_id, usage, **kw))
             # Raw response commits before semantic validation, including a late response.
@@ -1118,6 +1416,9 @@ class AnalysisOrchestrationService:
                             "dataset_version": task["dataset_version"], "annotation_version": task["annotation_version"],
                             "validation_status": "quarantined" if late else "received", "content_status": "unreviewed",
                             "error": "late_response_after_stop" if late else "", "stale": False}
+                if latest["config"].get("model_context_version") and task["kind"] == "ai":
+                    stored_task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
+                    metadata["context_manifest_hash"] = stored_task.get("context_manifest_hash")
                 db.execute("INSERT OR IGNORE INTO orchestration_results VALUES (?,?,?,?,?)", (metadata["result_id"], run_id, task_id, raw_json, _json(metadata)))
                 current_task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                 current_task.update(status="quarantined" if late else "received", ended_at=_now(), result_id=metadata["result_id"],
@@ -1136,13 +1437,56 @@ class AnalysisOrchestrationService:
             with self._db() as db:
                 current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                 # Transport errors may have consumed external work. Never retry blind.
-                current.update(status="uncertain" if task["kind"] == "ai" else "failed", ended_at=_now(), error=type(exc).__name__)
-                self._write_task(db, current)
+                before_dispatch = getattr(exc, "code", "") in {"context_budget_exceeded", "context_budget_unavailable", "context_manifest_invalid", "expert_knowledge_unavailable"}
+                owned = current["intent"].get("scope", {}).get("owned_evidence_ids", []) if isinstance(current["intent"].get("scope"), dict) else []
                 latest = self._read_run(db, run_id)
-                if latest["status"] not in TERMINAL and task["kind"] == "ai":
+                if (getattr(exc, "code", "") == "context_budget_exceeded" and current["phase"] in {"initial_routing", "initial_labels"}
+                        and latest["config"].get("model_context_version") and latest["status"] not in TERMINAL):
+                    selected_keys = (current["intent"].get("scope") or {}).get("requirement_keys")
+                    if selected_keys is None:
+                        selected_keys = [fingerprint(entry) for entry in latest["initial_analysis_report"]["label_requirements"]]
+                    if len(selected_keys) > 1:
+                        child_phase = current["phase"]
+                        current.update(status="blocked", phase=child_phase + "_split", ended_at=_now(), error="context_requirement_split")
+                        self._write_task(db, current)
+                        latest["calls_started"] -= 1
+                        for keys in (selected_keys[:len(selected_keys) // 2], selected_keys[len(selected_keys) // 2:]):
+                            intent = copy.deepcopy(current["intent"])
+                            intent.update(parent_task_id=task_id, scope={"requirement_keys": keys, "split_from_task_id": task_id})
+                            if child_phase == "initial_labels":
+                                requirements = [entry for entry in latest["initial_analysis_report"]["label_requirements"] if fingerprint(entry) in keys]
+                                intent["evidence_ids"] = sorted({ref for entry in requirements for ref in entry["evidence_ids"]})
+                            self._register(db, latest, intent, phase=child_phase, automatic=True)
+                        self._write_run(db, latest)
+                        self._event(db, run_id, "context_requirement_split", "必須要件を保持したまま、Coreへの報告を分割して保存しました。", task_id=task_id)
+                        return
+                if (getattr(exc, "code", "") == "context_budget_exceeded" and current["phase"] == "initial_analysis"
+                        and len(owned) > 1 and latest["status"] not in TERMINAL):
+                    current.update(status="blocked", phase="initial_analysis_split", ended_at=_now(), error="context_page_split")
+                    self._write_task(db, current)
+                    rows = [e["evidence_id"] for e in self._initial(db, latest["initial_id"])["evidence"] if not e["excluded"]]
+                    latest["calls_started"] -= 1  # This attempt never reached inference.
+                    for part in (owned[:len(owned) // 2], owned[len(owned) // 2:]):
+                        first, last = rows.index(part[0]), rows.index(part[-1]) + 1
+                        visible = rows[max(0, first - 1):min(len(rows), last + 1)]
+                        intent = copy.deepcopy(current["intent"])
+                        intent.update(evidence_ids=visible, parent_task_id=task_id,
+                            scope={"owned_evidence_ids": part, "boundary_evidence_ids": [ref for ref in visible if ref not in part],
+                                   "split_from_task_id": task_id})
+                        self._register(db, latest, intent, phase="initial_analysis", automatic=True)
+                    self._write_run(db, latest)
+                    self._event(db, run_id, "context_page_split", "未送信の範囲を分割し、次の専門家タスクとして保存しました。", task_id=task_id)
+                    return
+                current.update(status="uncertain" if task["kind"] == "ai" and not before_dispatch else "failed", ended_at=_now(), error=getattr(exc, "code", type(exc).__name__))
+                self._write_task(db, current)
+                if before_dispatch:
+                    latest["calls_started"] -= 1
+                    self._write_run(db, latest)
+                if latest["status"] not in TERMINAL and task["kind"] == "ai" and not before_dispatch:
                     latest.update(status="recovery_required", error="外部呼出しの実行結果が不明です。自動再試行しません。")
                     self._write_run(db, latest)
-                self._event(db, run_id, "execution_uncertain" if task["kind"] == "ai" else "task_failed", type(exc).__name__, task_id=task_id)
+                event = "preflight_rejected" if before_dispatch else "execution_uncertain" if task["kind"] == "ai" else "task_failed"
+                self._event(db, run_id, event, getattr(exc, "code", type(exc).__name__), task_id=task_id)
 
     def _validate_received(self, run_id, task_id):
         with self._db() as db:
@@ -1166,6 +1510,7 @@ class AnalysisOrchestrationService:
                     self._write_task(db, task)
                 return
             try:
+                self._check_input_manifest(run, task, meta)
                 if len(row["raw_json"].encode("utf-8")) > run["config"]["max_result_bytes"]:
                     raise _error("結果が保存上限を超えています。", "result_size_limit")
                 if run["status"] in TERMINAL:
@@ -1177,7 +1522,14 @@ class AnalysisOrchestrationService:
                     self._save_issues(db, run, task, raw, meta)
                 for patch in raw.get("label_patches", []):
                     self._save_patch(db, run, task, patch, meta)
-                self._event(db, run_id, "result_validated", "保存済み・内容未検証としてCoreへ渡します。", source="handler", target="core", task_id=task_id)
+                delegated = run["config"].get("specialist_orchestration_version") and task["role"] not in {"core", "orchestrator"}
+                self._event(db, run_id, "result_validated", "保存済み・形式確認済みとして専門側へ渡します。" if delegated else "保存済み・内容未検証としてCoreへ渡します。",
+                            source="handler", target="orchestrator" if delegated else "core", task_id=task_id)
+                if task["phase"] == "initial_analysis":
+                    self._event(db, run_id, "initial_requirements_reported", "初回分析の結果とラベル・尺度の必要性をハンドラーが受領しました。",
+                                source=task["role"], target="handler", task_id=task_id,
+                                result_id=meta["result_id"], raw_hash=meta["raw_hash"],
+                                requirement_count=len(raw["label_requirements"]))
             except (AnalysisContractError, ValueError, TypeError, KeyError) as exc:
                 code = getattr(exc, "code", "invalid_result")
                 meta.update(validation_status="quarantined", error=code)
@@ -1186,7 +1538,148 @@ class AnalysisOrchestrationService:
             db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
             self._write_task(db, task)
 
+    def _label_design_evidence_ids(self, db, run, task=None):
+        if task and run["config"].get("model_context_version"):
+            manifest = task.get("context_manifest")
+            if manifest:
+                if fingerprint(manifest) != task.get("context_manifest_hash"):
+                    raise _error("入力記録のhashが一致しません。", "context_manifest_invalid")
+                return set(manifest["provided_evidence_ids"])
+            if task["intent"].get("evidence_ids"):
+                return set(task["intent"]["evidence_ids"])
+        included, size = set(), 0
+        for entry in self._initial(db, run["initial_id"])["evidence"]:
+            if entry["excluded"]:
+                continue
+            if len(included) >= run["config"]["context_evidence_limit"] or size + len(entry["text"]) > run["config"]["context_text_limit"]:
+                break
+            included.add(entry["evidence_id"])
+            size += len(entry["text"])
+        return included
+
+    def _collect_initial_analysis(self, db, run):
+        reports, requirements = [], {}
+        tasks = [task for task in self._tasks(db, run["run_id"]) if task["phase"] == "initial_analysis"]
+        expected = {("interpretation", "agent-v1"), ("verification", "agent-v1"), ("critic", "agent-v1"),
+                    *(("statistics", method) for method in METHODS)}
+        paged = run["config"].get("model_context_version")
+        if {(task["role"], task["method_id"]) for task in tasks} != expected or not paged and len(tasks) != len(expected):
+            raise _error("初回分析の担当が揃っていません。", "initial_analysis_incomplete")
+        if paged:
+            all_ids = {e["evidence_id"] for e in self._initial(db, run["initial_id"])["evidence"] if not e["excluded"]}
+            for role in ("interpretation", "verification", "critic"):
+                owned = [ref for task in tasks if task["role"] == role
+                         for ref in task["intent"].get("scope", {}).get("owned_evidence_ids", [])]
+                if len(owned) != len(set(owned)) or set(owned) != all_ids:
+                    raise _error("初回分析の分割範囲に欠落または重複があります。", "initial_analysis_incomplete")
+                for task in tasks:
+                    if task["role"] == role and not set(task["intent"]["scope"]["owned_evidence_ids"]).issubset(self._label_design_evidence_ids(db, run, task)):
+                        raise _error("担当範囲に未読の発話が残っています。", "initial_analysis_incomplete")
+        for task in tasks:
+            row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
+            if task["status"] != "succeeded" or row is None:
+                raise _error("初回分析に未実行または失敗した担当があります。", "initial_analysis_incomplete")
+            raw, meta = json.loads(row[0]), json.loads(row[1])
+            if (fingerprint(raw) != meta.get("raw_hash") or meta.get("validation_status") != "valid"
+                    or meta.get("task_id") != task["task_id"] or meta.get("attempt_id") != task["attempt_id"]
+                    or meta.get("run_id") != run["run_id"] or meta.get("dataset_version") != run["input_hash"]):
+                raise _error("初回分析結果の保存hashまたは版が不正です。", "result_integrity_mismatch")
+            self._validate_result(db, run, task, raw)
+            self._check_input_manifest(run, task, meta)
+            source = {"role": task["role"], "method_id": task["method_id"], "task_id": task["task_id"],
+                      "result_id": meta["result_id"], "raw_hash": meta["raw_hash"]}
+            reports.append({**source, "summary": raw.get("summary", ""),
+                            "requirement_count": len(raw["label_requirements"])})
+            for entry in raw["label_requirements"]:
+                key = fingerprint({k: v for k, v in entry.items() if k != "requirement_id"})
+                aggregate = requirements.setdefault(key, {**copy.deepcopy(entry), "sources": []})
+                aggregate["sources"].append({**source, "requirement_id": entry["requirement_id"]})
+        return {"status": "ai_draft", "dataset_version": run["input_hash"], "reports": reports,
+                "label_requirements": list(requirements.values()), "all_roles_reported": True,
+                "full_evidence_coverage": bool(paged)}
+
+    def _apply_initial_routing(self, db, run, task):
+        row = db.execute("SELECT * FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
+        raw, meta = json.loads(row["raw_json"]), json.loads(row["state_json"])
+        if fingerprint(raw) != meta.get("raw_hash") or meta.get("validation_status") != "valid":
+            raise _error("担当指示の保存結果が不正です。", "result_integrity_mismatch")
+        self._validate_result(db, run, task, raw)
+        self._check_input_manifest(run, task, meta)
+        decision = {**copy.deepcopy(raw), "decision_id": _id("decision"), "result_id": meta["result_id"],
+                    "task_id": task["task_id"], "phase": "initial_routing", "iteration": 0,
+                    "role": "core", "created_at": _now(), "annotation_version": run["annotation_version"],
+                    "before_annotation_version": run["annotation_version"], "after_annotation_version": run["annotation_version"]}
+        db.execute("INSERT OR IGNORE INTO orchestration_decisions VALUES (?,?,?,?)",
+                   (decision["decision_id"], run["run_id"], meta["result_id"], _json(decision)))
+        instruction = copy.deepcopy(raw["intents"][0])
+        if run["config"].get("model_context_version"):
+            scope = task["intent"].get("scope") or {}
+            instruction["scope"] = {"requirement_keys": scope.get("requirement_keys",
+                [fingerprint(entry) for entry in run["initial_analysis_report"]["label_requirements"]])}
+            requirements = [entry for entry in run["initial_analysis_report"]["label_requirements"] if fingerprint(entry) in instruction["scope"]["requirement_keys"]]
+            instruction["evidence_ids"] = sorted({ref for entry in requirements for ref in entry["evidence_ids"]})
+        instruction.update(parent_task_id=task["task_id"],
+            dependencies=sorted(set(instruction.get("dependencies", [])) | {task["task_id"]}
+                | {report["task_id"] for report in run["initial_analysis_report"]["reports"]}))
+        self._register(db, run, instruction, phase="initial_labels")
+        if run["status"] in TERMINAL:
+            return
+        self._event(db, run["run_id"], "initial_routing_dispatched", "Coreの担当指示を受け、ハンドラーが尺度設計専門家へ発注しました。",
+                    source="core", target="handler", result_id=meta["result_id"], raw_hash=meta["raw_hash"])
+        run["phase"] = "initial_labels"
+        self._write_run(db, run)
+
+    def _initial_label_catalog(self, db, run):
+        result_id = run.get("initial_label_result_id")
+        if not result_id:
+            return None
+        catalogs = [self._initial_label_result(db, run, key) for key in run.get("initial_label_result_ids", [result_id])]
+        if len(catalogs) == 1 and not run["config"].get("model_context_version"):
+            return catalogs[0]
+        definitions, sources, by_id = [], [], {}
+        for catalog in catalogs:
+            for definition in catalog["definitions"]:
+                definitions.append(definition)
+                sources.append(catalog["result_id"])
+                by_id.setdefault(definition["definition_id"], set()).add(fingerprint(definition))
+        return {**catalogs[0], "definitions": definitions, "definition_sources": sources,
+                "result_ids": [catalog["result_id"] for catalog in catalogs],
+                "source_hashes": {catalog["result_id"]: catalog["raw_hash"] for catalog in catalogs},
+                "definition_conflicts": sorted(key for key, values in by_id.items() if len(values) > 1)}
+
+    def _initial_label_result(self, db, run, result_id):
+        row = db.execute("SELECT * FROM orchestration_results WHERE run_id=? AND result_id=?", (run["run_id"], result_id)).fetchone()
+        if row is None:
+            raise _error("初回の尺度作成結果が見つかりません。", "initial_labels_missing")
+        metadata, raw = json.loads(row["state_json"]), json.loads(row["raw_json"])
+        task_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?", (row["task_id"], run["run_id"])).fetchone()
+        task = json.loads(task_row[0]) if task_row else {}
+        if (fingerprint(raw) != metadata.get("raw_hash") or metadata.get("validation_status") != "valid"
+                or metadata.get("role") != "interpretation" or task.get("role") != "interpretation"
+                or metadata.get("run_id") != run["run_id"] or metadata.get("result_id") != result_id
+                or metadata.get("task_id") != row["task_id"] or task.get("task_id") != row["task_id"]
+                or task.get("status") != "succeeded" or task.get("phase") != "initial_labels"
+                or task.get("method_id") != "label-design-v1" or task.get("iteration") != 0
+                or metadata.get("dataset_version") != run["input_hash"]
+                or metadata.get("attempt_id") != task.get("attempt_id")):
+            raise _error("初回の尺度作成結果の保存hashまたは作成主体が不正です。", "result_integrity_mismatch")
+        validate_label_definitions(raw.get("label_definitions"), evidence_ids=self._label_design_evidence_ids(db, run, task))
+        self._check_input_manifest(run, task, metadata)
+        return {"status": "ai_draft", "created_by": "interpretation", "specialization": "label_design",
+                "result_id": result_id, "raw_hash": metadata["raw_hash"], "dataset_version": run["input_hash"],
+                "base_codebook_version": task["codebook_version"], "definitions": copy.deepcopy(raw["label_definitions"])}
+
+    def _check_input_manifest(self, run, task, metadata=None):
+        if not run["config"].get("model_context_version") or task["kind"] != "ai":
+            return
+        manifest = task.get("context_manifest") or {}
+        if (manifest.get("version") != 1 or manifest.get("dataset_version") != run["input_hash"]
+                or fingerprint(manifest) != task.get("context_manifest_hash")
+                or metadata is not None and metadata.get("context_manifest_hash") != task.get("context_manifest_hash")):
+            raise _error("保存結果と入力パケットの来歴が一致しません。", "context_manifest_invalid")
+
     def _validate_result(self, db, run, task, raw):
+        self._check_input_manifest(run, task)
         if not isinstance(raw, dict):
             raise _error("結果はJSONオブジェクトで返してください。", "invalid_result")
         if raw.get("research_mode", "exploratory") != "exploratory":
@@ -1194,7 +1687,34 @@ class AnalysisOrchestrationService:
         if raw.get("dataset_version", run["input_hash"]) != run["input_hash"]:
             raise _error("結果の入力版が一致しません。", "revision_conflict")
         evidence = {e["evidence_id"]: e for e in self._initial(db, run["initial_id"])["evidence"] if not e["excluded"]}
-        for key in ("claims", "issues", "label_patches", "intents", "critique_responses", "label_decisions"):
+        if task["phase"] == "initial_analysis":
+            if task["kind"] == "ai" and (not isinstance(raw.get("summary"), str) or not raw["summary"].strip()
+                    or (task["role"] in {"interpretation", "verification"} and not raw.get("claims"))):
+                raise _error("初回の解釈・独立検証には空でない要約と根拠付きの主張が必要です。", "initial_analysis_empty")
+            requirements = raw.get("label_requirements")
+            if not isinstance(requirements, list) or len(requirements) > 12:
+                raise _error("初回分析ではラベル・尺度の必要性を明示して報告してください。", "initial_requirements_missing")
+            known = set()
+            provided = self._label_design_evidence_ids(db, run, task)
+            for entry in requirements:
+                if (not isinstance(entry, dict) or any(not isinstance(entry.get(key), str) or not entry[key].strip()
+                        for key in ("requirement_id", "name", "analysis", "reason"))
+                        or entry.get("kind") not in {"label", "scale"}
+                        or not isinstance(entry.get("evidence_ids"), list) or not entry["evidence_ids"]
+                        or any(ref not in provided for ref in entry["evidence_ids"])
+                        or entry["requirement_id"] in known):
+                    raise _error("尺度要件には種類・分析用途・理由・読んだ根拠IDと一意IDが必要です。", "invalid_initial_requirement")
+                known.add(entry["requirement_id"])
+            if raw.get("label_patches") or raw.get("label_definitions"):
+                raise _error("初回の予備分析は尺度の必要性を報告し、採用ラベルを変更しません。", "invalid_initial_requirement")
+        label_design = task["role"] == "interpretation" and task["phase"] == "initial_labels" and task["method_id"] == "label-design-v1"
+        if label_design:
+            validate_label_definitions(raw.get("label_definitions"), evidence_ids=self._label_design_evidence_ids(db, run, task))
+            if raw.get("label_patches"):
+                raise _error("尺度設計では確定ラベルを変更しません。", "invalid_label_patch")
+        elif raw.get("label_definitions"):
+            raise _error("尺度定義は初回の専門家タスクだけが作成します。", "label_definition_author_invalid")
+        for key in ("claims", "issues", "label_patches", "intents", "critique_responses", "label_decisions", "result_assessments"):
             if key in raw and (not isinstance(raw[key], list) or any(not isinstance(v, dict) for v in raw[key])):
                 raise _error("結果配列の形式が正しくありません。", "invalid_result")
         for claim in raw.get("claims", []):
@@ -1206,9 +1726,52 @@ class AnalysisOrchestrationService:
             refs = value.get("evidence_ids", [])
             if not isinstance(refs, list) or any(ref not in evidence for ref in refs):
                 raise _error("根拠発話が存在しません。", "evidence_missing")
-        if task["role"] == "core":
+            if run["config"].get("model_context_version") and task["kind"] == "ai":
+                manifest = task.get("context_manifest", {})
+                if fingerprint(manifest) != task.get("context_manifest_hash") or any(ref not in manifest.get("citation_ids", []) for ref in refs):
+                    raise _error("読んでいない発話は根拠として採用できません。", "evidence_not_provided")
+        if task["role"] in {"core", "orchestrator"}:
+            if task["role"] == "orchestrator" and (raw.get("stop") is not None or raw.get("label_patches") or raw.get("label_decisions") and task["intent"]["scope"]["domain"] != "labels"):
+                raise _error("専門側は終了判断や担当外ラベルの採否を決めません。", "orchestrator_authority_invalid")
+            if task["role"] == "core" and run["config"].get("specialist_orchestration_version") and any(raw.get(k) for k in ("result_assessments", "critique_responses", "label_decisions")):
+                raise _error("個別結果・批判・ラベルの判断は専門側の責務です。", "core_authority_invalid")
+            routing = task["phase"] == "initial_routing"
+            if run["config"].get("initial_label_definitions_version") and not routing and not self._initial_label_catalog(db, run):
+                raise _error("初回の専門家によるラベル・尺度出力が必要です。", "initial_labels_missing")
+            if routing:
+                intents = raw.get("intents", [])
+                if (not isinstance(intents, list) or len(intents) != 1
+                        or intents[0].get("role") != "interpretation" or intents[0].get("method_id") != "label-design-v1"
+                        or intents[0].get("kind", "analysis") != "analysis" or intents[0].get("evidence_ids")
+                        or intents[0].get("label_dependent") or raw.get("stop") is not None
+                        or any(raw.get(key) for key in ("claims", "critique_responses", "label_decisions", "result_assessments"))):
+                    raise _error("初回の担当指示は尺度設計専門家への1件の依頼です。統合・終了・ラベル更新は後続判断で行います。", "initial_routing_invalid")
             if not isinstance(raw.get("summary"), str) or not raw["summary"].strip():
                 raise _error("空でない統合要約が必要です。", "invalid_result")
+            for key in ("alternatives", "unresolved"):
+                if key in raw and (not isinstance(raw[key], list) or any(not isinstance(value, str) for value in raw[key])):
+                    raise _error("代替説明・未解決点は文字列の配列です。", "invalid_result")
+            if run["config"].get("core_progress_version"):
+                expected = set() if routing else set(self._review_pending(db, run, task)[:20])
+                if run["config"].get("model_context_version") and not routing:
+                    manifest = task.get("context_manifest", {})
+                    requested = manifest.get("requested_result_ids", [])
+                    pending = self._review_pending(db, run, task)
+                    if fingerprint(manifest) != task.get("context_manifest_hash") or requested != pending[:len(requested)] or pending and not requested:
+                        raise _error("評価範囲の保存記録が不正です。", "context_manifest_invalid")
+                    expected = set(requested)
+                received = []
+                for assessment in raw.get("result_assessments", []):
+                    if (assessment.get("result_id") not in expected
+                            or assessment.get("disposition") not in {"adopt", "reject", "defer"}
+                            or any(not isinstance(assessment.get(key), str) or not assessment[key].strip()
+                                   for key in ("reason", "impact"))):
+                        raise _error("新しい専門家結果には実在ID・採否・理由・影響が必要です。", "invalid_result_assessment")
+                    received.append(assessment["result_id"])
+                if len(received) != len(set(received)):
+                    raise _error("同じ専門家結果を重複して評価できません。", "invalid_result_assessment")
+                if set(received) != expected:
+                    raise _error("新しい専門家結果の採否が未記録です。", "result_assessment_missing")
             if raw.get("stop") is not None and (not isinstance(raw["stop"], dict) or not raw["stop"].get("reason")):
                 raise _error("停止案には理由が必要です。", "invalid_stop")
             for intent in raw.get("intents", []):
@@ -1228,6 +1791,8 @@ class AnalysisOrchestrationService:
                 if not isinstance(intent.get("evidence_ids", []), list) or any(ref not in evidence for ref in intent.get("evidence_ids", [])):
                     raise _error("タスクの根拠が存在しません。", "evidence_missing")
             for response in raw.get("critique_responses", []):
+                if run["config"].get("model_context_version") and response.get("issue_id") not in task["context_manifest"].get("provided_issue_ids", []):
+                    raise _error("未提示の批判は評価できません。", "issue_not_provided")
                 if response.get("disposition") not in {"adopt", "reject", "defer"} or not response.get("reason") or not response.get("impact"):
                     raise _error("批判への応答には採否・理由・結論への影響が必要です。", "invalid_critique_response")
                 if not db.execute("SELECT 1 FROM orchestration_issues WHERE issue_id=? AND run_id=?", (response.get("issue_id"), run["run_id"])).fetchone():
@@ -1386,6 +1951,52 @@ class AnalysisOrchestrationService:
                              reason=decision["reason"])
             db.execute("UPDATE orchestration_label_proposals SET payload_json=? WHERE proposal_id=?", (_json(patch), patch["proposal_id"]))
 
+    def _record_critique_responses(self, db, run, raw, decision_id):
+        for response in raw.get("critique_responses", []):
+            value = {**response, "response_id": _id("response"), "decision_id": decision_id, "created_at": _now()}
+            db.execute("INSERT OR IGNORE INTO orchestration_responses VALUES (?,?,?,?,?)", (value["response_id"], run["run_id"], response["issue_id"], decision_id, _json(value)))
+            issue = json.loads(db.execute("SELECT payload_json FROM orchestration_issues WHERE issue_id=?", (response["issue_id"],)).fetchone()[0])
+            issue.update(status="adopted_unresolved" if response["disposition"] == "adopt" else response["disposition"], latest_response=value)
+            db.execute("UPDATE orchestration_issues SET payload_json=? WHERE issue_id=?", (_json(issue), issue["issue_id"]))
+
+    def _apply_specialist_review(self, db, run, task, raw, meta):
+        self._validate_result(db, run, task, raw)
+        decision = {**copy.deepcopy(raw), "decision_id": _id("decision"), "role": "orchestrator",
+            "phase": "specialist_review", "domain": task["intent"]["scope"]["domain"],
+            "result_id": meta["result_id"], "task_id": task["task_id"], "iteration": run["iteration"],
+            "annotation_version": task["annotation_version"], "created_at": _now()}
+        self._commit_labels(db, run, raw.get("label_decisions", []), task=task, result_id=meta["result_id"], decision_id=decision["decision_id"])
+        self._record_critique_responses(db, run, raw, decision["decision_id"])
+        db.execute("INSERT INTO orchestration_decisions VALUES (?,?,?,?)", (decision["decision_id"], run["run_id"], meta["result_id"], _json(decision)))
+        self._event(db, run["run_id"], "specialist_review_committed", raw["summary"], source="orchestrator", target="handler",
+                    task_id=task["task_id"], domain=decision["domain"], assessed_result_ids=[a["result_id"] for a in raw["result_assessments"]])
+        for intent in raw.get("intents", []):
+            if run["status"] in TERMINAL:
+                return
+            domain = task["intent"]["scope"]["domain"]
+            pending = self._review_pending(db, run, task)
+            parents = {t["task_id"] for t in self._tasks(db, run["run_id"])
+                       if t["role"] == "orchestrator" and t["intent"]["scope"]["domain"] == domain and t["iteration"] == task["iteration"]}
+            issued = any(t["phase"] == "specialist_followup" and t.get("parent_task_id") in parents for t in self._tasks(db, run["run_id"]))
+            if pending or issued:
+                self._event(db, run["run_id"], "intent_deferred", "分野内の保存結果を先に読むため、またはこの段階の追加依頼を既に発注したため保留しました。",
+                            intent=intent, review_result_id=meta["result_id"], remaining_result_count=len(pending))
+                continue
+            if run["config"]["stop_mode"] == "importance" and IMPORTANCE.get(intent.get("importance"), 0) < IMPORTANCE[run["config"]["importance_threshold"]]:
+                self._event(db, run["run_id"], "intent_deferred", "重要度の閾値未満の専門側の依頼を保存しました。", intent=intent, review_result_id=meta["result_id"])
+                continue
+            question = " ".join(unicodedata.normalize("NFKC", intent["question"]).casefold().split())
+            original = " ".join(unicodedata.normalize("NFKC", run["config"]["question"]).casefold().split())
+            similar = question == original or len(original) >= 30 and SequenceMatcher(None, question, original, autojunk=False).ratio() >= .85
+            if intent.get("kind", "analysis") == "analysis" and not intent.get("label_dependent") and similar:
+                self._event(db, run["run_id"], "intent_deferred", "元の問いと同一または文字列が近い再発注案を保留しました。具体的な不足を調べる問いが必要です。", intent=intent, review_result_id=meta["result_id"])
+                continue
+            if intent["role"] == "critic":
+                intent = {**intent, "target_id": "view:" + run["run_id"], "target_version": run["view_version"]}
+            self._register(db, run, {**intent, "parent_task_id": task["task_id"]}, phase="specialist_followup")
+        run["phase"] = "specialists"
+        self._write_run(db, run)
+
     def _apply_core(self, db, run, task, result):
         meta, raw = json.loads(result["state_json"]), json.loads(result["raw_json"])
         # The validation commit and the decision commit are separate durable
@@ -1403,36 +2014,92 @@ class AnalysisOrchestrationService:
             return
         if db.execute("SELECT 1 FROM orchestration_decisions WHERE result_id=?", (meta["result_id"],)).fetchone():
             return
+        self._check_input_manifest(run, task, meta)
+        if task["role"] == "orchestrator":
+            self._apply_specialist_review(db, run, task, raw, meta)
+            return
+        progress = None
+        if run["config"].get("initial_label_definitions_version"):
+            self._validate_result(db, run, task, raw)
+        if run["config"].get("core_progress_version"):
+            # Recheck the review references at the durable adoption boundary too.
+            self._validate_result(db, run, task, raw)
+            history = [json.loads(row[0]) for row in db.execute(
+                "SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run["run_id"],))
+                if json.loads(row[0]).get("phase") != "initial_routing" and json.loads(row[0]).get("role", "core") == "core"]
+            signature = self._core_progress_signature(raw)
+            repeated = next((old for old in reversed(history)
+                             if self._core_progress_signature(old) == signature
+                             and old.get("after_annotation_version") == run["annotation_version"]), None)
+            new_responses = [response["issue_id"] for response in raw.get("critique_responses", [])
+                             if not db.execute("SELECT 1 FROM orchestration_responses WHERE run_id=? AND issue_id=?",
+                                               (run["run_id"], response["issue_id"])).fetchone()]
+            previous_proposals = {entry["proposal_id"] for old in history for entry in old.get("label_decisions", [])}
+            new_labels = [entry["proposal_id"] for entry in raw.get("label_decisions", [])
+                          if entry["proposal_id"] not in previous_proposals]
+            assessments = [entry["result_id"] for entry in raw.get("result_assessments", [])]
+            fresh_basis = self._new_result_basis(db, run, history, assessments)
+            domain_reports = self._domain_reports(db, run) if run["config"].get("specialist_orchestration_version") else []
+            domain_ids = [r["result_id"] for r in domain_reports]
+            previous_domain_ids = {rid for old in history for rid in old.get("domain_report_ids", [])}
+            # A new review ID is not new evidence. Reuse the same source/version/
+            # scope/hash comparison as legacy review, including explicit repeats.
+            previous_sources = [{"result_assessments": [{"result_id": rid} for rid in report["source_result_ids"]]}
+                                for report in domain_reports if report["result_id"] in previous_domain_ids]
+            fresh_basis.extend(self._new_result_basis(db, run, previous_sources,
+                [rid for report in domain_reports if report["result_id"] not in previous_domain_ids for rid in report["source_result_ids"]]))
+            if repeated and not (fresh_basis or new_responses or new_labels):
+                meta.update(content_status="no_progress", repeated_decision_id=repeated["decision_id"])
+                db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
+                self._event(db, run["run_id"], "core_no_progress",
+                            "同じ根拠・判断・作業案の繰り返しを検出しました。進展として数えず停止します。",
+                            task_id=task["task_id"], result_id=meta["result_id"],
+                            repeated_decision_id=repeated["decision_id"], completed_core_iterations=len(history))
+                self._stop(db, run, "no_progress")
+                return
+            progress = {"signature": signature, "assessed_result_ids": assessments,
+                        "new_result_basis_ids": fresh_basis,
+                        "responded_issue_ids": new_responses, "decided_proposal_ids": new_labels}
         decision = {**copy.deepcopy(raw), "decision_id": _id("decision"), "result_id": meta["result_id"],
                     "iteration": run["iteration"], "created_at": _now(),
                     "task_id": task["task_id"], "annotation_version": task["annotation_version"],
                     "before_annotation_version": run["annotation_version"],
                     "role": task["role"], "model": task.get("model"), "provider": task.get("provider")}
+        if progress is not None:
+            decision["progress"] = progress
+            if run["config"].get("specialist_orchestration_version"):
+                decision["domain_report_ids"] = domain_ids
+        if run.get("initial_label_result_id"):
+            decision["initial_label_result_id"] = run["initial_label_result_id"]
         self._commit_labels(db, run, raw.get("label_decisions", []), task=task,
                             result_id=meta["result_id"], decision_id=decision["decision_id"])
         decision["after_annotation_version"] = run["annotation_version"]
-        for response in raw.get("critique_responses", []):
-            value = {**response, "response_id": _id("response"), "decision_id": decision["decision_id"], "created_at": _now()}
-            db.execute("INSERT OR IGNORE INTO orchestration_responses VALUES (?,?,?,?,?)", (value["response_id"], run["run_id"], response["issue_id"], decision["decision_id"], _json(value)))
-            issue = json.loads(db.execute("SELECT payload_json FROM orchestration_issues WHERE issue_id=?", (response["issue_id"],)).fetchone()[0])
-            # Adoption is not proof of resolution. A reasoned defer/reject stays visible.
-            issue.update(status="adopted_unresolved" if response["disposition"] == "adopt" else response["disposition"], latest_response=value)
-            db.execute("UPDATE orchestration_issues SET payload_json=? WHERE issue_id=?", (_json(issue), issue["issue_id"]))
+        self._record_critique_responses(db, run, raw, decision["decision_id"])
         claims_changed = bool(raw.get("claims")) and fingerprint(raw.get("claims", [])) != fingerprint(run["current_view"].get("claims", []))
         next_view = {"summary": raw.get("summary", ""), "claims": raw.get("claims", []),
                      "alternatives": raw.get("alternatives", []), "unresolved": raw.get("unresolved", [])}
-        if next_view != run["current_view"]:
+        view_changed = next_view != run["current_view"]
+        if run["config"].get("core_progress_version"):
+            claims_changed = bool(raw.get("claims")) and self._core_progress_signature({"claims": raw["claims"]}) != self._core_progress_signature({"claims": run["current_view"].get("claims", [])})
+            view_changed = not run["last_decision_id"] or self._core_progress_signature(next_view) != self._core_progress_signature(run["current_view"])
+        if view_changed:
             run["view_version"] += 1
             run["current_view"] = next_view
             for row in db.execute("SELECT issue_id,payload_json FROM orchestration_issues WHERE run_id=?", (run["run_id"],)).fetchall():
                 issue = json.loads(row[1])
-                if str(issue["target_version"]) != str(run["view_version"]):
+                view_issue = not run["config"].get("specialist_orchestration_version") or issue["target_id"] == "view:" + run["run_id"]
+                if view_issue and str(issue["target_version"]) != str(run["view_version"]):
                     issue["stale"] = True
                     db.execute("UPDATE orchestration_issues SET payload_json=? WHERE issue_id=?", (_json(issue), row[0]))
         decision["view_version"] = run["view_version"]
         db.execute("INSERT INTO orchestration_decisions VALUES (?,?,?,?)", (decision["decision_id"], run["run_id"], meta["result_id"], _json(decision)))
         run["last_decision_id"] = decision["decision_id"]
         self._event(db, run["run_id"], "core_decision", raw.get("summary", "Core判断を保存しました。"), source="core", target="handler", task_id=task["task_id"])
+        if run["config"].get("core_progress_version") and self._pending_result_assessments(db, run):
+            run["phase"] = "core"
+            self._event(db, run["run_id"], "result_assessments_continued", "未提示の専門家結果の採否を次の判断で確認します。")
+            self._write_run(db, run)
+            return
         intents = raw.get("intents", [])
         if raw.get("stop"):
             proposal = {**raw["stop"], "target_id": "view:" + run["run_id"], "target_version": run["view_version"],
@@ -1565,6 +2232,37 @@ class AnalysisOrchestrationService:
             with self._worker_lock:
                 self._driving.discard(run_id)
 
+    def _initial_specialist_intents(self, db, run):
+        rows = [e for e in self._initial(db, run["initial_id"])["evidence"] if not e["excluded"]]
+        pages = []
+        if run["config"].get("model_context_version"):
+            start = 0
+            while start < len(rows):
+                end, size = start, 0
+                while end < len(rows) and end - start < run["config"]["context_evidence_limit"]:
+                    length = len(rows[end]["text"])
+                    if end > start and size + length > run["config"]["context_text_limit"]:
+                        break
+                    size += length
+                    end += 1
+                owned = [e["evidence_id"] for e in rows[start:end]]
+                visible = [e["evidence_id"] for e in rows[max(0, start - 1):min(len(rows), end + 1)]]
+                pages.append({"evidence_ids": visible, "scope": {"page_number": len(pages) + 1,
+                              "owned_evidence_ids": owned, "boundary_evidence_ids": [ref for ref in visible if ref not in owned]}})
+                start = end
+        else:
+            pages = [{}]
+        intents = []
+        for role in ("interpretation", "verification", "critic"):
+            for page in pages:
+                intents.append({"role": role, "question": "初回の専門分析: " + run["config"]["question"],
+                    **copy.deepcopy(page),
+                    **({"target_id": run["initial_id"], "target_version": 0} if role == "critic" else {})})
+        intents.extend({"role": "statistics", "method_id": method,
+                       "question": "初回の数量・統計: " + method, "label_field": "codes"}
+                       for method in sorted(METHODS))
+        return intents
+
     def _run_analysis(self, run_id: str) -> None:
         """Drive persisted phases; safe to call synchronously with mock adapters."""
         try:
@@ -1593,6 +2291,35 @@ class AnalysisOrchestrationService:
                         self._stop(db, run, limit); return
                     phase = run["phase"]
                     tasks = self._tasks(db, run_id)
+                    if phase == "core" and run["iteration"] == 0 and run["config"].get("initial_label_definitions_version"):
+                        if not run.get("initial_label_result_id"):
+                            if run["config"].get("initial_specialist_analysis_version"):
+                                initial_intents = self._initial_specialist_intents(db, run)
+                                for initial_intent in initial_intents:
+                                    self._register(db, run, initial_intent, phase="initial_analysis", automatic=True)
+                                    if run["status"] in TERMINAL:
+                                        return
+                                run["phase"] = phase = "initial_analysis"
+                            else:
+                                self._register(db, run, {"role": "interpretation", "method_id": "label-design-v1",
+                                    "question": "初回のラベル・尺度を設計する: " + run["config"]["question"],
+                                    "importance": "high"}, phase="initial_labels", automatic=True)
+                                run["phase"] = phase = "initial_labels"
+                            self._write_run(db, run)
+                    if run["config"].get("specialist_orchestration_version") and phase in {"core", "specialists"}:
+                        pending = self._pending_result_assessments(db, run)
+                        if pending:
+                            queued = [t for t in tasks if t["role"] == "orchestrator" and t["status"] == "queued"]
+                            if not queued:
+                                domain = self._result_domain(db, pending[0])
+                                batch = [rid for rid in pending if self._result_domain(db, rid) == domain][:20]
+                                self._register(db, run, {"role": "orchestrator", "method_id": "result-review-v1",
+                                    "question": "担当分野の保存結果を評価して具体的な所見と限界を報告する",
+                                    "scope": {"domain": domain, "result_ids": batch}}, phase="specialist_review", automatic=True)
+                            if run["status"] in TERMINAL:
+                                return
+                            run["phase"] = phase = "specialist_review"
+                            self._write_run(db, run)
                     if phase == "core":
                         pending_core = [t for t in tasks if t["role"] == "core" and t["iteration"] == run["iteration"]]
                         if not pending_core or pending_core[-1]["status"] == "succeeded" and db.execute(
@@ -1609,10 +2336,77 @@ class AnalysisOrchestrationService:
                     if run["status"] in TERMINAL or run["status"] == "recovery_required":
                         return
                     tasks = self._tasks(db, run_id)
-                    if run["phase"] == "core":
+                    if run["config"].get("specialist_orchestration_version") and any(
+                            t["phase"] == "specialist_followup" and t["status"] in {"failed", "quarantined", "blocked"}
+                            and not t["stale"] for t in tasks):
+                        self._stop(db, run, "execution_failure"); return
+                    if run["phase"] == "initial_analysis":
+                        try:
+                            run["initial_analysis_report"] = self._collect_initial_analysis(db, run)
+                        except AnalysisContractError as exc:
+                            run["error"] = exc.code
+                            self._stop(db, run, "initial_analysis_incomplete"); return
+                        self._event(db, run_id, "initial_analysis_aggregated", "全専門家の初回分析と尺度要件を集約してCoreへ報告しました。",
+                                    source="handler", target="core", report_count=len(run["initial_analysis_report"]["reports"]),
+                                    requirement_count=len(run["initial_analysis_report"]["label_requirements"]))
+                        self._register(db, run, {"role": "core", "question": "初回の尺度要件を担当へ振り分ける: " + run["config"]["question"],
+                            "dependencies": [report["task_id"] for report in run["initial_analysis_report"]["reports"]]},
+                            phase="initial_routing", automatic=True)
+                        if run["status"] in TERMINAL:
+                            return
+                        run["phase"] = "initial_routing"
+                        self._write_run(db, run)
+                    elif run["phase"] == "initial_routing":
+                        routing_tasks = [t for t in tasks if t["phase"] == "initial_routing"]
+                        if not routing_tasks or any(t["status"] != "succeeded" for t in routing_tasks):
+                            self._stop(db, run, "initial_routing_invalid"); return
+                        for task in routing_tasks:
+                            self._apply_initial_routing(db, run, task)
+                            if run["status"] in TERMINAL:
+                                return
+                    elif run["phase"] == "initial_labels":
+                        label_tasks = [t for t in tasks if t["phase"] == "initial_labels"]
+                        if not label_tasks or any(t["status"] != "succeeded" for t in label_tasks):
+                            self._stop(db, run, "initial_labels_missing"); return
+                        task = label_tasks[0]
+                        run["initial_label_result_id"] = task["result_id"]
+                        if run["config"].get("model_context_version"):
+                            run["initial_label_result_ids"] = [t["result_id"] for t in label_tasks]
+                        catalog = self._initial_label_catalog(db, run)
+                        self._event(db, run_id, "initial_labels_created", "専門家による初回のラベル・尺度定義をAI下書きとして保存しました。",
+                                    source="interpretation", target="core", result_id=catalog["result_id"], raw_hash=catalog["raw_hash"])
+                        if run["config"].get("specialist_orchestration_version"):
+                            references = sorted({ref for definition in catalog["definitions"] for ref in definition["evidence_ids"]})
+                            self._register(db, run, {"role": "critic", "question": "初回のラベル・尺度下書きを独立に検証する。欠測を低水準に含めていないか、否定の発話を高評価にしていないか、基準と尺度水準の妥当性を確認する。",
+                                "scope": "label_review", "evidence_ids": references, "dependencies": [t["task_id"] for t in label_tasks],
+                                "target_id": "labels:" + catalog["result_id"], "target_version": run["annotation_version"]}, phase="label_review", automatic=True)
+                            if run["status"] in TERMINAL:
+                                return
+                            run["phase"] = "label_review"
+                        else:
+                            run["phase"] = "core"
+                        self._write_run(db, run)
+                    elif run["phase"] == "label_review":
+                        reviews = [t for t in tasks if t["phase"] == "label_review"]
+                        if not reviews or any(t["status"] != "succeeded" for t in reviews):
+                            self._stop(db, run, "label_review_incomplete"); return
+                        run["phase"] = "specialists"
+                        self._write_run(db, run)
+                    elif run["phase"] == "specialist_review":
+                        reviews = [t for t in tasks if t["role"] == "orchestrator" and t["phase"] == "specialist_review" and t.get("result_id")
+                            and not db.execute("SELECT 1 FROM orchestration_decisions WHERE result_id=?", (t["result_id"],)).fetchone()]
+                        if not reviews or any(t["status"] != "succeeded" for t in reviews):
+                            self._stop(db, run, "specialist_review_incomplete"); return
+                        for task in reviews:
+                            result = db.execute("SELECT * FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
+                            self._apply_core(db, run, task, result)
+                            if run["status"] in TERMINAL:
+                                return
+                    elif run["phase"] == "core":
                         task = next((t for t in reversed(tasks) if t["role"] == "core" and t["iteration"] == run["iteration"]), None)
                         if task is None or task["status"] != "succeeded":
-                            self._stop(db, run, "execution_failure"); return
+                            reason = "unreviewed_results" if task and task.get("error") == "result_assessment_missing" else "execution_failure"
+                            self._stop(db, run, reason); return
                         result = db.execute("SELECT * FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
                         self._apply_core(db, run, task, result)
                     elif run["phase"] == "stop_review":
@@ -1623,7 +2417,7 @@ class AnalysisOrchestrationService:
                             self._stop(db, run, "review_incomplete"); return
                         run["reviewed_stop_versions"].append(run["pending_stop"]["target_version"])
                         run["review_status"] = "reviewed"
-                        run["phase"] = "core"
+                        run["phase"] = "specialists" if run["config"].get("specialist_orchestration_version") else "core"
                         self._write_run(db, run)
                     else:
                         run["phase"] = "core"
