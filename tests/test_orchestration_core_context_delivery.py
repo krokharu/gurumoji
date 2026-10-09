@@ -169,6 +169,87 @@ class CoreHistoryDeliveryTests(unittest.TestCase):
         with self.assertRaises(AnalysisContractError):
             self.h.context(self.h.register("core"))
 
+    def assert_corrupt_history_rejected(self):
+        consumers = [self.h.register(role) for role in ("core", "critic")]
+        before = self.h.path.read_bytes()
+        calls = len(self.h.calls)
+        for consumer in consumers:
+            with self.subTest(role=consumer["role"]):
+                with self.assertRaises(AnalysisContractError) as caught:
+                    self.h.context(consumer)
+                self.assertEqual(caught.exception.code, "result_integrity_mismatch")
+        self.assertEqual(self.h.path.read_bytes(), before)
+        self.assertEqual(len(self.h.calls), calls)
+
+    def test_adopted_decision_result_id_mismatch_is_not_a_reference(self):
+        prior = self.produce_core()
+        self.mutate_decision(prior, result_id="different-synthetic-result")
+        self.assert_corrupt_history_rejected()
+
+    def test_adopted_decision_missing_result_id_is_not_a_reference(self):
+        prior = self.produce_core()
+        with self.h.service._db() as db:
+            row = db.execute("SELECT * FROM orchestration_decisions WHERE result_id=?", (prior["result_id"],)).fetchone()
+            decision = json.loads(row["payload_json"])
+            del decision["result_id"]
+            db.execute("UPDATE orchestration_decisions SET payload_json=? WHERE decision_id=?",
+                       (canonical(decision).decode(), row["decision_id"]))
+            saved = db.execute("SELECT * FROM orchestration_decisions WHERE decision_id=?", (row["decision_id"],)).fetchone()
+            self.assertEqual(saved["result_id"], prior["result_id"])
+            self.assertNotIn("result_id", json.loads(saved["payload_json"]))
+        self.assert_corrupt_history_rejected()
+
+    def test_adopted_decision_content_and_summary_mutations_are_not_references(self):
+        prior = self.produce_core()
+        original = self.h.saved(prior["result_id"])["raw"]
+        for change in ({"summary": "Changed adopted summary"},
+                       {"alternatives": ["Changed adopted alternative"]}):
+            with self.subTest(change=change):
+                self.mutate_decision(prior, **original)
+                self.mutate_decision(prior, **change)
+                self.assertEqual(self.h.saved(prior["result_id"])["raw"], original)
+                self.assert_corrupt_history_rejected()
+
+    def test_adopted_decision_role_mismatch_is_not_a_reference(self):
+        prior = self.produce_core()
+        self.mutate_decision(prior, role="critic")
+        self.assert_corrupt_history_rejected()
+
+    def test_coherent_foreign_run_rows_cannot_enter_current_core_or_critic_history(self):
+        prior = self.produce_core()
+        # This is a real adopted result from another run, with no forged flags
+        # or mismatched metadata. The same input alone must not grant access.
+        self.assert_reference(self.h.context(self.h.register("core"))["results"][0], prior)
+        current = self.h.start()
+        self.assertNotEqual(current["run_id"], self.h.run["run_id"])
+        self.assertEqual(current["input_hash"], self.h.run["input_hash"])
+        consumers = [self.h.register(role, run=current) for role in ("core", "critic")]
+        before = self.h.path.read_bytes()
+        with self.h.service._db() as db:
+            result = db.execute("SELECT * FROM orchestration_results WHERE result_id=?", (prior["result_id"],)).fetchone()
+            source = db.execute("SELECT * FROM orchestration_tasks WHERE task_id=?", (prior["task_id"],)).fetchone()
+            decision = db.execute("SELECT * FROM orchestration_decisions WHERE result_id=?", (prior["result_id"],)).fetchone()
+            metadata, task = json.loads(result["state_json"]), json.loads(source["state_json"])
+            self.assertEqual({result["run_id"], metadata["run_id"], source["run_id"], task["run_id"], decision["run_id"]},
+                             {self.h.run["run_id"]})
+            self.assertEqual(metadata["task_id"], task["task_id"])
+            self.assertEqual(metadata["attempt_id"], task["attempt_id"])
+            self.assertEqual(metadata["raw_hash"], fingerprint(json.loads(result["raw_json"])))
+            self.assertEqual(json.loads(decision["payload_json"])["result_id"], result["result_id"])
+        for consumer in consumers:
+            with self.subTest(role=consumer["role"]):
+                context = self.h.context(consumer, run=current)
+                self.assertEqual(context["results"], [])
+                self.assertNotIn("result_delivery", context)
+                self.assertNotIn(prior["result_id"], canonical(context).decode())
+        self.assertEqual(self.h.path.read_bytes(), before)
+
+    def test_stored_stale_core_metadata_is_not_a_reference(self):
+        prior = self.produce_core()
+        metadata = self.h.mutate_result(prior, stale=True)
+        self.assertIs(metadata["stale"], True)
+        self.assert_corrupt_history_rejected()
+
     def test_ordinary_expert_omits_unrelated_metadata_but_preserves_dependency_guards(self):
         needed = self.h.produce("Required body")
         self.h.produce("Unrelated body")
