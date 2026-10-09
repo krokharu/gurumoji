@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const crypto = require('node:crypto');
 const app = path.resolve(__dirname, '..');
 const files = Object.fromEntries(['analysis-method-view.js', 'analysis-execution.js', 'analysis-content.js', 'app.js', 'style.css'].map(name =>
-  [name, fs.readFileSync(path.join(app, 'src/gurumoji/static', name), 'utf8')]));
+  [name, fs.readFileSync(name === 'app.js' && process.env.R01_APP_SOURCE ? process.env.R01_APP_SOURCE : path.join(app, 'src/gurumoji/static', name), 'utf8')]));
 function extract(file, name) {
   const src = files[file];
   const match = new RegExp(`^(?:async )?function ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\(`, 'm').exec(src);
@@ -76,7 +76,84 @@ const assert = require('node:assert/strict');
 const tick=()=>new Promise(r=>setImmediate(r));
 const passed=[];
 async function check(name, work) { const timer=setTimeout(()=>{console.error('Unresolved test: '+name);process.exit(1);},2000);try {await work();passed.push(name);} finally {clearTimeout(timer);} }
+function reloadFixture() {
+ const p=make();
+ Object.assign(p.ctx,{analysisRequestController:null,analysisSaveOwner:null,analysisSaveInProgress:false,
+  analysisTermRunRequested:false,analysisItemSelect:null,analysisCard:null,preparationDraft:{evidence:'local-evidence'},preparationDirty:false,
+  updateAnalysisTarget:()=>p.effects.push(['target']),setAnalysisDirty:dirty=>{p.ctx.analysisState.dirty=dirty;},
+  deepCopy:value=>structuredClone(value),onContentAnalysisLoaded:()=>p.effects.push(['content-loaded'])});
+ Object.assign(p.ctx.analysisState,{config:{threshold:7},annotations:{u1:{memo:'local memo'}},segmentQuery:'local filter',
+  annotatedOnly:true,speakerAttributeFilter:'local group',selectedSpeaker:'speaker-A',automaticPage:'evidence'});
+ p.storage.set('evidence-position','u1');
+ p.ctx.analysisState.methods={context:p.ctx.captureAnalysisContext(),selected:'saved-method',data:{origin:'saved-method-result'},loading:false};
+ const content=p.ctx.contentAnalysisState();Object.assign(content,{query:'saved content filter',result:{hits:[{id:'u1'}]}});
+ p.load('analysis-method-view.js','analysisMethodState');
+ p.load('app.js','setAnalysisLoading','loadAnalysisItem');
+ return p;
+}
+function retainedSnapshot(p) {
+ return {data:p.ctx.analysisState.data,config:p.ctx.analysisState.config,annotations:p.ctx.analysisState.annotations,
+  preparation:p.ctx.preparationDraft,query:p.ctx.analysisState.segmentQuery,selected:p.ctx.analysisState.selectedSpeaker,
+  page:p.ctx.analysisState.automaticPage,evidence:p.storage.get('evidence-position'),
+  method:p.ctx.analysisMethodState().selected,methodData:p.ctx.analysisMethodState().data,
+  contentQuery:p.ctx.contentAnalysisState().query,contentResult:p.ctx.contentAnalysisState().result};
+}
+async function reloadPrimaryControls() {
+ const controls=[];
+ const primary=async(id,work)=>{try{await work();controls.push({id,outcome:'passed'});}catch(error){controls.push({id,outcome:'failed',error:error.message});}};
+ await primary('R01-01',async()=>{
+  const p=reloadFixture(),fresh=data('A-current',3);fresh.config={threshold:9};fresh.annotations={u2:{memo:'current'}};
+  const loading=p.ctx.loadAnalysisItem('A');assert(p.nodes.get('#analysis-execution-view').hidden);
+  p.reply(0,{analysis:fresh});await loading;assert.equal(p.ctx.analysisState.data,fresh);
+  assert.deepEqual(p.ctx.analysisState.config,fresh.config);assert.deepEqual(p.ctx.analysisState.annotations,fresh.annotations);
+  assert.equal(p.ctx.analysisState.segmentQuery,'');assert.equal(p.ctx.analysisState.selectedSpeaker,'');assert.equal(p.ctx.preparationDraft,null);
+  assert(p.effects.some(e=>e[0]==='content-loaded'));assert.equal(p.nodes.get('#analysis-shell').hidden,false);
+ });
+ for(const [id,transport] of [['R01-02',false],['R01-03',true]])await primary(id,async()=>{
+  const p=reloadFixture(),before=retainedSnapshot(p);const loading=p.ctx.loadAnalysisItem('A');
+  assert(p.nodes.get('#analysis-execution-view').hidden);
+  if(transport)p.requests[0].reject(new TypeError('synthetic transport rejected'));else p.requests[0].resolve({ok:false,status:503,payload:{error:'synthetic HTTP503'}});
+  await loading;assert.deepEqual(retainedSnapshot(p),before);assert.equal(p.nodes.get('#analysis-shell').hidden,false);
+  assert(p.effects.some(e=>e[0]==='alert'&&e[3]&&e[2].includes('前回')));
+  assert(!p.effects.some(e=>e[0]==='content-loaded'));
+ });
+ await primary('R01-04',async()=>{
+  const p=reloadFixture(),loading=p.ctx.loadAnalysisItem('B');assert.equal(p.ctx.analysisState.data,null);
+  p.reply(0,{error:'B failed'},false);await loading;assert.equal(p.ctx.analysisState.itemId,'B');assert.equal(p.ctx.analysisState.data,null);
+  assert.equal(p.nodes.get('#analysis-shell').hidden,true);assert(!p.effects.some(e=>e[0]==='content-loaded'));
+ });
+ await primary('R01-05',async()=>{
+  const p=reloadFixture(),old=p.ctx.loadAnalysisItem('A'),current=p.ctx.loadAnalysisItem('B'),fresh=data('B-current',3);
+  p.reply(1,{analysis:fresh});await current;p.reply(0,{analysis:data('A-stale')});await old;
+  assert.equal(p.ctx.analysisState.itemId,'B');assert.equal(p.ctx.analysisState.data,fresh);
+  // A current request also loses ownership when input/context changes without another fetch.
+  const q=reloadFixture(),before=q.ctx.analysisState.data,loading=q.ctx.loadAnalysisItem('A');
+  q.ctx.analysisMutationGeneration++;q.reply(0,{analysis:data('old-input')});await loading;assert.equal(q.ctx.analysisState.data,before);
+ });
+ await primary('R01-06',async()=>{
+  const p=reloadFixture(),old=p.ctx.loadAnalysisItem('A'),current=p.ctx.loadAnalysisItem('A'),fresh=data('A-newer',4);
+  assert(p.requests[0].options.signal.aborted);p.reply(1,{analysis:fresh});await current;
+  p.requests[0].reject(Object.assign(new Error('old aborted'),{name:'AbortError'}));await old;
+  assert.equal(p.ctx.analysisState.data,fresh);assert.equal(p.nodes.get('#analysis-shell').hidden,false);
+  assert.equal(p.effects.filter(e=>e[0]==='content-loaded').length,1);
+ });
+ await primary('R01-07',async()=>{
+  const p=reloadFixture();p.ctx.analysisState.data.context={run:'saved-r1',filter:'saved-filter',revision:1};
+  const before=retainedSnapshot(p),loading=p.ctx.loadAnalysisItem('A',{discardDirty:true,execute:true});
+  assert(p.requests[0].url.endsWith('?execute=1'));p.reply(0,{error:'new context unavailable'},false);await loading;
+  assert.deepEqual(retainedSnapshot(p),before);assert.equal(p.ctx.analysisState.data.context.run,'saved-r1');
+  const message=p.effects.filter(e=>e[0]==='alert').at(-1);assert(message[3]);assert(message[2].includes('前回'));assert(message[2].includes('今回の条件では未取得'));
+  assert(!p.effects.some(e=>e[0]==='content-loaded'));
+ });
+ return controls;
+}
 (async()=>{
+const primaryControls=await reloadPrimaryControls();
+if(process.env.R01_PRIMARY_ONLY==='1'){
+ console.log(JSON.stringify({scope:'Actual app.js functions; synthetic deferred-fetch/DOM; primary denominator belongs to R01-01..08 only',primaryControls},null,2));
+ if(primaryControls.some(c=>c.outcome==='failed'))process.exitCode=1;
+ return;
+}
 for (const route of ['B','ABA']) for (const failure of [false,true]) {
  await check(`classification-${route}-${failure}`,async()=>{
   const p=make();p.load('analysis-method-view.js','runSegmentClassification');
@@ -161,5 +238,21 @@ await check('result-button-opens-exact-fixed-run-without-live-load',async()=>{
  assert(p.effects.some(e=>e[0]==='fixed-run'&&e[1]==='A'&&e[2]==='saved-run-A'));
  assert(!p.effects.some(e=>['load-item','load-storage'].includes(e[0])));
 });
-console.log(JSON.stringify({scope:'Pure Node synthetic deferred-fetch/DOM; no browser, real API, models or user data',passed},null,2));
+await check('reload-dirty-confirm-rejection-keeps-current-input-and-owner',async()=>{
+ const p=reloadFixture(),before=retainedSnapshot(p),generation=p.ctx.analysisNavigationGeneration;
+ p.ctx.hasUnsavedAnalysisChanges=()=>true;p.ctx.window.confirm=()=>false;
+ await p.ctx.loadAnalysisItem('B');assert.equal(p.requests.length,0);assert.deepEqual(retainedSnapshot(p),before);
+ assert.equal(p.ctx.analysisState.itemId,'A');assert.equal(p.ctx.analysisNavigationGeneration,generation);
+});
+await check('reload-retained-method-view-does-not-revive-old-response',async()=>{
+ const p=reloadFixture();p.ctx.analysisState.methods.data=null;
+ p.load('analysis-method-view.js','loadAnalysisMethodOverview');const oldState=p.ctx.analysisState.methods;
+ const old=p.ctx.loadAnalysisMethodOverview(),reload=p.ctx.loadAnalysisItem('A');
+ p.reply(1,{error:'reload failed'},false);await reload;const retained=p.ctx.analysisMethodState();
+ assert.notEqual(retained,oldState);assert.equal(retained.selected,'saved-method');assert.equal(retained.loading,false);
+ p.reply(0,{methods:[{method_id:'old-method',produced:true}]});await old;
+ assert.equal(p.ctx.analysisMethodState(),retained);assert.equal(retained.data,null);assert.equal(retained.selected,'saved-method');
+});
+console.log(JSON.stringify({scope:'Pure Node synthetic deferred-fetch/DOM; no browser, real API, models or user data',passed,primaryControls},null,2));
+if(primaryControls.some(c=>c.outcome==='failed'))process.exitCode=1;
 })().catch(e=>{console.error(e);process.exitCode=1;});

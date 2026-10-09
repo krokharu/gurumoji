@@ -6,6 +6,45 @@ const {createHarness}=require('./harness.cjs');
 const node=(h,id)=>h.document.getElementById(`orchestration-${id}`);
 const pending=(h,suffix,method='GET')=>{const request=h.requests.findLast(r=>!r.settled&&r.url.endsWith(suffix)&&(r.options.method||'GET')===method);assert(request,`${method} ${suffix}`);return request;};
 const plain=value=>JSON.parse(JSON.stringify(value));
+
+test('Obsidian management is a separate new-run default, with honest legacy state',async t=>{
+ const h=await setup(t);
+ assert.equal(node(h,'memory-enabled').checked,true);
+ assert.equal(h.evaluate('orchestrationPayload().obsidian_management'),true);
+ assert.deepEqual(plain(h.evaluate('orchestrationPayload().publication_targets')),[]);
+ h.click('#orchestration-memory-enabled');
+ assert.equal(h.evaluate('orchestrationPayload().obsidian_management'),false);
+ await started(h,snapshot());
+ assert.match(node(h,'memory-status').textContent,/無効/);
+ assert.equal(node(h,'memory-note').hidden,true);
+ assert.equal(node(h,'memory-retry').hidden,true);
+ assert.match(h.document.querySelector('[data-role="obsidian_manager"]').textContent,/CODE/);
+ assert.doesNotMatch(h.document.querySelector('[data-role="obsidian_manager"]').textContent,/割当 0/);
+});
+
+test('management links are local generated routes and display text cannot inject HTML',async t=>{
+ const h=await setup(t);
+ await started(h,snapshot({obsidian_management:{enabled:true,status:'linked',note_id:'<img src=x onerror=alert(1)>',note_path:'javascript:alert(1)'}}));
+ assert.equal(node(h,'memory-note').getAttribute('href'),'/api/library/A/analysis/orchestration/R1/memory/note');
+ assert.equal(node(h,'memory-note').hidden,false);
+ assert.equal(node(h,'memory-location').querySelector('img'),null);
+ assert.equal(node(h,'memory-retry').hidden,true);
+ assert.match(node(h,'memory-status').textContent,/参照を保存済み/);
+ assert.equal(posts(h).length,1);
+});
+
+test('management retry sends an empty body once and never resumes analysis',async t=>{
+ const h=await setup(t),run=snapshot({status:'cancelled',allowed_actions:[],obsidian_management:{enabled:true,status:'edited',note_id:'memory-R1'}});
+ await started(h,run);
+ assert.match(node(h,'memory-warning').textContent,/履歴/);
+ h.click('#orchestration-memory-retry');h.click('#orchestration-memory-retry');
+ const request=pending(h,'/R1/memory/retry','POST');
+ assert.deepEqual(JSON.parse(request.options.body),{});
+ assert.equal(posts(h).length,2);
+ h.reply(request,{run:{...run,obsidian_management:{enabled:true,status:'linked',note_id:'memory-R1'}}});await h.flush();
+ assert.equal(node(h,'memory-retry').hidden,true);
+ assert.equal(h.requests.filter(r=>r.url.endsWith('/resume')).length,0);
+});
 function input(h,id,value){node(h,id).value=value;node(h,id).dispatchEvent(new h.w.Event('input',{bubbles:true}));}
 function snapshot(overrides={}) {
  return {run_id:'R1',item_id:'A',status:'running',phase:'specialists',iteration:1,source_revision:2,

@@ -3,22 +3,26 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any, Callable
 
 from flask import Blueprint, Flask, Response, jsonify, request
 
-from ..analysis_core import AnalysisContractError
-from ..analysis_store import StoreConflict
+from ..analysis_core import AnalysisContractError, TABLE_PILOT_MAX_BYTES
+from ..analysis_store import (StoreConflict, AssetBindingError, HUMAN_RECORD_OPTIONS_MAX_BYTES,
+                              human_record_options_offset, asset_plan_options_offset)
 
 
 def register_orchestration_routes(app: Flask, service: Callable[[], Any],
                                   prepare: Callable[[dict], dict],
                                   publication: Callable[[], Any] | None = None,
-                                  history_viewer: Callable[[], Any] | None = None) -> None:
+                                  history_viewer: Callable[[], Any] | None = None,
+                                  table_reader: Callable[[], Any] | None = None) -> None:
     blueprint = Blueprint("analysis_orchestration", __name__)
 
-    def payload() -> dict:
-        if request.content_length and request.content_length > 64 * 1024:
+    def payload(max_bytes=64 * 1024) -> dict:
+        if ((request.content_length and request.content_length > max_bytes)
+                or len(request.get_data(cache=True)) > max_bytes):
             raise AnalysisContractError("実行条件が大きすぎます。")
         value = request.get_json(silent=True)
         if not isinstance(value, dict):
@@ -32,14 +36,15 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.errorhandler(AnalysisContractError)
     def contract_error(exc):
-        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run",
+        conflict = exc.code in {"revision_conflict", "request_conflict", "active_run", "asset_plan_conflict", "asset_plan_revision", "asset_plan_changed",
                                 "provider_unavailable", "resume_blocked", "uncertain_execution",
-                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch"}
+                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch",
+                                "table_run_stopped", "table_run_unavailable", "table_task_limit"}
         return jsonify(error=str(exc), reason_code=exc.code, field=exc.field), 409 if conflict else 400
 
     @blueprint.errorhandler(StoreConflict)
     def publication_conflict(exc):
-        return jsonify(error=str(exc), reason_code="publication_conflict"), 409
+        return jsonify(error=str(exc), reason_code=exc.reason if isinstance(exc, AssetBindingError) else "publication_conflict"), 409
 
     @blueprint.errorhandler(LookupError)
     def not_found(_exc):
@@ -97,9 +102,101 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     def cancel(item_id, run_id):
         return jsonify(run=public_run(item_id, service().cancel(item_id, run_id)))
 
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot")
+    def table_pilot_options(item_id, run_id):
+        # Application wiring uses the viewer's readonly connection, never the
+        # execution factory. The legacy injected Service constructor is inert.
+        try:
+            reader = table_reader() if table_reader is not None else service()
+            response = viewer_response(reader.table_pilot_options(item_id, run_id, offset=request.args.get("offset", "0")))
+        except LookupError as exc:
+            return viewer_response({"error": str(exc), "reason_code": "table_selection_unavailable"}), 404
+        if len(response.get_data()) > TABLE_PILOT_MAX_BYTES:
+            raise AnalysisContractError("選択用の登録情報が上限を超えています。", code="table_selection_byte_limit")
+        return response
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot/<method_id>")
+    def table_pilot_register(item_id, run_id, method_id):
+        task = service().register_table_pilot(item_id, run_id, method_id, payload(TABLE_PILOT_MAX_BYTES), server_bound=True)
+        return jsonify(task=task), 200 if task["registration_duplicate"] else 202
+
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/resume")
     def resume(item_id, run_id):
         return jsonify(run=public_run(item_id, service().resume(item_id, run_id, payload()))), 202
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans")
+    def asset_plan_register(item_id,run_id):
+        outcome=service().register_asset_plan(item_id,run_id,payload(TABLE_PILOT_MAX_BYTES))
+        return jsonify(outcome),200 if outcome["duplicate"] else 202
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/options")
+    def asset_plan_options(item_id, run_id):
+        if set(request.args) - {"offset"} or len(request.args.getlist("offset")) > 1:
+            raise AnalysisContractError("接続計画の取得条件が不正です。", code="asset_plan_options_query")
+        offset = asset_plan_options_offset(request.args.get("offset", "0"))
+        try:
+            if table_reader is None: raise OSError("read-only asset reader is not configured")
+            reader = table_reader()
+            if reader.table_store is None: raise OSError("read-only asset store is not configured")
+            response = viewer_response(reader.asset_plan_options(item_id, run_id, offset=offset))
+        except LookupError:
+            return viewer_response({"error": "対象の会話または固定分析が見つかりません。", "reason_code": "asset_plan_options_unavailable"}), 404
+        except (sqlite3.Error, OSError):
+            return viewer_response({"error": "接続計画の保存済み台帳を読み取れません。", "reason_code": "asset_plan_options_storage_unavailable"}), 503
+        if len(response.get_data()) > HUMAN_RECORD_OPTIONS_MAX_BYTES:
+            raise AnalysisContractError("接続候補の情報が上限を超えています。", code="asset_plan_options_byte_limit")
+        return response
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/notifications/<producer_task_id>")
+    def asset_plan_notification(item_id,run_id,producer_task_id):
+        if payload():raise AnalysisContractError("通知は保存済producerだけを指定してください。",code="asset_notification_body")
+        return jsonify(service().notify_asset_output(item_id,run_id,producer_task_id))
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
+    def human_record_options(item_id, run_id):
+        if set(request.args) - {"offset"} or len(request.args.getlist("offset")) > 1:
+            raise AnalysisContractError("研究者記録の取得条件が不正です。", code="human_record_options_query")
+        offset = human_record_options_offset(request.args.get("offset", "0"))
+        # The existing app reader uses mode=ro/query_only. Never initialize an
+        # execution service or writer store as a fallback for a missing reader.
+        try:
+            if table_reader is None: raise OSError("read-only record reader is not configured")
+            reader = table_reader()
+            item = reader.find_item(item_id)
+            if item is None: raise LookupError("対象の会話がありません。")
+            if reader.table_store is None: raise OSError("read-only record store is not configured")
+            with reader.connect() as db:
+                authority = db.execute("PRAGMA database_list").fetchone()[2]
+            if not authority or Path(authority).resolve() != reader.table_store.database_file:
+                raise OSError("record store authority mismatch")
+            stamp = reader.source_fingerprint(item) if reader.source_fingerprint else None
+            source = dict(item)
+            response = viewer_response(reader.table_store.human_record_options(item_id=item_id,
+                execution_run_id=run_id, offset=offset, current_input_hash=stamp,
+                current_source_revisions={"source_revision": source.get("revision_count", 0),
+                                          "analysis_revision": source.get("analysis_revision", 0)}))
+            fresh_item = reader.find_item(item_id)
+            if fresh_item is None or (reader.source_fingerprint and reader.source_fingerprint(fresh_item) != stamp):
+                raise AnalysisContractError("取得中に元入力が更新されました。", code="revision_conflict")
+            if any(dict(fresh_item).get(k) != source.get(k) for k in ("revision_count", "analysis_revision")):
+                raise AnalysisContractError("取得中に元入力の版が更新されました。", code="revision_conflict")
+        except LookupError:
+            return viewer_response({"error": "対象の会話または固定分析が見つかりません。",
+                                    "reason_code": "human_record_options_unavailable"}), 404
+        except (sqlite3.Error, OSError):
+            return viewer_response({"error": "研究者記録の保存済み台帳を読み取れません。",
+                                    "reason_code": "human_record_options_storage_unavailable"}), 503
+        if len(response.get_data()) > HUMAN_RECORD_OPTIONS_MAX_BYTES:
+            raise AnalysisContractError("研究者記録の選択情報が上限を超えています。", code="human_record_options_byte_limit")
+        return response
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/human-records")
+    def human_record(item_id, run_id):
+        value = payload()
+        outcome = service().submit_human_record(item_id, run_id, value, request_bytes=request.get_data(cache=True))
+        response = jsonify(outcome)
+        response.headers["Cache-Control"] = "no-store"
+        return response, 200 if outcome["duplicate"] else 201
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/publication/retry")
     def retry_publication(item_id, run_id):
@@ -109,7 +206,23 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
         if value:
             raise AnalysisContractError("保存・公開の再試行で条件や公開先を変更できません。")
         publication().retry(item_id, run_id)
-        return jsonify(run=public_run(item_id, service().status(item_id, run_id)))
+        backend = service()
+        state = backend.status(item_id, run_id)
+        memory = state.get("obsidian_management", {})
+        if memory.get("enabled") and memory.get("status") != "unavailable":
+            state = backend.sync_memory(item_id, run_id)
+        return jsonify(run=public_run(item_id, state))
+
+    @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/memory/retry")
+    def retry_memory(item_id, run_id):
+        if payload():
+            raise AnalysisContractError("管理ノートの更新で条件・保存先は変更できません。")
+        return jsonify(run=public_run(item_id, service().sync_memory(item_id, run_id)))
+
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/memory/note")
+    def memory_note(item_id, run_id):
+        return Response(service().memory_note(item_id, run_id), mimetype="text/markdown", headers={
+            "Content-Disposition": 'attachment; filename="obsidian-management.md"', "Cache-Control": "no-store"})
 
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>/results")
     def results(item_id, run_id):

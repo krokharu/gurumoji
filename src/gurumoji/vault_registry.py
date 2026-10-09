@@ -17,6 +17,7 @@ import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 
@@ -520,6 +521,75 @@ class VaultRegistry:
         return cell(label)
 
     # Analysis runs --------------------------------------------------------
+    def publish_orchestration_memory(self, packet: dict) -> dict:
+        """Index committed Core/Handler records through the generated-note policy.
+
+        This local management note is separate from four-vault result publication.
+        Large data stays in SQLite/AnalysisStore and is resolved by ID/hash.
+        """
+        with VAULT_LOCK:
+            data = self.load()
+            note_id = "orchestration-memory-" + entity_key(packet["run_id"])
+            previous = data["entities"].get(note_id)
+            if previous and (previous["item_id"] != packet["item_id"] or previous["run_id"] != packet["run_id"]):
+                raise StoreConflict("管理ノートの所有権が異なります。")
+            body = ("# 自律分析のObsidian管理\n\n"
+                    "Coreの判断とHandlerの保存記録を受け取る管理ノートです。AI下書きと研究者の確定解釈を区別します。\n\n"
+                    "## 正本と対応\n\n| 項目 | 値 |\n| --- | --- |\n")
+            for key in ("run_id", "item_id", "initial_id", "input_hash", "source_revision", "analysis_revision",
+                        "generation", "status", "phase", "view_version", "annotation_version", "codebook_version", "event_seq", "source_hash"):
+                body += f"| {key} | {cell(packet.get(key), 240)} |\n"
+            body += "\n## データを開く\n\n"
+            for key, label in (("state", "実行状態"), ("ledger", "全量台帳JSON"), ("history", "履歴・根拠の索引JSON")):
+                body += f"- [{label}](<{packet['links'][key]}>)\n"
+            body += ("\nJSON・CSV・発話本文・ラベル全量は正本に保持します。下表はIDの対応だけを載せ、未実行・隔離・欠測を成功やゼロへ置き換えません。"
+                     "リンクはアプリへの参照で、アプリ停止中の閲覧可能性を保証しません。\n\n## 現在のCore判断（AI下書き）\n\n")
+            body += markdown(packet["core_summary"]) + "\n"
+            if packet["core_summary_truncated"]:
+                body += "\n判断は先頭1200文字だけを表示しています。全量と根拠は台帳JSONを参照してください。\n"
+            if packet.get("expert_agents"):
+                body += "\n## 専門家の固定知識と入出力契約\n\n知識の固定と専門的な適用の確認は別です。取得元ノートID・抜粋・未読範囲は全量台帳JSONを参照します。\n\n"
+                fields = ("expert_id", "definition_version", "contract_version", "profile_hash", "knowledge_hash")
+                body += "| " + " | ".join(fields) + " |\n| " + " | ".join("---" for _ in fields) + " |\n"
+                for entry in packet["expert_agents"]:
+                    body += "| " + " | ".join(cell(entry.get(field), 240) for field in fields) + " |\n"
+                for entry in packet.get("expert_calls", []):
+                    body += f"- 専門家タスク {code(entry['task_id'])} / {code(entry['expert_id'])} / {code(entry['status'])}\n"
+                    for result_id in entry.get("calculation_result_ids", []):
+                        body += f"  - 提供した検証済み計算結果 {code(result_id)}（利用した結果は台帳のexpert_reportを参照）\n"
+            for key, label, fields in (("tasks", "Handlerのタスク", ("task_id", "role", "method_id", "status", "result_id")),
+                                       ("results", "保存結果", ("result_id", "task_id", "validation_status", "raw_hash")),
+                                       ("decisions", "Coreの判断履歴", ("decision_id", "result_id", "iteration"))):
+                entries = packet[key]
+                body += f"\n## {label}\n\n全{packet['counts'][key]}件のうち直近{len(entries)}件。全量は台帳JSONを参照します。\n\n"
+                body += "| " + " | ".join(fields) + " |\n| " + " | ".join("---" for _ in fields) + " |\n"
+                for entry in entries:
+                    body += "| " + " | ".join(cell(entry.get(field), 240) for field in fields) + " |\n"
+            package = packet.get("package")
+            artifacts = package["artifacts"] if package else []
+            body += "\n## 固定成果物\n\n"
+            if package:
+                body += f"固定保存run: {code(package['run_id'])} / package hash: {code(package['package_hash'])}\n\n"
+                origin = packet["links"]["state"].split("/api/library/", 1)[0]
+                for artifact in artifacts:
+                    url = origin + "/api/analysis/artifacts/" + quote(artifact["id"], safe="")
+                    body += f"- [{cell(artifact['name'], 240)}](<{url}>) / artifact {code(artifact['id'])} / sha256 {code(artifact['sha256'])}\n"
+            else:
+                body += "固定成果物は未保存です。実行台帳の参照を保持します。\n"
+            data["entities"][note_id] = {key: packet[key] for key in ("item_id", "run_id", "initial_id", "input_hash",
+                "status", "source_hash", "management_version", "references", "links", "counts", "tasks", "results", "decisions", "package")}
+            action = self._write(data, "orchestrator", f"20-Runs/{note_id}.md", note_id, {
+                "note_type": "orchestration-memory", "title": "自律分析のObsidian管理",
+                "summary": f"実行状態 {packet['status']}、Core判断{packet['counts']['decisions']}件、結果{packet['counts']['results']}件。正本は台帳と固定成果物。",
+                "source_ids": [packet["item_id"]], "run_id": packet["run_id"], "initial_id": packet["initial_id"],
+                "artifact_ids": [a["id"] for a in artifacts if a["name"] == "manifest.json"],
+                "revision": packet["event_seq"], "source_hash": packet["source_hash"],
+                "status": "stale" if packet["stale"] else "current", "run_status": packet["status"],
+                "sensitivity": "restricted", "tags": ["gurumoji/orchestrator", "gurumoji/analysis"]}, body)
+            self._finish(data, ("orchestrator",))
+            return {"status": "missing" if action == "missing" else "linked", "note_id": note_id,
+                    "note_path": data["notes"][note_id]["path"], "vault_kind": "orchestrator", "stale": bool(packet["stale"])}
+
     def publish_analysis(self, run: dict, snapshot: dict, result: dict, artifacts: list[dict],
                          table_fields: dict[str, list[str]]) -> dict[str, str]:
         with VAULT_LOCK:

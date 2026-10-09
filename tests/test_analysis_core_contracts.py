@@ -39,5 +39,33 @@ class AnalysisCoreContractTests(unittest.TestCase):
         self.assertFalse(CAPABILITIES["llm_roles"]["manual"]["external"])
 
 
+class ConnectionCapabilityContractTests(unittest.TestCase):
+    def test_opt_in_metadata_uses_the_22_method_registry_without_default_change(self):
+        from gurumoji.analysis_core import capability_catalog, CONNECTION_VERSION
+        from gurumoji.analysis_method_registry import METHODS
+        before = capability_catalog()
+        self.assertEqual(set(before), {"version", "capabilities"})
+        value = capability_catalog(connections=True)["connections"]
+        self.assertEqual(value["version"], CONNECTION_VERSION)
+        self.assertEqual({row["method_id"] for row in value["methods"]}, {key for key, _, _ in METHODS})
+        self.assertEqual(len(value["methods"]), 22)
+        self.assertEqual(len(value["kinds"]), 5); self.assertEqual(len(value["roles"]), 4)
+        self.assertTrue(all(not row["typed_asset_adapter_supported"] for row in value["methods"]))
+        self.assertEqual(capability_catalog(), before)
+
+    def test_native_tools_remain_the_existing_allowlist_and_unknown_is_not_registered(self):
+        from gurumoji.analysis_method_registry import connection_method_descriptor
+        from gurumoji.services.analysis_orchestration_methods import STATISTICAL_TOOLS, STATISTICAL_TOOL_VERSION
+        for method_id, (output, _, _) in STATISTICAL_TOOLS.items():
+            row = connection_method_descriptor(method_id)
+            self.assertEqual(row["method_version"], STATISTICAL_TOOL_VERSION)
+            self.assertEqual(row["output_names"], [output])
+            self.assertEqual(row["scope_policy"], "all_included_initial")
+            self.assertEqual(row["units"], ["utterance"])
+            self.assertFalse(row["typed_asset_adapter_supported"])
+        for name in ("welch", "paired", "nested", "python_expression", "unknown"):
+            self.assertIsNone(connection_method_descriptor(name))
+
+
 if __name__ == "__main__":
     unittest.main()

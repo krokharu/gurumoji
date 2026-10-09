@@ -5,7 +5,7 @@ expert_id: exp-descriptive-statistics
 title: 記述統計の専門家
 role: computational
 status: current
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 analysis_method_ids: []
 registry_method_ids:
@@ -66,7 +66,7 @@ Nと欠測・除外・分母の明示、中央値と四分位の提示、入れ�
 
 ```yaml
 expert_id: exp-descriptive-statistics
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 title: 記述統計の専門家
 role: computational
@@ -142,6 +142,17 @@ procedure:
     actor: researcher
     basis:
       - LIT-appelbaum-2018-jars-quant
+  - id: desc-ai-plan
+    title: 専用知識から集計案・前提確認事項を下書きし、Handlerへ計算を提案する
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+  - id: desc-ai-report
+    title: Handlerが検証した記述統計・度数の結果を参照して説明を下書きする
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+      - LIT-aarts-2014-nested-data
 quality_checks:
   - id: desc-q1
     check: morphology_engine_ready
@@ -174,10 +185,10 @@ output_sections:
   - 分布の確認（極端な発話ID）
   - 限界
 ai_assist:
-  allowed: false
-  steps: []
-  reason: 記述統計は計算系の専門家で、値はコードで計算するため、AI見解を使いません。
-  brief: ""
+  allowed: true
+  steps: [desc-ai-plan, desc-ai-report]
+  reason: 数値計算と研究者の確定判断はAIへ委ねない。
+  brief: 専用知識を使って集計案と結果説明を下書きする。数値はHandlerの計算結果だけを参照し、計算前はneeds_calculationを返す。欠測・分母・入れ子構造を明記し、研究者の確認を代行しない。
 literature:
   - LIT-appelbaum-2018-jars-quant
   - LIT-aarts-2014-nested-data

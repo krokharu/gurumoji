@@ -80,6 +80,67 @@ class RuntimeTests(unittest.TestCase):
         self.service.run(run["run_id"])
         return self.service.status("conversation", run["run_id"])
 
+    def test_evidence_preserves_explicit_time_validity_and_legacy_zero(self):
+        cases = [
+            ("valid_zero", {"start": 0, "end": 0, "duration": 0, "valid_time": True}, 0, 0, True),
+            ("known_positive", {"start": 2, "end": 5, "duration": 3, "valid_time": True}, 2, 5, True),
+            ("null_time", {"start": None, "end": None, "duration": None, "valid_time": False}, None, None, False),
+            ("false_placeholder", {"start": 0, "end": 0, "duration": 0, "valid_time": False}, None, None, False),
+            ("start_missing", {"start": None, "end": 5, "duration": 0, "valid_time": False}, None, None, False),
+            ("end_missing", {"start": 2, "end": None, "duration": 0, "valid_time": False}, None, None, False),
+            ("duration_uncomputed", {"start": 2, "end": 5, "duration": None, "valid_time": True}, 2, 5, True),
+            ("duration_absent", {"start": 2, "end": 5, "valid_time": True}, 2, 5, True),
+            ("legacy_no_flag", {"start": 0, "end": 0}, 0, 0, None),
+            ("legacy_duration", {"start": 2, "end": 5, "duration": 3}, 2, 5, None),
+        ]
+        for name, timing, start, end, validity in cases:
+            with self.subTest(case=name):
+                snapshot = copy.deepcopy(self.snapshot)
+                snapshot["analysis"]["segments"] = [{"id": "u1", "text": "Synthetic timing", "speaker": "UNKNOWN", **timing}]
+                before = copy.deepcopy(snapshot)
+                evidence = self.service._evidence(snapshot)[0]
+                self.assertEqual((evidence["start"], evidence["end"]), (start, end))
+                if validity is None:
+                    self.assertNotIn("valid_time", evidence)
+                else:
+                    self.assertIs(evidence["valid_time"], validity)
+                if validity is not None and "duration" in timing:
+                    self.assertEqual(evidence["duration"], None if validity is False else timing["duration"])
+                else:
+                    self.assertNotIn("duration", evidence)
+                self.assertEqual(evidence["speaker"], "UNKNOWN")
+                self.assertEqual(evidence["utterance_id"], "u1")
+                self.assertEqual(snapshot, before)
+
+    def test_missing_time_reaches_core_verification_saved_evidence_and_reload(self):
+        self.snapshot["analysis"]["segments"] = [
+            {"id": "u1", "text": "Observed zero", "speaker": "A", "start": 0, "end": 0, "duration": 0, "valid_time": True},
+            {"id": "u2", "text": "Unknown timing", "speaker": "UNKNOWN", "start": 0, "end": 0, "duration": 0, "valid_time": False},
+        ]
+        def agent(role, context, *_):
+            if role == "core":
+                if context["budget"]["iteration"] == 1:
+                    return core(intents=[intent("verification")])
+                return stop()
+            return critic(context) if role == "critic" else {"summary": "Timing remains unknown", "claims": []}
+        self.agent = agent
+        run = self.start()
+        final = self.drive(run)
+        self.assertEqual(final["status"], "completed")
+        for role in ("core", "verification"):
+            context = next(ctx for called_role, ctx, _ in self.calls if called_role == role)
+            rows = {r["utterance_id"]: r for r in context["raw_evidence"]}
+            self.assertEqual((rows["u1"]["start"], rows["u1"]["end"], rows["u1"]["valid_time"]), (0, 0, True))
+            self.assertEqual((rows["u2"]["start"], rows["u2"]["end"], rows["u2"]["valid_time"]), (None, None, False))
+            self.assertEqual((rows["u1"]["duration"], rows["u2"]["duration"]), (0, None))
+        saved = self.service.result("conversation", run["run_id"])
+        reloaded = self.make_service().result("conversation", run["run_id"])
+        self.assertEqual(saved, reloaded)
+        rows = {r["utterance_id"]: r for r in reloaded["initial"]["snapshot"]["evidence"]}
+        self.assertEqual((rows["u2"]["start"], rows["u2"]["end"], rows["u2"]["valid_time"]), (None, None, False))
+        self.assertEqual((rows["u1"]["start"], rows["u1"]["end"], rows["u1"]["valid_time"]), (0, 0, True))
+        self.assertEqual((rows["u1"]["duration"], rows["u2"]["duration"]), (0, None))
+
     def test_configured_context_limit_keeps_omissions_and_full_source_explicit(self):
         run = self.start(context_evidence_limit=1, context_text_limit=1000, context_index_limit=1)
         final = self.drive(run)

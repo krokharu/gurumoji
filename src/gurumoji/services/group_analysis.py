@@ -24,6 +24,73 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
+
+def run_qualitative_asset_method(method_id,prepared,parameters,task):
+    """Preserve proposed judgments and fixed evidence; never infer agreement.
+
+    A2 is a new bounded rereading bundle, not an invented new researcher theme.
+    Semantic confirmation is the separate explicit saved HumanRecord path.
+    """
+    from ..analysis_core import canonical,fingerprint,AnalysisContractError,validate_connection_actor
+    def require(ok,code):
+        if not ok:raise AnalysisContractError("質的比較契約と一致しません。",code=code)
+    inputs=prepared["inputs"];catalog={canonical(t):t for i in inputs for t in i["targets"]}
+    relations=[]
+    if method_id=="qualitative_compare":
+        seen=set()
+        for proposal in parameters["proposals"]:
+            require(isinstance(proposal,dict) and set(proposal)=={"relation_id","left","right","relation","reason","actor"},"qualitative_proposal_shape")
+            require(isinstance(proposal["relation_id"],str) and proposal["relation_id"] and proposal["relation_id"] not in seen
+                and proposal["relation"] in {"support","counter","complement","conflict","incomparable"}
+                and isinstance(proposal["reason"],str) and proposal["reason"].strip(),"qualitative_proposal")
+            seen.add(proposal["relation_id"]);validate_connection_actor(proposal["actor"])
+            require(canonical(proposal["left"]) in catalog and canonical(proposal["right"]) in catalog
+                and proposal["left"]["input_ref_id"]!=proposal["right"]["input_ref_id"],"qualitative_target")
+            relations.append({**proposal,"semantic_status":"human_pending","actor_evidence":"declared_unverified"})
+        if not relations:
+            for index,other in enumerate(inputs[1:],1):
+                relations.append({"relation_id":f"comparison-{index:04d}","left":inputs[0]["targets"][0],"right":other["targets"][0],
+                    "relation":"incomparable","reason":"No explicit semantic judgment was supplied; fixed evidence is available for review",
+                    "actor":{"kind":"code","actor_id":"qualitative-evidence-1","step_ids":[method_id]},
+                    "semantic_status":"human_pending","actor_evidence":"registered_structural_code"})
+        stage="B1_comparison"
+    elif method_id=="qualitative_reuse":
+        basis=[i for i in inputs if i["role"]=="selection_basis" and i["kind"]=="claim_set" and i["payload"].get("version")=="qualitative-evidence-1"]
+        require(len(basis)==1,"qualitative_selection_basis")
+        by_id={r["relation_id"]:r for r in basis[0]["payload"]["relations"]}
+        require(set(parameters["relation_ids"])<=by_id.keys(),"qualitative_relation_unresolved")
+        relations=[by_id[r] for r in parameters["relation_ids"]]
+        stage="A2_rereading"
+    else:require(False,"qualitative_method")
+    # Store each fixed leaf once. Copying whole predecessor bundles recursively
+    # makes a legitimate A2 consumer exceed the existing byte limit; immutable
+    # parent identities and their relations retain the exact evidence graph.
+    packets={};compact=[]
+    def add_packet(key,packet):
+        require(key==fingerprint([packet["kind"],packet["source"],packet["content_domain"],packet["content_hash"]]),"qualitative_packet_identity")
+        require(key not in packets or canonical(packets[key])==canonical(packet),"qualitative_evidence_conflict")
+        packets[key]=packet
+    for item in inputs:
+        payload=item["payload"]
+        if payload.get("version")=="qualitative-evidence-1":
+            require(isinstance(payload.get("evidence_packets"),dict),"qualitative_packet_graph")
+            for key,packet in payload["evidence_packets"].items():add_packet(key,packet)
+            reduced={k:v for k,v in payload.items() if k not in {"inputs","evidence_packets"}}
+            reduced["input_references"]=[{k:v for k,v in parent.items() if k!="payload"} for parent in payload["inputs"]]
+        else:
+            packet={k:item[k] for k in ("kind","source","content_hash","content_domain","source_scope","review_refs","payload")}
+            key=fingerprint([packet["kind"],packet["source"],packet["content_domain"],packet["content_hash"]])
+            add_packet(key,packet);reduced={"evidence_packet_id":key}
+        compact.append({**item,"payload":reduced})
+    bundle={"version":"qualitative-evidence-1","stage":stage,"producer_task_id":task["task_id"],
+        "inputs":compact,"evidence_packets":packets,"relations":relations,"omitted_inputs":prepared["omitted"],"human_status":"human_pending",
+        "same_parent_evidence":True,"independent_validation":False,"input_hashes":prepared["input_hashes"],
+        "limitations":["Shared-parent evidence is not independent validation","Semantic relations require an explicit saved researcher record"]}
+    return {"fields":["bundle_json"],"rows":[{"bundle_json":canonical(bundle).decode("utf-8")}],
+        "population":{"denominator":len(inputs),"calculation_denominator":0},
+        "unit_contract":{"version":"unit-table-2","unit":"dataset_claim","input_hashes":prepared["input_hashes"],
+            "definition_adoption_refs":[],"sources":{},"source_utterances":{},"variables":[],"denominators":{},"scope":prepared["scope"]}}
+
 from ..analysis_insights import KWIC_FIELDS, build_session_outline, input_fingerprint, plan_items
 from ..analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
 from ..media_formats import ALLOWED_EXTENSIONS, VIDEO_EXTENSIONS

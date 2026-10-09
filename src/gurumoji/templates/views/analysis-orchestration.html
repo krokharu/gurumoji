@@ -50,6 +50,8 @@
         <p id="orchestration-publication-disclosure" class="field-note">対象はInput／Orchestrator／Visualization／Researchの4つ一式です。Researchには保存時点の発話本文も複製します。生成ノートは既存の履歴保護経路で更新し、手動編集の履歴と削除済みノートの保護を維持します。研究者所有ノートの本文・タグ・別名は変更しません。停止・取消・失敗した分析は自動出力しません。</p>
         <p class="field-note">既定はOFFです。この選択は今回開始する実行だけに保存され、過去の実行の再開・再試行には追加されません。</p>
       </fieldset>
+      <label class="orchestration-consent"><input id="orchestration-memory-enabled" type="checkbox" checked> Core判断・Handler記録をObsidian管理ノートへ保存する</label>
+      <p class="field-note">新規実行では既定ONです。Orchestrator Vaultに状態・短い判断・データ参照を保存します。JSON・CSV・DBは正本に保持し、上の4 Vault出力とは別に管理します。</p>
       <p class="orchestration-boundary">探索的なAI下書きです。実行成功・検証済みの表示は、研究上の結論の確定を意味しません。画面の描画・状態取得にAIは使いません。</p>
       <div class="app-dialog-actions"><button id="orchestration-settings-close" class="secondary-button" type="button">閉じる</button><button id="orchestration-history" class="secondary-button" type="button">保存済み実行</button><button id="orchestration-start" class="primary-button" type="submit">自律分析を開始</button></div>
       <div id="orchestration-history-list" aria-live="polite"></div>
@@ -89,6 +91,109 @@
     <div class="orchestration-live-actions"><button id="orchestration-viewer" type="button" class="secondary-button">履歴と根拠を読む</button><button id="orchestration-refresh" type="button" class="secondary-button">状態を更新</button><button id="orchestration-stop" type="button" class="secondary-button danger">停止する</button><button id="orchestration-resume" type="button" class="primary-button" hidden>保存地点から再開</button><button id="orchestration-results" type="button" class="secondary-button">保存済み結果・初期版</button></div>
     <p id="orchestration-stop-reason" class="orchestration-boundary"></p>
     <p class="field-note">閉じても実行は止まりません。上部の「自律分析」から戻れます。表示の更新・再表示は保存済み状態の取得だけで、AI呼出しやVault出力を開始しません。</p>
+    <section class="orchestration-output orchestration-table-pilot" aria-labelledby="orchestration-table-title">
+      <h3 id="orchestration-table-title">保存済み表から、局所集計 <span class="orchestration-kind">CODE</span></h3>
+      <p class="field-note">現在の実行に固定された、利用許可のある保存表を選びます。選択肢の取得は計算しません。実行はアプリのローカルコード処理です。</p>
+      <p id="orchestration-table-availability"></p>
+      <button id="orchestration-table-load" type="button" class="secondary-button">利用できる保存表を確認</button>
+      <button id="orchestration-table-next" type="button" class="secondary-button" hidden>次の保存表を確認</button>
+      <p id="orchestration-table-message" role="status" aria-live="polite"></p>
+      <form id="orchestration-table-form" hidden>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-table-asset-label">保存表</span><select id="orchestration-table-asset" aria-labelledby="orchestration-table-asset-label"></select></label>
+          <label class="field"><span id="orchestration-table-method-label">処理方式</span><select id="orchestration-table-method" aria-labelledby="orchestration-table-method-label"></select></label>
+          <label id="orchestration-table-second-field" class="field" hidden><span id="orchestration-table-second-label">結合する保存表</span><select id="orchestration-table-second" aria-labelledby="orchestration-table-second-label"></select></label>
+        </div>
+        <p id="orchestration-table-scope" class="field-note"></p>
+        <div id="orchestration-table-parameters" class="orchestration-form-grid"></div>
+        <p class="field-note">対象集合と計算の分母は結果で確認できます。欠測・未処理・不明・除外は、観測されたゼロと区別して保存されます。行の抽出は対象集合そのものの変更ではありません。</p>
+        <button id="orchestration-table-review" type="submit" class="secondary-button">選択内容を確認</button>
+        <div id="orchestration-table-confirmation" hidden>
+          <p id="orchestration-table-summary"></p>
+          <button id="orchestration-table-execute" type="button" class="primary-button">確認した表処理をローカルで実行</button>
+        </div>
+      </form>
+    </section>
+    <section class="orchestration-output orchestration-asset-plan" aria-labelledby="orchestration-asset-title">
+      <h3 id="orchestration-asset-title">保存した根拠をつなぎ、局所分析 <span class="orchestration-kind">CODE</span></h3>
+      <p class="field-note">採用テーマの根拠、単位表、質的比較を選びます。複数会話では完全な発話表を2〜16件選び、確認後の送信時に対象集合を固定します。表示の取得は計算しません。入力・対象集合・依存する処理を確認してから、ローカルのコード処理を明示的に実行します。</p>
+      <p id="orchestration-asset-availability"></p>
+      <button id="orchestration-asset-load" type="button" class="secondary-button">利用できる保存根拠を確認</button>
+      <button id="orchestration-asset-next" type="button" class="secondary-button" hidden>次の保存根拠を確認</button>
+      <p id="orchestration-asset-message" role="status" aria-live="polite" tabindex="-1"></p>
+      <form id="orchestration-asset-form" hidden>
+        <label class="field"><span id="orchestration-asset-method-label">保存根拠の処理方式</span><select id="orchestration-asset-method" aria-labelledby="orchestration-asset-method-label"></select></label>
+        <fieldset><legend>今回使う保存参照と役割</legend><div id="orchestration-asset-inputs"></div></fieldset>
+        <p id="orchestration-asset-scope" class="field-note"></p>
+        <div id="orchestration-asset-parameters" class="orchestration-form-grid"></div>
+        <p class="field-note">計算の分母・欠測・未処理・不明・除外は保存結果で確認します。観測されたゼロとは別です。質的関係の提案と研究者の採否、同じ親根拠の再読と独立検証を区別します。</p>
+        <button id="orchestration-asset-add" type="submit" class="secondary-button">この処理を計画に追加</button>
+      </form>
+      <ol id="orchestration-asset-steps" class="orchestration-asset-steps" aria-label="確認する処理と依存"></ol>
+      <button id="orchestration-asset-clear" type="button" class="secondary-button" hidden>計画を取り消す</button>
+      <button id="orchestration-asset-review" type="button" class="secondary-button" hidden>計画全体を確認</button>
+      <div id="orchestration-asset-confirmation" hidden><p id="orchestration-asset-summary"></p><button id="orchestration-asset-execute" type="button" class="primary-button">確認した計画をローカルで実行</button></div>
+      <details id="orchestration-participant" hidden>
+        <summary>会話内の話者と参加者の対応を研究者が記録する</summary>
+        <p class="field-note">選択した固定対象の各会話・話者について、同じ人物として集約する参加者を明示します。複数会話でも同じ人物は研究者が明示してください。保存済み単位表の独立した確認記録として、この対応表そのものを保存します。既存のTA自由記述メモから対応を推測しません。訂正すると派生した入力が古くなるため、保存根拠を再取得して接続を確認してください。</p>
+        <label id="orchestration-participant-context-field" class="field" hidden><span id="orchestration-participant-context-label">参加者対応を記録する固定対象</span><select id="orchestration-participant-context" aria-labelledby="orchestration-participant-context-label"><option value="">固定対象を選択</option></select></label>
+        <details id="orchestration-participant-target" hidden><summary>選択した対象と固定版を確認</summary><dl id="orchestration-participant-target-meta" class="analysis-history-metadata"></dl></details>
+        <p id="orchestration-participant-status"></p>
+        <button id="orchestration-participant-prepare" type="button" class="secondary-button" hidden>対応を記録する単位表の保存を、計画に追加</button>
+        <p id="orchestration-participant-message" role="status" aria-live="polite" tabindex="-1"></p>
+        <form id="orchestration-participant-form">
+          <div id="orchestration-participant-assignments"></div>
+          <label class="field">参加者対応の記録者<input id="orchestration-participant-actor" required maxlength="200" autocomplete="off"></label>
+          <label id="orchestration-participant-author-field" class="check-row" hidden><input id="orchestration-participant-author" type="checkbox">私はこの対応表の記録者本人として、訂正を記録します</label>
+          <label class="field"><span id="orchestration-participant-decision-label">対応の判断</span><select id="orchestration-participant-decision" aria-labelledby="orchestration-participant-decision-label" required><option value="">判断を選択</option><option value="adopt">採用</option><option value="reject">不採用</option><option value="defer">保留</option></select></label>
+          <label class="field">対応を判断した理由<textarea id="orchestration-participant-reason" required rows="3" maxlength="2000"></textarea></label>
+          <button id="orchestration-participant-review" type="submit" class="secondary-button">対応表と記録内容を確認</button>
+          <div id="orchestration-participant-confirmation" hidden><p id="orchestration-participant-summary"></p><button id="orchestration-participant-save" type="button" class="primary-button">確認した対応表を研究者記録として保存</button></div>
+        </form>
+      </details>
+    </section>
+    <section class="orchestration-output orchestration-human-record" aria-labelledby="orchestration-human-title">
+      <h3 id="orchestration-human-title">研究者の確認・判断を記録</h3>
+      <p class="field-note">候補全体・テーマ・関係グラフ・質的比較や再利用の保存結果について、表示された一つの段階ずつ原文メモと判断を残します。AIの提案・表示・既読を、研究者の確認や採用とみなしません。</p>
+      <p id="orchestration-human-availability"></p>
+      <button id="orchestration-human-load" type="button" class="secondary-button">保存対象と研究者記録を確認</button>
+      <button id="orchestration-human-next" type="button" class="secondary-button" hidden>次の保存対象を確認</button>
+      <button id="orchestration-human-evidence" type="button" class="secondary-button">対象の原文・根拠を読む</button>
+      <p id="orchestration-human-message" role="status" aria-live="polite" tabindex="-1"></p>
+      <form id="orchestration-human-form" hidden>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-human-asset-label">保存済みの対象</span><select id="orchestration-human-asset" required aria-labelledby="orchestration-human-asset-label"></select></label>
+          <label class="field"><span id="orchestration-human-target-label">判断する対象</span><select id="orchestration-human-target" required aria-labelledby="orchestration-human-target-label"></select></label>
+          <label class="field"><span id="orchestration-human-step-label">今回記録する段階</span><select id="orchestration-human-step" required aria-labelledby="orchestration-human-step-label"></select></label>
+          <label class="field">記録者の名前<input id="orchestration-human-actor" required maxlength="200" autocomplete="off"></label>
+        </div>
+        <p id="orchestration-human-scope" class="field-note"></p>
+        <ol id="orchestration-human-stages" class="orchestration-human-stages" aria-label="段階ごとの研究者記録"></ol>
+        <p id="orchestration-human-existing" class="field-note"></p>
+        <label id="orchestration-human-author-field" class="check-row" hidden><input id="orchestration-human-author-confirm" type="checkbox">私は表示された記録者本人として、この訂正を記録します</label>
+        <label class="field">この段階の確認・判断を記した原文メモ<textarea id="orchestration-human-source" required maxlength="16000" rows="6" aria-describedby="orchestration-human-source-help"></textarea></label>
+        <p id="orchestration-human-source-help" class="field-note">自分が確認した内容を記します。この文章を研究者の原文としてそのまま保存します。別の段階の確認をまとめて代行する記録にはなりません。</p>
+        <div class="orchestration-form-grid">
+          <label class="field"><span id="orchestration-human-decision-label">この対象・段階の判断</span><select id="orchestration-human-decision" required aria-labelledby="orchestration-human-decision-label"><option value="">判断を選択</option><option value="adopt">採用</option><option value="reject">不採用</option><option value="defer">保留</option></select></label>
+          <label class="field">判断の理由<textarea id="orchestration-human-reason" required maxlength="2000" rows="3"></textarea></label>
+        </div>
+        <p class="field-note">候補は探索的な資料です。研究者記録の保存だけで数量分析の入力として利用できるとは限りません。数値入力への接続状態は、別途確認が必要です。</p>
+        <button id="orchestration-human-review" type="submit" class="secondary-button">この段階の記録内容を確認</button>
+        <div id="orchestration-human-confirmation" hidden>
+          <p id="orchestration-human-summary"></p>
+          <button id="orchestration-human-save" type="button" class="primary-button">確認した研究者記録を保存</button>
+        </div>
+      </form>
+    </section>
+    <section id="orchestration-memory" class="orchestration-output" aria-labelledby="orchestration-memory-title">
+      <h3 id="orchestration-memory-title">Obsidian管理とデータ参照</h3>
+      <p id="orchestration-memory-status" role="status" aria-live="polite"></p>
+      <p id="orchestration-memory-location" class="field-note"></p>
+      <p class="field-note">実行中・停止後の記録も管理します。データ本体は保存台帳に保持し、管理ノートからID・版・hashとリンクで対応を確認できます。</p>
+      <p id="orchestration-memory-warning" class="field-note"></p>
+      <a id="orchestration-memory-note" class="secondary-button" download="obsidian-management.md" hidden>管理ノートを取得</a>
+      <button id="orchestration-memory-retry" class="secondary-button" type="button" hidden>管理ノートを照合・更新</button>
+    </section>
     <section id="orchestration-output" class="orchestration-output" aria-labelledby="orchestration-output-title">
       <h3 id="orchestration-output-title">固定成果物とVault出力</h3>
       <p id="orchestration-save-status" role="status" aria-live="polite"></p>

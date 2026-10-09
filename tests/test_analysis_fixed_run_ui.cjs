@@ -31,6 +31,22 @@ function payload(item='A',id='r1'){return {run:{id,item_id:item,kind:'milestone_
 function publication(){const roles=['research','input','orchestrator','visualization'];return {id:'r1',kind:'milestone_analysis',status:'completed',fingerprint:'fp',publication_attempts:[{attempt_id:'attempt',package_hash:'fp',status:'completed',requested:['input','orchestrator','visualization'],effective:roles,executed:roles,outcomes:Object.fromEntries(roles.map(r=>[r,{status:'published'}]))}],publication_records:roles.map(target_role=>({target_role,status:'published',result_run_id:'r1',package_hash:'fp'}))};}
 const passed=[];async function check(name,fn){await fn();passed.push(name);}
 (async()=>{
+ const primaryControls=[];
+ try {
+  const p=make(),saved=payload(),before=JSON.stringify(saved),live=p.ctx.analysisState.data;
+  const loading=p.ctx.openFixedAnalysisRun('A','r1');p.reply(0,saved);await loading;
+  assert.equal(p.requests[0].url,'/api/library/A/analysis/runs/r1');assert(!p.requests[0].options.method);
+  assert(p.view().identity.textContent.includes('固定run r1'));assert.equal(JSON.stringify(saved),before);assert.equal(p.ctx.analysisState.data,live);
+  const other=p.ctx.openFixedAnalysisRun('A','r2');p.reply(1,payload('A','wrong-run'));await other;
+  assert(p.view().status.textContent.includes('確認できません'));assert.equal(p.view().body.children.length,0);
+  assert.equal(p.requests.length,2);assert.equal(p.ctx.analysisState.data,live);
+  primaryControls.push({id:'R01-08',outcome:'passed'});
+ }catch(error){primaryControls.push({id:'R01-08',outcome:'failed',error:error.message});}
+ if(process.env.R01_PRIMARY_ONLY==='1'){
+  console.log(JSON.stringify({scope:'Actual fixed-run JS; synthetic DOM; immutable exact run only',primaryControls},null,2));
+  if(primaryControls.some(c=>c.outcome==='failed'))process.exitCode=1;
+  return;
+ }
  await check('exact-readonly-get-safe-render',async()=>{const p=make();const done=p.ctx.openFixedAnalysisRun('A','r1');assert(p.view().dialog.open);assert(p.view().close.focused);assert.equal(p.requests[0].url,'/api/library/A/analysis/runs/r1');assert(!p.requests[0].options.method);p.reply(0,payload());await done;assert(p.view().body.textContent.includes('元データ 2版'));assert(p.view().body.textContent.includes('現在入力は保存時と異なります'));assert(p.view().identity.textContent.includes('固定run r1'));});
  for(const path of ['B','ABA','run-change','close-reopen'])for(const failure of [false,true])await check(`${path}-late-${failure?'failure':'success'}`,async()=>{
   const p=make();const first=p.ctx.openFixedAnalysisRun('A','r1');let second;
@@ -129,5 +145,6 @@ const passed=[];async function check(name,fn){await fn();passed.push(name);}
   assert(host.textContent.includes('automatic: saved-only'));assert(!host.textContent.includes('保存した計算版: saved-only'));
  });
  await check('file-catalog-page-bounded-and-full-zip',async()=>{const p=make(),data=payload();data.run.artifacts=Array.from({length:101},(_,i)=>({id:'f'+i,name:'tables/t'+i+'.csv',rows:500,bytes:100,sha256:'abc'}));const host=node();p.ctx.renderFixedAnalysisRun(host,data,{itemId:'A',runId:'r1',current:()=>true});const buttons=[];function visit(n){if(n.tag==='button')buttons.push(n);n.children.forEach(visit);}visit(host);assert.equal(buttons.filter(b=>b.textContent.endsWith('を読む')).length,20);assert(host.textContent.includes('全101ファイル'));assert(host.textContent.includes('全ファイルをZIP'));});
- console.log(JSON.stringify({scope:'Node synthetic DOM/deferred fetch; no GUI, AT, browser or network',passed},null,2));
+ console.log(JSON.stringify({scope:'Node synthetic DOM/deferred fetch; no GUI, AT, browser or network',passed,primaryControls},null,2));
+ if(primaryControls.some(c=>c.outcome==='failed'))process.exitCode=1;
 })().catch(e=>{console.error(e);process.exitCode=1;});

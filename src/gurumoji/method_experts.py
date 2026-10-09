@@ -4,7 +4,7 @@ The canonical knowledge lives in ``docs/program-vault/50-Analysis-Methods/10-Exp
 folder per expert, whose ``01-Expert.md`` holds a machine-readable execution definition.
 Only the experts selected for the analysis at hand are parsed. Their knowledge notes and the
 literature notes they cite are hashed so that saved results can tell when the knowledge
-changed; note contents are never sent to an AI provider. Experts are definitions that
+changed; the optional specialist-agent reader renders bounded excerpts separately. Experts are definitions that
 constrain procedure and explanation, not retrained models.
 
 A second, local-only tree under ``LOCAL_KNOWLEDGE_DIR`` (outside the git-tracked Software
@@ -66,6 +66,60 @@ EXPECTED_CELLS = re.compile(r"期待度数5未満: (\d+)/(\d+)セル")
 
 class ExpertDefinitionError(ValueError):
     pass
+
+
+class SkillContextError(ExpertDefinitionError):
+    def __init__(self, reason, *, decision="blocked"):
+        super().__init__("固定skill資料の取得条件を確認してください：" + reason)
+        self.code, self.decision = "expert_skill_" + reason, decision
+
+
+def _skill_range(body, name, native=None):
+    """Exact native block/explicit section; never expand a missing block."""
+    lines = body.splitlines()
+    positions = {}
+    in_fence = False
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            in_fence = not in_fence
+        match = re.fullmatch(r"\^([A-Za-z0-9-]+)\s*", line) if not in_fence else None
+        if match:
+            if match[1] in positions: raise SkillContextError("duplicate_block_id")
+            positions[match[1]] = i
+    if in_fence: raise SkillContextError("malformed_fence")
+    if native is None:
+        matches = [(i, len(m[1])) for i, line in enumerate(lines)
+                   if (m := re.fullmatch(r"(#{1,6})\s+(.+?)\s*", line)) and m[2] == name]
+        if len(matches) != 1:
+            raise SkillContextError("section_missing_or_ambiguous", decision="needs_input")
+        start, level = matches[0]
+        end = next((i for i in range(start + 1, len(lines))
+                    if (m := re.match(r"^(#{1,6})\s", lines[i])) and len(m[1]) <= level), len(lines))
+        if not any(line.strip() for line in lines[start + 1:end]):
+            raise SkillContextError("section_empty", decision="needs_input")
+        return "\n".join(lines[start:end]).strip()
+    if native not in {"quote", "table", "paragraph"} or name not in positions:
+        raise SkillContextError("block_missing", decision="needs_input")
+    marker = positions[name]
+    if marker < 2 or lines[marker - 1].strip(): raise SkillContextError("block_boundary")
+    end = marker - 1
+    while end and not lines[end - 1].strip(): end -= 1
+    start = end
+    if native == "quote":
+        while start and (lines[start - 1] == ">" or lines[start - 1].startswith("> ")): start -= 1
+    elif native == "table":
+        while start and lines[start - 1].startswith("|"): start -= 1
+    else:
+        while start and lines[start - 1].strip(): start -= 1
+    selected = lines[start:end]
+    if not selected: raise SkillContextError("block_empty", decision="needs_input")
+    if native == "table" and (len(selected) < 3 or not re.fullmatch(r"\|[\s|:\-]+\|", selected[1])):
+        raise SkillContextError("malformed_table")
+    if native == "quote" and sum(bool(re.match(r"^>\s*```", line)) for line in selected) % 2:
+        raise SkillContextError("malformed_quote")
+    if native == "paragraph" and any(re.match(r"^(?:#|\||>|```|\^)", line) for line in selected):
+        raise SkillContextError("malformed_paragraph")
+    return "\n".join(selected)
 
 
 def _nested(data: Any, *path: str) -> Any:
@@ -389,6 +443,53 @@ def validate_definition(definition: Any, *, folder: str, props: dict | None = No
     return errors
 
 
+SKILL_CONTEXT_VERSION = "expert-skill-context-1"
+# Fixed Software Vault registrations; these never register executable methods.
+SKILL_NOTE_REFS = json.loads(r'''{
+  "data-analysis-asset-connection-v1": {"path":"30-Data/analysis-asset-connection-v1.md","raw_sha256":"00c42234f95ab433542432cddaf61b29191e0b9f00ae645127d882230bd5e9a5","version":{"schema_version":1,"proposal_revision":3,"updated":"2026-10-08"},"blocks":[["asset-types","quote"],["asset-hash","quote"],["asset-binding","quote"],["asset-measures","quote"],["ta-metadata","paragraph"]],"sections":[],"authority":false,"range_hashes":{"asset-types":"sha256:46576360afffab5542db20582b76c46d0f6c0e18cf65781460eb707d43bb8b28","asset-hash":"sha256:5ed480c1a88b6807de5e4bec872362d539f5667dc221b8141e4df74077813a21","asset-binding":"sha256:de9c0e2aa19e618fe39aeba725febc370940f2622fe7455451f83455cc2d708b","asset-measures":"sha256:92780394e0624115ade9e55c90141d49b3f8d83b66608ce714cc19fd6edaff68","ta-metadata":"sha256:6a75c118ada1b999589f3e9d2ffff16d1f5bb573fa1a31e239d1bd30b9c41692"}},
+  "analysis-skills-index": {"path":"50-Analysis-Methods/40-Skills/00-Index.md","raw_sha256":"e569ef34c22279c72d80cc5732a48598d42617268207b1aaf39b08470ef00364","version":{"updated":"2026-10-08"},"blocks":[],"sections":["分析スキルの入口"],"authority":false,"range_hashes":{"分析スキルの入口":"sha256:f97e299af4492b34a8de3e3c20373206d4bfbd78212665cd9488d3407c8018c0"}},
+  "skill-thematic-candidate-evidence": {"path":"50-Analysis-Methods/40-Skills/thematic-candidate-evidence.md","raw_sha256":"8f7860af502ba9dd6e33da259309284bd53f2fa64c9d91a5d0754c66c82b5527","version":{"schema_version":1,"skill_version":1,"proposal_revision":3,"updated":"2026-10-08"},"blocks":[["tce-guards","quote"],["tce-procedure","table"],["tce-output","quote"]],"sections":[],"authority":false,"range_hashes":{"tce-guards":"sha256:fe12eca80d37bf999401bd1e1a6f543a4f0163442bb2ec575d9736ce826d8432","tce-procedure":"sha256:62a669cc888347677854b8f38bb23955e7455681188b72c5d040ef009a8d82e9","tce-output":"sha256:ccfaff3d205f1f80af206a4eeb049817412633206659e0b769f1da6991bac92d"}},
+  "skill-correlation-exploratory-evidence": {"path":"50-Analysis-Methods/40-Skills/correlation-exploratory-evidence.md","raw_sha256":"3d29a901c8fc64c7d0822310bb8e97e7137e661431dcd0851e25a766eb7eb2ec","version":{"schema_version":1,"skill_version":1,"proposal_revision":3,"updated":"2026-10-08"},"blocks":[["cee-guards","quote"],["cee-procedure","table"],["cee-output","quote"]],"sections":[],"authority":false,"range_hashes":{"cee-guards":"sha256:719b3c841c05fc31b014b2d5af46295a8b5d5364f5b94267e070a65b36ca6cb4","cee-procedure":"sha256:60e7792b9bd014c32ad3d988e50d1f4f6e511a7fba0207a327efd87c41c2e756","cee-output":"sha256:74b9c49730038059d1069e5afe5b8d917d382d1d3d116c7653437ee4951f26b1"}},
+  "skill-group-comparison-exploratory-evidence": {"path":"50-Analysis-Methods/40-Skills/group-comparison-exploratory-evidence.md","raw_sha256":"eb1475f67af863bd232ef3b0701c7bea71c7405c7ce95b8a0fa854544574729d","version":{"schema_version":1,"skill_version":1,"proposal_revision":3,"updated":"2026-10-08"},"blocks":[["gcee-guards","quote"],["gcee-procedure","table"],["gcee-output","quote"]],"sections":[],"authority":false,"range_hashes":{"gcee-guards":"sha256:7c7f93cfc3a23797d4cfeb7769e7bfe61fb83ae9a401c83f02c5d66812ffbeeb","gcee-procedure":"sha256:c2b1d66378cb3cd93ebfd78e26c0dd5d32ca27f348d8eedd7510b7f41ae07cb1","gcee-output":"sha256:f146cdb74c3caa0af1a9d6416284402b5f7f9b23af4ea78e6afc4cae37a0fa29"}},
+  "workflow-group-interview-evidence": {"path":"50-Analysis-Methods/40-Skills/group-interview-evidence-workflow.md","raw_sha256":"1a8ed0b31076f5ade8ddb30ca953ac00debf022a3b08b20b4544221a096a2a32","version":{"schema_version":1,"workflow_version":1,"proposal_revision":3,"updated":"2026-10-08"},"blocks":[["giew-units","quote"],["giew-binding","quote"],["giew-procedure-guards","quote"],["giew-purpose","table"],["giew-procedure","table"],["giew-cases","table"]],"sections":[],"authority":false,"range_hashes":{"giew-units":"sha256:448353e5413607556e0c818067760da0a592fc9dcbc011a32abcd48c76406954","giew-binding":"sha256:c7bd0b9f223ef2ea4dca2613c57c25c151efc81e2aff16e7bb479141b8ebea73","giew-procedure-guards":"sha256:f00d0ffc55f0954ea8748c2da2f4d4b75965e0899537fe03fab1cd52e87b65bd","giew-purpose":"sha256:0c5ce9317f436b7e70652d7091ab197ad935f837a7683ecbe9197c6213e7a4a2","giew-procedure":"sha256:509caedbef8537af7c6a2bb32a468f1c7710311343215e339c03c8d9effdeedf","giew-cases":"sha256:72f3a2130f8037dc549ffb904d6003c21608d6e7270733c169fad4857cc23f45"}},
+  "expert-thematic-analysis-definition": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/01-Expert.md","raw_sha256":"26dfcdfe87323ed33fe232c8c36489f24453adb58c2b2feaa48083996147ecdc","version":{"definition_version":2},"blocks":[],"sections":["テーマ分析の専門家（exp-thematic-analysis）"],"authority":true,"range_hashes":{"テーマ分析の専門家（exp-thematic-analysis）":"sha256:b5409ab7cfad2b445c25c65c05006b7d04b7a7dcb3de8066757c711f12b2888c"}},
+  "expert-thematic-analysis-quality": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/03-Quality.md","raw_sha256":"84dd97a7f50d30485975148d8a48270055ddf890d1dd7dc5f7a291e8e57e235e","version":{"updated":"2026-09-16"},"blocks":[],"sections":["テーマ分析の専門家：判断基準と品質確認"],"authority":true,"range_hashes":{"テーマ分析の専門家：判断基準と品質確認":"sha256:428ee8794bc1b06a513a95abcc73f10a9c4aecdbb818550182895174019a6b80"}},
+  "expert-thematic-analysis-limits": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/04-Applicability-and-Limits.md","raw_sha256":"c6caa930bb08cce37f495779e02998d90ce39743e143cb1198c459d7b654eab0","version":{"updated":"2026-09-28"},"blocks":[],"sections":["テーマ分析の専門家：適用条件と限界"],"authority":true,"range_hashes":{"テーマ分析の専門家：適用条件と限界":"sha256:3aa0967d34dc4cca3f2156726083ce7fdbc4628342e46bac857cf45930a50a09"}},
+  "expert-thematic-analysis-procedure": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/02-Procedure.md","raw_sha256":"2df79e2b69385ccf8a2dbad744d1a91cb7e02c305b873642a18c81284fab2bc4","version":{"updated":"2026-09-16"},"blocks":[],"sections":["手順と各段階の確認事項","判断に迷いやすい点","典型的な失敗と修正","結果のまとめ方","分析の前に決めること","Byrne（2022）の本文から補う実務上の確認事項"],"authority":true,"range_hashes":{"手順と各段階の確認事項":"sha256:77f710f3fa656d3078ac9d02f6f281549b6b32054e3b374738a6363813cdc7e6","判断に迷いやすい点":"sha256:75ea995330f5bb4303c3a12d3800ee08b540196583c71d693e74c1ba26c2c642","典型的な失敗と修正":"sha256:9752a4ca3e39ab2efbc9718c598ea4aed9e109f480fbfe174bfba4f13b06fc1f","結果のまとめ方":"sha256:2b9f41142ba0708d71cde6fd0f7d83898be287b53e9af1b6a5bf76afa166fb5d","分析の前に決めること":"sha256:538a6aaab1e964d2f92933bd8f7e0c3cad3dd254c45128f82424ceec187c5709","Byrne（2022）の本文から補う実務上の確認事項":"sha256:3a9ac1ee06c6d150806204a9424a0d0167defc9b64d855cf7f1671d46595e80f"}},
+  "expert-thematic-analysis-agent-contract": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/07-Agent-Contract.md","raw_sha256":"09f3742811e56c187427ec5b7899d8f7fb9cc576f6ec36ffb26f538069aa3beb","version":{"updated":"2026-10-06"},"blocks":[],"sections":["テーマ分析エージェントの入出力契約"],"authority":true,"range_hashes":{"テーマ分析エージェントの入出力契約":"sha256:e2d950ae9653b11ce34ad708dc8676bc156ac6dafff7c30264838d33a2f7d43f"}},
+  "expert-thematic-analysis-skill-hook-binding": {"path":"50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding.md","raw_sha256":"e4677c2271ff95ccdbd053119420d20c44ac1049b3c372e30c24b747037816ef","version":{"schema_version":1,"binding_version":2,"updated":"2026-10-08"},"blocks":[],"sections":["目的・取得用途・固定する出典","段階別の対応表","入力slot・論理kind・roleの照合案","hook・callback・上限・停止と再開","G3へ渡す正常・負例（仮書式の評価）","採否・独立レビューの保留"],"authority":false,"range_hashes":{"目的・取得用途・固定する出典":"sha256:1258073757a787b66ac4ba541464190ebb1e38b29ede03b6e27535ba662fc4eb","段階別の対応表":"sha256:e0e5e0e9f95082c28523b8c6ffe38c629a0fa359c4c1b8eb583a2efec18e83b2","入力slot・論理kind・roleの照合案":"sha256:05f928958df09b79dd7959d0a1f5a31e769ebc120ade7bec2181eaab5111185d","hook・callback・上限・停止と再開":"sha256:fec16b2e92d677239590d8c8342c54b7eaa71e79a3685456c8c878525948f0b1","G3へ渡す正常・負例（仮書式の評価）":"sha256:14757e8532b5f1791a85a157f514800dcdea151fb25bee4d657d5398e411f1b8","採否・独立レビューの保留":"sha256:08b9acb81d5dc44aa885289c15299777149b51fab6fd40c126a165c3d77c1e65"}},
+  "analysis-common-evidence-and-claims": {"path":"50-Analysis-Methods/08-Common-Knowledge/01-Evidence-and-Claims.md","raw_sha256":"4bc68200e3461d3bd406d907fde972fec2b6be13969b86026b6b50a200247a14","version":{"updated":"2026-09-15"},"blocks":[],"sections":["観測・解釈・根拠の区別"],"authority":false,"range_hashes":{"観測・解釈・根拠の区別":"sha256:c0bcd3f2eec5b69dbb29482e0be2edf5da993744403f5b5f9abc96153f5f8768"}},
+  "analysis-common-source-classification": {"path":"50-Analysis-Methods/08-Common-Knowledge/02-Source-Classification.md","raw_sha256":"3b88a99e9b5d3965f8e4f0c1c5c0445c993cc893dd2656fc7a1f3d8a787e7564","version":{"updated":"2026-09-15"},"blocks":[],"sections":["出典の区分と根拠の強さ"],"authority":false,"range_hashes":{"出典の区分と根拠の強さ":"sha256:e4fd1bb1334f45786c3d0b7c9ebf6e231df2932e377c6b11aae49940fd9800f1"}},
+  "analysis-common-group-interview-data": {"path":"50-Analysis-Methods/08-Common-Knowledge/03-Group-Interview-Data.md","raw_sha256":"2e373a185b9a11729b5b3411cfa555dd8aa41fc5dec075c61818795d8450b95a","version":{"updated":"2026-09-15"},"blocks":[],"sections":["グループインタビューのデータに共通する注意"],"authority":false,"range_hashes":{"グループインタビューのデータに共通する注意":"sha256:02727957963785428d20b0be8de7e624035c79fcf236ca523f1a3a8ff9551f90"}},
+  "analysis-common-ai-assistance-boundaries": {"path":"50-Analysis-Methods/08-Common-Knowledge/04-AI-Assistance-Boundaries.md","raw_sha256":"3dff4cc7b5da87855377e6851f7ba7ff4c33fe6a32a4aaff6178ae055f85599e","version":{"updated":"2026-09-16"},"blocks":[],"sections":["AIが担う範囲と禁止事項"],"authority":false,"range_hashes":{"AIが担う範囲と禁止事項":"sha256:eeb006f589f127249989fa12eb9b7acbc733c329a66de70c14181bbf85a27652"}},
+  "expert-correlation-definition": {"path":"50-Analysis-Methods/10-Experts/correlation/01-Expert.md","raw_sha256":"5a499ea69a38f176a1212ab52d4fe85b8237aaf80ba6fd1b5deed148a14642bb","version":{"definition_version":2},"blocks":[],"sections":["相関の専門家（exp-correlation）"],"authority":true,"range_hashes":{"相関の専門家（exp-correlation）":"sha256:93d7e807b8857ad6b28fcf3a419699646fea845f3b4eb10d26da944b81726153"}},
+  "expert-correlation-quality": {"path":"50-Analysis-Methods/10-Experts/correlation/03-Quality.md","raw_sha256":"fa8dcd1c4121132552e17d2991b4469ece84d9c1f86cd6621eabab3149fea49e","version":{"updated":"2026-09-16"},"blocks":[],"sections":["相関の専門家：判断基準と品質確認"],"authority":true,"range_hashes":{"相関の専門家：判断基準と品質確認":"sha256:913749b134e6f0e5265bee8856161859fdb38a5fe92bd085dc3b0838663c95bd"}},
+  "expert-correlation-limits": {"path":"50-Analysis-Methods/10-Experts/correlation/04-Applicability-and-Limits.md","raw_sha256":"fe7aaaeab6959575ce7924353730f2d5592fd11fe86b942786525ed1e95e0a14","version":{"updated":"2026-09-16"},"blocks":[],"sections":["相関の専門家：適用条件と限界"],"authority":true,"range_hashes":{"相関の専門家：適用条件と限界":"sha256:fb48a2854bbae8e44e106ce177064e1dca4b6fe867e293a7c409944dadba77a1"}},
+  "expert-correlation-procedure": {"path":"50-Analysis-Methods/10-Experts/correlation/02-Procedure.md","raw_sha256":"77bb9f85f528dec64e7c3605252f34fd55e962fa698a12e602349f7892bc909e","version":{"updated":"2026-09-16"},"blocks":[],"sections":["手順と各段階の確認事項","判断に迷いやすい点","典型的な失敗と修正","結果のまとめ方"],"authority":true,"range_hashes":{"手順と各段階の確認事項":"sha256:c651f874c8b2297308484b1631bb05bb9a50fef6f6cabb3c39a9e32840d4bf37","判断に迷いやすい点":"sha256:febfd42534d5c4ad85ea0192f9e57947e8c3c3f1f7f07fd8fba089033aafa14f","典型的な失敗と修正":"sha256:ad482661fa081c24a9d49b30c59effa0c0c3a16e31b9256f5120f53e11cd384e","結果のまとめ方":"sha256:1bb5762722ca8c403d9371dca2993e807c7976687708849bf0f367f1d77f6a99"}},
+  "expert-correlation-agent-contract": {"path":"50-Analysis-Methods/10-Experts/correlation/07-Agent-Contract.md","raw_sha256":"92c02db1e1db0f68ed2ff0febd3b5d5615149a748bf0b2a7a534dc06478bb3d2","version":{"updated":"2026-10-08"},"blocks":[],"sections":["相関専門家の入出力契約"],"authority":true,"range_hashes":{"相関専門家の入出力契約":"sha256:b1166034cfcd463ce13bd621ca26a5156667849b104df2305c870cf5c30869e3"}},
+  "expert-correlation-skill-hook-binding": {"path":"50-Analysis-Methods/10-Experts/correlation/08-Skill-Hook-Binding.md","raw_sha256":"4834067229ad482d05316df8d504a6cfdc17e8c652b58318801675e9560ffe66","version":{"schema_version":1,"binding_version":6,"updated":"2026-10-08"},"blocks":[],"sections":["目的・取得用途・固定する出典","段階別の対応表","入力slot・論理kind・roleの照合案","hook・callback・上限・停止と再開","G3へ渡す正常・負例（仮書式の評価）","採否・独立レビューの保留"],"authority":false,"range_hashes":{"目的・取得用途・固定する出典":"sha256:f0d8ebceede6c3f111df16509a313257636d58fcf767f7948802d9a666d65d51","段階別の対応表":"sha256:b335d912ccbe72ee09009e6f3c5648eaed70aef9ca451c0f558316952b330f58","入力slot・論理kind・roleの照合案":"sha256:40dc856b40c3ca86b61a9824ee3ed1f5beb00d89de43b63175292cf948e9a3eb","hook・callback・上限・停止と再開":"sha256:be2f1cdb5e1e89f29ab1e71182f08361c55b3be92362e1c41a8d667058235630","G3へ渡す正常・負例（仮書式の評価）":"sha256:050c21f13603f17f5191a650739acdec37b494893a135bf10fc623badcf0e38d","採否・独立レビューの保留":"sha256:c1eb97461b27ff6104ccc5fae296bd6d50ad573d32223fcb4550171cccfabe16"}},
+  "expert-group-comparison-statistics-definition": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/01-Expert.md","raw_sha256":"15ac2cd8ffd7c02a9ffd8d99215a6a2a31fc1b776d3702da23e73b05f3fc9906","version":{"definition_version":2},"blocks":[],"sections":["群間比較の専門家（exp-group-comparison-statistics）"],"authority":true,"range_hashes":{"群間比較の専門家（exp-group-comparison-statistics）":"sha256:a1f58874f456a02ab30189b70c968e4a8190693faaa7a6861693f73b6ff177f2"}},
+  "expert-group-comparison-statistics-quality": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/03-Quality.md","raw_sha256":"de1017b055957be6137ea7915cfce736236e18d75b5acebe47e5ed6f6b5c3709","version":{"updated":"2026-09-16"},"blocks":[],"sections":["群間比較の専門家：判断基準と品質確認"],"authority":true,"range_hashes":{"群間比較の専門家：判断基準と品質確認":"sha256:26bbb6609f059eab0ee9f046f264e7f98c781fadff9694af6e9efefbdc5a1a03"}},
+  "expert-group-comparison-statistics-limits": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/04-Applicability-and-Limits.md","raw_sha256":"71f3ca8c3438b523efc0edb4541f85314c12990debe44afc29a0559e9f294a3a","version":{"updated":"2026-09-16"},"blocks":[],"sections":["群間比較の専門家：適用条件と限界"],"authority":true,"range_hashes":{"群間比較の専門家：適用条件と限界":"sha256:fb3502fabe21110f1e37f491877860329ff62603ae3e15517ea943433a763176"}},
+  "expert-group-comparison-statistics-procedure": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/02-Procedure.md","raw_sha256":"61b70f55d5be860a88554f1ed51437dce3f5e3039eff780fe01ebbc97f068f14","version":{"updated":"2026-09-16"},"blocks":[],"sections":["手順と各段階の確認事項","判断に迷いやすい点","典型的な失敗と修正","結果のまとめ方"],"authority":true,"range_hashes":{"手順と各段階の確認事項":"sha256:1e6cd12e742d750a9fcb8f39cb14a0ebaa72ae1fc922dc9ee5751396e6537059","判断に迷いやすい点":"sha256:59ea391cd16ee07900b75fefc9b403bcaf3ba6e245549c91cdd2456a2aa87d54","典型的な失敗と修正":"sha256:e6c82b4901674ac43e27bd13118dfcff4cb9c1894761e0e4cc2beda53f192aff","結果のまとめ方":"sha256:a957058df02fcc9176efe3c0117e580d5243eca84f7d229883e067c9447d54f3"}},
+  "expert-group-comparison-statistics-agent-contract": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/07-Agent-Contract.md","raw_sha256":"a1ed398b0e6f759448fd4b327eccb1d672f5bada923a4f377e82f98a16ed0c5a","version":{"updated":"2026-10-08"},"blocks":[],"sections":["群間比較専門家の入出力契約"],"authority":true,"range_hashes":{"群間比較専門家の入出力契約":"sha256:d7b95326127776ecc07008699d25509bb5347a1e21dce8557e6f97efd3534e82"}},
+  "expert-group-comparison-statistics-skill-hook-binding": {"path":"50-Analysis-Methods/10-Experts/group-comparison-statistics/08-Skill-Hook-Binding.md","raw_sha256":"5080fbf445fc4668ca803ffa0cfe4ef5ad00f302786dc3644bb1d9c24f903be4","version":{"schema_version":1,"binding_version":6,"updated":"2026-10-08"},"blocks":[],"sections":["目的・取得用途・固定する出典","段階別の対応表","入力slot・論理kind・roleの照合案","hook・callback・上限・停止と再開","G3へ渡す正常・負例（仮書式の評価）","採否・独立レビューの保留"],"authority":false,"range_hashes":{"目的・取得用途・固定する出典":"sha256:e0bc8f8287703d7cea78613d55490bb034178ad685ce0f51a9bbfd41a820f3e8","段階別の対応表":"sha256:e1124aceee81704a9d4add487cbe0773d16898231e0a5d1aaf770586a5e91d03","入力slot・論理kind・roleの照合案":"sha256:db02e2b43f275b6a1d7575e9518ecfc6b186355a7c56584042ee0a3ae253b60f","hook・callback・上限・停止と再開":"sha256:8279b20f717e4af91545c36f5eebfc02c7d48d56960b8df2ac014bcc65eb41a3","G3へ渡す正常・負例（仮書式の評価）":"sha256:c10bdecdd9f25e83112854195a1650962254288c6e6483c1d442390b148722e2","採否・独立レビューの保留":"sha256:c1eb97461b27ff6104ccc5fae296bd6d50ad573d32223fcb4550171cccfabe16"}},
+  "expert-focus-group-interaction-definition": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/01-Expert.md","raw_sha256":"502131e409de7b141a166658ee63a5935e0e1aca95efd7112f99bd9b316dde82","version":{"definition_version":1},"blocks":[],"sections":["フォーカスグループの相互作用分析の専門家（exp-focus-group-interaction）"],"authority":true,"range_hashes":{"フォーカスグループの相互作用分析の専門家（exp-focus-group-interaction）":"sha256:7fd9f1fc4d8dc7311206e38164cf1db1860aadc8c90e8eadf5c31056f5395ee8"}},
+  "expert-focus-group-interaction-quality": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/03-Quality.md","raw_sha256":"a08de475a427660f1d0d90d76d2d0401b137567f8ee464648776f736e3d28c52","version":{"updated":"2026-09-16"},"blocks":[],"sections":["フォーカスグループの相互作用分析の専門家：判断基準と品質確認"],"authority":true,"range_hashes":{"フォーカスグループの相互作用分析の専門家：判断基準と品質確認":"sha256:07286e109898d081a1d35d8db398262f9b05b941e8aa7b1a8c6ecbc2d67f05d4"}},
+  "expert-focus-group-interaction-limits": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/04-Applicability-and-Limits.md","raw_sha256":"1ae6ecc9e2de687e4fd6c4934c300932cc03ddb3395d3d0dd5c0b8e8318e4ddd","version":{"updated":"2026-09-16"},"blocks":[],"sections":["フォーカスグループの相互作用分析の専門家：適用条件と限界"],"authority":true,"range_hashes":{"フォーカスグループの相互作用分析の専門家：適用条件と限界":"sha256:d77c9180b42e70321f1107fead03b1a5a36546b457056cd023897da5d44dbfe7"}},
+  "expert-focus-group-interaction-procedure": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/02-Procedure.md","raw_sha256":"e8a2e4681379ce6fd8c0919b6328b7cf0347057a9944e081627135a9aa3d2178","version":{"updated":"2026-09-16"},"blocks":[],"sections":["手順と各段階の確認事項","判断に迷いやすい点","典型的な失敗と修正","結果のまとめ方","Gurumojiでの記録"],"authority":true,"range_hashes":{"手順と各段階の確認事項":"sha256:789874201249c31f6da725a05f8a335449a5591b928d0ea27f75b575cef92551","判断に迷いやすい点":"sha256:a1c418882d7d19a1be5014236b9f290b5949f982ce726d6d4e0d3029e1d7b291","典型的な失敗と修正":"sha256:9b61824c8b67cc173d7c35402157758e06b0822b5fa66b812d9855a44127c9b9","結果のまとめ方":"sha256:013e5920237198a1cf00edc44fddd71a351cdc2c0f23e0b52b9b42bb73d4e0c1","Gurumojiでの記録":"sha256:7e937b3394bba0500f68e0e60032845ca17f1f14304d878b638daee7a14f4809"}},
+  "expert-focus-group-interaction-agent-contract": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/07-Agent-Contract.md","raw_sha256":"18e3f05b356806c9fe2bb625c7e7ae7d5fb20f7cf4ab002926aefe891f5f2942","version":{"schema_version":1,"contract_version":2,"updated":"2026-10-09"},"blocks":[],"sections":["FGIエージェントの候補入出力契約"],"authority":true,"range_hashes":{"FGIエージェントの候補入出力契約":"sha256:dfca36820ccc847e577dfc335e6b7439e40a3103e7d1c06e39c8b0a481463d2b"}},
+  "expert-focus-group-interaction-skill-hook-binding": {"path":"50-Analysis-Methods/10-Experts/focus-group-interaction/08-Skill-Hook-Binding.md","raw_sha256":"1eb5e6ef2fe06f4a264ace022b53ec44522f9abfba68f4798ad177bbff998c37","version":{"schema_version":1,"binding_version":1,"updated":"2026-10-09"},"blocks":[],"sections":["FGI候補の固定skillとHandler接続"],"authority":false,"range_hashes":{"FGI候補の固定skillとHandler接続":"sha256:d2a4c34742289f22b0990a6fdf80054ceac00fda1e60064e71ab4f16cfec2b61"}},
+  "transcript-preparation-v1": {"path":"30-Data/transcript-preparation-v1.md","raw_sha256":"1585793639032f36128ed1b41622df295e43f9a19198bd6e4602deead3995581","version":{"updated":"2026-10-10"},"blocks":[],"sections":["逐語録の分析準備"],"authority":false,"range_hashes":{"逐語録の分析準備":"sha256:b932027739cf48498adecb945a5ba38fc4939f1d0b43322973d585a702b7e4eb"}}
+}''')
+SKILL_EXPERTS = {
+    "exp-focus-group-interaction": ("focus-group-interaction", "expert-focus-group-interaction-skill-hook-binding"),
+    "exp-thematic-analysis": ("thematic-analysis", "skill-thematic-candidate-evidence"),
+    "exp-correlation": ("correlation", "skill-correlation-exploratory-evidence"),
+    "exp-group-comparison-statistics": ("group-comparison-statistics", "skill-group-comparison-exploratory-evidence"),
+}
+
+
 class ExpertCatalog:
     """Loads expert definitions lazily; every file read is logged for traceability tests."""
 
@@ -554,6 +655,123 @@ class ExpertCatalog:
         return {"knowledge_hash": "sha256:" + digest, "references": references,
                 "missing_references": missing_references, "missing_notes": missing_notes,
                 "notes": sorted(path for path, _ in parts)}
+
+    def _skill_note_ids(self, expert_id, workflow=False):
+        if not isinstance(expert_id, str): raise SkillContextError("expert_unregistered", decision="rejected")
+        if expert_id not in SKILL_EXPERTS:
+            # Prototype coverage does not define the authoritative expert registry.
+            # Index reads definition frontmatter only, never all knowledge bodies.
+            for root in (self.root, self.local_root):
+                if root.is_symlink() or root.resolve() != root.absolute():
+                    raise SkillContextError("path_escape")
+            for folder in self._expert_folders():
+                relative = EXPERTS_DIR / folder / DEFINITION_NOTE
+                candidate = self._resolve(relative)
+                root = self.local_root if candidate == self.local_root / relative else self.root
+                if not candidate.resolve().is_relative_to(root.resolve()):
+                    raise SkillContextError("path_escape")
+            known = expert_id in self.index()
+            raise SkillContextError("expert_unsupported" if known else "expert_unregistered",
+                                    decision="unsupported" if known else "rejected")
+        if type(workflow) is not bool: raise SkillContextError("selection_invalid", decision="rejected")
+        folder, skill_id = SKILL_EXPERTS[expert_id]
+        prefix = "expert-" + folder + "-"
+        selected = {"data-analysis-asset-connection-v1", "analysis-skills-index", skill_id}
+        selected.update(key for key in SKILL_NOTE_REFS if key.startswith(prefix) or key.startswith("analysis-common-"))
+        if workflow:
+            selected.update({"workflow-group-interview-evidence", "skill-thematic-candidate-evidence", "transcript-preparation-v1"})
+            selected.update(key for key in SKILL_NOTE_REFS if key.startswith("expert-focus-group-interaction-"))
+        return sorted(selected)
+
+    def read_skill_note(self, expert_id, note_id, *, workflow=False, reference=None):
+        """Read registered bytes afresh, including same-size/same-mtime edits.
+
+        Roots are the existing bounded Software Vault/local overlay roots. No
+        researcher Vault discovery, arbitrary path or missing-block expansion.
+        Receipt verification applies to bytes read now, not future file state.
+        """
+        if note_id not in self._skill_note_ids(expert_id, workflow):
+            raise SkillContextError("note_out_of_scope", decision="rejected")
+        spec = SKILL_NOTE_REFS[note_id]
+        identity = {k: spec[k] for k in ("path", "raw_sha256", "version")}
+        if reference is not None:
+            try:
+                if json.dumps(reference, sort_keys=True, allow_nan=False) != json.dumps(identity, sort_keys=True, allow_nan=False):
+                    raise SkillContextError("reference_mismatch")
+            except (TypeError, ValueError):
+                raise SkillContextError("reference_mismatch") from None
+        relative = Path(spec["path"])
+        if relative.is_absolute() or ".." in relative.parts or "\\" in spec["path"]:
+            raise SkillContextError("path_escape")
+        path, origin = None, None
+        for root, label in ((self.local_root, "local_override"), (self.root, "base")):
+            if root.is_symlink() or root.is_junction(): raise SkillContextError("root_escape")
+            resolved_root = root.resolve()
+            candidate = root / relative
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(resolved_root): raise SkillContextError("path_escape")
+            if candidate.exists():
+                if not resolved.is_file(): raise SkillContextError("registered_file_invalid")
+                path, origin = resolved, label
+                break
+        if path is None: raise SkillContextError("note_missing", decision="needs_input")
+        try:
+            if path.stat().st_size > 131072: raise SkillContextError("note_byte_limit", decision="needs_input")
+            with path.open("rb") as handle:
+                data = handle.read(131073)
+        except OSError:
+            raise SkillContextError("note_unavailable", decision="needs_input") from None
+        self.read_log.append("skill:" + relative.as_posix())
+        if len(data) > 131072: raise SkillContextError("note_byte_limit", decision="needs_input")
+        if hashlib.sha256(data).hexdigest() != spec["raw_sha256"]:
+            raise SkillContextError("raw_hash_mismatch")
+        try:
+            props, body = unpack(data.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, yaml.YAMLError):
+            raise SkillContextError("note_malformed") from None
+        if props.get("note_id") != note_id: raise SkillContextError("note_id_mismatch")
+        for key, expected in spec["version"].items():
+            actual = props.get(key)
+            if not isinstance(actual, (str, int, bool)): actual = str(actual)
+            if type(actual) is not type(expected) or actual != expected:
+                raise SkillContextError("version_mismatch")
+        parts = [{"type": native, "id": name, "text": _skill_range(body, name, native)}
+                 for name, native in spec["blocks"]]
+        parts.extend({"type": "section", "id": name, "text": _skill_range(body, name)} for name in spec["sections"])
+        for part in parts:
+            part["range_utf8_hash"] = "sha256:" + hashlib.sha256(part["text"].encode("utf-8")).hexdigest()
+            expected = spec.get("range_hashes", {}).get(part["id"])
+            if expected is not None and expected != part["range_utf8_hash"]:
+                raise SkillContextError("range_incomplete")
+        return {"note_id": note_id, "path": relative.as_posix(), "version": dict(spec["version"]),
+                "raw_byte_hash": "sha256:" + spec["raw_sha256"], "source": origin, "parts": parts,
+                "receipt_type": "knowledge_read", "verification_scope": "bytes_read_at_receipt",
+                "unselected_body_characters": max(0, len(body) - sum(len(p["text"]) for p in parts)),
+                "delivery_state": "not_measured", "human_adoption": "unanswered"}
+
+    def skill_context(self, expert_id, *, workflow=False, max_bytes=262144):
+        """Opt-in complete required ranges; default currentPack is untouched."""
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 262144:
+            raise SkillContextError("context_byte_limit", decision="needs_input")
+        sources = [self.read_skill_note(expert_id, nid, workflow=workflow)
+                   for nid in self._skill_note_ids(expert_id, workflow)]
+        if sum(len(part["text"].encode("utf-8")) for source in sources for part in source["parts"]) > max_bytes:
+            raise SkillContextError("context_byte_limit", decision="needs_input")
+        definition_source = next(s for s in sources if s["note_id"] == "expert-" + SKILL_EXPERTS[expert_id][0] + "-definition")
+        body = "\n\n".join(part["text"] for part in definition_source["parts"])
+        match = DEFINITION_BLOCK.search(body)
+        if not match: raise SkillContextError("authority_missing")
+        definition = yaml.safe_load(match[1])
+        if validate_definition(definition, folder=SKILL_EXPERTS[expert_id][0]): raise SkillContextError("authority_invalid")
+        # YAML dates in this existing descriptive field are not runtime objects.
+        definition["knowledge_verified"] = str(definition["knowledge_verified"])
+        result = {"version": SKILL_CONTEXT_VERSION, "expert_id": expert_id, "workflow_selected": workflow,
+                  "status": "draft", "runtime_state": "planned", "production_default_enabled": False,
+                  "definition": definition, "sources": sources, "literature_body_read": False,
+                  "human_adoption": "unanswered", "meaning_review": "undetermined"}
+        result["context_hash"] = "sha256:" + hashlib.sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+        return result
 
     def review(self, expert_id: str, analysis: dict, *, role: str = "主", method_id: str = "",
                selection: str = "researcher", context: dict | None = None) -> dict:

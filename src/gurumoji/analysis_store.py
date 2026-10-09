@@ -6,6 +6,7 @@ can be retried from the saved package without repeating analysis or AI calls.
 from __future__ import annotations
 
 import copy
+import base64
 import csv
 import hashlib
 import html
@@ -29,6 +30,28 @@ LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
 STORE_VERSION = 1
 TABLE_FORMAT_VERSION = 1
+HUMAN_RECORD_KIND = "analysis_human_record"
+_HUMAN_RECORD_WRITER = object()
+HUMAN_RECORD_OPTIONS_LIMIT = 20
+HUMAN_RECORD_OPTIONS_MAX_BYTES = 65536
+
+
+def human_record_options_offset(value):
+    """Bound the public cursor before any database/factory access."""
+    from .analysis_core import AnalysisContractError
+    text = str(value)
+    if (type(value) not in (int, str) or not text or len(text) > 5
+            or any(c not in "0123456789" for c in text)
+            or (len(text) > 1 and text[0] == "0") or int(text) > 10000):
+        raise AnalysisContractError("研究者記録の開始位置が不正です。", code="human_record_options_offset")
+    return int(text)
+
+
+def asset_plan_options_offset(value):
+    from .analysis_core import AnalysisContractError
+    try: return human_record_options_offset(value)
+    except AnalysisContractError:
+        raise AnalysisContractError("接続計画の開始位置が不正です。", code="asset_plan_options_offset") from None
 
 
 class StoreConflict(ValueError):
@@ -244,13 +267,225 @@ def frontmatter(note_id: str, title: str, **properties) -> str:
     return "---\n" + "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in data.items()) + "\n---\n\n"
 
 
+CONNECTION_METADATA_VERSION = 1
+CONNECTION_METADATA_KIND = "connection_metadata"
+# A storage schema describes observed JSON values, not a measurement or adapter.
+CONNECTION_TABLE_SCHEMA = {"format": "gurumoji.analysis-table", "schema_version": 1,
+                           "required": ["dataset_id", "run_id", "input_snapshot_id", "source_revision",
+                                        "analysis_revision", "fields", "columns", "row_count", "rows"]}
+
+
+class AssetBindingError(StoreConflict):
+    def __init__(self, reason, decision="rejected"):
+        self.reason, self.decision = reason, decision
+        super().__init__("asset_connection_" + reason)
+
+
+def _asset_hash(raw):
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _asset_fields(value, required, optional=()):
+    if not isinstance(value, dict) or not set(required) <= set(value) <= set(required) | set(optional):
+        raise AssetBindingError("fields")
+
+
+def _asset_id(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _asset_enum(value, choices):
+    return isinstance(value, str) and value in choices
+
+
+def _asset_ids(value, *, nonempty=False):
+    return (isinstance(value, list) and (bool(value) or not nonempty)
+            and all(_asset_id(v) for v in value) and len(value) == len(set(value)))
+
+
+def _asset_ref(ref):
+    from .analysis_core import HASH_DOMAINS, _connection_hash, _connection_source_ref
+    if isinstance(ref, dict) and ref.get("target_type") == "artifact":
+        _asset_fields(ref, ("target_type", "target_id", "version", "content_hash", "hash_domain"), ("library_id", "locator"))
+        return (all(_asset_id(ref[k]) for k in ("target_id", "version", "hash_domain"))
+                and _connection_hash(ref["content_hash"]) and ref["hash_domain"] in HASH_DOMAINS
+                and all(_asset_id(ref[k]) for k in ("library_id", "locator") if k in ref))
+    return _connection_source_ref(ref)
+
+
+def _asset_refs(refs, *, nonempty=False):
+    return (isinstance(refs, list) and (bool(refs) or not nonempty)
+            and all(_asset_ref(r) for r in refs) and len({digest(r) for r in refs}) == len(refs))
+
+
+def _asset_key(key):
+    _asset_fields(key, ("library_id", "store_run_id", "artifact_id", "output_name"))
+    if not all(_asset_id(v) for v in key.values()): raise AssetBindingError("asset_key")
+    return digest(key)
+
+
+def _asset_scope(scope):
+    from .analysis_core import _connection_hash
+    fields = ("scope_id", "manifest_hash", "mode", "input_refs", "conversation_ids", "member_ids", "context_ids")
+    _asset_fields(scope, fields)
+    if (not _asset_id(scope["scope_id"]) or not _asset_enum(scope["mode"], {"dataset", "selection", "section", "episode"})
+            or not _asset_refs(scope["input_refs"], nonempty=True)
+            or not _asset_ids(scope["conversation_ids"], nonempty=True)
+            or not all(_asset_ids(scope[k]) for k in ("member_ids", "context_ids"))
+            or not _connection_hash(scope["manifest_hash"])
+            or scope["manifest_hash"] != _asset_hash(canonical({k: v for k, v in scope.items() if k != "manifest_hash"}))):
+        raise AssetBindingError("scope")
+
+
+def _asset_meaning(meaning):
+    from .analysis_core import CONNECTION_UNITS
+    _asset_fields(meaning, ("definition_refs", "description", "status", "unit"))
+    if (not _asset_refs(meaning["definition_refs"]) or not _asset_enum(meaning["unit"], CONNECTION_UNITS)
+            or not _asset_enum(meaning["status"], {"declared", "unknown"})
+            or (meaning["status"] == "unknown" and meaning["description"] is not None)
+            or (meaning["status"] == "declared" and not _asset_id(meaning["description"]))):
+        raise AssetBindingError("meaning")
+
+
+def _asset_state(state):
+    from .analysis_core import CONNECTION_PURPOSES, _connection_hash
+    _asset_fields(state, ("asset_key", "target_content_hash", "target_domain", "state_revision", "policy_revision",
+                         "status", "allowed_purposes", "send_policy", "destinations", "revoked",
+                         "review_refs", "reason", "updated_at"))
+    _asset_key(state["asset_key"])
+    if (not _connection_hash(state["target_content_hash"]) or not _asset_enum(state["target_domain"],
+            {"raw-bytes-v1", "ta-candidate-content-v1", "ta-theme-content-v1"})
+            or any(type(state[k]) is not int or state[k] < 1 for k in ("state_revision", "policy_revision"))
+            or not _asset_enum(state["status"], {"draft", "candidate", "adopted", "rejected", "retired", "stale", "unavailable"})
+            or not _asset_ids(state["allowed_purposes"]) or not set(state["allowed_purposes"]) <= CONNECTION_PURPOSES
+            or not _asset_enum(state["send_policy"], {"local_only", "permitted_destinations", "prohibited"})
+            or not _asset_ids(state["destinations"]) or type(state["revoked"]) is not bool
+            or not _asset_refs(state["review_refs"]) or not _asset_id(state["reason"])
+            or not isinstance(state["updated_at"], str)
+            or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z", state["updated_at"])):
+        raise AssetBindingError("state")
+    try: datetime.fromisoformat(state["updated_at"].replace("Z", "+00:00"))
+    except ValueError: raise AssetBindingError("state_time") from None
+    if state["send_policy"] != "permitted_destinations" and state["destinations"]:
+        raise AssetBindingError("state_destinations")
+
+
+def _asset_descriptor(asset, *, original=False):
+    from .analysis_core import ASSET_KINDS, _connection_hash, _connection_schema, _connection_adapter, validate_connection_actor
+    common = ("asset_key", "raw_byte_hash", "schema", "scope", "producer", "adapter", "meaning")
+    if original:
+        _asset_fields(asset, common + ("source_ref",))
+        if not _asset_ref(asset["source_ref"]) or asset["source_ref"]["target_type"] != "snapshot":
+            raise AssetBindingError("original_type", "unsupported")
+    else:
+        _asset_fields(asset, common + ("contract_id", "contract_version", "content_hash", "content_domain", "kind",
+                                      "source_refs", "method_id", "method_version", "variables", "parent_refs"),
+                      ("execution_run_id", "producer_task_id", "supersedes"))
+        if (asset["contract_id"] != "gurumoji.analysis-asset-connection" or type(asset["contract_version"]) is not int
+                or asset["contract_version"] != 1 or not _asset_enum(asset["kind"], ASSET_KINDS)
+                or not _connection_hash(asset["content_hash"]) or not _asset_enum(asset["content_domain"],
+                    {"raw-bytes-v1", "ta-candidate-content-v1", "ta-theme-content-v1"})
+                or not _asset_refs(asset["source_refs"], nonempty=True) or not _asset_refs(asset["parent_refs"])
+                or not all(_asset_id(asset[k]) for k in ("method_id", "method_version"))
+                or (("execution_run_id" in asset) != ("producer_task_id" in asset))
+                or not all(_asset_id(asset[k]) for k in ("execution_run_id", "producer_task_id") if k in asset)
+                or ("supersedes" in asset and not _asset_refs(asset["supersedes"], nonempty=True))):
+            raise AssetBindingError("asset")
+        from .analysis_method_registry import connection_method_descriptor, connection_output_contract
+        registered = connection_method_descriptor(asset["method_id"])
+        if registered is None: raise AssetBindingError("method_unregistered")
+        if asset["method_version"] != registered.get("method_version", registered["registry_version"]):
+            raise AssetBindingError("method_version")
+        output = connection_output_contract(asset["method_id"], asset["asset_key"]["output_name"], asset["kind"])
+        if output is None:
+            raise AssetBindingError("method_output_unregistered")
+        if (asset["content_domain"] != output["content_domain"] or asset["kind"] != output["kind"]
+                or asset["schema"] != output["schema"] or asset["adapter"] != output["adapter"]):
+            raise AssetBindingError("typed_schema_or_domain")
+        if asset["kind"] != "observation_table" and asset["variables"]:
+            raise AssetBindingError("typed_variables_unpermitted")
+        if not isinstance(asset["variables"], list): raise AssetBindingError("variables")
+        ids = []
+        for variable in asset["variables"]:
+            _asset_fields(variable, ("variable_id", "version", "definition_hash", "value_type", "scale", "unit",
+                                     "value_domain", "generation", "validity", "definition_ref"))
+            validate_connection_actor(variable["generation"])
+            if (not all(_asset_id(variable[k]) for k in ("variable_id", "unit", "value_domain"))
+                    or type(variable["version"]) is not int or variable["version"] < 1
+                    or not _asset_enum(variable["value_type"], {"string", "number", "integer", "boolean"})
+                    or not _asset_enum(variable["scale"], {"nominal", "ordinal", "interval", "ratio"})
+                    or not _asset_enum(variable["validity"], {"candidate", "structural_checked", "human_reviewed", "unknown"})
+                    or not _asset_ref(variable["definition_ref"])
+                    or variable["definition_hash"] != variable["definition_ref"]["content_hash"]):
+                raise AssetBindingError("variable")
+            ids.append(variable["variable_id"])
+        if len(ids) != len(set(ids)): raise AssetBindingError("variable_duplicate")
+    _asset_key(asset["asset_key"]); _asset_scope(asset["scope"]); _asset_meaning(asset["meaning"])
+    validate_connection_actor(asset["producer"])
+    if not original and asset["kind"] != "observation_table":
+        if (asset["producer"]["kind"] not in output["actor_kinds"] or asset["meaning"]["unit"] != output["unit"]):
+            raise AssetBindingError("typed_actor_or_meaning")
+    if not original and not asset["parent_refs"]:
+        raise AssetBindingError("derived_parent_missing")
+    if not _connection_hash(asset["raw_byte_hash"]) or not _connection_schema(asset["schema"]):
+        raise AssetBindingError("hash_or_schema")
+    if asset["adapter"] is None:
+        if asset["producer"]["kind"] != "researcher": raise AssetBindingError("adapter")
+    elif not _connection_adapter(asset["adapter"]): raise AssetBindingError("adapter")
+
+
+def _asset_transition(history, state, descriptor):
+    _asset_state(state)
+    target = (descriptor.get("content_hash", descriptor["raw_byte_hash"]),
+              descriptor.get("content_domain", "raw-bytes-v1"))
+    if (state["target_content_hash"], state["target_domain"]) != target:
+        raise AssetBindingError("state_target_mismatch")
+    revision = state["state_revision"]
+    if revision in history:
+        if canonical(history[revision]) != canonical(state): raise AssetBindingError("state_revision_conflict")
+        return
+    previous = history[max(history)] if history else None
+    if revision != (previous["state_revision"] + 1 if previous else 1): raise AssetBindingError("state_revision_gap")
+    if previous:
+        changed = any(state[k] != previous[k] for k in ("allowed_purposes", "send_policy", "destinations", "revoked"))
+        if state["policy_revision"] != previous["policy_revision"] + int(changed): raise AssetBindingError("policy_revision")
+        if (not set(state["allowed_purposes"]) <= set(previous["allowed_purposes"])
+                or not set(state["destinations"]) <= set(previous["destinations"])
+                or (previous["revoked"] and not state["revoked"])
+                or (previous["send_policy"] == "prohibited" and state["send_policy"] != "prohibited")
+                or (previous["send_policy"] == "local_only" and state["send_policy"] not in {"local_only", "prohibited"})
+                or (previous["send_policy"] == "permitted_destinations" and state["send_policy"] == "local_only"
+                    and "local" not in previous["destinations"])
+                or (previous["status"] == "adopted" and state["status"] in {"draft", "candidate"})):
+            raise AssetBindingError("permission_widening_or_adopted_downgrade")
+    elif state["policy_revision"] != 1: raise AssetBindingError("policy_revision")
+    history[revision] = state
+
+
+def _asset_producer_link(link, assets):
+    from .analysis_core import _connection_hash
+    _asset_fields(link, ("plan_id", "plan_version", "plan_hash", "generation", "execution_run_id",
+                         "producer_task_id", "output_name", "asset_key"))
+    if (not all(_asset_id(link[k]) for k in ("plan_id", "execution_run_id", "producer_task_id", "output_name"))
+            or any(type(link[k]) is not int or link[k] < 1 for k in ("plan_version", "generation"))
+            or not _connection_hash(link["plan_hash"])):
+        raise AssetBindingError("producer_link")
+    asset = assets.get(_asset_key(link["asset_key"]))
+    if (asset is None or asset.get("execution_run_id") != link["execution_run_id"]
+            or asset.get("producer_task_id") != link["producer_task_id"]
+            or asset["asset_key"]["output_name"] != link["output_name"]):
+        raise AssetBindingError("producer_identity")
+
+
 class AnalysisStore:
     def __init__(self, database_file: Path, connect):
+        self.database_file = Path(database_file).resolve()
         from .obsidian_layout import ObsidianLayout
         from .vault_registry import VaultRegistry
         self.layout = ObsidianLayout(database_file)
         self.vaults = VaultRegistry(database_file)
         self.connect = connect
+        self._binding_reads = threading.local()
         self.root = Path(database_file).parent / "analysis_store"
         self.vault = Path(database_file).parent / "obsidian" / "ResearchVault"
         self._last_publication_outcomes: dict[str, dict[str, dict[str, str]]] = {}
@@ -448,8 +683,11 @@ class AnalysisStore:
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
-             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION) -> dict:
+             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION,
+             _human_writer=None) -> dict:
         with STORE_LOCK:
+            if (kind == HUMAN_RECORD_KIND or "human_submission" in result) and _human_writer is not _HUMAN_RECORD_WRITER:
+                raise AssetBindingError("human_record_origin")
             check_cancelled()
             library_id = self.library_id()
             snapshot = {**snapshot, "library_id": library_id}
@@ -458,6 +696,10 @@ class AnalysisStore:
                         "input_fingerprint": input_fingerprint,
                         "algorithms": result.get("algorithms", {}), "parameters": result.get("parameters", {}),
                         "ai_request": result.get("ai_request_id", "")}
+            if result.get("orchestration", {}).get("thematic_candidates_v1"):
+                identity["typed_candidates"] = digest(result["orchestration"]["thematic_candidates_v1"])
+            if kind == HUMAN_RECORD_KIND:
+                identity["human_submission"] = digest(result["human_submission"])
             if kind in {"ai_finishing", "ai_insights"}: identity["request"] = request_id
             fingerprint = digest(identity)
             previous = self.by_request(request_id)
@@ -530,6 +772,57 @@ class AnalysisStore:
                 files = {"input.json": (canonical(snapshot), "application/json", None),
                          "parameters.json": (canonical(result.get("parameters", {})), "application/json", None),
                          "result.json": (canonical(result), "application/json", None)}
+                if kind == HUMAN_RECORD_KIND:
+                    human = result["human_submission"]
+                    files.update({"human/record.json": (canonical(human["record"]), "application/json", None),
+                        "human/source.txt": (human["source_text"].encode("utf-8"), "text/plain", None),
+                        "human/submission.json": (base64.b64decode(human["request_bytes"], validate=True), "application/json", None)})
+                orchestration = result.get("orchestration", {})
+                candidates = orchestration.get("thematic_candidates_v1", [])
+                if candidates:
+                    from .services.expert_agents import thematic_source_packet, validate_report
+                    from .analysis_core import validate_thematic_candidates
+                    fixed = thematic_source_packet(orchestration["initial"], library_id=library_id, conversation_id=item_id)
+                    if not isinstance(candidates, list) or len(candidates) > 9999:
+                        raise StoreConflict("型付き候補の保存件数が不正です。")
+                    files["assets/orchestration_snapshot.json"] = (canonical(orchestration["initial"]["snapshot"]), "application/json", None)
+                    seen = set()
+                    validated_candidates = []
+                    for index, entry in enumerate(candidates):
+                        if (not isinstance(entry, dict) or set(entry) != {"result_id", "task_id", "candidate"}
+                                or not _asset_id(entry["result_id"]) or entry["result_id"] in seen or not _asset_id(entry["task_id"])):
+                            raise StoreConflict("型付き候補の原結果識別子が不正です。")
+                        seen.add(entry["result_id"])
+                        matches = [r for r in orchestration.get("raw_results", []) if r.get("result_id") == entry["result_id"] and r.get("task_id") == entry["task_id"]]
+                        if (len(matches) != 1 or matches[0].get("validation_status") != "valid" or matches[0].get("stale")
+                                or matches[0].get("raw", {}).get("expert_report", {}).get("thematic_candidates_v1") != entry["candidate"]):
+                            raise StoreConflict("型付き候補と検証済みの原結果が一致しません。")
+                        raw_report = matches[0]["raw"]
+                        profile = orchestration.get("expert_knowledge_snapshot", {}).get("profiles", {}).get(raw_report["expert_report"]["expert_id"])
+                        if profile is None or profile.get("typed_contract") != "thematic_candidates_v1":
+                            raise StoreConflict("型付き候補の選択・契約版が一致しません。")
+                        execution_run = orchestration.get("run", {}).get("run_id")
+                        if not _asset_id(execution_run): raise AssetBindingError("typed_execution_provenance")
+                        with self.connect() as db:
+                            task_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND task_id=?",
+                                (execution_run, entry["task_id"])).fetchone()
+                            result_row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE run_id=? AND result_id=? AND task_id=?",
+                                (execution_run, entry["result_id"], entry["task_id"])).fetchone()
+                        task = _read_typed_json(task_row[0]) if task_row else {}
+                        result_state = _read_typed_json(result_row[1]) if result_row else {}
+                        if (not task or task.get("kind") != "ai" or task.get("status") != "succeeded" or not result_row
+                                or result_state.get("validation_status") != "valid" or result_state.get("stale")
+                                or _read_typed_json(result_row[0]) != raw_report
+                                or result_state.get("raw_hash") != _asset_hash(canonical(raw_report))):
+                            raise AssetBindingError("typed_execution_provenance")
+                        from .services.expert_agents import thematic_execution_producer
+                        expected_producer = thematic_execution_producer(task)
+                        validate_report(profile, raw_report, [r["evidence_id"] for r in fixed["evidence"]], thematic_source=fixed,
+                            expected_producer=expected_producer)
+                        candidate = validate_thematic_candidates(entry["candidate"], source=fixed)
+                        self._validate_thematic_versions(candidate, pending_candidates=validated_candidates)
+                        validated_candidates.append(candidate)
+                        files[f"assets/thematic_candidates_{index:04d}.json"] = (canonical(candidate), "application/json", None)
                 for name, (fields, rows) in datasets.items():
                     if not re.fullmatch(r"[a-z_]+", name): raise ValueError("表の名前が正しくありません。")
                     if table_version == TABLE_FORMAT_VERSION:
@@ -609,6 +902,8 @@ class AnalysisStore:
 
     def verified_package(self, run_id: str) -> tuple[dict, dict, dict, dict[str, bytes]]:
         """Read the fixed package only; never recover, publish, stamp or rewrite it."""
+        cache=getattr(self._binding_reads,"packages",None)
+        if cache is not None and run_id in cache:return copy.deepcopy(cache[run_id])
         run = self.get(run_id)
         artifacts = self.artifacts(run_id)
         by_name = {artifact["name"]: artifact for artifact in artifacts}
@@ -648,7 +943,9 @@ class AnalysisStore:
         if parameters != result.get("parameters", {}):
             raise StoreConflict("固定packageの条件が一致しません。")
         self._verify_typed_tables(run, manifest, by_name, content)
-        return snapshot, result, manifest, content
+        value=(snapshot,result,manifest,content)
+        if cache is not None:cache[run_id]=copy.deepcopy(value)
+        return value
 
     @staticmethod
     def _verify_typed_tables(run, manifest, artifacts, content):
@@ -694,6 +991,2212 @@ class AnalysisStore:
         if references is None:
             raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")
         return _read_typed_json(content[references["data"]])
+
+    def thematic_asset_descriptors(self, run_id):
+        """Verified saved review choices; registration/adoption remains explicit."""
+        from .analysis_method_registry import connection_kind_contract, connection_method_descriptor
+        from .services.expert_agents import thematic_source_packet
+        _snapshot, result, manifest, content = self.verified_package(run_id)
+        orchestration = result.get("orchestration", {})
+        entries = orchestration.get("thematic_candidates_v1", [])
+        if not entries: raise AssetBindingError("typed_candidates_missing", "needs_input")
+        fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+        artifacts = {a["name"]: a for a in self.artifacts(run_id)}
+        def common(name, kind, producer, description):
+            contract = connection_kind_contract(kind)
+            return {"asset_key": {"library_id": self.library_id(), "store_run_id": run_id,
+                    "artifact_id": artifacts[name]["id"], "output_name": name},
+                    "raw_byte_hash": _asset_hash(content[name]), "schema": contract["schema"],
+                    "scope": copy.deepcopy(fixed["scope"]), "producer": copy.deepcopy(producer),
+                    "adapter": contract["adapter"], "meaning": {"definition_refs": [], "description": description,
+                    "status": "declared", "unit": contract["unit"]}}
+        original = {**common("assets/orchestration_snapshot.json", "snapshot",
+            {"kind": "system", "actor_id": "Handler-fixed-input", "step_ids": []}, "固定されたテーマ分析の入力。"),
+            "source_ref": fixed["source_ref"]}
+        assets = []
+        for index, entry in enumerate(entries):
+            candidate = entry["candidate"]
+            asset = {**common(f"assets/thematic_candidates_{index:04d}.json", "claim_set", candidate["content"]["producer"],
+                "研究者未確定のテーマ候補。支持・反例・代替はAI下書き。"),
+                "contract_id": "gurumoji.analysis-asset-connection", "contract_version": 1,
+                "content_hash": candidate["content_hash"], "content_domain": "ta-candidate-content-v1", "kind": "claim_set",
+                "source_refs": copy.deepcopy(candidate["content"]["input_refs"]), "method_id": "thematic",
+                "method_version": connection_method_descriptor("thematic")["method_version"],
+                "variables": [], "parent_refs": [fixed["source_ref"]]}
+            self._connection_content(asset); assets.append(asset)
+        self._connection_content(original, original=True)
+        return {"original": original, "assets": assets, "human_status": "human_pending"}
+
+    def read_asset(self, descriptor, *, original=False):
+        """Review-only immutable read, never a state transition or execution grant."""
+        raw, _snapshot = self._connection_content(descriptor, original=original)
+        if "group_source_set" in _snapshot:
+            self._verify_group(_snapshot["group_source_set"])
+            self._connected_current(descriptor)
+        return {"value": _read_typed_json(raw), "raw_byte_hash": _asset_hash(raw),
+                "content_hash": descriptor.get("content_hash", descriptor.get("source_ref", {}).get("content_hash")),
+                "content_domain": descriptor.get("content_domain", descriptor.get("source_ref", {}).get("hash_domain")),
+                "human_status": "human_pending" if descriptor["producer"]["kind"] in {"ai", "researcher"} else "not_applicable",
+                "execution_enabled": False, "adoption_performed": False}
+
+    def _validate_thematic_versions(self, candidate, *, pending_candidates=()):
+        """Resolve historical ThemeTargets to retained, verified immutable bytes."""
+        from .analysis_core import validate_thematic_candidates
+        from .services.expert_agents import thematic_source_packet
+        known = [candidate] + [c for c in pending_candidates if c["content"]["candidate_set_id"] == candidate["content"]["candidate_set_id"]]
+        with self.connect() as db:
+            runs = db.execute("SELECT id FROM analysis_runs WHERE kind='autonomous_analysis' AND status='completed'").fetchall()
+        for row in runs:
+            _snapshot, result, manifest, content = self.verified_package(row[0])
+            orchestration = result.get("orchestration", {})
+            for index, entry in enumerate(orchestration.get("thematic_candidates_v1", [])):
+                old = entry["candidate"]
+                if old["content"]["candidate_set_id"] != candidate["content"]["candidate_set_id"]: continue
+                if content.get(f"assets/thematic_candidates_{index:04d}.json") != canonical(old):
+                    raise AssetBindingError("typed_history_bytes")
+                fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+                validate_thematic_candidates(old, source=fixed)
+                known.append(old)
+        versions = {}; themes = {}; targets = set()
+        for saved in known:
+            version = saved["content"]["version"]
+            if version in versions and versions[version] != saved["content_hash"]:
+                raise AssetBindingError("typed_candidate_version_conflict")
+            versions[version] = saved["content_hash"]
+            for theme, target in zip(saved["themes"], saved["content"]["theme_refs"]):
+                key = (theme["content"]["theme_id"], theme["content"]["version"])
+                if key in themes and themes[key] != theme["content_hash"]:
+                    raise AssetBindingError("typed_theme_version_conflict")
+                themes[key] = theme["content_hash"]; targets.add(canonical(target))
+        for change in candidate["history"]:
+            if any(canonical(t) not in targets for t in change["from_themes"] + change["to_themes"]):
+                raise AssetBindingError("typed_history_unresolved", "needs_input")
+
+    @staticmethod
+    def _validate_manual_relations(table, snapshot, descriptor):
+        """Reuse the saved hand-annotated interaction_links carrier and direction."""
+        if descriptor["meaning"]["unit"] != "utterance" or descriptor["producer"]["kind"] != "researcher":
+            raise AssetBindingError("graph_meaning_or_actor")
+        required = {"relation", "source_segment_id", "target_segment_id", "context_segment_ids", "source_text", "target_text", "status"}
+        if not required <= set(table["fields"]): raise AssetBindingError("graph_fields")
+        evidence = {str(row.get("utterance_id", row.get("evidence_id"))): row for row in snapshot.get("evidence", [])}
+        if not evidence: raise AssetBindingError("graph_evidence_missing", "needs_input")
+        for row in table["rows"]:
+            link = row["values"]
+            if (not all(_asset_id(link.get(k)) for k in ("relation", "source_segment_id", "target_segment_id", "status"))
+                    or not _asset_ids(link.get("context_segment_ids"))): raise AssetBindingError("graph_edge")
+            # Deleted endpoints are preserved by the legacy artifact, but cannot
+            # become resolved evidence in a typed consumer.
+            for endpoint in ("source", "target"):
+                item = evidence.get(link[endpoint + "_segment_id"])
+                if item is None: raise AssetBindingError("graph_endpoint_unresolved", "needs_input")
+                if item["text"] != link[endpoint + "_text"]: raise AssetBindingError("graph_evidence_text")
+            if not set(link["context_segment_ids"]) <= evidence.keys(): raise AssetBindingError("graph_context")
+
+    @staticmethod
+    def source_snapshot_view(snapshot, conversation_id):
+        """A verified identity view; raw immutable snapshot hashes stay separate."""
+        nested=snapshot.get("archive_snapshot",{}).get("conversation_id")
+        if snapshot.get("conversation_id",conversation_id) != conversation_id or (nested is not None and nested != conversation_id):
+            raise AssetBindingError("snapshot_conversation_mismatch")
+        return {**snapshot,"conversation_id":conversation_id}
+
+    def _connection_content(self, descriptor, *, original=False):
+        """Verify an explicit immutable address; never read a current library item."""
+        _asset_descriptor(descriptor, original=original)
+        key = descriptor["asset_key"]
+        if key["library_id"] != self.library_id(): raise AssetBindingError("foreign_library")
+        snapshot, _result, manifest, content = self.verified_package(key["store_run_id"])
+        if manifest.get("library_id") != key["library_id"] or snapshot.get("library_id") != key["library_id"]:
+            raise AssetBindingError("package_library_mismatch")
+        artifact = next((row for row in self.artifacts(key["store_run_id"])
+                         if row["id"] == key["artifact_id"] and row["name"] == key["output_name"]), None)
+        if artifact is None: raise AssetBindingError("artifact_missing", "needs_input")
+        raw = content[key["output_name"]]
+        if _asset_hash(raw) != descriptor["raw_byte_hash"]: raise AssetBindingError("raw_hash_mismatch")
+        from .analysis_method_registry import CONNECTED_METHODS
+        if not original and descriptor.get("method_id") in CONNECTED_METHODS:
+            expected = self.connected_output_descriptor(key["store_run_id"])
+            if canonical(expected) != canonical(descriptor): raise AssetBindingError("connected_descriptor_mismatch")
+            group = _result.get("unit_contract",{}).get("group_source_set")
+            if group is not None:
+                if descriptor["scope"] != group["scope"]: raise AssetBindingError("group_scope_mismatch")
+                snapshot = {**snapshot, "group_source_set":group,
+                    "group_speakers":[{"conversation_id":m["conversation_id"],"speaker_id":s} for m in group["sources"] for s in m["speakers"]]}
+            return raw, self.source_snapshot_view(snapshot,manifest["conversation_id"])
+        from .analysis_method_registry import connection_kind_contract
+        # Fixed Handler source lives alongside the unchanged human-readable
+        # archive; it is never reconstructed from a current database item.
+        thematic_source = original and descriptor["schema"] == connection_kind_contract("snapshot")["schema"]
+        if thematic_source or (not original and descriptor["kind"] == "claim_set"):
+            from .services.expert_agents import thematic_source_packet
+            from .analysis_core import validate_thematic_candidates
+            orchestration = _result.get("orchestration", {})
+            fixed = thematic_source_packet(orchestration["initial"], library_id=key["library_id"], conversation_id=manifest["conversation_id"])
+            fixed_raw = content.get("assets/orchestration_snapshot.json")
+            if fixed_raw != canonical(orchestration["initial"]["snapshot"]): raise AssetBindingError("typed_source_bytes")
+            if descriptor["scope"] != fixed["scope"]: raise AssetBindingError("typed_scope_mismatch")
+            if thematic_source:
+                contract = connection_kind_contract("snapshot")
+                if (key["output_name"] != "assets/orchestration_snapshot.json" or descriptor["source_ref"] != fixed["source_ref"]
+                        or descriptor["adapter"] != contract["adapter"]): raise AssetBindingError("typed_original_reference")
+            else:
+                candidate = _read_typed_json(raw)
+                validate_thematic_candidates(candidate, source=fixed)
+                self._validate_thematic_versions(candidate)
+                index = int(key["output_name"].removeprefix("assets/thematic_candidates_").removesuffix(".json"))
+                entries = orchestration.get("thematic_candidates_v1", [])
+                if (index >= len(entries) or canonical(entries[index]["candidate"]) != raw
+                        or descriptor["content_hash"] != candidate["content_hash"]
+                        or descriptor["producer"] != candidate["content"]["producer"]
+                        or descriptor["source_refs"] != candidate["content"]["input_refs"]
+                        or descriptor["meaning"]["unit"] != "dataset_claim"):
+                    raise AssetBindingError("typed_content_mismatch")
+            return raw, self.source_snapshot_view(orchestration["initial"]["snapshot"],manifest["conversation_id"])
+        if original:
+            from .analysis_method_registry import connection_method_descriptor
+            native = connection_method_descriptor("pearson")
+            ref = descriptor["source_ref"]
+            expected = {"target_type": "snapshot", "target_id": manifest["input_snapshot_id"],
+                        "version": str(manifest["source_revision"]), "content_hash": _asset_hash(canonical(snapshot)),
+                        "hash_domain": "canonical-json-v1", "library_id": key["library_id"]}
+            if (key["output_name"] != "input.json" or canonical(ref) != canonical(expected)
+                    or descriptor["schema"] != native["native_input_schema"]
+                    or descriptor["adapter"] != native["native_adapter"]):
+                raise AssetBindingError("original_reference_mismatch")
+            if (not isinstance(snapshot.get("analysis"), dict) or not _asset_id(snapshot.get("input_hash"))
+                    or type(snapshot.get("source_revision")) is not int or type(snapshot.get("analysis_revision")) is not int
+                    or snapshot["source_revision"] < 0 or snapshot["analysis_revision"] < 0
+                    or snapshot["source_revision"] != manifest["source_revision"]
+                    or snapshot["analysis_revision"] != manifest["analysis_revision"]):
+                raise AssetBindingError("original_payload_schema")
+        else:
+            dataset = key["output_name"].removeprefix("tables/").removesuffix(".json")
+            if descriptor["kind"] in {"event_sequence", "embedding_matrix"}:
+                raise AssetBindingError("typed_asset_adapter_unimplemented", "unsupported")
+            graph = descriptor["kind"] == "relation_graph"
+            contract = connection_kind_contract("relation_graph") if graph else None
+            if (key["output_name"] != f"tables/{dataset}.json" or dataset not in manifest.get("typed_tables", {})
+                    or descriptor["schema"] != (contract["schema"] if graph else {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                               "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))})
+                    or descriptor["adapter"] != (contract["adapter"] if graph else {"adapter_id": "analysis-store-table", "version": "1"})):
+                raise AssetBindingError("table_schema_or_hash", "unsupported")
+            if descriptor["content_hash"] != _asset_hash(raw): raise AssetBindingError("content_hash_mismatch")
+            table = self.read_table(key["store_run_id"], dataset)
+            if not graph and set(v["variable_id"] for v in descriptor["variables"]) != {c["name"] for c in table["columns"]}:
+                raise AssetBindingError("table_variable_coverage")
+            if graph:
+                self._validate_manual_relations(table, snapshot, descriptor)
+            for variable in descriptor["variables"]:
+                for row in table["rows"]:
+                    if variable["variable_id"] not in row["values"] or row["values"][variable["variable_id"]] is None:
+                        continue
+                    value = row["values"][variable["variable_id"]]
+                    allowed = {"string": {str}, "number": {int, float}, "integer": {int}, "boolean": {bool}}
+                    if type(value) not in allowed[variable["value_type"]]: raise AssetBindingError("variable_value_type")
+        def check_times(value):
+            if isinstance(value, dict):
+                if value.get("valid_time") is False and any(value.get(k) is not None for k in ("start", "end", "duration")):
+                    raise AssetBindingError("invalid_time_placeholder")
+                for child in value.values(): check_times(child)
+            elif isinstance(value, list):
+                for child in value: check_times(child)
+        check_times(_read_typed_json(raw))
+        scope = descriptor["scope"]
+        if scope["conversation_ids"] != [manifest["conversation_id"]]:
+            raise AssetBindingError("scope_conversation")
+        source = {"target_type": "snapshot", "target_id": manifest["input_snapshot_id"],
+                  "version": str(manifest["source_revision"]), "content_hash": _asset_hash(canonical(snapshot)),
+                  "hash_domain": "canonical-json-v1", "library_id": key["library_id"]}
+        if scope["input_refs"] != [source] or (not original and source not in descriptor["source_refs"]):
+            raise AssetBindingError("scope_input_version")
+        # Only dataset scopes have a storage projection in this wave.
+        if scope["mode"] != "dataset": raise AssetBindingError("scope_projection_unimplemented", "unsupported")
+        evidence = snapshot.get("evidence")
+        if (not isinstance(evidence, list) or any(not isinstance(e, dict) or not _asset_id(e.get("evidence_id"))
+                or type(e.get("excluded")) is not bool for e in evidence)):
+            raise AssetBindingError("scope_population_unavailable", "needs_input")
+        ids = [e["evidence_id"] for e in evidence]
+        if (len(ids) != len(set(ids))
+                or set(scope["member_ids"]) != {e["evidence_id"] for e in evidence if not e["excluded"]}
+                or set(scope["context_ids"]) != {e["evidence_id"] for e in evidence if e["excluded"]}):
+            raise AssetBindingError("scope_population_mismatch")
+        return raw, self.source_snapshot_view(snapshot,manifest["conversation_id"])
+
+    def manual_relation_descriptors(self,run_id):
+        from .analysis_method_registry import connection_kind_contract,connection_method_descriptor
+        snapshot,_result,manifest,content=self.verified_package(run_id)
+        name="tables/interaction_links.json"
+        if name not in content:raise AssetBindingError("human_record_asset")
+        source={"target_type":"snapshot","target_id":manifest["input_snapshot_id"],"version":str(manifest["source_revision"]),
+            "content_hash":_asset_hash(canonical(snapshot)),"hash_domain":"canonical-json-v1","library_id":self.library_id()}
+        scope={"scope_id":"manual-source:"+manifest["input_snapshot_id"],"mode":"dataset","input_refs":[source],
+            "conversation_ids":[manifest["conversation_id"]],"member_ids":[e["evidence_id"] for e in snapshot["evidence"] if not e["excluded"]],
+            "context_ids":[e["evidence_id"] for e in snapshot["evidence"] if e["excluded"]]};scope["manifest_hash"]=_asset_hash(canonical(scope))
+        def common(output,actor,schema,adapter):
+            artifact=next(a for a in manifest["artifacts"] if a["name"]==output)
+            return {"asset_key":{"library_id":self.library_id(),"store_run_id":run_id,"artifact_id":artifact["id"],"output_name":output},
+                "raw_byte_hash":_asset_hash(content[output]),"schema":schema,"adapter":adapter,"scope":copy.deepcopy(scope),"producer":actor,
+                "meaning":{"definition_refs":[],"description":"Fixed manually annotated relations; researcher review pending","status":"declared","unit":"utterance"}}
+        contract=connection_kind_contract("relation_graph");native=connection_method_descriptor("pearson")
+        original={**common("input.json",{"kind":"system","actor_id":"AnalysisStore-fixed-input","step_ids":[]},native["native_input_schema"],native["native_adapter"]),"source_ref":source}
+        asset={**common(name,{"kind":"researcher","actor_id":"manual-annotation-source","step_ids":[]},contract["schema"],contract["adapter"]),
+            "contract_id":"gurumoji.analysis-asset-connection","contract_version":1,"content_hash":_asset_hash(content[name]),"content_domain":"raw-bytes-v1",
+            "kind":"relation_graph","source_refs":[source],"parent_refs":[source],"variables":[],"method_id":"qualitative_coding","method_version":connection_method_descriptor("qualitative_coding")["registry_version"]}
+        self._connection_content(asset);self._connection_content(original,original=True)
+        return {"assets":[asset],"original":original}
+
+    def human_asset_choices(self,run_id):
+        """Fixed known human-review targets; never arbitrary producer metadata."""
+        from .analysis_method_registry import CONNECTED_METHODS
+        _snapshot,result,_manifest,_content=self.verified_package(run_id)
+        if result.get("orchestration",{}).get("thematic_candidates_v1"):
+            return self.thematic_asset_descriptors(run_id)
+        if result.get("method_id") in CONNECTED_METHODS:
+            return {"assets":[self.connected_output_descriptor(run_id)],"original":None}
+        assets,originals,_states,_links=self._connection_index()
+        matches=[a for a in assets.values() if a["asset_key"]["store_run_id"]==run_id and a["kind"]=="relation_graph"]
+        if not matches:return self.manual_relation_descriptors(run_id)
+        if len(matches)!=1:raise AssetBindingError("human_record_asset")
+        return {"assets":matches,"original":next((o for o in originals.values() if o["source_ref"] in matches[0]["parent_refs"]),None)}
+
+    def _human_contract(self, asset, *, require_current=False, execution_run_id=None):
+        """Resolve the exact immutable output and its frozen researcher duties."""
+        from .analysis_core import fingerprint
+        from .analysis_method_registry import CONNECTED_METHODS
+        if asset.get("kind")=="relation_graph" or asset.get("method_id") in CONNECTED_METHODS:
+            choices=self.human_asset_choices(asset["asset_key"]["store_run_id"])
+            if not any(canonical(a)==canonical(asset) for a in choices["assets"]):raise AssetBindingError("human_record_asset")
+            _raw,snapshot=self._connection_content(asset)
+            _s,_r,manifest,_c=self.verified_package(asset["asset_key"]["store_run_id"])
+            owner=execution_run_id or asset.get("execution_run_id")
+            if not owner:raise AssetBindingError("human_record_owner")
+            if asset.get("execution_run_id") and owner!=asset["execution_run_id"]:raise AssetBindingError("human_record_owner")
+            with self.connect() as db:
+                row=db.execute("SELECT item_id,initial_id,state_json FROM orchestration_runs WHERE run_id=?",(owner,)).fetchone()
+                initial=db.execute("SELECT snapshot_json FROM orchestration_initials WHERE initial_id=?",(row[1],)).fetchone() if row else None
+            if not row or row[0]!=manifest["conversation_id"] or not initial:raise AssetBindingError("human_record_owner")
+            fixed=self.source_snapshot_view(_read_typed_json(initial[0]),row[0]);run=_read_typed_json(row[2])
+            if any(snapshot.get(k)!=fixed.get(k) for k in ("input_hash","conversation_id","source_revision","analysis_revision")) or fingerprint(snapshot.get("evidence"))!=fingerprint(fixed.get("evidence")):
+                raise AssetBindingError("human_record_source")
+            if require_current:
+                if run.get("cancel_requested") or run.get("status")=="cancelled" or run.get("stale") or self.get(asset["asset_key"]["store_run_id"])["stale"]:
+                    raise AssetBindingError("human_target_stale","blocked")
+                self._connected_current(asset)
+            target={"domain":"raw-bytes-v1",**asset["asset_key"],"version":asset["schema"]["version"],"content_hash":asset["content_hash"]}
+            candidate={"content":{"scope":asset["scope"],"theme_refs":[]},"_human_target":target}
+            if asset["kind"] == "observation_table":
+                if asset["meaning"]["unit"] != "utterance": raise AssetBindingError("participant_mapping_target_unit", "unsupported")
+                steps = ["participant-mapping-review"]
+            else: steps=["manual-interaction-review"] if asset["kind"]=="relation_graph" else ["qualitative-interpretation-review"]
+            return candidate,steps,choices["original"],manifest,{"run":{"run_id":owner}}
+        choices = self.thematic_asset_descriptors(asset["asset_key"]["store_run_id"])
+        if not any(canonical(asset) == canonical(a) for a in choices["assets"]):
+            raise AssetBindingError("human_record_asset")
+        _snapshot, result, manifest, content = self.verified_package(asset["asset_key"]["store_run_id"])
+        orchestration = result["orchestration"]
+        candidate = _read_typed_json(content[asset["asset_key"]["output_name"]])
+        execution_run = orchestration.get("run", {}).get("run_id")
+        entry = next((e for e in orchestration["thematic_candidates_v1"] if e["candidate"] == candidate), None)
+        try:
+            with self.connect() as db:
+                run_row = db.execute("SELECT item_id,state_json FROM orchestration_runs WHERE run_id=?", (execution_run,)).fetchone()
+                result_row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE run_id=? AND result_id=? AND task_id=?",
+                    (execution_run, entry["result_id"], entry["task_id"])).fetchone() if entry else None
+                task_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND task_id=?",
+                    (execution_run, entry["task_id"])).fetchone() if entry else None
+        except Exception as exc:
+            import sqlite3
+            if isinstance(exc, sqlite3.Error): raise AssetBindingError("human_record_ledger_unavailable", "needs_input") from None
+            raise
+        if (not run_row or run_row["item_id"] != manifest["conversation_id"] or not result_row
+                or _read_typed_json(run_row["state_json"]).get("expert_agents") != orchestration["expert_knowledge_snapshot"]
+                or _read_typed_json(result_row["state_json"]).get("validation_status") != "valid"
+                or _read_typed_json(result_row["raw_json"]).get("expert_report", {}).get("thematic_candidates_v1") != candidate):
+            raise AssetBindingError("human_record_ledger_mismatch")
+        if require_current:
+            current_run, current_result = _read_typed_json(run_row["state_json"]), _read_typed_json(result_row["state_json"])
+            if current_run.get("cancel_requested") or current_run.get("status") == "cancelled":
+                raise AssetBindingError("human_run_cancelled", "blocked")
+            if current_run.get("stale") or current_result.get("stale") or self.get(asset["asset_key"]["store_run_id"])["stale"]:
+                raise AssetBindingError("human_target_stale", "blocked")
+        profiles = orchestration["expert_knowledge_snapshot"]["profiles"]
+        profile = profiles.get("exp-thematic-analysis", {})
+        steps = [s["id"] for s in profile.get("human_steps", []) if s.get("actor") == "researcher"]
+        if profile.get("typed_contract") != "thematic_candidates_v1" or not steps or len(steps) != len(set(steps)):
+            raise AssetBindingError("human_record_contract")
+        if require_current:
+            from .analysis_core import AnalysisContractError
+            from .services.expert_agents import validate_report, thematic_execution_producer, thematic_source_packet
+            task = _read_typed_json(task_row[0]) if task_row else {}
+            if (task.get("task_id") != entry["task_id"] or task.get("run_id") != execution_run or task.get("kind") != "ai"
+                    or task.get("status") != "succeeded" or not all(_asset_id(task.get(k)) for k in ("model", "provider"))):
+                raise AssetBindingError("typed_execution_provenance", "blocked")
+            fixed = thematic_source_packet(orchestration["initial"], library_id=self.library_id(), conversation_id=manifest["conversation_id"])
+            try:
+                validate_report(profile, _read_typed_json(result_row["raw_json"]), [r["evidence_id"] for r in fixed["evidence"]],
+                    thematic_source=fixed, expected_producer=thematic_execution_producer(task))
+            except AnalysisContractError as exc:
+                raise AssetBindingError(exc.code, "blocked") from None
+        return candidate, steps, choices["original"], manifest, orchestration
+
+    def _human_permission_reason(self, asset, *, parent=False, visiting=(), index=None):
+        """Current local policy and every immutable source/producer ancestor."""
+        assets, originals, states, _links = index or self._connection_index()
+        key = _asset_key(asset["asset_key"])
+        if key in visiting: raise AssetBindingError("content_cycle")
+        if parent and self.get(asset["asset_key"]["store_run_id"])["stale"]:
+            return "parent_state_unavailable"
+        history = states.get(key, {}); state = history[max(history)] if history else None
+        if state:
+            if (state["target_content_hash"] != asset.get("content_hash", asset["raw_byte_hash"])
+                    or state["target_domain"] != asset.get("content_domain", "raw-bytes-v1")):
+                return "state_target_mismatch"
+            if state["revoked"] or state["status"] in {"retired", "unavailable", "rejected"} or (parent and state["status"] != "adopted"):
+                return "parent_state_unavailable" if parent else "human_record_state_unavailable"
+            if (state["send_policy"] == "prohibited" or (state["send_policy"] == "permitted_destinations" and "local" not in state["destinations"])
+                    or not {"exploratory", "qualitative_compare"} & set(state["allowed_purposes"])):
+                return "human_record_policy_unavailable"
+            if parent and (asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]): self._human_review(asset, state)
+        elif parent and asset.get("kind"): return "parent_state_unknown"
+        for ref in asset.get("parent_refs", []):
+            original = ref["target_type"] == "snapshot"
+            matches = [a for a in (originals if original else assets).values() if
+                (a["source_ref"] == ref if original else a["asset_key"]["artifact_id"] == ref["target_id"]
+                 and str(a["schema"]["version"]) == ref["version"] and a["content_hash"] == ref["content_hash"]
+                 and a["content_domain"] == ref["hash_domain"] and a["asset_key"]["library_id"] == ref.get("library_id"))]
+            if not matches and original: continue  # First submission fixes its verified system source.
+            if len(matches) != 1: raise AssetBindingError("parent_reference_unresolved")
+            ancestor = matches[0]; self._connection_content(ancestor, original=original)
+            if not original: self._connected_current(ancestor)
+            reason = self._human_permission_reason(ancestor, parent=True, visiting=visiting + (key,), index=(assets, originals, states, _links))
+            if reason: return reason
+        return None
+
+    @staticmethod
+    def _participant_mapping_applies(asset, target, assets):
+        """A definition review applies only to its saved target or descendants.
+
+        Same conversation/source bytes alone do not establish an interpretation
+        dependency. Following existing immutable parent refs also makes later
+        record corrections invalidate every affected output through the normal
+        lineage path, without inventing a second dependency graph.
+        """
+        pending = [asset]; seen = set(); target_key = _asset_key(target["asset_key"])
+        while pending:
+            current = pending.pop(); key = _asset_key(current["asset_key"])
+            if key in seen: continue
+            seen.add(key)
+            if key == target_key and current["content_hash"] == target["content_hash"]:
+                return True
+            for ref in current.get("parent_refs", []):
+                if ref["target_type"] != "artifact": continue
+                matches = [a for a in assets.values() if a["asset_key"]["artifact_id"] == ref["target_id"]
+                    and a["asset_key"]["library_id"] == ref.get("library_id")
+                    and str(a["schema"]["version"]) == ref["version"]
+                    and a["content_hash"] == ref["content_hash"] and a["content_domain"] == ref["hash_domain"]]
+                if len(matches) != 1: raise AssetBindingError("parent_reference_unresolved")
+                pending.append(matches[0])
+        return False
+
+    def human_record_options(self, *, item_id, execution_run_id, offset=0, current_input_hash=None,
+                             current_source_revisions=None):
+        """Verified, read-only form choices; enabled never grants adoption.
+
+        The application supplies its existing readonly connection and current
+        source stamp. No execution transaction, schema recovery or actor/source
+        statement is created here. Immutable records are exposed only for this
+        exact saved run/target; their separately saved source text is not copied
+        into a new researcher statement.
+        """
+        from .analysis_core import AnalysisContractError
+        from .services.expert_agents import verify_bundle
+        offset = human_record_options_offset(offset)
+        result = {"schema_id": "gurumoji.human-record-options", "schema_version": 1,
+                  "item_id": item_id, "run_id": execution_run_id, "generation": None,
+                  "enabled": False, "reason_code": None, "offset": offset,
+                  "limit": HUMAN_RECORD_OPTIONS_LIMIT, "next_offset": None, "options": []}
+
+        def disabled(reason):
+            return {**result, "enabled": False, "reason_code": reason, "options": [], "next_offset": None}
+
+        if not self.database_file.is_file():
+            raise LookupError("研究者記録の保存済み台帳がありません。")
+        try:
+            with self.connect() as db:
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                required = {"orchestration_runs", "orchestration_tasks", "orchestration_results",
+                            "orchestration_initials", "analysis_runs", "analysis_artifacts", "application_metadata"}
+                if not required <= tables: return disabled("human_record_ledger_unavailable")
+                row = db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=? AND item_id=?",
+                                 (execution_run_id, item_id)).fetchone()
+                if not row: raise LookupError("対象の分析履歴がありません。")
+                run = _read_typed_json(row[0])
+                if (run.get("run_id") != execution_run_id or run.get("item_id") != item_id
+                        or type(run.get("generation")) is not int or run["generation"] < 1):
+                    return disabled("human_record_ledger_mismatch")
+                result["generation"] = run["generation"]
+                publication = db.execute("SELECT result_run_id,generation FROM orchestration_publications WHERE run_id=? AND item_id=?",
+                                         (execution_run_id, item_id)).fetchone() if "orchestration_publications" in tables else None
+            if publication and publication[0] and publication[1] != run["generation"]:
+                return disabled("human_record_generation_changed")
+            if run.get("cancel_requested") or run.get("status") == "cancelled": return disabled("human_run_cancelled")
+            if run.get("stale"): return disabled("human_target_stale")
+            if current_input_hash is None: return disabled("human_record_source_unavailable")
+            if current_input_hash != run.get("input_hash"): return disabled("revision_conflict")
+            if current_source_revisions is None: return disabled("human_record_source_unavailable")
+            if any(int(current_source_revisions.get(k, 0) or 0) != run.get(k)
+                   for k in ("source_revision", "analysis_revision")):
+                return disabled("revision_conflict")
+            choices = {"assets": []}
+            if publication and publication[0]:
+                verify_bundle(run.get("expert_agents"))
+                choices["assets"].extend(self.human_asset_choices(publication[0])["assets"])
+            with self.connect() as db:
+                task_rows = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=?", (execution_run_id,)).fetchall()
+                graph_rows = db.execute("SELECT DISTINCT r.id FROM analysis_runs r JOIN analysis_artifacts a ON a.run_id=r.id "
+                    "WHERE r.item_id=? AND r.status='completed' AND r.stale=0 AND a.name='tables/interaction_links.json' ORDER BY r.id", (item_id,)).fetchall()
+            for row in task_rows:
+                task = _read_typed_json(row[0])
+                if task.get("table_store_run_id") and task.get("status") == "succeeded" and not task.get("stale"):
+                    from .analysis_method_registry import CONNECTED_METHODS
+                    if task.get("method_id") in CONNECTED_METHODS:
+                        saved_choices = self.human_asset_choices(task["table_store_run_id"])["assets"]
+                        choices["assets"].extend(a for a in saved_choices if a["kind"] != "observation_table" or a["meaning"]["unit"] == "utterance")
+            for row in graph_rows:
+                graph = self.human_asset_choices(row[0])["assets"][0]
+                if graph["kind"] != "relation_graph": continue
+                _raw, fixed = self._connection_content(graph)
+                if all(fixed.get(k) == run.get(k) for k in ("input_hash", "source_revision", "analysis_revision")):
+                    choices["assets"].append(graph)
+            if not choices["assets"]: return disabled("human_record_candidates_unavailable")
+            assets, originals, states, _links = self._connection_index()
+            _packages, latest = self._human_packages()
+
+            def current(descriptor):
+                if descriptor is None: return None
+                history = states.get(_asset_key(descriptor["asset_key"]), {})
+                return history[max(history)] if history else None
+
+            def parents_reason(asset):
+                return self._human_permission_reason(asset, index=(assets, originals, states, _links))
+
+            index = 0
+            for asset in choices["assets"]:
+                candidate, required_steps, original, manifest, orchestration = self._human_contract(
+                    asset, require_current=True, execution_run_id=execution_run_id)
+                if (manifest["conversation_id"] != item_id or orchestration["run"]["run_id"] != execution_run_id
+                        or asset["asset_key"]["library_id"] != self.library_id()):
+                    raise AssetBindingError("human_record_owner")
+                generic = "_human_target" in candidate
+                if generic:
+                    steps = [{"id": required_steps[0], "title": "参加者対応の確認" if asset["kind"] == "observation_table" else
+                              "手動相互作用の確認" if asset["kind"] == "relation_graph" else "質的解釈の確認"}]
+                else:
+                    profile = orchestration["expert_knowledge_snapshot"]["profiles"]["exp-thematic-analysis"]
+                    steps = profile["human_steps"]
+                    if (len(required_steps) != 4 or {s["id"] for s in steps} != set(required_steps)
+                            or any(not isinstance(s.get("title"), str) or not s["title"].strip() for s in steps)):
+                        raise AssetBindingError("human_record_contract")
+                state = current(asset)
+                reason = parents_reason(asset)
+                owners = {p["execution_run_id"] for p in latest.values() if p["asset_key"] == asset["asset_key"]}
+                if owners and owners != {execution_run_id}: reason = "human_record_owner"
+                targets = [("participant_mapping" if asset["kind"] == "observation_table" else
+                            "relation_graph" if asset["kind"] == "relation_graph" else "qualitative_bundle", candidate["_human_target"],
+                            "参加者対応" if asset["kind"] == "observation_table" else "手動相互作用" if asset["kind"] == "relation_graph" else "質的比較・再読")] if generic else [("candidate", {"domain": "ta-candidate-content-v1",
+                    "candidate_set_id": candidate["content"]["candidate_set_id"],
+                    "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]},
+                    candidate["content"]["candidate_set_id"])]
+                if not generic:
+                    targets.extend(("theme", t, theme["content"]["name"]) for t, theme in
+                                   zip(candidate["content"]["theme_refs"], candidate["themes"]))
+                for kind, target, label in targets:
+                    position = index; index += 1
+                    if position < offset: continue
+                    if len(result["options"]) == HUMAN_RECORD_OPTIONS_LIMIT:
+                        result["next_offset"] = position
+                        break
+                    rows = []
+                    for step in steps:
+                        old = next((p for p in latest.values() if p["asset_key"] == asset["asset_key"]
+                            and p["record"]["target"] == target and p["record"]["allowed_step_ids"] == [step["id"]]), None)
+                        rows.append({"step_id": step["id"], "label": step["title"],
+                            "latest_record": {"record": copy.deepcopy(old["record"]), "record_ref": copy.deepcopy(old["ref"])} if old else None,
+                            "next_revision": old["record"]["revision"] + 1 if old else 1,
+                            "next_supersedes_record_ref": {"domain": "human-record-v1", "record_id": old["record"]["record_id"],
+                                "revision": old["record"]["revision"], "content_hash": old["ref"]["content_hash"]} if old else None})
+                    option = {"asset_key": copy.deepcopy(asset["asset_key"]), "library_id": manifest["library_id"],
+                        "scope": copy.deepcopy(asset["scope"]), "target_kind": kind, "target": copy.deepcopy(target),
+                        "label": label, "expected_state_revision": state["state_revision"] if state else 0,
+                        "enabled": reason is None, "reason_code": reason, "human_steps": rows}
+                    if generic and asset["kind"] == "observation_table":
+                        _raw,fixed=self._connection_content(asset)
+                        if "group_source_set" in fixed:
+                            option["speakers"]=copy.deepcopy(fixed["group_speakers"])
+                        else:
+                            option["speakers"]=[{"conversation_id":fixed["conversation_id"],"speaker_id":s}
+                                for s in self.participant_speakers(fixed)]
+                    result["options"].append(option)
+                    if len(json.dumps(result, ensure_ascii=True).encode("utf-8")) > HUMAN_RECORD_OPTIONS_MAX_BYTES - 128:
+                        result["options"].pop()
+                        if not result["options"]:
+                            raise AnalysisContractError("研究者記録の選択情報が上限を超えています。", code="human_record_options_byte_limit")
+                        result["next_offset"] = position
+                        break
+                if result["next_offset"] is not None: break
+            result["enabled"] = any(o["enabled"] for o in result["options"])
+            result["reason_code"] = None if result["enabled"] else (
+                result["options"][0]["reason_code"] if result["options"] else "human_record_options_empty")
+            with self.connect() as db:
+                fresh_run = _read_typed_json(db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=? AND item_id=?",
+                    (execution_run_id, item_id)).fetchone()[0])
+            if fresh_run["generation"] != run["generation"]: return disabled("human_record_generation_changed")
+            if fresh_run.get("cancel_requested") or fresh_run.get("status") == "cancelled": return disabled("human_run_cancelled")
+            if fresh_run.get("stale"): return disabled("human_target_stale")
+            old_states = states
+            assets, originals, states, _links = self._connection_index()
+            _fresh_packages, fresh_latest = self._human_packages()
+            for option in result["options"]:
+                asset = next(a for a in choices["assets"] if a["asset_key"] == option["asset_key"])
+                self._human_contract(asset, require_current=True, execution_run_id=execution_run_id)
+                key = _asset_key(asset["asset_key"])
+                if canonical(states.get(key, {})) != canonical(old_states.get(key, {})):
+                    return disabled("human_record_state_changed")
+                before = {p["record"]["record_id"]: p["ref"] for p in latest.values() if p["asset_key"] == asset["asset_key"]}
+                after = {p["record"]["record_id"]: p["ref"] for p in fresh_latest.values() if p["asset_key"] == asset["asset_key"]}
+                if before != after: return disabled("human_record_state_changed")
+                reason = parents_reason(asset)
+                if reason and option["enabled"]: return disabled(reason)
+            return result
+        except AnalysisContractError as exc:
+            if exc.code == "human_record_options_byte_limit": raise
+            return disabled(exc.code)
+        except AssetBindingError as exc:
+            return disabled(exc.reason)
+        except (StoreConflict, ValueError, TypeError, KeyError, IndexError):
+            return disabled("human_record_options_unverified")
+
+    @staticmethod
+    def participant_speakers(snapshot):
+        """Recorded speaker IDs, including an explicitly saved silent roster."""
+        speakers={s["speaker"] for s in snapshot.get("segments",snapshot.get("analysis",{}).get("segments",[])) if s.get("speaker")}
+        speakers.update(snapshot.get("original_source",snapshot.get("archive_snapshot",{}).get("original_source",{})).get("speaker_names",{}))
+        return sorted(speakers)
+
+    @staticmethod
+    def validate_participant_source(source_text, snapshot):
+        """The dedicated step confirms explicit assignments, not a prose memo."""
+        try: body = _read_typed_json(source_text)
+        except (TypeError, ValueError): raise AssetBindingError("participant_mapping_source") from None
+        speakers = {(snapshot["conversation_id"], s["speaker"]) for s in
+            snapshot.get("segments", snapshot.get("analysis", {}).get("segments", [])) if isinstance(s.get("speaker"), str) and s["speaker"]}
+        if "group_source_set" in snapshot:
+            speakers = {(s["conversation_id"],s["speaker_id"]) for s in snapshot["group_speakers"]}
+        else:
+            speakers={(snapshot["conversation_id"],s) for s in AnalysisStore.participant_speakers(snapshot)}
+        assignments = body.get("participant_mapping") if isinstance(body, dict) else None
+        if (not isinstance(body, dict) or set(body) != {"participant_mapping"} or not isinstance(assignments, list)
+                or not 1 <= len(assignments) <= 256 or any(not isinstance(a, dict)
+                or set(a) != {"conversation_id", "speaker_id", "participant_id"} or not all(_asset_id(v) for v in a.values()) for a in assignments)):
+            raise AssetBindingError("participant_mapping_source")
+        keys = [(a["conversation_id"], a["speaker_id"]) for a in assignments]
+        if len(keys) != len(set(keys)) or set(keys) != speakers or len({(a["conversation_id"],a["participant_id"]) for a in assignments}) != len(assignments):
+            raise AssetBindingError("participant_mapping_scope")
+        return assignments
+
+    def pool_sources(self):
+        """Existing immutable carriers plus application source lookup; read only."""
+        from .analysis_core import fingerprint, AnalysisContractError
+        from .analysis_method_registry import connected_slot
+        options=[]
+        assets=self._connection_index()[0]
+        for asset in sorted(assets.values(),key=lambda a:canonical(a["asset_key"])):
+            if asset.get("kind") != "observation_table" or asset["meaning"]["unit"] != "utterance" or len(asset["scope"]["conversation_ids"]) != 1: continue
+            lookup=getattr(self,"current_source_lookup",None)
+            if lookup is None or lookup(asset["scope"]["conversation_ids"][0]) is None: continue
+            try:
+                _raw,fixed=self._connection_content(asset)
+                self._source_current(fixed)
+                source={"type":"frozen","asset_key":asset["asset_key"],"content_hash":asset["content_hash"],"content_domain":asset["content_domain"]}
+                identifier="saved:"+digest(source)
+                context={"plan_id":"pool-options","plan_version":1,"plan_hash":fingerprint(source),"generation":1,
+                    "consumer_task_id":"pool-options","purpose":"exploratory","destination":"local","cancelled":False,
+                    "scope_id":asset["scope"]["scope_id"],"scope_manifest_hash":asset["scope"]["manifest_hash"]}
+                selector={"row_ids":[],"column_ids":[],"range_ref":None};selector["selection_hash"]=fingerprint(selector)
+                ref={**{k:context[k] for k in ("plan_id","plan_version","plan_hash","generation","consumer_task_id")},
+                    "input_ref_id":identifier,"slot_id":"table","role":"data_input","selection":"selected","omission_reason":None,
+                    "source":source,"selector":selector}
+                prepared=self.prepare_connected("unit_projection",{"version":"connected-assets-2","actor":"code",
+                    "parameters":{"columns":["unit_id"],"unit_ids":["pool-options"]},
+                    "bindings":{"slot":connected_slot("unit_projection"),"inputs":[ref],"context":context}},expected_snapshot=fixed)
+                table=prepared["tables"][0]
+                # Discovery metadata fits the readonly byte budget. It never
+                # replaces full immutable definitions/scope resolved by POST.
+                options.append({"option_id":identifier,"input_ref_id":identifier,"label":fixed["conversation_id"]+" / "+asset["asset_key"]["output_name"],
+                    "metadata_version":"pool-source-option-1","source":source,
+                    "scope":{k:asset["scope"][k] for k in ("scope_id","manifest_hash","mode","conversation_ids")},
+                    "fields":table["fields"],"variables":[{k:v[k] for k in
+                        ("variable_id","version","definition_hash","value_type","scale","unit","validity")} for v in table["variables"]],
+                    "speakers":[{"conversation_id":fixed["conversation_id"],"speaker_id":s} for s in self.participant_speakers(fixed)]})
+            except (AssetBindingError,AnalysisContractError,StoreConflict): continue
+        if len(options)>64: raise AssetBindingError("pool_options_limit")
+        return options
+
+    def pool_plan(self, value, run, initial):
+        """Explicit POST freezes a complete group; no caller scope is accepted."""
+        from .analysis_core import fingerprint, web_asset_plan_template
+        from .analysis_method_registry import connected_slot
+        _asset_fields(value,("version","plan_id","plan_version","source_ids","columns"))
+        template=web_asset_plan_template(run)
+        prior=next((p for p in run.get("asset_plans",[]) if p["plan_id"]==value["plan_id"] and p["plan_version"]==value["plan_version"]),None)
+        if prior: template={**template,"plan_version":prior["plan_version"]}
+        if value["version"] != "unit-pool-request-1" or any(type(value[k]) is not type(template[k]) or value[k]!=template[k] for k in ("plan_id","plan_version")):
+            raise AssetBindingError("pool_plan_identity")
+        if not _asset_ids(value["source_ids"]) or not 2<=len(value["source_ids"])<=16 or not _asset_ids(value["columns"]):
+            raise AssetBindingError("pool_sources")
+        choices={o["option_id"]:o for o in self.pool_sources()}
+        if not set(value["source_ids"])<=choices.keys(): raise AssetBindingError("pool_source_unavailable","blocked")
+        context={"plan_id":value["plan_id"],"plan_version":value["plan_version"],"plan_hash":fingerprint(value),"generation":run["generation"],
+            "consumer_task_id":"pool-registration","purpose":"exploratory","destination":"local","cancelled":False,
+            "scope_id":"pool-registration","scope_manifest_hash":fingerprint(value)}
+        selector={"row_ids":[],"column_ids":[],"range_ref":None};selector["selection_hash"]=fingerprint(selector)
+        refs=[{**{k:context[k] for k in ("plan_id","plan_version","plan_hash","generation","consumer_task_id")},
+            "input_ref_id":sid,"slot_id":"table","role":"data_input","selection":"selected","omission_reason":None,
+            "source":choices[sid]["source"],"selector":selector} for sid in value["source_ids"]]
+        _receipt,_tables,group=self._group_bindings(connected_slot("unit_pool"),refs,context,require_scope=False)
+        scope={k:group["scope"][k] for k in ("scope_id","manifest_hash")}
+        plan={**template,"steps":[{"step_id":"P1","method_id":"unit_pool","parameters":{"columns":value["columns"]},"scope":scope,
+            "inputs":[{k:r[k] for k in ("input_ref_id","role","selection","omission_reason","source")} for r in refs]}]}
+        return plan,group["scope"]
+
+    def asset_plan_options(self, *, run, initial, offset=0):
+        """Readonly current saved carriers. No task, adoption or future IDs."""
+        from .analysis_core import fingerprint, connected_web_methods, web_asset_plan_template, AnalysisContractError, assess_connection_inputs
+        from .analysis_method_registry import CONNECTED_METHODS, connected_slot, connection_method_descriptor
+        initial=self.source_snapshot_view(initial,run["item_id"])
+        offset = asset_plan_options_offset(offset)
+        result = {"schema_id": "gurumoji.asset-plan-options", "schema_version": 1, "version": "asset-plan-options-1",
+            "item_id": run["item_id"], "run_id": run["run_id"], "library_id": self.library_id(), "generation": run["generation"],
+            "enabled": False, "reason_code": "asset_plan_inputs_empty", "offset": offset, "limit": 20, "next_offset": None,
+            "plan_template": web_asset_plan_template(run), "methods": connected_web_methods(), "inputs": [],
+            "participant_context": {"enabled": False, "reason_code": "participant_mapping_missing", "speakers": [],
+                "known_participants": [], "human_record_option": None, "confirmed_mapping": None, "preparation_method": "unit_projection",
+                "preparation_input_ref_id": None, "preparation_option_id": None}}
+        assets, originals, states, _links = self._connection_index()
+        result["unit_pool"]={"version":"unit-pool-request-1","min_sources":2,"max_sources":16,"sources":self.pool_sources(),
+            "request_template":{**{k:result["plan_template"][k] for k in ("plan_id","plan_version")},"version":"unit-pool-request-1"},
+            "parameter_fields":["columns"],"required_columns":["unit_id","conversation_id","speaker_id","value_status"]}
+        pool_conversations={s["scope"]["conversation_ids"][0] for s in result["unit_pool"]["sources"]}
+        pool_enabled=initial["conversation_id"] in pool_conversations and len(pool_conversations)>=2
+        result["unit_pool"].update(enabled=pool_enabled,reason_code=None if pool_enabled else
+            ("pool_anchor_unavailable" if initial["conversation_id"] not in pool_conversations else "pool_sources_insufficient"))
+        descriptors = [(a, False) for a in assets.values()] + [(a, True) for a in originals.values()]
+        descriptors.sort(key=lambda pair: canonical(pair[0]["asset_key"]))
+        _packages, latest = self._human_packages()
+        same_source = lambda fixed: all(fixed.get(k) == initial.get(k) for k in
+            ("input_hash", "conversation_id", "source_revision", "analysis_revision")) and fingerprint(fixed.get("evidence")) == fingerprint(initial.get("evidence"))
+        speakers = self.participant_speakers(initial)
+        result["participant_context"]["speakers"] = [{"conversation_id": initial["conversation_id"], "speaker_id": s} for s in speakers]
+        # Speaker roster comes from the verified source; person assignments
+        # remain explicit HumanRecords, never display-name inference or zeros.
+        context = {"plan_id": result["plan_template"]["plan_id"], "plan_version": result["plan_template"]["plan_version"],
+            "plan_hash": fingerprint(result["plan_template"]), "generation": run["generation"],
+            "consumer_task_id": "web-options:" + run["run_id"], "purpose": "exploratory", "destination": "local", "cancelled": False}
+        selector = {"row_ids": [], "column_ids": [], "range_ref": None}; selector["selection_hash"] = fingerprint(selector)
+        owners = {run["run_id"]}
+        for asset, original in descriptors:
+            if not original and asset.get("kind") == "observation_table" and asset.get("execution_run_id"):
+                _raw, fixed = self._connection_content(asset)
+                if same_source(fixed): owners.add(asset["execution_run_id"])
+            if not original and asset.get("method_id") == "thematic":
+                candidate, _steps, _original, _manifest, orchestration = self._human_contract(asset)
+                _raw, fixed = self._connection_content(asset)
+                if same_source(fixed): owners.add(orchestration["run"]["run_id"])
+        confirmed = []; mapping_contexts=[]
+        for owner in sorted(owners):
+            page = self.human_record_options(item_id=run["item_id"], execution_run_id=owner,
+                current_input_hash=initial["input_hash"], current_source_revisions=initial)
+            for option in page["options"]:
+                if not option["enabled"] or option["target_kind"] != "participant_mapping": continue
+                option_speakers=option.get("speakers",result["participant_context"]["speakers"])
+                mapping_contexts.append({"scope":copy.deepcopy(option["scope"]),"speakers":copy.deepcopy(option_speakers),
+                    "human_record_option":{**copy.deepcopy(option),"owner_item_id":run["item_id"],"owner_run_id":owner},
+                    "confirmed_mapping":None,"enabled":False,"reason_code":"participant_mapping_missing"})
+                if result["participant_context"]["human_record_option"] is None:
+                    result["participant_context"]["human_record_option"] = {**copy.deepcopy(option),
+                        "owner_item_id": run["item_id"], "owner_run_id": owner}
+                for step in option["human_steps"]:
+                    saved = step["latest_record"]
+                    if not saved or saved["record"]["decision"] != "adopt": continue
+                    matches = [p for p in latest.values() if p["ref"] == saved["record_ref"]]
+                    if len(matches) != 1: raise AssetBindingError("human_record_body")
+                    human = self.verified_package(matches[0]["run_id"])[1]["human_submission"]
+                    try: body = json.loads(human["source_text"])
+                    except (ValueError, TypeError): continue
+                    if not isinstance(body, dict) or set(body) != {"participant_mapping"}: continue
+                    assignments = body["participant_mapping"]
+                    if (not isinstance(assignments, list) or not assignments or any(not isinstance(a, dict)
+                        or set(a) != {"conversation_id", "speaker_id", "participant_id"} or not all(_asset_id(v) for v in a.values())
+                        or {"conversation_id": a["conversation_id"], "speaker_id": a["speaker_id"]} not in option_speakers for a in assignments)):
+                        continue
+                    asset = assets.get(_asset_key(option["asset_key"]))
+                    history = states.get(_asset_key(option["asset_key"]), {})
+                    state = history[max(history)] if history else None
+                    if not asset or not state or state["status"] != "adopted": continue
+                    self._human_review(asset, state)
+                    confirmed.append(({"actor": copy.deepcopy(saved["record"]["actor"]), "record_ref": copy.deepcopy(saved["record_ref"]),
+                                       "assignments": copy.deepcopy(assignments)},
+                                      {**copy.deepcopy(option), "owner_item_id": run["item_id"], "owner_run_id": owner}))
+                    mapping_contexts[-1].update(confirmed_mapping=copy.deepcopy(confirmed[-1][0]),enabled=True,reason_code=None)
+        result["participant_context"]["contexts"]=mapping_contexts
+        if confirmed:
+            definitions = {fingerprint(sorted(mapping["assignments"], key=canonical)) for mapping, _option in confirmed}
+            if len(definitions) == 1:
+                mapping, option = confirmed[0]
+                result["participant_context"].update(enabled=True, reason_code=None, confirmed_mapping=mapping, human_record_option=option)
+            else:
+                result["participant_context"]["reason_code"] = "participant_mapping_ambiguous"
+        if result["participant_context"]["human_record_option"] is None:
+            result["participant_context"]["reason_code"] = "require_saved_output"
+        position = 0; exposed = []
+        for asset, original in descriptors:
+            if asset["asset_key"]["library_id"] != self.library_id(): continue
+            if initial["conversation_id"] not in asset["scope"]["conversation_ids"]: continue
+            if self.get(asset["asset_key"]["store_run_id"])["stale"]: continue
+            if not original and asset["kind"] not in {"observation_table", "claim_set", "relation_graph"}: continue
+            raw, fixed = self._connection_content(asset, original=original)
+            if not same_source(fixed): continue
+            if not original:
+                try: self._connected_current(asset)
+                except AssetBindingError as exc:
+                    if exc.reason == "connected_producer_unavailable": continue
+                    raise
+            source = {"type": "original", "source_ref": copy.deepcopy(asset["source_ref"])} if original else {
+                "type": "frozen", "asset_key": copy.deepcopy(asset["asset_key"]), "content_hash": asset["content_hash"], "content_domain": asset["content_domain"]}
+            identifier = "saved:" + digest(source)
+            local_context = {**context, "scope_id": asset["scope"]["scope_id"], "scope_manifest_hash": asset["scope"]["manifest_hash"]}
+            ref = {**{k: local_context[k] for k in ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id")},
+                "slot_id": "table", "input_ref_id": identifier, "role": "data_input", "selection": "selected", "omission_reason": None,
+                "source": source, "selector": selector}
+            # Resolve bytes, genuine reviews and the entire current lineage
+            # once. Capabilities then use the same shared registry assessor;
+            # enumerating seven method names must not reread all packages seven
+            # times. The fresh proof fence below still rereads current authority.
+            receipt = self.bind_asset_inputs(method_id="qualitative_reuse", slot=connected_slot("qualitative_reuse"), inputs=[ref], context=local_context)
+            if receipt["decision"] != "eligible": continue
+            history = states.get(_asset_key(asset["asset_key"]), {})
+            state = history[max(history)] if history else None
+            candidate = {"source_type": "original" if original else "artifact", "schema": asset["schema"], "unit": asset["meaning"]["unit"],
+                "scope_mode": asset["scope"]["mode"], "scope_policy": "all_included_initial", "actor": asset["producer"], "adapter": asset["adapter"],
+                "purpose": "exploratory", "meaning_status": asset["meaning"]["status"],
+                "human_review_state": "human_reviewed" if asset.get("kind") == "claim_set" and state and state["review_refs"] else "structural_checked"}
+            candidate.update({"source_ref": asset["source_ref"]} if original else
+                {"kind": asset["kind"], "content_hash": asset["content_hash"], "content_domain": asset["content_domain"]})
+            envelope = {"input_ref_id": identifier, "role": "data_input", "selection": "selected", "omission_reason": None, "candidate": candidate}
+            compatible = []
+            for method in CONNECTED_METHODS:
+                if original and method not in {"qualitative_compare", "qualitative_reuse"}: continue
+                inputs = [envelope, {**envelope, "input_ref_id": identifier + ":right"}] if method == "unit_join" else [envelope]
+                checked = assess_connection_inputs(connected_slot(method), inputs, connection_method_descriptor(method))
+                if checked["decision"] == "eligible": compatible.append(method)
+            # Metadata for unavailable inputs is not an executable choice. Do
+            # not copy fields/semantic IDs from revoked or unreviewed bodies.
+            if not compatible: continue
+            payload = json.loads(raw); fields = []; unit_ids = []; theme_ids = []; relation_ids = []; table = None; targets = []
+            if original or asset.get("kind") in {"relation_graph", "claim_set", "observation_table"}:
+                # Target identities are the same fixed addresses used by the
+                # production qualitative adapter (shared helper below).
+                targets = self.qualitative_targets(asset, payload, fixed, identifier, original=original)
+            if asset.get("kind") == "observation_table":
+                if asset["meaning"]["unit"] != "report_claim":
+                    package_result = self.verified_package(asset["asset_key"]["store_run_id"])[1]
+                    unit_contract = package_result.get("unit_contract", {})
+                    if unit_contract.get("version") != "unit-table-2" and (
+                        not {"utterance_id", "conversation_id", "value_status"} <= set(payload["fields"])
+                        or not set(payload["fields"]) <= {v["variable_id"] for v in asset["variables"]}):
+                        continue  # Legacy summary tables have no unit adapter.
+                    request = {"version": "connected-assets-2", "actor": "code", "parameters": {"columns": ["unit_id"], "unit_ids": ["options-only"]},
+                        "bindings": {"slot": connected_slot("unit_projection"), "inputs": [ref], "context": local_context}}
+                    try: prepared = self.prepare_connected("unit_projection", request, expected_snapshot=initial)
+                    except AnalysisContractError as exc:
+                        if exc.code in {"connected_unit_contract", "connected_unit_identity", "connected_unit_exclusion", "connected_unit_population"}: continue
+                        raise
+                    table = prepared["tables"][0]; fields = table["fields"]; unit_ids = [r["unit_id"] for r in table["rows"]]
+                else: fields = payload["fields"]
+            elif asset.get("method_id") == "thematic": theme_ids = [t["content"]["theme_id"] for t in payload["themes"]]
+            elif asset.get("kind") == "claim_set": relation_ids = [r["relation_id"] for r in json.loads(payload["rows"][0]["values"]["bundle_json"])["relations"]]
+            option = {"option_id": identifier, "input_ref_id": identifier, "label": asset["asset_key"]["output_name"],
+                "enabled": True, "reason_code": None, "source": source, "scope": copy.deepcopy(asset["scope"]),
+                "kind": "snapshot" if original else asset["kind"], "schema": copy.deepcopy(asset["schema"]),
+                "unit": table["unit"] if table else asset["meaning"]["unit"], "variables": copy.deepcopy(table["variables"] if table else asset.get("variables", [])),
+                "fields": fields, "unit_ids": unit_ids, "theme_ids": theme_ids, "relation_ids": relation_ids,
+                "roles": ["data_input", "selection_basis", "evidence_context"], "semantic_targets": targets,
+                "compatible_methods": compatible, "statuses": ["observed", "missing", "unprocessed", "unknown", "excluded"] if table else [],
+                "denominators": copy.deepcopy(table["denominators"] if table else {}),
+                "source_utterances": copy.deepcopy(table.get("source_utterances", {}) if table else {}),
+                "confirmed_participant_mapping": None, "participant_mapping_reason_code": "participant_mapping_missing"}
+            applicable=[(m,o) for m,o in confirmed if not original and self._participant_mapping_applies(asset,assets[_asset_key(o["asset_key"])],assets)
+                and o["scope"]["conversation_ids"] == asset["scope"]["conversation_ids"]]
+            mapping,mapping_option=applicable[0] if len(applicable)==1 else (None,None)
+            if mapping is not None:
+                mapping_target = assets[_asset_key(mapping_option["asset_key"])]
+                if not original and self._participant_mapping_applies(asset, mapping_target, assets):
+                    option["confirmed_participant_mapping"] = copy.deepcopy(mapping)
+                    option["participant_mapping_reason_code"] = None
+                else:
+                    option["participant_mapping_reason_code"] = "participant_mapping_target_lineage"
+            option["numeric_columns"] = [v["variable_id"] for v in option["variables"]
+                if v["value_type"] in {"integer", "number"} and v["scale"] in {"ordinal", "interval", "ratio"}]
+            option["aggregate_columns"] = [v["variable_id"] for v in option["variables"]
+                if v["variable_id"] not in {"unit_id", "conversation_id", "speaker_id", "participant_id", "value_status"}]
+            if (result["participant_context"]["preparation_option_id"] is None and "unit_projection" in compatible
+                    and option["unit"] == "utterance"):
+                result["participant_context"].update(preparation_option_id=identifier, preparation_input_ref_id=identifier)
+            if position >= offset:
+                result["inputs"].append(option)
+                if len(result["inputs"]) > 20 or len(json.dumps(result, ensure_ascii=True).encode()) > HUMAN_RECORD_OPTIONS_MAX_BYTES - 256:
+                    result["inputs"].pop()
+                    if not result["inputs"]: raise AnalysisContractError("接続候補の情報が上限を超えています。", code="asset_plan_options_byte_limit")
+                    result["next_offset"] = position; break
+                exposed.append((ref, local_context, receipt))
+            position += 1
+        def proof(receipt):
+            return {"bindings": [{k: v for k, v in b.items() if k not in {"checked_at", "binding_id"}} for b in receipt["bindings"]],
+                    "parents": receipt.get("parent_checks", [])}
+        for ref, local_context, prior in exposed:
+            current = self.bind_asset_inputs(method_id="qualitative_reuse", slot=connected_slot("qualitative_reuse"),
+                inputs=[ref], context=local_context)
+            if current["decision"] != "eligible": raise AssetBindingError(current["reason"])
+            if canonical(proof(current)) != canonical(proof(prior)):
+                raise AssetBindingError("asset_plan_options_state_changed")
+        if result["participant_context"]["confirmed_mapping"] is not None:
+            key = _asset_key(result["participant_context"]["human_record_option"]["asset_key"])
+            current_index = self._connection_index(); current_assets, _current_originals, current_states, _current_links = current_index
+            if canonical(current_states.get(key)) != canonical(states.get(key)):
+                raise AssetBindingError("asset_plan_options_state_changed")
+            target = current_assets[key]; state = current_states[key][max(current_states[key])]
+            self._connection_content(target); self._connected_current(target); self._human_review(target, state)
+            if self._human_permission_reason(target, index=current_index):
+                raise AssetBindingError("asset_plan_options_state_changed")
+        result["enabled"] = bool(result["inputs"]) or result["unit_pool"]["enabled"]
+        result["reason_code"] = None if result["enabled"] else "asset_plan_inputs_empty"
+        return result
+
+    def qualitative_targets(self, asset, value, snapshot, input_ref_id, *, original=False):
+        """Canonical addresses shared by readonly options and real consumers."""
+        kind = "snapshot" if original else asset["kind"]
+        content_hash = asset["source_ref"]["content_hash"] if original else asset["content_hash"]
+        targets = [{"input_ref_id": input_ref_id, "target_kind": "asset",
+            "target_id": asset["source_ref"]["target_id"] if original else asset["asset_key"]["artifact_id"],
+            "version": asset["schema"]["version"], "content_hash": content_hash}]
+        def target(kind, identifier, version=1, hash_value=None):
+            targets.append({"input_ref_id": input_ref_id, "target_kind": kind, "target_id": identifier,
+                "version": version, "content_hash": hash_value or content_hash})
+        if original:
+            for e in snapshot["evidence"]: target("utterance", e["utterance_id"], asset["source_ref"]["version"])
+        elif kind == "claim_set" and asset["method_id"] == "thematic":
+            for theme in value["themes"]:
+                tc = theme["content"]; target("theme", tc["theme_id"], tc["version"], theme["content_hash"])
+                target("claim", tc["claim_id"], tc["version"], theme["content_hash"])
+        elif kind == "claim_set":
+            bundle = json.loads(value["rows"][0]["values"]["bundle_json"])
+            if bundle["version"] != "qualitative-evidence-1": raise AssetBindingError("qualitative_bundle")
+            for relation in bundle["relations"]: target("relation", relation["relation_id"])
+        else:
+            for row in value["rows"]: target("manual_link" if kind == "relation_graph" else "row", row["row_id"])
+        return targets
+
+    def _human_packages(self):
+        """Fresh saved bytes, not descriptor claims, establish researcher records."""
+        from .analysis_core import validate_human_record, content_fingerprint
+        with self.connect() as db:
+            rows = db.execute("SELECT id FROM analysis_runs WHERE kind=? AND status='completed' ORDER BY id", (HUMAN_RECORD_KIND,)).fetchall()
+        packages = []
+        contracts = {}
+        for row in rows:
+            _snapshot, result, manifest, content = self.verified_package(row[0])
+            human = result.get("human_submission")
+            _asset_fields(human, ("asset_key", "record", "source_text", "expected_state_revision", "request_bytes"))
+            if (content.get("human/record.json") != canonical(human["record"])
+                    or content.get("human/source.txt") != human["source_text"].encode("utf-8")
+                    or content.get("human/submission.json") != base64.b64decode(human["request_bytes"], validate=True)):
+                raise AssetBindingError("human_record_body")
+            request = _read_typed_json(content["human/submission.json"])
+            if canonical(request) != canonical({k:v for k,v in human.items() if k != "request_bytes"}):
+                raise AssetBindingError("human_record_submission")
+            owner=result.get("parameters",{}).get("review_execution_run_id")
+            contract_key=canonical([human["asset_key"],owner])
+            if contract_key not in contracts:
+                choices = self.human_asset_choices(human["asset_key"]["store_run_id"])
+                matches = [a for a in choices["assets"] if a["asset_key"] == human["asset_key"]]
+                if len(matches) != 1: raise AssetBindingError("human_record_asset")
+                contracts[contract_key]=self._human_contract(matches[0],execution_run_id=owner)
+            candidate, steps, _original, target_manifest, _orch = contracts[contract_key]
+            if (manifest["library_id"], manifest["conversation_id"]) != (target_manifest["library_id"], target_manifest["conversation_id"]):
+                raise AssetBindingError("human_record_owner")
+            record = validate_human_record(human["record"], candidate=candidate, required_steps=steps,
+                library_id=self.library_id(), source_text=human["source_text"])
+            if steps == ["participant-mapping-review"]:
+                fixed = self.source_snapshot_view(self.verified_package(human["asset_key"]["store_run_id"])[0],target_manifest["conversation_id"])
+                target_result=self.verified_package(human["asset_key"]["store_run_id"])[1]
+                group=target_result.get("unit_contract",{}).get("group_source_set")
+                if group is not None:
+                    fixed={**fixed,"group_source_set":group,"group_speakers":[{"conversation_id":m["conversation_id"],"speaker_id":s}
+                        for m in group["sources"] for s in m["speakers"]]}
+                self.validate_participant_source(human["source_text"], fixed)
+            artifact = next(a for a in manifest["artifacts"] if a["name"] == "human/record.json")
+            ref = {"target_type": "artifact", "target_id": artifact["id"], "version": str(record["revision"]),
+                "content_hash": content_fingerprint("human-record-v1", record), "hash_domain": "human-record-v1", "library_id": self.library_id()}
+            packages.append({"run_id": row[0], "asset_key": human["asset_key"], "record": record, "ref": ref,"execution_run_id":owner or _orch["run"]["run_id"]})
+        histories = {}
+        for package in packages:
+            record = package["record"]; history = histories.setdefault(record["record_id"], {})
+            if record["revision"] in history: raise AssetBindingError("human_record_revision_conflict")
+            history[record["revision"]] = package
+        for history in histories.values():
+            for revision, package in sorted(history.items()):
+                record = package["record"]; old = history.get(revision - 1)
+                if revision > 1:
+                    if old is None: raise AssetBindingError("human_record_revision_gap")
+                    predecessor = old["record"]
+                    expected = {"domain": "human-record-v1", "record_id": predecessor["record_id"], "revision": revision - 1,
+                        "content_hash": old["ref"]["content_hash"]}
+                    if (record["supersedes_record_ref"] != expected or record["actor"] != predecessor["actor"]
+                            or record["allowed_step_ids"] != predecessor["allowed_step_ids"]
+                            or package["asset_key"] != old["asset_key"] or record["target"] != predecessor["target"]
+                            or record["scope"] != predecessor["scope"] or package["execution_run_id"]!=old["execution_run_id"]):
+                        raise AssetBindingError("human_record_supersedes")
+        return packages, {record_id: history[max(history)] for record_id, history in histories.items()}
+
+    def _human_review(self, asset, state, *, packages=None):
+        """Review is scoped qualitative adoption, never measurement certification."""
+        _packages, latest = self._human_packages() if packages is None else packages
+        records = [p for p in latest.values() if p["asset_key"] == asset["asset_key"]]
+        if asset.get("kind") not in {"claim_set","relation_graph","observation_table"}:raise AssetBindingError("human_record_contract_unsupported","human_pending")
+        if not records:raise AssetBindingError("human_record_steps_pending","human_pending")
+        owners={p["execution_run_id"] for p in records}
+        if len(owners)!=1:raise AssetBindingError("human_record_owner")
+        candidate, required, _original, _manifest, _orch = self._human_contract(asset, require_current=True,execution_run_id=next(iter(owners)))
+        target = candidate.get("_human_target") or {"domain": "ta-candidate-content-v1", "candidate_set_id": candidate["content"]["candidate_set_id"],
+            "version": candidate["content"]["version"], "content_hash": candidate["content_hash"]}
+        refs = [p["ref"] for p in records]
+        if len(state["review_refs"]) != len(refs) or any(ref not in refs for ref in state["review_refs"]):
+            raise AssetBindingError("human_record_current", "human_pending")
+        covered = set()
+        for package in records:
+            if package["ref"] not in state["review_refs"]: continue
+            if package["record"]["decision"] != "adopt": raise AssetBindingError("human_record_not_adopted", "human_pending")
+            if package["record"]["target"] == target: covered.update(package["record"]["allowed_step_ids"])
+        if covered != set(required): raise AssetBindingError("human_record_steps_pending", "human_pending")
+        # Record body, scope and HC were just read and validated above. No AI
+        # unread/search receipts or mutable wrapper status can substitute them.
+        return True
+
+    def submit_human_record(self, *, item_id, execution_run_id, payload, request_bytes, commit_guard=None):
+        """Append a researcher HTTP statement and current policy/state metadata.
+
+        Called only by the explicit Handler route. Generic save cannot produce
+        human artifacts; retries must return through this same checked path.
+        """
+        from .analysis_core import validate_human_record, content_fingerprint
+        _asset_fields(payload, ("asset_key", "record", "source_text", "expected_state_revision"))
+        _asset_key(payload["asset_key"])
+        if payload["asset_key"]["library_id"] != self.library_id(): raise AssetBindingError("human_record_library")
+        if (not isinstance(request_bytes, bytes) or _read_typed_json(request_bytes) != payload
+                or type(payload["expected_state_revision"]) is not int or payload["expected_state_revision"] < 0):
+            raise AssetBindingError("human_record_request")
+        with STORE_LOCK:
+            choices = self.human_asset_choices(payload["asset_key"]["store_run_id"])
+            matches = [a for a in choices["assets"] if a["asset_key"] == payload["asset_key"]]
+            if len(matches) != 1: raise AssetBindingError("human_record_asset")
+            asset = matches[0]
+            candidate, steps, original, manifest, orchestration = self._human_contract(asset, require_current=True,execution_run_id=execution_run_id)
+            if (manifest["conversation_id"] != item_id or orchestration["run"]["run_id"] != execution_run_id):
+                raise AssetBindingError("human_record_owner")
+            record = validate_human_record(payload["record"], candidate=candidate, required_steps=steps,
+                library_id=self.library_id(), source_text=payload["source_text"])
+            if steps == ["participant-mapping-review"]:
+                _raw, fixed = self._connection_content(asset)
+                self.validate_participant_source(payload["source_text"], fixed)
+            packages, latest = self._human_packages()
+            old = latest.get(record["record_id"])
+            record_hash = content_fingerprint("human-record-v1", record)
+            duplicate = old is not None and old["ref"]["content_hash"] == record_hash and old["asset_key"] == asset["asset_key"]
+            if old and not duplicate:
+                predecessor = old["record"]
+                expected = {"domain": "human-record-v1", "record_id": predecessor["record_id"], "revision": predecessor["revision"],
+                    "content_hash": old["ref"]["content_hash"]}
+                if (record["revision"] != predecessor["revision"] + 1 or record["supersedes_record_ref"] != expected
+                        or record["actor"] != predecessor["actor"] or record["allowed_step_ids"] != predecessor["allowed_step_ids"]
+                        or old["asset_key"] != asset["asset_key"] or record["target"] != predecessor["target"]
+                        or record["scope"] != predecessor["scope"] or old["execution_run_id"]!=execution_run_id):
+                    raise AssetBindingError("human_record_supersedes")
+            elif not old and record["revision"] != 1: raise AssetBindingError("human_record_revision_gap")
+            for other in latest.values():
+                if (other["record"]["record_id"] != record["record_id"] and other["asset_key"] == asset["asset_key"]
+                        and other["record"]["target"] == record["target"]
+                        and other["record"]["allowed_step_ids"] == record["allowed_step_ids"]):
+                    raise AssetBindingError("human_record_step_conflict")
+            assets, originals, states, links = self._connection_index()
+            key = _asset_key(asset["asset_key"]); history = states.get(key, {})
+            current = history[max(history)] if history else None
+            if steps == ["participant-mapping-review"]:
+                permission_reason = self._human_permission_reason(asset, index=(assets, originals, states, links))
+                if permission_reason: raise AssetBindingError(permission_reason, "blocked")
+            if duplicate and current and old["ref"] in current["review_refs"]:
+                if commit_guard:
+                    with self.connect() as db: commit_guard(db)
+                stale_assets = []
+                for metadata_run, metadata in self._connection_packages():
+                    saved_snapshot = self.verified_package(metadata_run)[0]
+                    if saved_snapshot.get("human_record_ref") == old["ref"]:
+                        stale_assets.extend(s["asset_key"] for s in metadata["states"]
+                            if s["status"] == "stale" and s["asset_key"] != asset["asset_key"])
+                return {"record": copy.deepcopy(record), "record_ref": old["ref"], "state": current,
+                        "duplicate": True, "stale_assets": stale_assets}
+            if payload["expected_state_revision"] != (current["state_revision"] if current else 0):
+                raise AssetBindingError("human_record_state_revision", "blocked")
+            if current and (current["revoked"] or current["status"] in {"retired", "unavailable"}):
+                raise AssetBindingError("human_record_state_unavailable", "blocked")
+            def guarded(db):
+                if commit_guard: commit_guard(db)
+                self._human_contract(asset, require_current=True,execution_run_id=execution_run_id)
+                fresh_states = self._connection_index()[2]
+                for checked_key in {key} | ({_asset_key(original["asset_key"])} if original else set()) | set(states):
+                    was = states.get(checked_key, {})
+                    actual = fresh_states.get(checked_key, {})
+                    if canonical(was) != canonical(actual):
+                        raise AssetBindingError("human_record_state_changed", "blocked")
+            human = {**copy.deepcopy(payload), "request_bytes": base64.b64encode(request_bytes).decode("ascii")}
+            saved = self.get(old["run_id"]) if duplicate else self.save(item_id=item_id, kind=HUMAN_RECORD_KIND, snapshot={"target_asset_key": asset["asset_key"]},
+                result={"schema_version": STORE_VERSION, "parameters": {"human_record_hash": record_hash,"review_execution_run_id":execution_run_id}, "human_submission": human},
+                datasets={}, request_id="human-record:" + digest(human), input_fingerprint=digest(asset["asset_key"]),
+                source_revision=manifest["source_revision"], analysis_revision=manifest["analysis_revision"], publish=False,
+                commit_guard=guarded, _human_writer=_HUMAN_RECORD_WRITER)
+            packages, latest = self._human_packages()
+            stored = next(p for p in packages if p["run_id"] == saved["id"])
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            def initial_state(descriptor, status):
+                return {"asset_key": descriptor["asset_key"], "target_content_hash": descriptor.get("content_hash", descriptor["raw_byte_hash"]),
+                    "target_domain": descriptor.get("content_domain", "raw-bytes-v1"), "state_revision": 1, "policy_revision": 1,
+                    "status": status, "allowed_purposes": ["exploratory", "qualitative_compare"], "send_policy": "local_only",
+                    "destinations": [], "revoked": False, "review_refs": [], "reason": "Explicit researcher submission", "updated_at": now}
+            refs = [p["ref"] for p in latest.values() if p["asset_key"] == asset["asset_key"]]
+            updated = copy.deepcopy(current) if current else initial_state(asset, "candidate")
+            if current: updated["state_revision"] += 1
+            updated.update(review_refs=refs, updated_at=now, reason=record["reason"])
+            try: self._human_review(asset, updated); adopted = True
+            except AssetBindingError as exc:
+                if exc.decision != "human_pending": raise
+                adopted = False
+            updated["status"] = "adopted" if adopted else "stale" if current and current["status"] in {"adopted", "stale"} else "candidate"
+            changed = [updated]; stale_assets = []
+            # Corrections invalidate all retained descendants, without rewriting
+            # their payloads, raw responses or the original sealed publication.
+            if old and not duplicate:
+                affected = {key}
+                while True:
+                    children = {k for k,a in assets.items() if k not in affected and any(
+                        r["target_type"] == "artifact" and any(r["target_id"] == assets[parent]["asset_key"]["artifact_id"]
+                            for parent in affected if parent in assets) for r in a["parent_refs"])}
+                    if not children: break
+                    affected.update(children)
+                for child in affected - {key}:
+                    revisions = states.get(child, {})
+                    if not revisions: continue
+                    state = copy.deepcopy(revisions[max(revisions)])
+                    if state["status"] in {"retired", "unavailable", "rejected"}: continue
+                    state.update(status="stale", state_revision=state["state_revision"] + 1,
+                        updated_at=now, reason="Researcher record corrected")
+                    changed.append(state); stale_assets.append(assets[child]["asset_key"])
+            original_key = _asset_key(original["asset_key"]) if original else None
+            if original and original_key not in states: changed.append(initial_state(original, "adopted"))
+            self.save_connection_metadata(request_id="human-state:" + digest({"record": stored["ref"], "states": changed}),
+                item_id=item_id, snapshot={"human_record_ref": stored["ref"]}, metadata={"version": CONNECTION_METADATA_VERSION,
+                    "assets": [asset], "originals": [original] if original else [], "states": changed, "producer_links": []}, commit_guard=guarded)
+            if stale_assets:
+                with self.connect() as db:
+                    db.executemany("UPDATE analysis_runs SET stale=1 WHERE id=?", [(a["store_run_id"],) for a in stale_assets])
+            return {"record": record, "record_ref": stored["ref"], "state": updated, "duplicate": duplicate,
+                    "stale_assets": stale_assets}
+
+    def _connection_packages(self):
+        with self.connect() as conn:
+            rows = conn.execute("SELECT id FROM analysis_runs WHERE kind=? AND status='completed' ORDER BY id",
+                                (CONNECTION_METADATA_KIND,)).fetchall()
+        packages = []
+        for row in rows:
+            _snapshot, result, _manifest, _content = self.verified_package(row[0])
+            value = result.get("connection_metadata")
+            _asset_fields(value, ("version", "assets", "originals", "states", "producer_links"))
+            if type(value["version"]) is not int or value["version"] != CONNECTION_METADATA_VERSION:
+                raise AssetBindingError("metadata_version", "unsupported")
+            if any(not isinstance(value[k], list) for k in ("assets", "originals", "states", "producer_links")):
+                raise AssetBindingError("metadata_shape")
+            packages.append((row[0], value))
+        return packages
+
+    def _connection_index(self):
+        """State revisions select current permissions, never the latest asset/run."""
+        assets, originals, states, links = {}, {}, {}, []
+        for metadata_run, package in self._connection_packages():
+            for field, target in (("assets", assets), ("originals", originals)):
+                for descriptor in package[field]:
+                    _asset_descriptor(descriptor, original=field == "originals")
+                    key = _asset_key(descriptor["asset_key"])
+                    if key in target and canonical(target[key]) != canonical(descriptor):
+                        raise AssetBindingError("immutable_descriptor_changed")
+                    target[key] = descriptor
+            for state in package["states"]:
+                _asset_state(state); key = _asset_key(state["asset_key"])
+                revision = state["state_revision"]
+                history = states.setdefault(key, {})
+                if revision in history and canonical(history[revision]) != canonical(state):
+                    raise AssetBindingError("state_revision_conflict")
+                history[revision] = state
+            links.extend(package["producer_links"])
+        for key in assets.keys() & originals.keys(): raise AssetBindingError("source_kind_conflict")
+        for key, history in states.items():
+            descriptor = assets.get(key) or originals.get(key)
+            if descriptor is None: raise AssetBindingError("state_target_missing", "needs_input")
+            checked = {}
+            for revision in sorted(history): _asset_transition(checked, history[revision], descriptor)
+        for link in links: _asset_producer_link(link, assets)
+        return assets, originals, states, links
+
+    def save_connection_metadata(self, *, request_id, item_id, snapshot, metadata, commit_guard=None):
+        """Append a new immutable metadata package via save, without SQL migration.
+
+        Metadata cannot certify human adoption: binding checks saved records.
+        This path has no publication or scheduler.
+        State/policy and review/history bytes are outside the referenced payload.
+        """
+        _asset_fields(metadata, ("version", "assets", "originals", "states", "producer_links"))
+        if type(metadata["version"]) is not int or metadata["version"] != CONNECTION_METADATA_VERSION:
+            raise AssetBindingError("metadata_version", "unsupported")
+        if any(not isinstance(metadata[k], list) for k in ("assets", "originals", "states", "producer_links")):
+            raise AssetBindingError("metadata_shape")
+        with STORE_LOCK:
+            request_hash=digest({"item_id":item_id,"snapshot":snapshot,"metadata":metadata})
+            previous=self.by_request(request_id)
+            if previous and previous["status"]=="completed":
+                prior_result=self.verified_package(previous["id"])[1]
+                prior_hash=prior_result.get("parameters",{}).get("metadata_request_hash")
+                if prior_hash is not None:
+                    if prior_hash!=request_hash:raise StoreConflict("固定metadata要求が異なります。")
+                    if commit_guard:
+                        with self.connect() as connection:commit_guard(connection)
+                    return previous
+            old_assets, old_originals, old_states, _links = self._connection_index()
+            assets, originals = dict(old_assets), dict(old_originals)
+            for field, target in (("assets", assets), ("originals", originals)):
+                keys = []
+                for descriptor in metadata[field]:
+                    self._connection_content(descriptor, original=field == "originals")
+                    key = _asset_key(descriptor["asset_key"]); keys.append(key)
+                    if key in target and canonical(target[key]) != canonical(descriptor):
+                        raise AssetBindingError("immutable_descriptor_changed")
+                    target[key] = descriptor
+                if len(keys) != len(set(keys)): raise AssetBindingError("duplicate_asset")
+            if assets.keys() & originals.keys(): raise AssetBindingError("source_kind_conflict")
+            # Referenced content stays a DAG, even when revisions use old keys.
+            by_artifact = {a["asset_key"]["artifact_id"]: key for key, a in assets.items()}
+            graph = {key: [by_artifact[r["target_id"]] for r in a["parent_refs"] + a.get("supersedes", [])
+                           if r["target_type"] == "artifact" and r["target_id"] in by_artifact]
+                     for key, a in assets.items()}
+            visited, visiting = set(), set()
+            def visit(key):
+                if key in visiting: raise AssetBindingError("content_cycle")
+                if key in visited: return
+                visiting.add(key)
+                for parent in graph.get(key, []): visit(parent)
+                visiting.remove(key); visited.add(key)
+            for key in graph: visit(key)
+            histories = copy.deepcopy(old_states)
+            for state in metadata["states"]: _asset_state(state)
+            for state in sorted(metadata["states"], key=lambda s: s["state_revision"]):
+                key = _asset_key(state["asset_key"])
+                descriptor = assets.get(key) or originals.get(key)
+                if descriptor is None: raise AssetBindingError("state_target_missing", "needs_input")
+                _asset_transition(histories.setdefault(key, {}), state, descriptor)
+            # Invalidate only actual descendants of changed adoption/policy.
+            changed=set()
+            for state in metadata["states"]:
+                key=_asset_key(state["asset_key"]); old=old_states.get(key,{})
+                prior=old[max(old)] if old else None
+                if prior and prior["status"]=="adopted" and any(prior[k]!=state[k] for k in ("status","policy_revision","revoked","review_refs")):
+                    changed.add(key)
+            descendants=set(); frontier=set(changed)
+            while frontier:
+                found={key for key,parents in graph.items() if set(parents)&frontier}-changed-descendants
+                descendants.update(found);frontier=found
+            payload_states=copy.deepcopy(metadata["states"])
+            stale_run_ids=[]
+            for key in sorted(descendants):
+                history=histories.get(key,{})
+                if not history:continue
+                current=history[max(history)]
+                if current["status"]!="adopted":continue
+                stale={**copy.deepcopy(current),"state_revision":current["state_revision"]+1,"status":"stale",
+                    "reason":"A referenced adoption or policy changed","updated_at":metadata["states"][-1]["updated_at"]}
+                _asset_transition(history,stale,assets[key]);payload_states.append(stale)
+                stale_run_ids.append(assets[key]["asset_key"]["store_run_id"])
+            for link in metadata["producer_links"]:
+                _asset_producer_link(link, assets)
+                identity = {k:v for k,v in link.items() if k != "asset_key"}
+                if any(canonical({k:v for k,v in old.items() if k != "asset_key"}) == canonical(identity)
+                       and old["asset_key"] != link["asset_key"] for old in _links):
+                    raise AssetBindingError("producer_mapping_changed")
+            payload = json.loads(canonical(metadata));payload["states"]=payload_states
+            def fenced(connection):
+                if commit_guard:commit_guard(connection)
+                for run_id in stale_run_ids:connection.execute("UPDATE analysis_runs SET stale=1 WHERE id=?",(run_id,))
+            return self.save(item_id=item_id, kind=CONNECTION_METADATA_KIND, snapshot=snapshot,
+                             result={"schema_version": STORE_VERSION, "parameters": {"metadata_hash": digest(payload),"metadata_request_hash":request_hash},
+                                     "connection_metadata": payload}, datasets={}, request_id=request_id,
+                             input_fingerprint=digest(snapshot), source_revision=1, analysis_revision=1, publish=False,
+                             commit_guard=fenced)
+
+    def list_assets(self, *, output_name=None):
+        """Enumerate distinct explicit choices, never choose/recompute/adopt one."""
+        assets, _originals, _states, _links = self._connection_index()
+        rows = []
+        for asset in assets.values():
+            if output_name is not None and asset["asset_key"]["output_name"] != output_name: continue
+            self._connection_content(asset)
+            rows.append(copy.deepcopy(asset))
+        return sorted(rows, key=lambda a: canonical(a["asset_key"]))
+
+    def _connection_parent(self, ref, context, links):
+        source = ref["source"]
+        matches = [link for link in links if all(link[k] == ref[k] for k in ("plan_id", "plan_version", "plan_hash", "generation"))
+                   and link["producer_task_id"] == source["producer_task_id"] and link["output_name"] == source["output_name"]]
+        unique = {digest(link): link for link in matches}
+        if not unique: raise AssetBindingError("parent_mapping_unresolved", "needs_input")
+        if len(unique) != 1: raise AssetBindingError("parent_mapping_ambiguous")
+        link = next(iter(unique.values()))
+        # The mapping is insufficient: the existing persisted producer ledger is authority.
+        try:
+            with self.connect() as conn:
+                task_row = conn.execute("SELECT run_id,state_json FROM orchestration_tasks WHERE task_id=?",
+                                        (link["producer_task_id"],)).fetchone()
+                run_row = conn.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",
+                                       (link["execution_run_id"],)).fetchone()
+                result_row = conn.execute("SELECT raw_json,state_json FROM orchestration_results WHERE task_id=? AND run_id=?",
+                                          (link["producer_task_id"], link["execution_run_id"])).fetchone()
+        except Exception as exc:
+            import sqlite3
+            if isinstance(exc, sqlite3.OperationalError): raise AssetBindingError("parent_ledger_unavailable", "needs_input") from None
+            raise
+        if not task_row or not run_row: raise AssetBindingError("parent_unresolved", "needs_input")
+        task, run = _read_typed_json(task_row["state_json"]), _read_typed_json(run_row[0])
+        if task.get("status") in {"failed", "cancelled", "quarantined", "blocked"}:
+            raise AssetBindingError("parent_failed", "blocked")
+        if task.get("status") != "succeeded" or not result_row: raise AssetBindingError("parent_unresolved", "needs_input")
+        expected = {k: ref[k] for k in ("plan_id", "plan_version", "plan_hash", "generation")}
+        if (task_row["run_id"] != link["execution_run_id"] or task.get("task_id") != link["producer_task_id"]
+                or task.get("run_id") != link["execution_run_id"] or type(task.get("generation")) is not int
+                or task["generation"] != ref["generation"]
+                or canonical(run.get("asset_plan_identity")) != canonical(expected)):
+            raise AssetBindingError("parent_plan_identity")
+        raw, state = _read_typed_json(result_row[0]), _read_typed_json(result_row[1])
+        if (state.get("validation_status") != "valid" or state.get("raw_hash") != _asset_hash(canonical(raw))
+                or state.get("task_id") != link["producer_task_id"] or state.get("run_id") != link["execution_run_id"]):
+            raise AssetBindingError("parent_result_integrity")
+        return link["asset_key"]
+
+    def bind_asset_inputs(self, *, slot, inputs, context, method_id, assess=None):
+        """Read/resolve/revalidate only; eligibility never executes or adopts."""
+        previous=getattr(self._binding_reads,"packages",None)
+        previous_groups=getattr(self._binding_reads,"groups",None)
+        self._binding_reads.packages={}
+        self._binding_reads.groups={}
+        try:
+            if method_id == "unit_pool":
+                try: return self._group_bindings(slot, inputs, context)[0]
+                except AssetBindingError as exc:
+                    return {"version":"analysis-asset-bindings-1","execution_enabled":False,"adoption_performed":False,
+                        "bindings":[],"payloads":[],"decision":exc.decision,"reason":exc.reason}
+                except (ValueError,TypeError,KeyError,OSError):
+                    return {"version":"analysis-asset-bindings-1","execution_enabled":False,"adoption_performed":False,
+                        "bindings":[],"payloads":[],"decision":"rejected","reason":"invalid_or_unverified"}
+            return self._bind_asset_inputs(slot=slot,inputs=inputs,context=context,method_id=method_id,assess=assess)
+        finally:
+            self._binding_reads.packages=previous
+            self._binding_reads.groups=previous_groups
+
+    def _source_current(self, snapshot):
+        """Application-owned lookup, never a caller-supplied source stamp."""
+        lookup = getattr(self, "current_source_lookup", None)
+        current = lookup(snapshot["conversation_id"]) if lookup else None
+        if current is None or any(current.get(k) != snapshot.get(k) for k in
+                ("input_hash", "source_revision", "analysis_revision")):
+            raise AssetBindingError("group_source_changed", "blocked")
+        return {k: current[k] for k in ("input_hash", "source_revision", "analysis_revision")}
+
+    def _group_bindings(self, slot, inputs, context, *, require_scope=True):
+        """Closed union capability: each source uses the unchanged native guard."""
+        from .analysis_core import fingerprint
+        from .analysis_method_registry import connected_slot
+        if slot != connected_slot("unit_pool") or not isinstance(inputs,list) or not 2 <= len(inputs) <= 16 or not _asset_ids([r.get("input_ref_id") for r in inputs]):
+            raise AssetBindingError("group_cardinality")
+        assets, originals, states, links = self._connection_index()
+        receipts=[]; tables=[]; members=[]; seen=set()
+        for ref in inputs:
+            source=ref.get("source", {})
+            if source.get("type") == "from_step":
+                key=self._connection_parent(ref, context, links)
+            elif source.get("type") == "frozen": key=source["asset_key"]
+            else: raise AssetBindingError("group_source_type")
+            asset=assets.get(_asset_key(key))
+            if not asset: raise AssetBindingError("group_source_missing", "blocked")
+            _raw, fixed=self._connection_content(asset)
+            if self.get(asset["asset_key"]["store_run_id"])["stale"]: raise AssetBindingError("group_source_stale","blocked")
+            if len(asset["scope"]["conversation_ids"]) != 1 or fixed["conversation_id"] in seen:
+                raise AssetBindingError("group_duplicate_conversation")
+            seen.add(fixed["conversation_id"])
+            current=self._source_current(fixed)
+            local={**context,"scope_id":asset["scope"]["scope_id"],"scope_manifest_hash":asset["scope"]["manifest_hash"]}
+            local_ref=copy.deepcopy(ref)
+            receipt=self._bind_asset_inputs(slot=connected_slot("unit_projection"), inputs=[local_ref], context=local, method_id="unit_projection")
+            if receipt["decision"] != "eligible": raise AssetBindingError(receipt["reason"], receipt["decision"])
+            request={"version":"connected-assets-2","actor":"code","parameters":{"columns":["unit_id"],"unit_ids":["group-preparation"]},
+                "bindings":{"slot":connected_slot("unit_projection"),"inputs":[local_ref],"context":local}}
+            prepared=self.prepare_connected("unit_projection",request,expected_snapshot=fixed)
+            table=prepared["tables"][0]
+            if table["unit"] != "utterance": raise AssetBindingError("group_source_unit")
+            evidence={e["utterance_id"]:e for e in fixed["evidence"]}
+            actual={r["unit_id"]:r for r in table["rows"]}
+            if len(evidence) != len(fixed["evidence"]) or len(actual) != len(table["rows"]) or set(actual) != set(table["source_utterances"]):
+                raise AssetBindingError("group_population")
+            mapped={s["utterance_id"] for s in table["source_utterances"].values()}
+            if mapped != set(evidence): raise AssetBindingError("group_population")
+            for uid,s in table["source_utterances"].items():
+                if (s != {"conversation_id":fixed["conversation_id"],"input_hash":fixed["input_hash"],"utterance_id":s["utterance_id"]}
+                        or uid != "utterance:"+fingerprint([self.library_id(),fixed["conversation_id"],fixed["input_hash"],s["utterance_id"]]).removeprefix("sha256:")
+                        or (evidence[s["utterance_id"]]["excluded"] and actual[uid]["value_status"] != "excluded")):
+                    raise AssetBindingError("group_utterance_identity")
+            # The application's source stamp is historically bare SHA-256;
+            # the closed pool carrier uses a typed hash. Keep both encodings
+            # and every pre-pool unit address, without changing legacy bytes.
+            import re
+            from .analysis_core import _connection_hash
+            actual_hash=fixed["input_hash"]
+            if _connection_hash(actual_hash): qualified_hash=actual_hash
+            elif isinstance(actual_hash,str) and re.fullmatch(r"[0-9a-f]{64}",actual_hash): qualified_hash="sha256:"+actual_hash
+            else: raise AssetBindingError("group_source_hash_encoding")
+            if table["input_hashes"] != [actual_hash]: raise AssetBindingError("group_source_input_hash")
+            original_units={}; converted=copy.deepcopy(table)
+            converted.update(input_hashes=[qualified_hash],sources={},source_utterances={},denominators={})
+            for row in converted["rows"]:
+                old=row["unit_id"];source_unit=table["source_utterances"][old]
+                uid="utterance:"+fingerprint([self.library_id(),fixed["conversation_id"],qualified_hash,source_unit["utterance_id"]]).removeprefix("sha256:")
+                row["unit_id"]=uid;converted["sources"][uid]=[uid]
+                converted["source_utterances"][uid]={**source_unit,"input_hash":qualified_hash}
+                converted["denominators"][uid]=table["denominators"][old]
+                original_units[uid]={"source_unit_id":old,**source_unit}
+            table=converted
+            originals_for_source=[o for o in originals.values() if o["source_ref"] in asset["scope"]["input_refs"]]
+            if len(originals_for_source) != 1: raise AssetBindingError("group_original_reference")
+            self._connection_content(originals_for_source[0], original=True)
+            members.append({"asset_key":copy.deepcopy(asset["asset_key"]),"content_hash":asset["content_hash"],
+                "content_domain":asset["content_domain"],"source_scope":copy.deepcopy(asset["scope"]),
+                "conversation_id":fixed["conversation_id"],"current":current,
+                "identity_encoding":"qualified-hash-encoding-1","qualified_input_hash":qualified_hash,"original_units":original_units,
+                "original_ref":copy.deepcopy(originals_for_source[0]["source_ref"]),
+                "snapshot_content_hash":originals_for_source[0]["source_ref"]["content_hash"],
+                "speakers":self.participant_speakers(fixed),
+                "permission":{"state_revision":receipt["bindings"][0]["checked_state_revision"],
+                    "policy_revision":receipt["bindings"][0]["checked_policy_revision"],
+                    "parents":sorted(receipt.get("parent_checks",[]),key=canonical)}})
+            receipts.append(receipt); tables.append(table)
+        order=sorted(range(len(members)),key=lambda i: canonical(members[i]["asset_key"]))
+        members=[members[i] for i in order];tables=[tables[i] for i in order]
+        scope={"scope_id":"group:"+digest(members),"mode":"dataset","input_refs":[m["original_ref"] for m in members],
+            "conversation_ids":sorted(seen),"member_ids":sorted(uid for t in tables for uid,r in
+                ((r["unit_id"],r) for r in t["rows"]) if r["value_status"] != "excluded"),
+            "context_ids":sorted(r["unit_id"] for t in tables for r in t["rows"] if r["value_status"] == "excluded")}
+        scope["manifest_hash"]=fingerprint(scope)
+        if require_scope and (context["scope_id"],context["scope_manifest_hash"]) != (scope["scope_id"],scope["manifest_hash"]):
+            raise AssetBindingError("group_scope_mismatch")
+        combined={**receipts[0],"bindings":[b for r in receipts for b in r["bindings"]],
+            "payloads":[p for r in receipts for p in r["payloads"]],
+            "parent_checks":[p for r in receipts for p in r.get("parent_checks",[])]}
+        # A second source may change while resolving a later one. Re-read all
+        # original/current identities and policy histories before delivery.
+        fresh_assets,fresh_originals,fresh_states,_fresh_links=self._connection_index()
+        for m in members:
+            key=_asset_key(m["asset_key"])
+            if canonical(fresh_states.get(key)) != canonical(states.get(key)): raise AssetBindingError("group_policy_changed","blocked")
+            self._source_current({"conversation_id":m["conversation_id"],**m["current"]})
+            current_asset=fresh_assets.get(key)
+            if not current_asset or canonical(current_asset)!=canonical(assets[key]):raise AssetBindingError("group_descriptor_changed")
+            self._connection_content(current_asset)
+            for parent in m["permission"]["parents"]:
+                parent_key=_asset_key(parent["asset_key"])
+                if canonical(fresh_states.get(parent_key)) != canonical(states.get(parent_key)):
+                    raise AssetBindingError("group_policy_changed","blocked")
+        return combined,tables,{"version":"group-source-set-1","sources":members,"scope":scope}
+
+    def _verify_group(self, group):
+        """Rebuild identity and current permissions from immutable source manifests."""
+        from .analysis_core import fingerprint
+        from .analysis_method_registry import connected_slot
+        if not isinstance(group,dict) or set(group)!={"version","sources","scope"} or group["version"]!="group-source-set-1":
+            raise AssetBindingError("group_contract")
+        phase=getattr(self._binding_reads,"groups",None);identity=fingerprint(group)
+        if phase is not None and identity in phase:
+            for m in group["sources"]:self._source_current({"conversation_id":m["conversation_id"],**m["current"]})
+            return phase[identity]
+        context={"plan_id":"group-recheck","plan_version":1,"plan_hash":fingerprint(group),"generation":1,
+            "consumer_task_id":"group-recheck","purpose":"exploratory","destination":"local","cancelled":False,
+            "scope_id":group["scope"]["scope_id"],"scope_manifest_hash":group["scope"]["manifest_hash"]}
+        selector={"row_ids":[],"column_ids":[],"range_ref":None};selector["selection_hash"]=fingerprint(selector)
+        refs=[{**{k:context[k] for k in ("plan_id","plan_version","plan_hash","generation","consumer_task_id")},
+            "slot_id":"table","input_ref_id":"group-source:"+str(i),"role":"data_input","selection":"selected","omission_reason":None,
+            "source":{"type":"frozen","asset_key":m["asset_key"],"content_hash":m["content_hash"],"content_domain":m["content_domain"]},
+            "selector":selector} for i,m in enumerate(group["sources"])]
+        _receipt,_tables,current=self._group_bindings(connected_slot("unit_pool"),refs,context)
+        if canonical(current)!=canonical(group): raise AssetBindingError("group_source_set_changed","blocked")
+        phase=getattr(self._binding_reads,"groups",None)
+        if phase is not None:phase[identity]=current
+        return current
+
+    def _bind_asset_inputs(self, *, slot, inputs, context, method_id, assess=None):
+        from .analysis_core import validate_connection_slot, assess_connection_inputs, _connection_hash
+        from .analysis_method_registry import connection_method_descriptor
+        base = {"version": "analysis-asset-bindings-1", "execution_enabled": False, "adoption_performed": False,
+                "bindings": [], "payloads": [], "decision": "needs_input", "reason": "unresolved"}
+        try:
+            slot = validate_connection_slot(slot)
+            _asset_fields(context, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id",
+                                    "purpose", "destination", "scope_id", "scope_manifest_hash", "cancelled"))
+            from .analysis_core import CONNECTION_PURPOSES
+            if (not all(_asset_id(context[k]) for k in ("plan_id", "consumer_task_id", "destination", "scope_id"))
+                    or context["purpose"] not in CONNECTION_PURPOSES or type(context["cancelled"]) is not bool
+                    or any(type(context[k]) is not int or context[k] < 1 for k in ("plan_version", "generation"))
+                    or not all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash"))):
+                raise AssetBindingError("context")
+            if context["cancelled"]: raise AssetBindingError("cancelled", "blocked")
+            descriptor = connection_method_descriptor(method_id)
+            if descriptor is None: raise AssetBindingError("method_unregistered")
+            if not isinstance(inputs, list): raise AssetBindingError("inputs")
+            assets, originals, states, links = self._connection_index()
+            envelopes, permissions, seen = [], [], set()
+            base["parent_checks"] = []
+            walked = set()
+            anchor_snapshot=None
+            human_packages=None
+            def review(asset,state):
+                # Only this resolution phase shares validated immutable bodies.
+                # The final phase below obtains a fresh record snapshot again.
+                nonlocal human_packages
+                if human_packages is None:human_packages=self._human_packages()
+                return self._human_review(asset,state,packages=human_packages)
+            def same_input(left,right):
+                def population(value):return sorted((e.get("utterance_id",e.get("evidence_id")),e.get("text"),e.get("excluded")) for e in value.get("evidence",[]))
+                return all(left.get(k)==right.get(k) for k in ("input_hash","conversation_id","source_revision","analysis_revision")) and population(left)==population(right)
+            def parent_permissions(asset, original, visiting=()):
+                key = _asset_key(asset["asset_key"])
+                if key in visiting: raise AssetBindingError("content_cycle")
+                if key in walked: return
+                _parent_raw, parent_snapshot = self._connection_content(asset, original=original)
+                if not original: self._connected_current(asset)
+                history = states.get(key, {})
+                if not history: raise AssetBindingError("parent_state_unknown", "needs_input")
+                state = history[max(history)]
+                if state["revoked"] or state["status"] in {"rejected", "retired", "stale", "unavailable"}:
+                    raise AssetBindingError("parent_state_unavailable", "blocked")
+                if state["status"] != "adopted": raise AssetBindingError("parent_not_adopted", "human_pending")
+                if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
+                    review(asset, state)
+                if (asset["scope"]["scope_id"], asset["scope"]["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
+                    from .analysis_method_registry import CONNECTED_METHODS
+                    group=snapshot.get("group_source_set")
+                    group_parent = group is not None and any(
+                        asset["scope"] == m["source_scope"] and same_input(parent_snapshot,{**m["current"],"conversation_id":m["conversation_id"],"evidence":parent_snapshot.get("evidence")})
+                        for m in group["sources"])
+                    if method_id not in CONNECTED_METHODS or (not group_parent and not same_input(parent_snapshot,snapshot)):
+                        raise AssetBindingError("parent_scope_intersection", "blocked")
+                permissions.append(state)
+                base["parent_checks"].append({"asset_key": asset["asset_key"], "target_content_hash": state["target_content_hash"],
+                                              "target_domain": state["target_domain"], "state_revision": state["state_revision"],
+                                              "policy_revision": state["policy_revision"]})
+                for parent_ref in asset.get("parent_refs", []):
+                    if parent_ref["target_type"] == "artifact":
+                        matches = [a for a in assets.values() if a["asset_key"]["artifact_id"] == parent_ref["target_id"]
+                                   and str(a["schema"]["version"]) == parent_ref["version"]
+                                   and a["content_hash"] == parent_ref["content_hash"] and a["content_domain"] == parent_ref["hash_domain"]
+                                   and parent_ref.get("library_id") == a["asset_key"]["library_id"]]
+                        parent_original = False
+                    elif parent_ref["target_type"] == "snapshot":
+                        matches = [a for a in originals.values() if canonical(a["source_ref"]) == canonical(parent_ref)]
+                        parent_original = True
+                    else: raise AssetBindingError("parent_reference_unimplemented", "unsupported")
+                    if len(matches) != 1: raise AssetBindingError("parent_reference_unresolved", "needs_input")
+                    parent_permissions(matches[0], parent_original, visiting + (key,))
+                walked.add(key)
+            for ref in inputs:
+                _asset_fields(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id",
+                                    "slot_id", "input_ref_id", "role", "selection", "omission_reason"), ("source", "selector"))
+                if (any(ref[k] != context[k] or type(ref[k]) is not type(context[k]) for k in
+                        ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id"))
+                        or ref["slot_id"] != slot["slot_id"] or not _asset_id(ref["input_ref_id"])
+                        or ref["input_ref_id"] in seen or ref["role"] not in slot["roles"]):
+                    raise AssetBindingError("input_identity")
+                seen.add(ref["input_ref_id"])
+                if ref["selection"] == "omitted":
+                    if slot["required"] or "source" in ref or "selector" in ref or not _asset_id(ref["omission_reason"]):
+                        raise AssetBindingError("illegal_omission")
+                    continue
+                if ref["selection"] != "selected" or ref["omission_reason"] is not None:
+                    raise AssetBindingError("selection")
+                if "source" not in ref or "selector" not in ref: raise AssetBindingError("selected_unresolved", "needs_input")
+                source = ref["source"]; selector = ref["selector"]
+                _asset_fields(selector, ("row_ids", "column_ids", "range_ref", "selection_hash"))
+                if (not _asset_ids(selector["row_ids"]) or not _asset_ids(selector["column_ids"])
+                        or (selector["range_ref"] is not None and not _asset_ref(selector["range_ref"]))
+                        or selector["selection_hash"] != _asset_hash(canonical({k: v for k, v in selector.items() if k != "selection_hash"}))):
+                    raise AssetBindingError("selector")
+                if not isinstance(source, dict): raise AssetBindingError("source")
+                original = source.get("type") == "original"
+                if original:
+                    _asset_fields(source, ("type", "source_ref"))
+                    from .analysis_core import _connection_source_ref
+                    if not _connection_source_ref(source["source_ref"]): raise AssetBindingError("source_ref")
+                    if source["source_ref"]["target_type"] != "snapshot":
+                        raise AssetBindingError("original_type_unimplemented", "unsupported")
+                    matches = [a for a in originals.values() if canonical(a["source_ref"]) == canonical(source["source_ref"])]
+                    if not matches: raise AssetBindingError("original_unresolved", "needs_input")
+                    if len(matches) != 1: raise AssetBindingError("original_ambiguous")
+                    asset = matches[0]; key = asset["asset_key"]
+                elif source.get("type") == "frozen":
+                    _asset_fields(source, ("type", "asset_key", "content_hash", "content_domain"))
+                    key = source["asset_key"]; key_id = _asset_key(key)
+                    if key["library_id"] != self.library_id(): raise AssetBindingError("foreign_library")
+                    asset = assets.get(key_id)
+                    if not asset: raise AssetBindingError("asset_unresolved", "needs_input")
+                    if (source["content_hash"], source["content_domain"]) != (asset["content_hash"], asset["content_domain"]):
+                        raise AssetBindingError("content_target_mismatch")
+                elif source.get("type") == "from_step":
+                    _asset_fields(source, ("type", "producer_task_id", "output_name"))
+                    if not all(_asset_id(source[k]) for k in ("producer_task_id", "output_name")):
+                        raise AssetBindingError("from_step")
+                    if source["producer_task_id"] == context["consumer_task_id"]: raise AssetBindingError("task_cycle")
+                    key = self._connection_parent(ref, context, links); asset = assets.get(_asset_key(key))
+                    if not asset: raise AssetBindingError("parent_not_saved", "needs_input")
+                else: raise AssetBindingError("source_type")
+                raw, snapshot = self._connection_content(asset, original=original)
+                if not original: self._connected_current(asset)
+                key_id = _asset_key(key)
+                history = states.get(key_id, {})
+                if not history: raise AssetBindingError("state_unknown", "needs_input")
+                state = history[max(history)]
+                if state["target_content_hash"] != asset.get("content_hash", asset["raw_byte_hash"]) or state["target_domain"] != asset.get("content_domain", "raw-bytes-v1"):
+                    raise AssetBindingError("state_target_mismatch")
+                if state["revoked"] or state["status"] in {"rejected", "retired", "stale", "unavailable"}:
+                    raise AssetBindingError("state_unavailable", "blocked")
+                if state["status"] != "adopted": raise AssetBindingError("not_adopted", "human_pending")
+                if asset["producer"]["kind"] in {"ai", "researcher"} or state["review_refs"]:
+                    review(asset, state)
+                if asset["meaning"]["status"] != "declared": raise AssetBindingError("meaning_unknown", "human_pending")
+                if context["purpose"] == "confirmatory" and not original and (asset["kind"] == "claim_set" or any(v["validity"] != "human_reviewed" for v in asset["variables"])):
+                    raise AssetBindingError("variable_review_unconfirmed", "human_pending")
+                scope = asset["scope"]
+                if (scope["scope_id"], scope["manifest_hash"]) != (context["scope_id"], context["scope_manifest_hash"]):
+                    if method_id not in {"qualitative_compare","qualitative_reuse"} or anchor_snapshot is None or not same_input(anchor_snapshot,snapshot):
+                        raise AssetBindingError("scope_mismatch")
+                    base.setdefault("scope_bridges",[]).append({"input_ref_id":ref["input_ref_id"],"source_scope":scope,
+                        "target_scope_id":context["scope_id"],"target_manifest_hash":context["scope_manifest_hash"],"basis":"verified_same_fixed_utterances"})
+                if anchor_snapshot is None:anchor_snapshot=snapshot
+                if selector["range_ref"] is not None: raise AssetBindingError("range_adapter_unimplemented", "unsupported")
+                if original:
+                    if selector["row_ids"] or selector["column_ids"]: raise AssetBindingError("original_selector_unimplemented", "unsupported")
+                    payload = _read_typed_json(raw)
+                elif asset["kind"] != "observation_table":
+                    if selector["row_ids"] or selector["column_ids"]: raise AssetBindingError("typed_selector_unimplemented", "unsupported")
+                    payload = _read_typed_json(raw)
+                else:
+                    payload = _read_typed_json(raw)
+                    rows = {r["row_id"]: r for r in payload["rows"]}; columns = {c["name"] for c in payload["columns"]}
+                    if not set(selector["row_ids"]) <= rows.keys() or not set(selector["column_ids"]) <= columns:
+                        raise AssetBindingError("selector_id")
+                    if selector["row_ids"]: payload["rows"] = [rows[r] for r in selector["row_ids"]]
+                    if selector["column_ids"]:
+                        keep = set(selector["column_ids"]); payload["fields"] = list(selector["column_ids"])
+                        payload["columns"] = [c for c in payload["columns"] if c["name"] in keep]
+                        payload["rows"] = [{**r, "values": {k: v for k, v in r["values"].items() if k in keep}} for r in payload["rows"]]
+                    payload["row_count"] = len(payload["rows"])
+                    # Projection has its own counts; source row IDs and raw bytes stay fixed.
+                    for column in payload["columns"]:
+                        name = column["name"]; selected_values = [r["values"] for r in payload["rows"]]
+                        column.update(observed_types=sorted({_table_value_type(r[name]) for r in selected_values if name in r}),
+                                      absent_count=sum(name not in r for r in selected_values),
+                                      null_count=sum(name in r and r[name] is None for r in selected_values))
+                payload_raw = canonical(payload)
+                if len(payload_raw) > slot["max_bytes"]: raise AssetBindingError("payload_byte_limit", "needs_input")
+                permissions.append(state)
+                parent_permissions(asset, original)
+                content_hash = asset.get("content_hash", asset["source_ref"]["content_hash"] if original else None)
+                domain = asset.get("content_domain", asset["source_ref"]["hash_domain"] if original else None)
+                binding_source = asset["source_ref"] if original else key
+                identity = {"input": ref, "source": binding_source, "content_hash": content_hash, "content_domain": domain,
+                            "selection_hash": selector["selection_hash"], "schema": asset["schema"]}
+                binding = {"source_type": "original" if original else "artifact", "binding_id": _asset_hash(canonical(identity)),
+                           "input_ref_id": ref["input_ref_id"], "source": copy.deepcopy(binding_source),
+                           "content_hash": content_hash, "content_domain": domain, "selection_hash": selector["selection_hash"],
+                           "schema": copy.deepcopy(asset["schema"]), "checked_state_revision": state["state_revision"],
+                           "checked_policy_revision": state["policy_revision"], "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                           "decision": "unsupported", "reason": "consumer_adapter_unimplemented"}
+                base["bindings"].append(binding)
+                base["payloads"].append({"input_ref_id": ref["input_ref_id"], "payload_hash": _asset_hash(payload_raw),
+                                         "payload_domain": "canonical-json-v1", "bytes": len(payload_raw), "value": payload})
+                candidate = {"source_type": "original" if original else "artifact", "schema": asset["schema"],
+                             "unit": asset["meaning"]["unit"], "scope_mode": scope["mode"], "scope_policy": "all_included_initial",
+                             "actor": asset["producer"], "adapter": asset["adapter"], "purpose": context["purpose"],
+                             "meaning_status": asset["meaning"]["status"], "human_review_state": "human_reviewed" if asset.get("kind") == "claim_set" and state["review_refs"] else "structural_checked"}
+                candidate.update({"source_ref": asset["source_ref"]} if original else
+                                 {"kind": asset["kind"], "content_hash": content_hash, "content_domain": domain})
+                envelopes.append({"input_ref_id": ref["input_ref_id"], "selection": "selected", "role": ref["role"],
+                                  "omission_reason": None, "candidate": candidate})
+            if not envelopes: raise AssetBindingError("omitted_or_empty", "needs_input")
+            purposes = set.intersection(*(set(s["allowed_purposes"]) for s in permissions))
+            if context["purpose"] not in purposes: raise AssetBindingError("purpose_intersection", "blocked")
+            if any(s["send_policy"] == "prohibited" or (s["send_policy"] == "local_only" and context["destination"] != "local")
+                   or (s["send_policy"] == "permitted_destinations" and context["destination"] not in s["destinations"]) for s in permissions):
+                raise AssetBindingError("destination_intersection", "blocked")
+            total = sum(p["bytes"] for p in base["payloads"])
+            if total > slot["max_bytes"]: raise AssetBindingError("payload_byte_limit", "needs_input")
+            checked = assess(envelopes) if assess else assess_connection_inputs(slot, envelopes, descriptor)
+            base["parent_checks"].sort(key=lambda row: canonical(row["asset_key"]))
+            # No cache crosses a resolution phase, execution, save or request.
+            # Re-read immutable packages for the final current-policy check.
+            self._binding_reads.packages={}
+            self._binding_reads.groups={}
+            _new_assets, _new_originals, current_states, _new_links = self._connection_index()
+            human_packages=None
+            for check in base["parent_checks"]:
+                current_history = current_states.get(_asset_key(check["asset_key"]), {})
+                current_state = current_history[max(current_history)] if current_history else {}
+                if any(current_state.get(k) != check[k] for k in
+                       ("target_content_hash", "target_domain", "state_revision", "policy_revision")):
+                    raise AssetBindingError("state_changed_during_resolution", "blocked")
+                key = _asset_key(check["asset_key"])
+                checked_asset = _new_assets.get(key) or _new_originals.get(key)
+                if checked_asset:
+                    self._connection_content(checked_asset,original=key in _new_originals)
+                    if key not in _new_originals:self._connected_current(checked_asset)
+                if checked_asset and (checked_asset["producer"]["kind"] in {"ai", "researcher"} or current_state["review_refs"]):
+                    review(checked_asset, current_state)
+            base.update(decision=checked["decision"], reason=checked["reason"], content_resolution=True,
+                        state_policy_pre_adoption=True, actual_payload_bytes=total,
+                        authority_check="registry_callback" if assess else "metadata_only",
+                        effective_permissions={"purposes": sorted(purposes), "destination": context["destination"]},
+                        input_refs_hash=_asset_hash(canonical(inputs)), context_hash=_asset_hash(canonical(context)))
+            for binding in base["bindings"]: binding.update(decision=base["decision"], reason=base["reason"])
+            if base["decision"] not in {"eligible", "unsupported"}:
+                base["payloads"] = []
+            return base
+        except AssetBindingError as exc:
+            base.update(decision=exc.decision, reason=exc.reason)
+        except (ValueError, TypeError, KeyError, OSError):
+            base.update(decision="rejected", reason="invalid_or_unverified")
+        # Failed checks never deliver a partial payload.
+        base["payloads"] = []
+        for binding in base["bindings"]: binding.update(decision=base["decision"], reason=base["reason"])
+        return base
+
+    def prepare_qualitative(self,method_id,request,receipt,*,expected_snapshot=None):
+        from .analysis_core import fingerprint,AnalysisContractError
+        assets,originals,states,_links=self._connection_index();inputs=[];scope=None;hashes=[]
+        for binding,delivered in zip(receipt["bindings"],receipt["payloads"]):
+            original=binding["source_type"]=="original"
+            if original:
+                matches=[a for a in originals.values() if a["source_ref"]==binding["source"]]
+                if len(matches)!=1:raise AnalysisContractError("固定原文が曖昧です。",code="qualitative_original")
+                asset=matches[0]
+            else:asset=assets[_asset_key(binding["source"])]
+            _raw,snapshot=self._connection_content(asset,original=original)
+            if expected_snapshot is not None and (any(snapshot.get(k)!=expected_snapshot.get(k) for k in ("input_hash","conversation_id","source_revision","analysis_revision"))
+                or fingerprint(snapshot.get("evidence"))!=fingerprint(expected_snapshot.get("evidence"))):
+                raise AnalysisContractError("比較範囲の対応を確認できません。",code="qualitative_scope_unmapped")
+            if scope is None:scope=asset["scope"]
+            hashes.append(snapshot["input_hash"])
+            ref=next(r for r in request["bindings"]["inputs"] if r["input_ref_id"]==binding["input_ref_id"])
+            kind="snapshot" if original else asset["kind"];value=delivered["value"]
+            targets = self.qualitative_targets(asset, value, snapshot, ref["input_ref_id"], original=original)
+            if kind=="claim_set" and asset["method_id"] != "thematic":
+                rows=value["rows"]
+                try:value=json.loads(rows[0]["values"]["bundle_json"])
+                except (KeyError,IndexError,TypeError,ValueError):raise AnalysisContractError("質的bundleが不正です。",code="qualitative_bundle") from None
+                if value.get("version")!="qualitative-evidence-1":raise AnalysisContractError("質的bundle版が異なります。",code="qualitative_bundle")
+            history=states[_asset_key(asset["asset_key"])];state=history[max(history)]
+            inputs.append({"input_ref_id":ref["input_ref_id"],"role":ref["role"],"kind":kind,"content_hash":binding["content_hash"],
+                "content_domain":binding["content_domain"],"source":binding["source"],"source_scope":asset["scope"],
+                "targets":targets,"payload":copy.deepcopy(value),"review_refs":copy.deepcopy(state["review_refs"]),
+                "human_review":"saved_record" if state["review_refs"] else "structural_only"})
+        selected=[r for r in request["bindings"]["inputs"] if r["selection"]=="selected"]
+        if method_id=="qualitative_compare" and len(inputs)<2:raise AnalysisContractError("比較には二つ以上の固定入力が必要です。",code="qualitative_cardinality")
+        if method_id=="qualitative_reuse" and not (any(i["role"]=="selection_basis" and i["kind"]=="claim_set" and i["payload"].get("version")=="qualitative-evidence-1" for i in inputs)
+                and any(i["role"]=="evidence_context" and i["kind"]=="claim_set" for i in inputs)
+                and any(i["role"]=="evidence_context" and i["kind"]=="snapshot" for i in inputs)):
+            raise AnalysisContractError("A2にはB1選択根拠、Q1と固定原文が必要です。",code="qualitative_reuse_context")
+        omitted=[copy.deepcopy(r) for r in request["bindings"]["inputs"] if r["selection"]=="omitted"]
+        prepared={"method_id":method_id,"request":request,"receipt":receipt,"tables":[{"inputs":inputs,"omitted":omitted,
+            "scope":scope,"input_hashes":sorted(set(hashes))}],"content_hash":fingerprint({"inputs":inputs,"omitted":omitted})}
+        return prepared
+
+    def prepare_connected(self, method_id, request, *, expected_snapshot=None):
+        """Resolve the actual registered v2 consumer through shared binding checks."""
+        from .analysis_core import validate_connected_request, fingerprint, AnalysisContractError
+        request = validate_connected_request(method_id, request)
+        if expected_snapshot is not None and "conversation_id" not in expected_snapshot:
+            conversation=expected_snapshot.get("archive_snapshot",{}).get("conversation_id")
+            if conversation is None: raise AnalysisContractError("固定会話IDがありません。",code="connected_source_identity")
+            expected_snapshot=self.source_snapshot_view(expected_snapshot,conversation)
+        if method_id == "unit_pool":
+            receipt,tables,group=self._group_bindings(**{k:request["bindings"][k] for k in ("slot","inputs","context")})
+            if expected_snapshot is None or not any(m["conversation_id"] == expected_snapshot["conversation_id"]
+                    and m["current"] == {k:expected_snapshot[k] for k in ("input_hash","source_revision","analysis_revision")} for m in group["sources"]):
+                raise AnalysisContractError("実行元の会話を含めてください。", code="group_anchor")
+            columns=request["parameters"]["columns"]
+            projected=[]
+            for table in tables:
+                if not set(columns) <= set(table["fields"]): raise AnalysisContractError("統合列がありません。",code="group_columns")
+                projected.append({**table,"fields":columns,"rows":[{k:r[k] for k in columns if k in r} for r in table["rows"]],
+                    "variables":[v for v in table["variables"] if v["variable_id"] in columns]})
+            from .services.analysis_unit_groups import pool_unit_tables
+            pooled=pool_unit_tables(projected,group_scope=group["scope"])
+            pooled["group_source_set"]=group
+            return {"method_id":method_id,"request":request,"receipt":receipt,"tables":[pooled],"content_hash":fingerprint(pooled)}
+        receipt = self.bind_asset_inputs(method_id=method_id, **request["bindings"])
+        if receipt["decision"] != "eligible":
+            raise AnalysisContractError("固定資産を利用できません。", code="connected_input_" + receipt["reason"])
+        if method_id in {"qualitative_compare","qualitative_reuse"}:
+            return self.prepare_qualitative(method_id,request,receipt,expected_snapshot=expected_snapshot)
+        assets, _originals, states, _links = self._connection_index(); tables = []
+        for binding, delivered in zip(receipt["bindings"], receipt["payloads"]):
+            asset = assets[_asset_key(binding["source"])]; _raw, snapshot = self._connection_content(asset)
+            if expected_snapshot is not None and (any(snapshot.get(k) != expected_snapshot.get(k) for k in
+                    ("input_hash", "conversation_id", "source_revision", "analysis_revision"))
+                    or fingerprint(snapshot.get("evidence")) != fingerprint(expected_snapshot.get("evidence"))):
+                raise AnalysisContractError("固定元入力が異なります。", code="connected_source_mismatch")
+            if method_id == "theme_evidence_table":
+                candidate = delivered["value"]; content = candidate["content"]
+                theme = next((t for t in candidate["themes"] if t["content"]["theme_id"] == request["parameters"]["theme_id"]), None)
+                if theme is None: raise AnalysisContractError("テーマIDがありません。", code="connected_theme")
+                theme = theme["content"]
+                support = {r["utterance_id"] for r in theme["support"]}
+                counter = {r["utterance_id"] for r in theme["counterexamples"]}
+                unread_state = candidate["coverage"]["unread_sets"]["processing"]
+                unread = set(unread_state["ids"] or []) if unread_state["status"] == "measured" else set()
+                refs = states[_asset_key(asset["asset_key"])][binding["checked_state_revision"]]["review_refs"]
+                definition = copy.deepcopy(refs[0])
+                fields = ["unit_id", "conversation_id", "speaker_id", "value_status", "support_count", "counter_count"]
+                variables = [{"variable_id":k,"version":1,"definition_hash":definition["content_hash"],
+                    "definition_ref":definition,"value_type":"integer" if k.endswith("_count") else "string",
+                    "scale":"ratio" if k.endswith("_count") else "nominal", "unit":"utterance",
+                    "value_domain":"explicit_evidence_relation" if k.endswith("_count") else "qualified_identity",
+                    "generation":{"kind":"code","actor_id":"connected-assets-2","step_ids":[method_id]},
+                    "validity":"structural_checked"} for k in fields]
+                by_uid = {str(s["id"]):s for s in snapshot.get("segments", snapshot.get("analysis",{}).get("segments",[]))}
+                rows=[]; sources={}; denominators={}; source_utterances={}
+                for e in snapshot["evidence"]:
+                    utterance = e["utterance_id"]; uid = "utterance:" + fingerprint([self.library_id(),snapshot["conversation_id"],snapshot["input_hash"],utterance]).removeprefix("sha256:")
+                    status = "excluded" if e["excluded"] else "unprocessed" if utterance in unread else "observed" if utterance in support | counter else "unknown"
+                    speaker = by_uid.get(utterance,{}).get("speaker")
+                    rows.append({"unit_id":uid,"conversation_id":snapshot["conversation_id"],"speaker_id":speaker or "",
+                        "value_status":status,"support_count":int(utterance in support) if status == "observed" else None,
+                        "counter_count":int(utterance in counter) if status == "observed" else None})
+                    sources[uid]=[uid]; source_utterances[uid]={"conversation_id":snapshot["conversation_id"],"input_hash":snapshot["input_hash"],"utterance_id":utterance}
+                    denominators[uid]={"included":int(status != "excluded"),"observed":int(status == "observed")}
+                tables.append({"fields":fields,"rows":rows,"unit":"utterance","variables":variables,"sources":sources,
+                    "input_hashes":[snapshot["input_hash"]],"definition_adoption_refs":copy.deepcopy(refs),
+                    "denominators":denominators,"source_utterances":source_utterances,"scope":asset["scope"],"theme_id":theme["theme_id"]})
+            else:
+                _s, result, _m, _c = self.verified_package(asset["asset_key"]["store_run_id"])
+                contract = result.get("unit_contract")
+                table = delivered["value"]
+                if isinstance(contract,dict) and contract.get("version") == "unit-table-2":
+                    tables.append({**copy.deepcopy(contract), "fields":table["fields"], "rows":[r["values"] for r in table["rows"]]})
+                else:
+                    if asset["meaning"]["unit"] != "utterance" or not {"utterance_id","conversation_id","value_status"} <= set(table["fields"]):
+                        raise AnalysisContractError("発話対応を持つ固定表が必要です。",code="connected_unit_contract")
+                    originals={e["utterance_id"]:e for e in snapshot["evidence"]}
+                    seen=set(); rows=[]; sources={}; utterances={}; denominators={}
+                    by_uid={str(s["id"]):s for s in snapshot.get("segments",snapshot.get("analysis",{}).get("segments",[]))}
+                    for wrapped in table["rows"]:
+                        row=copy.deepcopy(wrapped["values"]); old_id=row.pop("utterance_id")
+                        if old_id not in originals or old_id in seen or row["conversation_id"] != snapshot["conversation_id"]:
+                            raise AnalysisContractError("発話対応が曖昧です。",code="connected_unit_identity")
+                        seen.add(old_id); e=originals[old_id]
+                        if e["excluded"] != (row["value_status"] == "excluded"):
+                            raise AnalysisContractError("除外状態が異なります。",code="connected_unit_exclusion")
+                        uid="utterance:"+fingerprint([self.library_id(),snapshot["conversation_id"],snapshot["input_hash"],old_id]).removeprefix("sha256:")
+                        row["unit_id"]=uid; row["speaker_id"]=by_uid.get(old_id,{}).get("speaker") or ""; rows.append(row)
+                        sources[uid]=[uid]; utterances[uid]={"conversation_id":snapshot["conversation_id"],"input_hash":snapshot["input_hash"],"utterance_id":old_id}
+                        denominators[uid]={"included":int(row["value_status"]!="excluded"),"observed":int(row["value_status"]=="observed")}
+                    if seen != originals.keys(): raise AnalysisContractError("未処理行が欠落しています。",code="connected_unit_population")
+                    variables=[{**copy.deepcopy(v),"variable_id":"unit_id" if v["variable_id"]=="utterance_id" else v["variable_id"]} for v in asset["variables"]]
+                    variables.append({**copy.deepcopy(next(v for v in variables if v["variable_id"]=="unit_id")),"variable_id":"speaker_id"})
+                    tables.append({"fields":list(rows[0]),"rows":rows,"unit":"utterance","sources":sources,"source_utterances":utterances,
+                        "variables":variables,"denominators":denominators,"definition_adoption_refs":[],"input_hashes":[snapshot["input_hash"]],"scope":asset["scope"]})
+        mapping = request["parameters"].get("participant_mapping")
+        if mapping is not None:
+            packages, latest = self._human_packages()
+            matching = [p for p in latest.values() if p["ref"] == mapping.get("record_ref") and p["record"]["decision"] == "adopt"
+                and p["record"]["actor"] == mapping.get("actor")]
+            if len(matching) != 1: raise AnalysisContractError("参加者対応の確定記録がありません。",code="connected_participant_record")
+            human_result = self.verified_package(matching[0]["run_id"])[1]
+            try: declared = json.loads(human_result["human_submission"]["source_text"])
+            except (TypeError,ValueError): declared = None
+            if declared != {"participant_mapping":mapping.get("assignments")}:
+                raise AnalysisContractError("参加者対応が保存された研究者原文と異なります。",code="connected_participant_body")
+            package = matching[0]
+            target = assets.get(_asset_key(package["asset_key"]))
+            history = states.get(_asset_key(package["asset_key"]), {})
+            state = history[max(history)] if history else None
+            if not target or not state or mapping["record_ref"] not in state["review_refs"]:
+                raise AnalysisContractError("参加者対応の現在の採用状態がありません。", code="connected_participant_state")
+            self._human_review(target, state)
+            reason = self._human_permission_reason(target, index=(assets, _originals, states, _links))
+            if reason or state["status"] != "adopted" or "exploratory" not in state["allowed_purposes"]:
+                raise AnalysisContractError("参加者対応の現在の権限を確認できません。", code="connected_participant_state")
+            if any(not self._participant_mapping_applies(assets[_asset_key(b["source"])], target, assets)
+                   for b in receipt["bindings"]):
+                raise AnalysisContractError("参加者対応の承認対象を入力系譜に含めてください。", code="connected_participant_lineage")
+            _raw, mapping_source = self._connection_content(target)
+            anchor = expected_snapshot or snapshot
+            if any(mapping_source.get(k) != anchor.get(k) for k in ("input_hash", "conversation_id", "source_revision", "analysis_revision")):
+                raise AnalysisContractError("参加者対応の固定元入力が異なります。", code="connected_participant_source")
+            if canonical(mapping_source.get("group_source_set")) != canonical(snapshot.get("group_source_set")):
+                raise AnalysisContractError("Group mapping scope differs.",code="connected_participant_group")
+            self.validate_participant_source(human_result["human_submission"]["source_text"],mapping_source)
+            for table in tables:
+                if mapping["record_ref"] not in table["definition_adoption_refs"]:
+                    table["definition_adoption_refs"].append(copy.deepcopy(mapping["record_ref"]))
+        return {"method_id":method_id,"request":request,"receipt":receipt,"tables":tables,"content_hash":fingerprint(tables)}
+
+    def connected_output_descriptor(self, run_id):
+        """Fresh immutable bytes and actual Handler validation establish a producer."""
+        from .analysis_core import fingerprint, AnalysisContractError
+        from .analysis_method_registry import CONNECTED_METHODS, connection_output_contract
+        snapshot,result,manifest,content=self.verified_package(run_id)
+        params=result.get("parameters",{}); provenance=params.get("table_pilot_provenance",{})
+        referenced_pool = result.get("method_id") == "unit_pool" and provenance.get("version") == "connected-provenance-3"
+        if result.get("method_id") not in CONNECTED_METHODS or (provenance.get("version") != "connected-assets-2" and not referenced_pool):
+            raise AnalysisContractError("再利用できる単位表ではありません。",code="connected_output_unsupported")
+        with self.connect() as db:
+            row=db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",(params.get("task_id"),params.get("execution_run_id"))).fetchone()
+            raw=db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE task_id=? AND run_id=?",(params.get("task_id"),params.get("execution_run_id"))).fetchone()
+            run_row=db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",(params.get("execution_run_id"),)).fetchone()
+        task=_read_typed_json(row[0]) if row else {}; metadata=_read_typed_json(raw[1]) if raw else {}
+        run=_read_typed_json(run_row[0]) if run_row else {}
+        if (not run or task.get("status") != "succeeded" or task.get("kind")!="code" or task.get("method_id")!=result.get("method_id")
+                or result.get("method_version")!="connected-assets-2" or task.get("table_store_run_id") != run_id
+                or task.get("task_id")!=params.get("task_id") or task.get("run_id")!=params.get("execution_run_id")
+                or metadata.get("task_id")!=task.get("task_id") or metadata.get("run_id")!=task.get("run_id") or metadata.get("result_id")!=task.get("result_id")
+                or metadata.get("validation_status") != "valid"
+                or fingerprint(_read_typed_json(raw[0])) != metadata.get("raw_hash")
+                or canonical({k:v for k,v in result.items() if k != "parameters"}) != canonical(_read_typed_json(raw[0]))):
+            raise AnalysisContractError("Handler確定原票が異なります。",code="connected_output_ledger")
+        contract=result["unit_contract"]
+        if canonical(contract) != canonical(provenance.get("unit_contract")):
+            raise AnalysisContractError("単位契約が異なります。",code="connected_output_contract")
+        if referenced_pool:
+            prepared=task.get("table_pilot_prepared")
+            if (not isinstance(prepared,dict) or params.get("input_content_hash") != prepared.get("content_hash")
+                    or prepared.get("method_id")!="unit_pool" or not isinstance(prepared.get("tables"),list)
+                    or len(prepared["tables"])!=1 or prepared["content_hash"] != fingerprint(prepared["tables"][0])
+                    or canonical(params.get("table_pilot")) != canonical(prepared.get("request"))):
+                raise AnalysisContractError("固定入力参照が異なります。",code="connected_provenance_ledger")
+            parent_bindings=self._pool_provenance_parents(provenance)
+            _carrier, expected=self.table_pilot_carrier(_read_typed_json(raw[0]),prepared)
+            if canonical(provenance) != canonical(expected):
+                raise AnalysisContractError("固定入力参照が異なります。",code="connected_provenance_refs")
+        else:parent_bindings=provenance["parents"]
+        artifact=next(a for a in manifest["artifacts"] if a["name"] == "tables/table.json")
+        output=connection_output_contract(result["method_id"],"tables/table.json")
+        content_hash=_asset_hash(content["tables/table.json"])
+        parents=[copy.deepcopy(b["source"]) if b["source_type"]=="original" else {"target_type":"artifact","target_id":b["source"]["artifact_id"],"version":str(b["schema"]["version"]),
+            "content_hash":b["content_hash"],"hash_domain":b["content_domain"],"library_id":b["source"]["library_id"]} for b in parent_bindings]
+        return {"asset_key":{"library_id":manifest["library_id"],"store_run_id":run_id,"artifact_id":artifact["id"],"output_name":"tables/table.json"},
+            "raw_byte_hash":content_hash,"schema":output["schema"],"scope":copy.deepcopy(contract["scope"]),
+            "producer":{"kind":"code","actor_id":"connected-assets-2","step_ids":[result["method_id"]]},"adapter":output["adapter"],
+            "meaning":{"definition_refs":copy.deepcopy(contract["definition_adoption_refs"]),"description":"Explicit evidence relations; exploratory structural units only",
+                "status":"declared","unit":contract["unit"]},"contract_id":"gurumoji.analysis-asset-connection","contract_version":1,
+            "content_hash":content_hash,"content_domain":"raw-bytes-v1","kind":output["kind"],"source_refs":copy.deepcopy(contract["scope"]["input_refs"]),
+            "method_id":result["method_id"],"method_version":"connected-assets-2","variables":copy.deepcopy(contract["variables"]),"parent_refs":parents,
+            "execution_run_id":params["execution_run_id"],"producer_task_id":params["task_id"]}
+
+    def _connected_current(self, asset):
+        from .analysis_method_registry import CONNECTED_METHODS
+        if asset.get("method_id") not in CONNECTED_METHODS: return
+        group=self.verified_package(asset["asset_key"]["store_run_id"])[1].get("unit_contract",{}).get("group_source_set")
+        if group is not None:self._verify_group(group)
+        with self.connect() as db:
+            row=db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",(asset["producer_task_id"],asset["execution_run_id"])).fetchone()
+            run_row=db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",(asset["execution_run_id"],)).fetchone()
+        task=_read_typed_json(row[0]) if row else {}; run=_read_typed_json(run_row[0]) if run_row else {}
+        if task.get("stale") or run.get("stale") or run.get("cancel_requested") or run.get("status") == "cancelled" or task.get("generation") != run.get("generation"):
+            raise AssetBindingError("connected_producer_unavailable","blocked")
+
+    def prepare_table_pilot(self, method_id, request, *, expected_snapshot=None):
+        """Resolve a bounded frozen table; no adoption, scheduler or inferred metadata."""
+        from .analysis_core import validate_table_pilot_request, AnalysisContractError, fingerprint
+        from .analysis_method_registry import CONNECTED_METHODS
+        if method_id in CONNECTED_METHODS:
+            return self.prepare_connected(method_id, request, expected_snapshot=expected_snapshot)
+        request = validate_table_pilot_request(method_id, request)
+        binding = request["bindings"]
+        context = binding["context"]
+        if context["purpose"] not in {"descriptive", "exploratory"} or context["destination"] != "local":
+            raise AnalysisContractError("局所記述・探索専用です。", code="table_policy_unsupported")
+        receipt = self.bind_asset_inputs(method_id=method_id, **binding)
+        if receipt["decision"] != "eligible":
+            raise AnalysisContractError("固定表を利用できません。", code="table_input_" + receipt["reason"])
+        assets = self._connection_index()[0]
+        tables = []
+        for resolved, delivered in zip(receipt["bindings"], receipt["payloads"]):
+            asset = assets[_asset_key(resolved["source"])]
+            _raw, original = self._connection_content(asset)
+            if expected_snapshot is not None:
+                for key in ("input_hash", "conversation_id", "source_revision", "analysis_revision"):
+                    if original.get(key) != expected_snapshot.get(key):
+                        raise AnalysisContractError("表の元入力版が異なります。", code="table_source_mismatch")
+                if fingerprint(original.get("evidence")) != fingerprint(expected_snapshot.get("evidence")):
+                    raise AnalysisContractError("発話集合が異なります。", code="table_source_mismatch")
+            ref = next(r for r in binding["inputs"] if r["input_ref_id"] == resolved["input_ref_id"])
+            if ref["selector"]["row_ids"] or ref["selector"]["column_ids"]:
+                raise AnalysisContractError("部分選択は登録projectionで指定してください。", code="table_selector_unsupported")
+            if any(v["unit"] != "utterance" for v in asset["variables"]):
+                raise AnalysisContractError("変数の単位が異なります。", code="table_variable_unit")
+            value = delivered["value"]
+            fields = value["fields"]
+            base = {"utterance_id", "conversation_id", "value_status"}
+            if not base <= set(fields):
+                raise AnalysisContractError("発話単位の基底列がありません。", code="table_base_columns")
+            provenance_excluded = set()
+            if asset["method_id"] in {"table_projection", "table_aggregate", "table_join"}:
+                verified_descriptor = self.table_pilot_output_descriptor(asset["asset_key"]["store_run_id"])
+                if verified_descriptor != asset:
+                    raise AnalysisContractError("producer記録とdescriptorが異なります。", code="table_producer_mismatch")
+                producer_result = self.verified_package(asset["asset_key"]["store_run_id"])[1]
+                provenance_excluded = set(producer_result["population"]["excluded_ids"])
+            evidence = original["evidence"]
+            originals = {e.get("utterance_id", e["evidence_id"]): e for e in evidence}
+            seen = set()
+            measured = [request["parameters"][k] for k in ("value_column", "row_column", "column_column")
+                        if k in request["parameters"]]
+            if not set(measured) <= set(fields):
+                raise AnalysisContractError("登録列がありません。", code="table_variable_missing")
+            if method_id == "table_projection" and not set(request["parameters"]["columns"]) <= set(fields):
+                raise AnalysisContractError("projection列がありません。", code="table_variable_missing")
+            for row in value["rows"]:
+                v = row["values"]; uid = v.get("utterance_id")
+                if (not isinstance(uid, str) or not uid or uid in seen or uid not in originals
+                        or v.get("conversation_id") != original["conversation_id"]
+                        or v.get("value_status") not in {"observed", "excluded", "missing", "unprocessed", "unknown"}
+                        or ((v["value_status"] == "excluded") != (originals[uid]["excluded"] or uid in provenance_excluded))):
+                    raise AnalysisContractError("発話ID・状態・会話が不正です。", code="table_row_identity")
+                status = v["value_status"]
+                if ((status == "observed" and any(c not in v or v[c] is None for c in measured))
+                        or (status in {"missing", "unprocessed", "unknown"} and any(v.get(c) is not None for c in measured))):
+                    raise AnalysisContractError("状態と測定値が矛盾しています。", code="table_status_value")
+                seen.add(uid)
+            if seen != set(originals):
+                raise AnalysisContractError("未処理発話も明示してください。", code="table_population_incomplete")
+            tables.append({"table": copy.deepcopy(value), "variables": copy.deepcopy(asset["variables"]),
+                           "scope": copy.deepcopy(asset["scope"])})
+        if method_id == "table_join":
+            if tables[0]["scope"] != tables[1]["scope"]:
+                raise AnalysisContractError("結合対象の範囲が異なります。", code="table_join_scope")
+            left = {r["values"]["utterance_id"]: r["values"] for r in tables[0]["table"]["rows"]}
+            right = {r["values"]["utterance_id"]: r["values"] for r in tables[1]["table"]["rows"]}
+            if left.keys() != right.keys() or any(
+                    (left[i]["conversation_id"], left[i]["value_status"]) !=
+                    (right[i]["conversation_id"], right[i]["value_status"]) for i in left):
+                raise AnalysisContractError("結合の人口・会話・状態が異なります。", code="table_join_population")
+            if (set(tables[0]["table"]["fields"]) & set(tables[1]["table"]["fields"])) - {"utterance_id", "conversation_id", "value_status"}:
+                raise AnalysisContractError("非基底列が衝突します。", code="table_join_columns")
+        from .analysis_core import TABLE_PILOT_MAX_BYTES
+        if len(canonical(tables)) > TABLE_PILOT_MAX_BYTES:
+            raise AnalysisContractError("実payloadのUTF8上限を超えました。", code="table_payload_byte_limit")
+        return {"request": request, "receipt": receipt, "tables": tables,
+                "content_hash": fingerprint(tables)}
+
+    @staticmethod
+    def _pool_provenance_parents(provenance):
+        """Resolve only a duplicate binding list within the same saved package."""
+        from .analysis_core import AnalysisContractError, fingerprint
+        _asset_fields(provenance,("version","unit_contract","parents_ref","receipt"))
+        ref=provenance["parents_ref"]
+        _asset_fields(ref,("target","content_hash","hash_domain"))
+        receipt=provenance["receipt"]
+        parents=receipt.get("bindings") if isinstance(receipt,dict) else None
+        if (provenance["version"]!="connected-provenance-3" or not isinstance(parents,list) or not 2<=len(parents)<=16
+                or any(not isinstance(b,dict) for b in parents)
+                or not _asset_ids([b.get("input_ref_id") for b in parents])
+                or ref!={"target":"receipt.bindings","content_hash":fingerprint(parents),"hash_domain":"canonical-json-v1"}):
+            raise AnalysisContractError("Saved parent reference differs.",code="connected_provenance_refs")
+        return parents
+
+    def table_pilot_carrier(self, raw, prepared):
+        """Persist primitive utterance carriers with explicit projection omissions."""
+        from .analysis_core import AnalysisContractError, fingerprint
+        from .analysis_method_registry import CONNECTED_METHODS
+        if raw["method_id"] in CONNECTED_METHODS:
+            if raw["method_id"]=="unit_pool":
+                return raw["datasets"]["table"], {"version":"connected-provenance-3","unit_contract":raw["unit_contract"],
+                    "parents_ref":{"target":"receipt.bindings","content_hash":fingerprint(prepared["receipt"]["bindings"]),
+                        "hash_domain":"canonical-json-v1"},"receipt":copy.deepcopy(prepared["receipt"])}
+            return raw["datasets"]["table"], {"version":"connected-assets-2", "unit_contract":raw["unit_contract"],
+                "parents":copy.deepcopy(prepared["receipt"]["bindings"]), "receipt":copy.deepcopy(prepared["receipt"])}
+        method = raw["method_id"]
+        if method not in {"table_projection", "table_aggregate", "table_join"}:
+            return raw["datasets"]["table"], None
+        output = raw["datasets"]["table"]
+        fields = [f for f in output["fields"] if f != "source_utterance_ids"]
+        base = {"utterance_id", "conversation_id", "value_status"}
+        if not base <= set(fields):
+            raise AnalysisContractError("再利用表に基底列がありません。", code="table_carrier_columns")
+        by_uid = {}
+        for row in output["rows"]:
+            uid = row["utterance_id"]
+            if uid in by_uid or row["source_utterance_ids"] != [uid]:
+                raise AnalysisContractError("再利用表の発話対応が不正です。", code="table_carrier_identity")
+            by_uid[uid] = {k: row[k] for k in fields}
+        original = prepared["tables"][0]["table"]["rows"]
+        originals = {r["values"]["utterance_id"]: r for r in original}
+        if method == "table_projection":
+            selection = set(prepared["request"]["parameters"]["row_ids"])
+            expected = {r["values"]["utterance_id"] for r in original if r["row_id"] in selection}
+            if set(by_uid) != expected:
+                raise AnalysisContractError("projection結果が選択と異なります。", code="table_carrier_selection")
+            for uid in originals.keys() - by_uid.keys():
+                by_uid[uid] = {k: originals[uid]["values"].get(k) for k in fields}
+                by_uid[uid]["value_status"] = "excluded"
+        elif set(by_uid) != set(originals):
+            raise AnalysisContractError("結合・集計が発話を失いました。", code="table_carrier_population")
+        rows = [by_uid[uid] for uid in sorted(by_uid)]
+        variables = {}
+        for table in prepared["tables"]:
+            for variable in table["variables"]:
+                if variable["variable_id"] in fields: variables.setdefault(variable["variable_id"], copy.deepcopy(variable))
+        if method == "table_aggregate":
+            actor = {"kind": "code", "actor_id": "table-pilot-1", "step_ids": [method]}
+            definition = {"target_type": "definition", "target_id": "table-pilot-count-1", "version": "1",
+                          "content_hash": fingerprint({"method": method, "parameters": prepared["request"]["parameters"]}),
+                          "hash_domain": "canonical-json-v1"}
+            variables["count"] = {"variable_id": "count", "version": 1, "definition_hash": definition["content_hash"],
+                "value_type": "integer", "scale": "ratio", "unit": "utterance", "value_domain": "observed_indicator",
+                "generation": actor, "validity": "structural_checked", "definition_ref": definition}
+        if set(variables) != set(fields):
+            raise AnalysisContractError("再利用変数が未定義です。", code="table_carrier_variables")
+        parents = [{"target_type": "artifact", "target_id": b["source"]["artifact_id"], "version": "1",
+                    "content_hash": b["content_hash"], "hash_domain": b["content_domain"],
+                    "library_id": b["source"]["library_id"]} for b in prepared["receipt"]["bindings"]]
+        exclusion_reasons = {}
+        for parent in prepared["receipt"]["bindings"]:
+            _snapshot, parent_result, _manifest, _content = self.verified_package(parent["source"]["store_run_id"])
+            prior = parent_result.get("parameters", {}).get("table_pilot_provenance") or {}
+            exclusion_reasons.update(prior.get("exclusion_reasons", {}))
+        for uid in raw["population"]["excluded_ids"]:
+            exclusion_reasons.setdefault(uid, "registered_projection_omission" if
+                method == "table_projection" and originals[uid]["row_id"] not in set(prepared["request"]["parameters"]["row_ids"])
+                and originals[uid]["values"]["value_status"] != "excluded" else "original_input_excluded")
+        exclusion_reasons = {i:exclusion_reasons[i] for i in raw["population"]["excluded_ids"]}
+        provenance = {"version": "table-pilot-1", "method_id": method, "scope": prepared["tables"][0]["scope"],
+                      "exclusion_reasons": exclusion_reasons,
+                      "variables": [variables[k] for k in fields], "parent_refs": parents,
+                      "carrier_hash": fingerprint(rows), "population_hash": fingerprint(raw["population"])}
+        return {"fields": fields, "rows": rows}, provenance
+
+    def table_pilot_output_descriptor(self, run_id):
+        """Verified technical descriptor only. Caller must explicitly supply state."""
+        from .analysis_core import AnalysisContractError, fingerprint
+        snapshot, result, manifest, content = self.verified_package(run_id)
+        from .analysis_method_registry import CONNECTED_METHODS
+        if result.get("method_id") in CONNECTED_METHODS: return self.connected_output_descriptor(run_id)
+        provenance = result.get("parameters", {}).get("table_pilot_provenance")
+        if (not isinstance(provenance, dict) or provenance.get("version") != "table-pilot-1"
+                or result.get("method_id") not in {"table_projection", "table_aggregate", "table_join"}
+                or provenance.get("method_id") != result["method_id"] or result.get("method_version") != "table-pilot-1"
+                or result.get("manifest", {}).get("rows_hash") != fingerprint(result["datasets"]["table"]["rows"])
+                or provenance.get("population_hash") != fingerprint(result["population"])
+                or not isinstance(provenance.get("exclusion_reasons"), dict)
+                or set(provenance["exclusion_reasons"]) != set(result["population"]["excluded_ids"])
+                or any(not isinstance(v, str) or not v for v in provenance["exclusion_reasons"].values())):
+            raise AnalysisContractError("再利用producerは未対応です。", code="table_producer_unsupported")
+        parameters = result["parameters"]
+        with self.connect() as connection:
+            execution = connection.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?",
+                                           (parameters.get("execution_run_id"),)).fetchone()
+            task_row = connection.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                          (parameters.get("task_id"), parameters.get("execution_run_id"))).fetchone()
+            raw_row = connection.execute("SELECT state_json FROM orchestration_results WHERE task_id=? AND run_id=?",
+                                         (parameters.get("task_id"), parameters.get("execution_run_id"))).fetchone()
+        execution = _read_typed_json(execution[0]) if execution else {}
+        task = _read_typed_json(task_row[0]) if task_row else {}
+        receipt = _read_typed_json(raw_row[0]) if raw_row else {}
+        original_raw = {k:v for k,v in result.items() if k != "parameters"}
+        if (execution.get("cancel_requested") or execution.get("status") == "cancelled"
+                or task.get("status") != "succeeded" or task.get("validation_status") != "valid"
+                or task.get("table_store_run_id") != run_id or task.get("method_id") != result["method_id"]
+                or receipt.get("validation_status") != "valid" or receipt.get("result_id") != task.get("result_id")
+                or receipt.get("raw_hash") != fingerprint(original_raw)):
+            raise AnalysisContractError("producerは未検証・停止しています。", code="table_producer_unvalidated")
+        table = self.read_table(run_id, "table")
+        if provenance["carrier_hash"] != fingerprint([r["values"] for r in table["rows"]]):
+            raise AnalysisContractError("再利用carrierが異なります。", code="table_carrier_hash")
+        artifact = next(a for a in manifest["artifacts"] if a["name"] == "tables/table.json")
+        raw_hash = _asset_hash(content["tables/table.json"])
+        return {"asset_key": {"library_id": manifest["library_id"], "store_run_id": run_id,
+                             "artifact_id": artifact["id"], "output_name": "tables/table.json"},
+            "raw_byte_hash": raw_hash, "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                                "schema_hash": _asset_hash(canonical(CONNECTION_TABLE_SCHEMA))},
+            "scope": copy.deepcopy(provenance["scope"]),
+            "producer": {"kind": "code", "actor_id": "table-pilot-1", "step_ids": [result["method_id"]]},
+            "adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+            "meaning": {"definition_refs": [], "description": "Registered utterance table carrier; semantic review unanswered",
+                        "status": "declared", "unit": "utterance"},
+            "contract_id": "gurumoji.analysis-asset-connection", "contract_version": 1,
+            "content_hash": raw_hash, "content_domain": "raw-bytes-v1", "kind": "observation_table",
+            "source_refs": copy.deepcopy(provenance["scope"]["input_refs"]),
+            "method_id": result["method_id"], "method_version": "table-pilot-1",
+            "variables": copy.deepcopy(provenance["variables"]), "parent_refs": copy.deepcopy(provenance["parent_refs"])}
+
+    def revalidate_table_pilot(self, prepared, *, expected_snapshot=None):
+        from .analysis_core import AnalysisContractError
+        request = prepared["request"]
+        checked = self.revalidate_asset_inputs(prepared["receipt"], method_id=prepared.get("method_id", ""),
+                                               **request["bindings"])
+        if checked["decision"] != "eligible":
+            raise AnalysisContractError("表の状態・権限が変わりました。", code="table_policy_changed")
+        current = self.prepare_table_pilot(prepared["method_id"], request, expected_snapshot=expected_snapshot)
+        if current["content_hash"] != prepared["content_hash"]:
+            raise AnalysisContractError("表の内容が変わりました。", code="table_content_changed")
+        return current
+
+    def revalidate_asset_inputs(self, previous, **request):
+        current = self.bind_asset_inputs(**request)
+        fields = ("binding_id", "content_hash", "content_domain", "selection_hash", "schema",
+                  "checked_state_revision", "checked_policy_revision")
+        valid_previous = (isinstance(previous, dict) and previous.get("version") == "analysis-asset-bindings-1"
+                          and previous.get("decision") in {"eligible", "unsupported"}
+                          and previous.get("execution_enabled") is False and previous.get("adoption_performed") is False
+                          and isinstance(previous.get("bindings"), list)
+                          and all(isinstance(b, dict) and set(fields) <= set(b) for b in previous["bindings"]))
+        if (not valid_previous or current.get("decision") not in {"eligible", "unsupported"}
+                or previous.get("context_hash") != current.get("context_hash")
+                or previous.get("input_refs_hash") != current.get("input_refs_hash")
+                or previous.get("parent_checks") != current.get("parent_checks")
+                or [{k: b[k] for k in fields} for b in previous.get("bindings", [])]
+                    != [{k: b[k] for k in fields} for b in current["bindings"]]):
+            current.update(decision="blocked", reason="pre_adoption_revalidation_changed", payloads=[])
+        current["adoption_performed"] = False
+        return current
 
     def _publication_scope(self, run: dict, result: dict, targets: list[str] | None) -> list[str]:
         if run["kind"] in {"milestone_analysis", "autonomous_analysis"}:

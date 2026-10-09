@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import copy
 import os
 import platform
 import re
@@ -1608,6 +1609,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
 def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
     check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
+    *, request_budget=None, task_id="", attempt_id="", raw_usage_callback=None,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1615,11 +1617,18 @@ def call_orchestration_ai_json(
     An ambiguous response in this loop must never silently consume a second call.
     """
     def post_once(url, headers, payload, **kwargs):
-        return ai_client.post_json(
+        if request_budget is not None:
+            kwargs.update(request_budget=request_budget, task_id=task_id, attempt_id=attempt_id)
+        response = ai_client.post_json(
             url, headers, payload, worker_file=AI_HTTP_WORKER_FILE,
             run_subprocess=run_cancellable_subprocess, retry_delays=(),
             timeout=timeout_seconds, **kwargs,
         )
+        # The guard has already checked the strict raw usage. Observe it before
+        # call_ai_json normalizes aliases/missing values for ordinary reporting.
+        if raw_usage_callback is not None:
+            raw_usage_callback(copy.deepcopy(response.get("usage")) if isinstance(response, dict) else None)
+        return response
     return ai_client.call_ai_json(
         provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
         post=post_once, lmstudio_base=lmstudio_base_url,
@@ -1673,8 +1682,23 @@ def analysis_orchestration_service() -> AnalysisOrchestrationService:
                 write_lock=library_write_lock,
                 adapter_version=ORCHESTRATION_ADAPTER_VERSION,
                 on_complete=lambda item_id, run_id: analysis_orchestration_publication_service().finalize(item_id, run_id),
+                memory_manager=make_obsidian_management_agent(),
+                expert_provider=make_expert_agent_registry().freeze,
+                table_store=analysis_archive_store(),
             )
         return _orchestration_services[key]
+
+
+def make_expert_agent_registry():
+    from .method_experts import ExpertCatalog
+    from .services.expert_agents import ExpertAgentRegistry
+    return ExpertAgentRegistry(ExpertCatalog(local_root=DATA_DIRECTORY / "local_knowledge"))
+
+
+def make_obsidian_management_agent():
+    from .services.obsidian_management import ObsidianManagementAgent
+    return ObsidianManagementAgent(registry_factory=vault_registry,
+        publication_status=lambda item_id, run_id: analysis_orchestration_publication_service().status(item_id, run_id))
 
 
 @contextmanager
@@ -1696,6 +1720,33 @@ def analysis_history_item(item_id: str):
 
 def analysis_history_service() -> AnalysisHistoryService:
     return AnalysisHistoryService(connect=analysis_history_connection, find_item=analysis_history_item)
+
+
+def analysis_table_pilot_reader() -> AnalysisOrchestrationService:
+    """Fixed table metadata uses the existing viewer connection, without runtime initialization."""
+    if not DATABASE_FILE.is_file():
+        raise LookupError("固定表の選択に必要な保存済み台帳がありません。")
+    def item(item_id):
+        with analysis_history_connection() as connection:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_items'").fetchone():
+                return None
+            return connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+
+    def source_stamp(row):
+        with analysis_history_connection() as connection:
+            return archive_source_stamp(row, connection=connection)
+
+    reader = AnalysisOrchestrationService(connect=analysis_history_connection, find_item=item,
+        source_fingerprint=source_stamp, snapshot_builder=None, agent_runner=None, method_runner=None,
+        schedule=False, adapter_version=ORCHESTRATION_ADAPTER_VERSION,
+        table_store=AnalysisStore(DATABASE_FILE, analysis_history_connection))
+    # A saved execution budget needs its live process clock authority. Inspect
+    # an existing cached driver; never construct or recover one for a GET.
+    with _orchestration_service_lock:
+        driver = _orchestration_services.get(str(DATABASE_FILE.resolve()))
+        if driver is not None:
+            reader._run_budgets, reader._budget_clock = driver._run_budgets, driver._budget_clock
+    return reader
 
 
 def analysis_slides_service() -> AnalysisSlidesService:
@@ -1961,7 +2012,7 @@ def create_app() -> Flask:
 
     register_orchestration_routes(flask_app, analysis_orchestration_service, prepare_orchestration,
                                   analysis_orchestration_publication_service,
-                                  history_viewer=analysis_history_service)
+                                  history_viewer=analysis_history_service, table_reader=analysis_table_pilot_reader)
     register_analysis_slides_routes(flask_app, analysis_slides_service)
 
     register_speaker_routes(
@@ -2016,6 +2067,8 @@ def create_app() -> Flask:
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
         row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
+        media_directory=lambda: MEDIA_DIRECTORY,
+        path_is_within=path_is_within,
     )
 
     register_analysis_view_routes(

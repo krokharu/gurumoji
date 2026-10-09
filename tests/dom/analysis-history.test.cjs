@@ -3,6 +3,12 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createHarness}=require('./harness.cjs');
+// This ordinary method entry check belongs to the nonvisual publication.
+test('normal method detail opens the existing saved reader explicitly and fences an obsolete item',async t=>{
+ const h=await createHarness();t.after(()=>h.close());h.evaluate('analysisState.itemId="TEST-item";analysisState.data={item:{id:"TEST-item",source_name:"合成会話"},segments:[]};document.getElementById("analysis-history-detail").replaceChildren(...buildMethodDetail({method_id:"synthetic",title:"保存手法",status_label:"未実行",verdict_label:"結果なし"},{},false))');
+ const button=[...h.document.querySelectorAll('#analysis-history-detail button')].find(button=>button.textContent==='保存した実行と根拠を確認');assert(button);const before=h.requests.length;h.click(button);const request=h.requests.findLast(request=>!request.settled&&request.url.includes('/orchestration/viewer?'));assert(request);assert.match(request.url,/\/TEST-item\/analysis\/orchestration\/viewer\?/);h.reply(request,{runs:[],pagination:{total:0,offset:0,has_more:false}});await h.flush();assert.equal(h.requests.length,before+1);assert.equal(h.document.getElementById('analysis-history-dialog').open,true);
+ h.evaluate('closeAnalysisHistoryViewer();analysisState.itemId="OTHER-item";analysisState.data={item:{id:"OTHER-item"},segments:[]}');const count=h.requests.length;h.click(button);assert.equal(h.requests.length,count);assert.equal(h.document.getElementById('analysis-history-dialog').open,false);assert.equal(h.requests.filter(request=>(request.options.method||'GET')!=='GET').length,0);
+});
 const n=(h,id)=>h.document.getElementById(`analysis-history-${id}`);
 const pending=(h,part)=>{const r=h.requests.findLast(x=>!x.settled&&x.url.includes(part));assert(r,part);return r;};
 const run=(id='R1')=>({run_id:id,item_id:'A',status:'completed',question:`Question ${id}`,created_at:'2026-10-04T00:00:00Z',updated_at:'2026-10-04T00:10:00Z',source_revision:2,input_hash:'synthetic-hash',current_summary:'Synthetic integration',summary_annotation_version:1,summary_entry_id:'decision:D1'});
@@ -27,6 +33,19 @@ test('timeline filters, UTF-safe params, numeric past versions and page controls
  h.reply(r,page('R1',{pagination:{offset:0,limit:30,total:45,has_more:true},versions:{initial:0,selected:2,latest:301,available:[0,1,2,301],has_more:true}}));await h.flush();assert.equal(n(h,'version-form').hidden,false);h.click(n(h,'next'));r=pending(h,'/R1/viewer?');assert.match(r.url,/offset=30/);h.reply(r,page('R1',{pagination:{offset:30,limit:30,total:45,has_more:false},versions:{initial:0,selected:2,latest:301,available:[0,1,2,301],has_more:true}}));await h.flush();assert.equal(n(h,'prev').disabled,false);
  // A large history can address a version not in the first dropdown page.
  h.change(n(h,'version-number'),'217');h.click(n(h,'version-form').querySelector('[type="submit"]'));r=pending(h,'/R1/viewer?');assert.match(r.url,/annotation_version=217/);h.reply(r,page('R1',{versions:{initial:0,selected:217,latest:301,available:[0,1,2,301],has_more:true}}));await h.flush();assert.equal(n(h,'version').value,'217');allReads(h);
+});
+
+test('fixed evidence back restores focus and scroll without changing saved run, filters or page',async t=>{
+ const h=await setup(t);h.change(n(h,'role'),'handler');h.change(n(h,'kind'),'result');
+ await openEntry(h);const opener=[...n(h,'detail').querySelectorAll('button')].find(b=>b.textContent.startsWith('固定原文'));
+ n(h,'dialog').scrollTop=420;n(h,'detail').scrollTop=37;opener.focus();h.click(opener);
+ const request=pending(h,'/sources/');h.reply(request,{},404);await h.flush();
+ const back=[...n(h,'source').querySelectorAll('button')].find(b=>b.textContent.includes('選択位置へ戻る'));
+ assert(back);assert.equal(h.document.activeElement,back);
+ n(h,'dialog').scrollTop=990;n(h,'detail').scrollTop=80;const requests=h.requests.length;h.click(back);
+ assert.equal(h.document.activeElement,opener);assert.equal(n(h,'dialog').scrollTop,420);assert.equal(n(h,'detail').scrollTop,37);
+ assert.equal(n(h,'source').hidden,true);assert.equal(n(h,'role').value,'handler');assert.equal(n(h,'kind').value,'result');
+ assert.equal(n(h,'version').value,'2');assert.equal(h.requests.length,requests);assert.match(n(h,'run-title').textContent,/R1/);allReads(h);
 });
 
 test('all API strings remain literal, missing provenance stays unrecorded, and proposal differs from delete',async t=>{

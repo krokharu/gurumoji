@@ -175,6 +175,13 @@
   "analysis_queries.update_library_item"
  ],
  [
+  "/api/library/<item_id>/ai-export.zip",
+  [
+   "POST"
+  ],
+  "export_ai_data_bundle"
+ ],
+ [
   "/api/library/<item_id>/analysis",
   [
    "GET"
@@ -308,6 +315,27 @@
   "analysis_orchestration.status"
  ],
  [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.asset_plan_register"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/notifications/<producer_task_id>",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.asset_plan_notification"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/asset-plans/options",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.asset_plan_options"
+ ],
+ [
   "/api/library/<item_id>/analysis/orchestration/<run_id>/cancel",
   [
    "POST"
@@ -327,6 +355,34 @@
    "GET"
   ],
   "analysis_orchestration.export_markdown"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/human-records",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.human_record_options"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/human-records",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.human_record"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/memory/note",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.memory_note"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/memory/retry",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.retry_memory"
  ],
  [
   "/api/library/<item_id>/analysis/orchestration/<run_id>/publication/retry",
@@ -383,6 +439,20 @@
    "GET"
   ],
   "analysis_slides.templates"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot",
+  [
+   "GET"
+  ],
+  "analysis_orchestration.table_pilot_options"
+ ],
+ [
+  "/api/library/<item_id>/analysis/orchestration/<run_id>/table-pilot/<method_id>",
+  [
+   "POST"
+  ],
+  "analysis_orchestration.table_pilot_register"
  ],
  [
   "/api/library/<item_id>/analysis/orchestration/<run_id>/viewer",

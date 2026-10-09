@@ -63,5 +63,32 @@ class AnalysisPlanBindingTests(unittest.TestCase):
             self.plan(research_protocol={"classification": "confirmatory"})
 
 
+class ConnectionSelectionTests(unittest.TestCase):
+    def test_optional_omission_is_explicit_selected_optional_waits(self):
+        from test_expert_skill_bindings import selection
+        from gurumoji.analysis_core import assess_connection_inputs
+        slot, refs, descriptor = selection()
+        slot.update(required=False, min_items=0)
+        del refs[0]["candidate"]
+        self.assertEqual(assess_connection_inputs(slot, refs, descriptor)["decision"], "needs_input")
+        refs[0].update(selection="omitted", omission_reason="TEST fixed new-plan omission")
+        value = assess_connection_inputs(slot, refs, descriptor)
+        self.assertEqual(value["decision"], "eligible")
+        self.assertFalse(value["execution_enabled"])
+        slot["required"] = True; slot["min_items"] = 1
+        self.assertEqual(assess_connection_inputs(slot, refs, descriptor)["decision"], "rejected")
+
+    def test_descriptor_schema_scope_and_adapter_cannot_be_widened_by_a_slot(self):
+        from test_expert_skill_bindings import selection
+        from gurumoji.analysis_core import assess_connection_inputs
+        for field, value in (("unit", "participant"), ("scope_mode", "section"), ("scope_policy", "selected_subset"),
+                             ("adapter", {"adapter_id": "arbitrary-expression", "version": "1"})):
+            slot, refs, descriptor = selection(); refs[0]["candidate"][field] = value
+            if field == "unit": slot["accept_units"] = [value]
+            if field == "scope_mode": slot["scope_modes"] = [value]
+            if field == "adapter": slot["adapter"] = value
+            self.assertEqual(assess_connection_inputs(slot, refs, descriptor)["decision"], "unsupported")
+
+
 if __name__ == "__main__":
     unittest.main()

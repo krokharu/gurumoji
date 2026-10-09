@@ -39,6 +39,11 @@ class DurableOutputIntegrationTests(unittest.TestCase):
         package = self.client.get(artifact["url"]).get_json()
         self.assertEqual(package["orchestration"]["run"]["run_id"], rid)
         self.assertTrue(package["orchestration"]["raw_results"])
+        reports = [row["raw"]["expert_report"] for row in package["orchestration"]["raw_results"]
+                   if "expert_report" in row["raw"]]
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["expert_id"], support.EXPERT)
+        self.assertEqual(reports[0]["status"], "draft")
 
     def test_completed_statistics_are_not_repeated_after_later_initial_failure(self):
         original = self.service.initial_builder.run_stage
@@ -81,12 +86,17 @@ class DurableOutputIntegrationTests(unittest.TestCase):
         self.assertEqual(state["publication"]["publication_status"], "published", state["publication"])
         self.assertEqual(set(state["publication"]["effective_writers"]), {"input", "orchestrator", "visualization", "research"})
         self.assertTrue(all(v["status"] == "published" for v in state["publication"]["outcomes"].values()))
+        saved = state["publication"]["result_run"]
+        artifact = next(a for a in saved["artifacts"] if a["name"] == "result.json")
+        fixed_bytes = self.client.get(artifact["url"]).data
         with patch.object(app, "call_orchestration_ai_json") as model, \
              patch.object(app, "run_orchestration_method") as method, \
              patch.object(self.service.initial_builder, "run_stage") as initial:
             response = self.client.post(self.url + "/" + rid + "/publication/retry", json={})
             self.assertEqual(response.status_code, 200, response.get_json())
             model.assert_not_called(); method.assert_not_called(); initial.assert_not_called()
+        self.assertEqual(self.state(rid)["publication"]["result_run"]["id"], saved["id"])
+        self.assertEqual(self.client.get(artifact["url"]).data, fixed_bytes)
 
     def test_publication_guard_reads_uncommitted_revision_in_same_connection(self):
         item = app.library_row("content")

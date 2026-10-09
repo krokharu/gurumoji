@@ -963,6 +963,441 @@ def _crosstab_rows(
     return result, row_values, column_values, matrix
 
 
+def _table_pilot_error(code: str, field: str = "") -> None:
+    from .analysis_core import AnalysisContractError
+    raise AnalysisContractError("Table pilot contract failed: " + code,
+                                code="table_pilot_" + code, field=field)
+
+
+def _table_pilot_json(value: Any) -> bytes:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError):
+        _table_pilot_error("json_value")
+
+
+def _table_pilot_names(value: Any, *, nonempty: bool = False) -> bool:
+    return (isinstance(value, list) and (bool(value) or not nonempty)
+            and all(isinstance(v, str) and bool(v.strip()) for v in value)
+            and len(value) == len(set(value)))
+
+
+def _table_pilot_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if type(value) is bool:
+        return "boolean"
+    if type(value) is int:
+        return "integer"
+    if type(value) is float and math.isfinite(value):
+        return "number"
+    if isinstance(value, str):
+        _table_pilot_json(value)
+        return "string"
+    _table_pilot_error("primitive_value")
+
+
+def _table_pilot_input(wrapper: Any) -> dict[str, Any]:
+    """Validate local table structure; frozen hashes/permissions belong to runtime."""
+    if not isinstance(wrapper, dict) or set(wrapper) != {"table", "variables", "scope"}:
+        _table_pilot_error("input_shape")
+    _table_pilot_json(wrapper)
+    table, variables, scope = wrapper["table"], wrapper["variables"], wrapper["scope"]
+    table_keys = {"format", "schema_version", "dataset_id", "run_id", "input_snapshot_id",
+                  "source_revision", "analysis_revision", "fields", "columns", "row_count", "rows"}
+    if (not isinstance(table, dict) or set(table) != table_keys
+            or table["format"] != "gurumoji.analysis-table"
+            or type(table["schema_version"]) is not int or table["schema_version"] != 1
+            or any(not isinstance(table[k], str) or not table[k].strip()
+                   for k in ("dataset_id", "run_id", "input_snapshot_id"))
+            or any(type(table[k]) is not int or table[k] < 0
+                   for k in ("source_revision", "analysis_revision", "row_count"))
+            or not _table_pilot_names(table["fields"], nonempty=True)
+            or not isinstance(table["rows"], list) or table["row_count"] != len(table["rows"])):
+        _table_pilot_error("table_shape")
+    base = {"utterance_id", "conversation_id", "value_status"}
+    if not base <= set(table["fields"]) or "source_utterance_ids" in table["fields"]:
+        _table_pilot_error("identity_columns")
+    rows, native_ids, utterance_ids, column_names = [], set(), set(), set(table["fields"])
+    statuses = {"observed", "excluded", "missing", "unprocessed", "unknown"}
+    for row in table["rows"]:
+        if (not isinstance(row, dict) or set(row) != {"row_id", "values"}
+                or not isinstance(row["row_id"], str) or not row["row_id"].strip()
+                or row["row_id"] in native_ids or not isinstance(row["values"], dict)
+                or any(not isinstance(k, str) or not k.strip() for k in row["values"])):
+            _table_pilot_error("row_shape")
+        values = row["values"]
+        if (not base <= values.keys()
+                or any(not isinstance(values[k], str) or not values[k].strip()
+                       for k in ("utterance_id", "conversation_id"))
+                or not isinstance(values["value_status"], str) or values["value_status"] not in statuses):
+            _table_pilot_error("row_identity_status")
+        if values["utterance_id"] in utterance_ids:
+            _table_pilot_error("duplicate_utterance")
+        for value in values.values():
+            _table_pilot_value_type(value)
+        native_ids.add(row["row_id"]); utterance_ids.add(values["utterance_id"])
+        column_names.update(values); rows.append(row)
+    if not rows:
+        _table_pilot_error("not_computable")
+    if "source_utterance_ids" in column_names:
+        _table_pilot_error("reserved_column")
+    columns = table["columns"]
+    if not isinstance(columns, list):
+        _table_pilot_error("columns")
+    names = []
+    for column in columns:
+        if (not isinstance(column, dict)
+                or set(column) != {"name", "observed_types", "absent_count", "null_count"}
+                or not isinstance(column["name"], str) or column["name"] not in column_names
+                or any(type(column[k]) is not int or column[k] < 0
+                       for k in ("absent_count", "null_count"))):
+            _table_pilot_error("columns")
+        name = column["name"]; names.append(name)
+        values = [r["values"] for r in rows]
+        if (column["observed_types"] != sorted({_table_pilot_value_type(r[name]) for r in values if name in r})
+                or column["absent_count"] != sum(name not in r for r in values)
+                or column["null_count"] != sum(name in r and r[name] is None for r in values)):
+            _table_pilot_error("column_counts")
+    if len(names) != len(set(names)) or set(names) != column_names:
+        _table_pilot_error("columns")
+    variable_keys = {"variable_id", "version", "definition_hash", "value_type", "scale", "unit",
+                     "value_domain", "generation", "validity", "definition_ref"}
+    if not isinstance(variables, list):
+        _table_pilot_error("variables")
+    by_variable = {}
+    from .analysis_core import _connection_hash, validate_connection_actor
+    for variable in variables:
+        if (not isinstance(variable, dict) or set(variable) != variable_keys
+                or not isinstance(variable["variable_id"], str) or variable["variable_id"] not in column_names
+                or variable["variable_id"] in by_variable
+                or type(variable["version"]) is not int or variable["version"] < 1
+                or not isinstance(variable["value_type"], str)
+                or variable["value_type"] not in {"string", "number", "integer", "boolean"}
+                or not isinstance(variable["scale"], str) or variable["scale"] not in {"nominal", "ordinal", "interval", "ratio"}
+                or variable["unit"] != "utterance"
+                or not isinstance(variable["value_domain"], str) or not variable["value_domain"].strip()
+                or not isinstance(variable["validity"], str)
+                or variable["validity"] not in {"candidate", "structural_checked", "human_reviewed", "unknown"}
+                or not isinstance(variable["definition_ref"], dict)
+                or not _connection_hash(variable["definition_hash"])
+                or variable["definition_hash"] != variable["definition_ref"].get("content_hash")):
+            _table_pilot_error("variable")
+        reference = variable["definition_ref"]
+        if (not {"target_type", "target_id", "version", "content_hash", "hash_domain"} <= reference.keys()
+                or not set(reference) <= {"target_type", "target_id", "version", "content_hash", "hash_domain", "library_id", "locator"}
+                or any(not isinstance(reference[k], str) or not reference[k].strip()
+                       for k in ("target_type", "target_id", "version", "hash_domain"))):
+            _table_pilot_error("variable_definition")
+        validate_connection_actor(variable["generation"])
+        by_variable[variable["variable_id"]] = variable
+    if set(by_variable) != column_names:
+        _table_pilot_error("variable_membership")
+    allowed = {"string": {str}, "number": {int, float}, "integer": {int}, "boolean": {bool}}
+    for row in rows:
+        values = row["values"]; status = values["value_status"]
+        for name, variable in by_variable.items():
+            value = values.get(name)
+            if value is not None and type(value) not in allowed[variable["value_type"]]:
+                _table_pilot_error("variable_value_type", name)
+            if name not in base:
+                if status == "observed" and (name not in values or value is None):
+                    _table_pilot_error("observed_missing", name)
+                if status in {"missing", "unprocessed", "unknown"} and value is not None:
+                    _table_pilot_error("nonobserved_value", name)
+    scope_keys = {"scope_id", "manifest_hash", "mode", "input_refs", "conversation_ids", "member_ids", "context_ids"}
+    if (not isinstance(scope, dict) or set(scope) != scope_keys or scope["mode"] != "dataset"
+            or any(not isinstance(scope[k], str) or not scope[k].strip() for k in ("scope_id", "manifest_hash"))
+            or not isinstance(scope["input_refs"], list) or not scope["input_refs"]
+            or not _table_pilot_names(scope["conversation_ids"], nonempty=True)
+            or not _table_pilot_names(scope["member_ids"]) or not _table_pilot_names(scope["context_ids"])
+            or any(r["values"]["conversation_id"] not in scope["conversation_ids"] for r in rows)):
+        _table_pilot_error("scope")
+    _table_pilot_json(scope)
+    return {"table": table, "rows": rows, "columns": names, "scope": scope}
+
+
+def _table_pilot_population(rows: list[dict], measured: list[str], omitted=()) -> dict:
+    groups = {key: set() for key in ("included_ids", "excluded_ids", "missing_ids",
+                                    "unprocessed_ids", "unknown_ids", "observed_zero_ids")}
+    groups["excluded_ids"].update(omitted)
+    for row in rows:
+        values = row["values"]; uid = values["utterance_id"]; status = values["value_status"]
+        if status == "excluded":
+            groups["excluded_ids"].add(uid)
+        else:
+            groups["included_ids"].add(uid)
+            if status in {"missing", "unprocessed", "unknown"}:
+                groups[status + "_ids"].add(uid)
+            elif any(type(values.get(k)) in {int, float} and values[k] == 0 for k in measured):
+                groups["observed_zero_ids"].add(uid)
+    return {**{key: sorted(ids) for key, ids in groups.items()}, "denominator": len(groups["included_ids"])}
+
+
+def _table_pilot_finish(fields: list[str], rows: list[dict], population: dict, *, zero_cells=False) -> dict:
+    if not rows or not population["denominator"]:
+        _table_pilot_error("not_computable")
+    originals = set(population["included_ids"]) | set(population["excluded_ids"])
+    if not _table_pilot_names(fields, nonempty=True):
+        _table_pilot_error("output_fields")
+    for row in rows:
+        sources = row.get("source_utterance_ids")
+        if (set(row) != set(fields) or not _table_pilot_names(sources)
+                or not set(sources) <= originals
+                or (not sources and not (zero_cells and type(row.get("count")) is int and row["count"] == 0))):
+            _table_pilot_error("output_sources")
+    result = {"fields": fields, "rows": rows, "population": population}
+    if len(_table_pilot_json(result)) > 131072:
+        _table_pilot_error("byte_limit")
+    return result
+
+
+def run_table_pilot(method_id: str, tables: list[dict], parameters: dict) -> dict:
+    """Opt-in table-pilot-1 pure calculations; never resolve, execute AI, or adopt.
+
+    Runtime supplies complete frozen native rows and owns snapshot/hash/permission
+    validation and immutable population persistence. Scope evidence IDs are not
+    interpreted as utterance IDs here. Empty explicit selections never mean all.
+    """
+    parameter_keys = {
+        "table_projection": {"columns", "row_ids"},
+        "table_aggregate": {"value_column", "status_column", "operation", "group_by", "unit"},
+        "table_join": {"key"},
+        "table_frequency": {"value_column", "status_column"},
+        "table_crosstab": {"row_column", "column_column", "status_column"},
+    }
+    if not isinstance(method_id, str) or method_id not in parameter_keys:
+        _table_pilot_error("method")
+    if not isinstance(parameters, dict) or set(parameters) != parameter_keys[method_id]:
+        _table_pilot_error("parameters")
+    if not isinstance(tables, list) or len(tables) != (2 if method_id == "table_join" else 1):
+        _table_pilot_error("input_cardinality")
+    inputs = [_table_pilot_input(table) for table in tables]
+    source = inputs[0]; rows = source["rows"]; base = {"utterance_id", "conversation_id", "value_status"}
+    if method_id == "table_projection":
+        fields, selected = parameters["columns"], parameters["row_ids"]
+        if (not _table_pilot_names(fields, nonempty=True) or not base <= set(fields)
+                or not set(fields) <= set(source["columns"]) or not _table_pilot_names(selected)):
+            _table_pilot_error("projection")
+        by_id = {row["row_id"]: row for row in rows}
+        if not set(selected) <= by_id.keys():
+            _table_pilot_error("selector_id")
+        chosen = [by_id[key] for key in selected]
+        omitted = [r["values"]["utterance_id"] for r in rows if r["row_id"] not in set(selected)]
+        population = _table_pilot_population(chosen, [k for k in fields if k not in base], omitted)
+        output = [{**{key: row["values"].get(key) for key in fields},
+                   "source_utterance_ids": [row["values"]["utterance_id"]]} for row in chosen]
+        return _table_pilot_finish([*fields, "source_utterance_ids"], output, population)
+    if method_id == "table_join":
+        if parameters["key"] != "utterance_id":
+            _table_pilot_error("join_key")
+        right = inputs[1]
+        populations = [_table_pilot_population(i["rows"], [k for k in i["columns"] if k not in base]) for i in inputs]
+        left_ids = {r["values"]["utterance_id"] for r in rows}
+        right_rows = {r["values"]["utterance_id"]: r["values"] for r in right["rows"]}
+        shared_populations = [{k: v for k, v in population.items() if k != "observed_zero_ids"}
+                              for population in populations]
+        if (_table_pilot_json(source["scope"]) != _table_pilot_json(right["scope"])
+                or shared_populations[0] != shared_populations[1] or left_ids != right_rows.keys()):
+            _table_pilot_error("join_population_scope")
+        if (set(source["columns"]) & set(right["columns"])) - base:
+            _table_pilot_error("join_collision")
+        fields = [*source["columns"], *[k for k in right["columns"] if k not in base]]
+        output = []
+        for row in rows:
+            left = row["values"]; other = right_rows[left["utterance_id"]]
+            if any(left[k] != other[k] for k in base):
+                _table_pilot_error("join_identity_status")
+            output.append({**{k: left.get(k) if k in source["columns"] else other.get(k) for k in fields},
+                           "source_utterance_ids": [left["utterance_id"]]})
+        # Zero belongs to a measured variable, unlike shared inclusion/status.
+        # Recompute it from the joined columns; an aggregate indicator1 must not
+        # erase the original value0 or turn boolean False into numeric zero.
+        population = _table_pilot_population([{"values": row} for row in output],
+                                             [k for k in fields if k not in base])
+        return _table_pilot_finish([*fields, "source_utterance_ids"], output, population)
+    measured = ([parameters["row_column"], parameters["column_column"]]
+                if method_id == "table_crosstab" else [parameters["value_column"]])
+    if (parameters["status_column"] != "value_status"
+            or any(not isinstance(k, str) or k not in source["columns"] for k in measured)):
+        _table_pilot_error("measurement_columns")
+    population = _table_pilot_population(rows, measured)
+    observed = [r["values"] for r in rows if r["values"]["value_status"] == "observed"]
+    if not observed:
+        _table_pilot_error("not_computable")
+    if method_id == "table_aggregate":
+        if (parameters["operation"], parameters["group_by"], parameters["unit"]) != ("count", "utterance_id", "utterance"):
+            _table_pilot_error("aggregate_parameters")
+        output = [{"utterance_id": r["values"]["utterance_id"], "conversation_id": r["values"]["conversation_id"],
+                   "count": 1 if r["values"]["value_status"] == "observed" else None,
+                   "value_status": r["values"]["value_status"], "source_utterance_ids": [r["values"]["utterance_id"]]}
+                  for r in rows]
+        return _table_pilot_finish(["utterance_id", "conversation_id", "count", "value_status", "source_utterance_ids"], output, population)
+    categories = {}
+    def category(value):
+        key = _table_pilot_json([_table_pilot_value_type(value), value]).decode("utf-8")
+        categories[key] = value
+        return key
+    if method_id == "table_frequency":
+        sources = defaultdict(list)
+        for row in observed:
+            sources[category(row[measured[0]])].append(row["utterance_id"])
+        output = [{"category": categories[key], "count": len(ids), "source_utterance_ids": sorted(ids)}
+                  for key, ids in sorted(sources.items())]
+        return _table_pilot_finish(["category", "count", "source_utterance_ids"], output, population)
+    prepared = [{"segment_id": row["utterance_id"], "row": category(row[measured[0]]),
+                 "column": category(row[measured[1]])} for row in observed]
+    cells, _row_values, _column_values, _matrix = _crosstab_rows(
+        prepared, table_id="table-pilot", table_label="table-pilot", group_variable=measured[0],
+        group_accessor=lambda r: r["row"], column_variable=measured[1], column_accessor=lambda r: r["column"])
+    output = [{"row_value": categories[cell["row_id"]], "column_value": categories[cell["column_value"]],
+               "count": cell["count"], "source_utterance_ids": sorted(cell["segment_ids"])} for cell in cells]
+    return _table_pilot_finish(["row_value", "column_value", "count", "source_utterance_ids"], output, population, zero_cells=True)
+
+
+def run_connected_table(method_id, tables, parameters):
+    """Fixed v2 unit transformations. Values and source identities stay separate.
+
+    The Store supplies verified complete rows and adoption references. This pure
+    kernel does not resolve human claims or assign participant identities.
+    """
+    from .analysis_core import fingerprint
+    def require(ok, code):
+        if not ok: _table_pilot_error("v2_" + code)
+    require(isinstance(tables, list) and len(tables) == (2 if method_id == "unit_join" else 1), "cardinality")
+    source = tables[0]; unit = source["unit"]; rows = source["rows"]
+    variables = {v["variable_id"]: v for v in source["variables"]}
+    sources = source["sources"]
+    require(rows and len({r["unit_id"] for r in rows}) == len(rows), "identity")
+    require(all(r["value_status"] in {"observed", "missing", "unprocessed", "unknown", "excluded"} and
+        r["unit_id"] in sources and sources[r["unit_id"]] for r in rows), "status_sources")
+    fields = list(source["fields"])
+    selected = rows
+    if method_id == "unit_pool":
+        require(source.get("group_source_set",{}).get("version") == "group-source-set-1"
+            and set(parameters) == {"columns"} and set(parameters["columns"]) == set(fields), "pool_prepared")
+    elif method_id == "theme_evidence_table":
+        require(set(parameters) == {"theme_id"} and parameters["theme_id"] == source["theme_id"], "theme")
+    elif method_id == "unit_projection":
+        columns = parameters["columns"]; ids = parameters["unit_ids"]
+        require(_table_pilot_names(columns, nonempty=True) and {"unit_id", "conversation_id", "value_status"} <= set(columns)
+            and set(columns) <= set(fields) and _table_pilot_names(ids, nonempty=True)
+            and set(ids) <= {r["unit_id"] for r in rows}, "projection")
+        selected = [r for r in rows if r["unit_id"] in set(ids)]
+        # Omitted units remain explicit carriers and cannot silently become zero.
+        rows = [{**{k:r.get(k) for k in columns}, "value_status": r["value_status"] if r in selected else "excluded"} for r in rows]
+        fields = columns; variables = {k:variables[k] for k in fields}
+    elif method_id == "unit_aggregate":
+        column = parameters["value_column"]; operation = parameters["operation"]; target = parameters["unit"]
+        require(column in variables and column not in {"unit_id", "conversation_id", "value_status", "speaker_id"}
+            and operation in {"count", "sum", "mean"} and target in {"conversation_speaker", "conversation", "participant"}, "aggregate")
+        require(unit == "utterance", "aggregate_source_unit")
+        definition = variables[column]
+        if operation != "count":
+            require(definition["value_type"] in {"integer", "number"} and definition["scale"] in {"interval", "ratio"}, "scale")
+        mapping = parameters["participant_mapping"]
+        require(mapping is None if target != "participant" else isinstance(mapping, dict), "participant_mapping")
+        if target == "participant":
+            require(set(mapping) == {"actor", "record_ref", "assignments"} and mapping["actor"].get("kind") == "researcher"
+                and isinstance(mapping["actor"].get("actor_id"), str) and mapping["record_ref"] in source["definition_adoption_refs"], "participant_adoption")
+            require(isinstance(mapping["assignments"], list), "participant_assignments")
+            assigned = {}
+            for a in mapping["assignments"]:
+                require(isinstance(a, dict) and set(a) == {"conversation_id", "speaker_id", "participant_id"}
+                    and all(isinstance(v, str) and v for v in a.values()), "participant_assignment")
+                key = (a["conversation_id"], a["speaker_id"])
+                require(key not in assigned, "participant_ambiguous"); assigned[key] = a["participant_id"]
+        grouped = defaultdict(list)
+        for row in rows:
+            cid = row["conversation_id"]
+            if target != "conversation":
+                speaker = row.get("speaker_id")
+                require(isinstance(speaker, str) and speaker and "|" not in speaker, "speaker_unmapped")
+            if target == "participant":
+                require((cid, speaker) in assigned, "participant_unmapped")
+                key = (assigned[cid, speaker],)
+            else: key = (cid, speaker) if target == "conversation_speaker" else (cid,)
+            grouped[key].append(row)
+        output = []; new_sources = {}; denominators = {}
+        for key, members in sorted(grouped.items()):
+            uid = target + ":" + fingerprint([source["input_hashes"], key]).removeprefix("sha256:")
+            included = [r for r in members if r["value_status"] != "excluded"]
+            observed = [r for r in included if r["value_status"] == "observed"]
+            for r in observed: require(type(r.get(column)) in {int, float} and math.isfinite(r[column]) if operation != "count" else r.get(column) is not None, "observed_value")
+            value = (len(observed) if operation == "count" else sum(r[column] for r in observed)) if observed else None
+            if operation == "mean" and observed: value /= len(observed)
+            status = "observed" if observed else ("excluded" if not included else
+                "unprocessed" if any(r["value_status"] == "unprocessed" for r in included) else
+                "unknown" if any(r["value_status"] == "unknown" for r in included) else "missing")
+            out = {"unit_id": uid, "conversation_id": key[0] if target != "participant" else ",".join(sorted({r["conversation_id"] for r in members})),
+                   "value_status": status, "value": value}
+            if target == "conversation_speaker": out["speaker_id"] = key[1]
+            if target == "participant": out["participant_id"] = key[0]
+            output.append(out); new_sources[uid] = sorted({s for r in members for s in sources[r["unit_id"]]})
+            denominators[uid] = {"included": len(included), "observed": len(observed),
+                **{s:sum(r["value_status"] == s for r in members) for s in ("missing", "unprocessed", "unknown", "excluded")}}
+        rows = output; sources = new_sources; unit = target; fields = list(rows[0])
+        variables = {k:{**definition, "variable_id": k, "unit": unit,
+            "value_type": "integer" if k == "value" and operation == "count" else "number" if k == "value" else "string",
+            "scale": "ratio" if k == "value" and operation == "count" else definition["scale"] if k == "value" else "nominal"} for k in fields}
+    elif method_id == "unit_join":
+        right = tables[1]; keys = parameters["keys"]
+        require(_table_pilot_names(keys, nonempty=True) and "unit_id" in keys and set(keys) <= set(fields)
+            and set(keys) <= set(right["fields"]) and unit == right["unit"] and source["scope"] == right["scope"], "join_scope_keys")
+        def keyed(values):
+            result = {}
+            for row in values:
+                require(all(k in row and row[k] is not None and row[k] != "" for k in keys), "join_null_key")
+                key = tuple(row[k] for k in keys)
+                require(key not in result, "join_ambiguous"); result[key] = row
+            return result
+        left_index = keyed(rows); right_index = keyed(right["rows"])
+        require(left_index.keys() == right_index.keys(), "join_partial")
+        base = {"unit_id", "conversation_id", "speaker_id", "participant_id", "value_status"}
+        require(not (set(fields) & set(right["fields"])) - base, "join_collision")
+        output = []
+        for key, left in left_index.items():
+            other = right_index[key]
+            require(all(left[k] == other[k] for k in base & left.keys() & other.keys())
+                and sources[left["unit_id"]] == right["sources"][other["unit_id"]], "join_identity")
+            output.append({**left, **other})
+        rows = output; fields = list(dict.fromkeys(fields + right["fields"]))
+        variables.update({v["variable_id"]:v for v in right["variables"]})
+    elif method_id == "unit_correlation":
+        x, y = parameters["x_column"], parameters["y_column"]; statistic = parameters["statistic"]
+        require(x != y and x in variables and y in variables and statistic in {"pearson", "spearman"}, "correlation_columns")
+        require(all(variables[k]["value_type"] in {"integer", "number"} and variables[k]["scale"] in
+            ({"interval", "ratio"} if statistic == "pearson" else {"ordinal", "interval", "ratio"}) for k in (x, y)), "correlation_scale")
+        require(all(all(type(r.get(k)) in {int,float} and math.isfinite(r[k]) for k in (x,y))
+                    for r in rows if r["value_status"] == "observed"), "correlation_observed_missing")
+        pairs = [r for r in rows if r["value_status"] == "observed" and all(type(r.get(k)) in {int, float} and math.isfinite(r[k]) for k in (x,y))]
+        coefficient = None; status = "not_computable"
+        if len(pairs) >= 3 and all(len({r[k] for r in pairs}) > 1 for k in (x,y)):
+            try: from scipy import stats
+            except ImportError: status = "unavailable"
+            else:
+                function = stats.pearsonr if statistic == "pearson" else stats.spearmanr
+                coefficient = float(function([r[x] for r in pairs], [r[y] for r in pairs]).statistic); status = "computed"
+        return {"fields": ["statistic", "coefficient", "n", "status", "source_utterance_ids"],
+                "rows": [{"statistic":statistic,"coefficient":coefficient,"n":len(pairs),"status":status,
+                          "source_utterance_ids": sorted({s for r in pairs for s in sources[r["unit_id"]]})}],
+                "unit_contract": {**{k:source[k] for k in ("input_hashes", "definition_adoption_refs", "scope")},
+                    **({"group_source_set":source["group_source_set"]} if "group_source_set" in source else {}),
+                    "source_utterances":source.get("source_utterances",{}),
+                    "version":"unit-table-2", "unit":"report_claim", "sources":sources, "variables":[],
+                    "denominators":source["denominators"]}, "population": {"denominator":len(rows),"calculation_denominator":len(pairs)}}
+    else: require(False, "method")
+    return {"fields": fields, "rows":rows, "population": {"denominator":sum(r["value_status"] != "excluded" for r in rows),
+        "calculation_denominator":sum(r["value_status"] == "observed" for r in rows)},
+        "unit_contract": {"version":"unit-table-2", "unit":unit, "input_hashes":source["input_hashes"],
+            **({"group_source_set":source["group_source_set"]} if "group_source_set" in source else {}),
+            "source_utterances":source.get("source_utterances",{}),
+            "definition_adoption_refs":source["definition_adoption_refs"], "sources":sources,
+            "denominators":denominators if method_id == "unit_aggregate" else source["denominators"],
+            "variables":list(variables.values()), "scope":source["scope"]}}
+
+
 def _test_result_base(
     family: str,
     test: str,

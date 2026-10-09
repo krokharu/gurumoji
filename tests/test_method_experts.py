@@ -435,5 +435,35 @@ class ExpertApiTests(unittest.TestCase):
         self.assertIn("exp-thematic-analysis", result["algorithms"]["experts"])
 
 
+class PinnedSkillCatalogTests(unittest.TestCase):
+    """Load this class alone for CPU review; legacy classes import the app."""
+
+    def test_actual_registered_body_contains_complete_TA_output_and_human_pending(self):
+        import tempfile
+        from pathlib import Path
+        from gurumoji.method_experts import ExpertCatalog
+        with tempfile.TemporaryDirectory() as task_dir:
+            catalog = ExpertCatalog(root=Path(__file__).resolve().parents[1] / "docs/program-vault",
+                                    local_root=Path(task_dir) / "local")
+            value = catalog.skill_context("exp-thematic-analysis")
+            note = next(row for row in value["sources"] if row["note_id"] == "skill-thematic-candidate-evidence")
+            output = next(part["text"] for part in note["parts"] if part["id"] == "tce-output")
+            for field in ("CandidateContent", "ThemeContent", "HumanRecord", "Receipt", "UnreadSets"):
+                self.assertIn(field, output)
+            self.assertEqual(value["human_adoption"], "unanswered")
+            self.assertFalse(value["production_default_enabled"])
+            self.assertFalse(any("20-Literature/" in path for path in catalog.read_log))
+
+    def test_registered_reader_rejects_foreign_scope_without_note_discovery(self):
+        import tempfile
+        from pathlib import Path
+        from gurumoji.method_experts import ExpertCatalog, SkillContextError
+        with tempfile.TemporaryDirectory() as task_dir:
+            catalog = ExpertCatalog(root=Path(__file__).resolve().parents[1] / "docs/program-vault",
+                                    local_root=Path(task_dir) / "local")
+            with self.assertRaises(SkillContextError):
+                catalog.read_skill_note("exp-thematic-analysis", "expert-correlation-agent-contract")
+            self.assertEqual(catalog.read_log, [])
+
 if __name__ == "__main__":
     unittest.main()

@@ -114,6 +114,9 @@ function buildMethodDetail(method, overview, compact) {
     header.append(metrics);
   }
   header.append(analysisElement('p', 'analysis-caption', `分析単位：${method.analysis_unit || '—'}`));
+  const context=captureAnalysisContext(),saved=analysisElement('button','secondary-button','保存した実行と根拠を確認');saved.type='button';
+  saved.addEventListener('click',()=>{if(isAnalysisContextCurrent(context))openAnalysisHistoryViewer({itemId:context.itemId});});
+  header.append(saved);
   nodes.push(header);
 
   const expert = (overview.experts || {})[method.expert_id];

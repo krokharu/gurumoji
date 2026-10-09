@@ -78,6 +78,201 @@ METHODS = [
 ]
 SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_classification", "autonomous_analysis"}
 
+
+def connection_method_descriptor(method_id: str) -> dict | None:
+    """Metadata for existing outputs, never a new executor or typed adapter.
+
+    The 22 saved-method names and eight Handler tools remain their authorities.
+    Native statistical results are tables; the proposed Asset wrapper/resolver
+    is not implemented merely because its logical kind is known.
+    """
+    from .services.analysis_orchestration_methods import (
+        STATISTICAL_TOOLS, STATISTICAL_TOOL_VERSION,
+    )
+    from .analysis_core import fingerprint
+    if method_id in CONNECTED_METHODS:
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        table = {"kind": "observation_table", "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                 "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)}, "adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+                 "content_domain": "raw-bytes-v1", "actor_kinds": ["code", "system"], "supported": True}
+        qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
+        native=connection_method_descriptor("pearson")
+        native_snapshot={"kind":"snapshot","schema":native["native_input_schema"],
+            "adapter":native["native_adapter"],"unit":"utterance","supported":True,
+            "actor_kinds":["system","code"],"content_domain":"canonical-json-v1"}
+        contracts = [connection_kind_contract("claim_set")] if method_id == "theme_evidence_table" else (
+            [connection_kind_contract("claim_set"),qualitative_bundle_contract(),connection_kind_contract("relation_graph"),
+             connection_kind_contract("snapshot"),native_snapshot,table] if qualitative else [table])
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "connected-assets-2", "output_names": ["table"],
+                "logical_output_kinds": ["claim_set" if qualitative else "observation_table"], "input_contracts": contracts,
+                "native_input_schema": contracts[0]["schema"], "native_adapter": contracts[0]["adapter"],
+                "original_source_types": ["snapshot"] if qualitative else [], "units": ["utterance"] if method_id == "unit_pool" else ["dataset_claim"] if method_id == "theme_evidence_table" else
+                    ["utterance", "conversation_speaker", "conversation", "participant"]+(["dataset_claim","report_claim"] if qualitative else []),
+                "reference_roles": ["data_input","selection_basis","evidence_context"] if qualitative else ["data_input"], "input_actor_kinds": ["ai", "code", "system","researcher"] if qualitative else ["ai","code","system"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial", "purposes": ["exploratory"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": qualitative}
+    if method_id == "thematic":
+        contracts = [connection_kind_contract(k) for k in
+                     ("claim_set", "relation_graph", "event_sequence", "embedding_matrix", "snapshot")]
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "thematic_candidates_v1",
+                "output_names": ["thematic_candidates"], "logical_output_kinds": ["claim_set"],
+                "native_adapter": contracts[0]["adapter"], "native_input_schema": contracts[0]["schema"],
+                "input_contracts": contracts, "original_source_types": ["snapshot"],
+                "units": ["dataset_claim", "utterance", "event", "vector_row"],
+                "reference_roles": ["evidence_context"], "input_actor_kinds": ["ai", "code", "system", "researcher"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial",
+                "purposes": ["exploratory", "qualitative_compare"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": True}
+    if method_id in TABLE_PILOT_METHODS:
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": "table-pilot-1",
+                "output_names": ["table"], "logical_output_kinds": ["observation_table"],
+                "native_adapter": {"adapter_id": "analysis-store-table", "version": "1"},
+                "native_input_schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                                        "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)},
+                "original_source_types": [], "units": ["utterance"], "reference_roles": ["data_input"],
+                "input_actor_kinds": ["system", "code"], "scope_modes": ["dataset"],
+                "scope_policy": "all_included_initial", "purposes": ["exploratory", "descriptive"],
+                "typed_asset_adapter_supported": True, "native_adapter_supported": False}
+    registered = {key: outputs for key, _, outputs in METHODS}
+    if method_id in STATISTICAL_TOOLS:
+        return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+                "registry_version": REGISTRY_VERSION, "method_version": STATISTICAL_TOOL_VERSION,
+                "output_names": [STATISTICAL_TOOLS[method_id][0]],
+                "logical_output_kinds": ["observation_table"],
+                "native_adapter": {"adapter_id": "statistical-tools", "version": STATISTICAL_TOOL_VERSION},
+                "native_input_schema": {"schema_id": "orchestration-initial-snapshot", "version": 1,
+                    "schema_hash": fingerprint({"input_hash": "string", "source_revision": "integer",
+                        "analysis_revision": "integer", "analysis": "object"})},
+                "original_source_types": ["snapshot"], "units": ["utterance"],
+                "reference_roles": ["data_input"], "input_actor_kinds": ["system", "code"],
+                "scope_modes": ["dataset"], "scope_policy": "all_included_initial",
+                "purposes": ["exploratory", "descriptive"],
+                "typed_asset_adapter_supported": False, "native_adapter_supported": True}
+    if method_id not in registered:
+        return None
+    return {"metadata_version": "analysis-connections-1", "method_id": method_id,
+            "registry_version": REGISTRY_VERSION, "output_names": list(registered[method_id]),
+            "logical_output_kinds": [], "native_adapter": None,
+            "original_source_types": [], "units": [], "scope_modes": [], "purposes": [],
+            "reference_roles": [], "input_actor_kinds": [],
+            "typed_asset_adapter_supported": False, "native_adapter_supported": False}
+
+
+def connection_kind_contract(kind):
+    """Fixed identities, including metadata-only kinds with no executor."""
+    from .analysis_core import fingerprint, thematic_candidates_schema
+    from .analysis_store import CONNECTION_TABLE_SCHEMA
+    contracts = {
+        "claim_set": ("gurumoji.thematic-candidate", thematic_candidates_schema(), "thematic-candidates", "dataset_claim", True),
+        "relation_graph": ("gurumoji.manual-interaction-graph", {"table": CONNECTION_TABLE_SCHEMA,
+            "endpoints": ["target_segment_id", "source_segment_id"], "direction": "target_to_source",
+            "relation": "manual_annotation", "context": "context_segment_ids"}, "manual-interaction-graph", "utterance", True),
+        "event_sequence": ("gurumoji.event-sequence", {"required": ["conversation_id", "order", "valid_time", "observed", "missing_intervals"]}, "event-sequence", "event", False),
+        "embedding_matrix": ("gurumoji.embedding-matrix", {"required": ["source_rows", "dimensions", "encoder_revision", "input_kind", "space_id"]}, "embedding-matrix", "vector_row", False),
+        "snapshot": ("gurumoji.thematic-initial-snapshot", {"initial_id": "string", "snapshot": "Handler fixed snapshot",
+            "input_hash": "string", "evidence": "fixed utterance text and exclusions"}, "thematic-initial-snapshot", "utterance", True),
+    }
+    if kind not in contracts: return None
+    sid, schema, adapter, unit, supported = contracts[kind]
+    return {"kind": kind, "schema": {"schema_id": sid, "version": 1, "schema_hash": fingerprint(schema)},
+            "adapter": {"adapter_id": adapter, "version": "1"}, "unit": unit, "supported": supported,
+            "content_domain": "ta-candidate-content-v1" if kind == "claim_set" else "canonical-json-v1" if kind == "snapshot" else "raw-bytes-v1",
+            "actor_kinds": ["researcher"] if kind == "relation_graph" else ["ai", "code"] if kind == "claim_set" else ["system", "code"]}
+
+
+def connection_output_contract(method_id, output_name, kind=None):
+    """No arbitrary filename or executable schema supplied by a producer."""
+    import re
+    if method_id in {"qualitative_compare","qualitative_reuse"} and output_name=="tables/table.json" and kind in {None,"claim_set"}:
+        return qualitative_bundle_contract()
+    if method_id == "thematic":
+        if kind in {None, "claim_set"} and re.fullmatch(r"assets/thematic_candidates_[0-9]{4}\.json", output_name):
+            return connection_kind_contract("claim_set")
+        return None
+    if kind in {None, "relation_graph"} and method_id == "qualitative_coding" and output_name == "tables/interaction_links.json":
+        return {**connection_kind_contract("relation_graph"), "content_domain": "raw-bytes-v1"}
+    known = {("conversation_dynamics", "tables/timeline.json"): "event_sequence",
+             ("transformer_topics", "assets/embedding_matrix.json"): "embedding_matrix"}
+    if (method_id, output_name) in known and kind in {None, known[method_id, output_name]}:
+        return {**connection_kind_contract(known[method_id, output_name]), "content_domain": "raw-bytes-v1"}
+    registered = connection_method_descriptor(method_id)
+    if registered and output_name in {f"tables/{name}.json" for name in registered["output_names"]}:
+        from .analysis_core import fingerprint
+        from .analysis_store import CONNECTION_TABLE_SCHEMA
+        return {"kind": "observation_table", "schema": {"schema_id": "gurumoji.analysis-table", "version": 1,
+                "schema_hash": fingerprint(CONNECTION_TABLE_SCHEMA)},
+                "adapter": {"adapter_id": "analysis-store-table", "version": "1"}, "unit": "utterance",
+                "supported": True, "content_domain": "raw-bytes-v1"}
+    return None
+
+
+# Separate opt-in code steps; neither the saved-method22 nor expert stat8 changes.
+TABLE_PILOT_METHODS = {
+    "table_projection": ("columns", "row_ids"),
+    "table_aggregate": ("value_column", "status_column", "operation", "group_by", "unit"),
+    "table_join": ("key",),
+    "table_frequency": ("value_column", "status_column"),
+    "table_crosstab": ("row_column", "column_column", "status_column"),
+}
+
+# Explicit versioned operations; the original five pilot contracts remain fixed.
+CONNECTED_METHODS = {
+    "unit_pool": ("columns",),
+    "theme_evidence_table": ("theme_id",),
+    "unit_projection": ("columns", "unit_ids"),
+    "unit_aggregate": ("value_column", "operation", "unit", "participant_mapping"),
+    "unit_join": ("keys",),
+    "unit_correlation": ("x_column", "y_column", "statistic"),
+    "qualitative_compare": ("proposals",),
+    "qualitative_reuse": ("relation_ids",),
+}
+
+
+def qualitative_bundle_contract():
+    from .analysis_core import fingerprint
+    return {"kind":"claim_set","schema":{"schema_id":"gurumoji.qualitative-evidence-bundle","version":1,
+        "schema_hash":fingerprint({"version":"qualitative-evidence-1","content":"fixed typed inputs and proposed relations",
+            "payload_graph":"deduplicated fixed evidence packets and direct parent relations",
+            "relations":["support","counter","complement","conflict","incomparable"],"human_status":"human_pending","independent_validation":False})},
+        "adapter":{"adapter_id":"qualitative-evidence-bundle","version":"1"},"unit":"dataset_claim","supported":True,
+        "content_domain":"raw-bytes-v1","actor_kinds":["code"]}
+
+
+def connected_slot(method_id):
+    from .analysis_core import TABLE_PILOT_MAX_BYTES,fingerprint
+    descriptor = connection_method_descriptor(method_id)
+    count = 2 if method_id in {"unit_join", "unit_pool"} else 1
+    qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
+    slot={"slot_id": "table", "required": True, "min_items": count, "max_items": 32 if qualitative else 16 if method_id == "unit_pool" else count,
+            "roles": descriptor["reference_roles"], "accept_kinds": list(dict.fromkeys(c["kind"] for c in descriptor["input_contracts"] if c["kind"]!="snapshot")),
+            "accept_schemas": [c["schema"] for c in descriptor["input_contracts"]], "accept_units": descriptor["units"],
+            "scope_modes": ["dataset"], "actors": descriptor["input_actor_kinds"],
+            "adapter": descriptor["native_adapter"], "purposes": ["exploratory"], "max_bytes": TABLE_PILOT_MAX_BYTES}
+    if qualitative:
+        slot["accept_source_types"]=["snapshot"]
+        slot["adapters"]=list({fingerprint(c["adapter"]):c["adapter"] for c in descriptor["input_contracts"]}.values())
+        slot["required"]=False;slot["min_items"]=0
+    return slot
+
+
+def table_pilot_slot(method_id):
+    from .analysis_core import TABLE_PILOT_MAX_BYTES
+    descriptor = connection_method_descriptor(method_id)
+    if method_id not in TABLE_PILOT_METHODS:
+        from .analysis_core import AnalysisContractError
+        raise AnalysisContractError("未登録の表stepです。", code="table_method_unsupported")
+    count = 2 if method_id == "table_join" else 1
+    return {"slot_id": "table", "required": True, "min_items": count, "max_items": count,
+            "roles": ["data_input"], "accept_kinds": ["observation_table"],
+            "accept_schemas": [descriptor["native_input_schema"]], "accept_units": ["utterance"],
+            "scope_modes": ["dataset"], "actors": ["code", "system"],
+            "adapter": descriptor["native_adapter"], "purposes": descriptor["purposes"],
+            "max_bytes": TABLE_PILOT_MAX_BYTES}
+
 # Navigation categories describe the implemented methods, not external engines.
 METHOD_GROUPS = [
     ("text", "KH Coder系・計量テキスト分析",

@@ -5,7 +5,7 @@ title: dot クラウド開発とローカルへの引継ぎ
 summary: dot を優先して基本作業を進め、設計判断・変更背景・検証・未解決事項をローカル開発へ引き継ぐためのプロジェクト記録。
 status: current
 verified: 2026-10-02
-updated: 2026-10-04
+updated: 2026-10-09
 feature: development-workflow
 tags:
   - gurumoji/program
@@ -13,6 +13,16 @@ tags:
 ---
 
 # dot クラウド開発とローカルへの引継ぎ
+
+## 2026-10-09: 実多会話接続とCPU残件の最新受入
+
+公開選別sourceは`3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533`。C0が固定backend4f4／UI211／別作者test80の10pathをbytesで選別し、旧mock実Registry修正3pathと純粋kernel import分離2pathを保持した。閉じたunit_poolの2〜16 source POST、実group HumanRecord、Handler保存／fresh、元発話・入力版・現在権限と元分母／現在除外を接続。GETはreadonly、同名定義や単一会話HCを互換としない。保存v3は全unit_contractと全receipt値を保ち、重複parentsだけを閉じたhash参照にする。
+
+別作者の最終境界8件、有効な47発話のSAVE上限拒否1件、receipt実値改変拒否1件、同固定版の1440通常画面→実API→Handler→group HC→sum6／mean2／分母3→save／freshが成功、open製品指摘0。16source・5変数・21発話の正常保存は122014bytesで131072上限内。390正常画面とprimaryなし無効化は前723版で成功、UI2 blobは最終版と一致する。初期失敗、作者capacity停止と同modelのreadonly回復、未確認の旧試験を分けて保持する。固定SHA・コマンド・対象別検証は[公開引継ぎ正本](../../GIT_HANDOFF.md)とmanifestを参照。
+
+Dotの[#27 Linux受領](https://github.com/krokharu/gurumoji/issues/27#issuecomment-6073765543)は旧bc0の109照合とhelper14成功、純kernel4はFlask未導入でloader BLOCKED。後続[#28](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6074192102)はクラウド環境利用不可・編集0で、C0が2testpathのownerをWindowsへ移管して完成・独立受入した。Linuxでの新固定版試験は未実行であり、環境復旧後もC0が固定SHAと専用scopeを渡すまでDotが同じ2pathを再編集しない。Lunaは受入済み公開版の通常push／readback／通知、C0は割当・共有index・技術受入を所有する。
+
+私有checkpointと延期PNGは別branchでローカル保持、Downloads原本・私有履歴・実DB／Vault／資格情報は共有しない。Node24.21による今回検証は通常PATHの変更ではない。PNG Store／Web／Vault延期、Gemma323 HOLD、G0.5b/c未実測／currentPack暫定、G5残14と意味品質未評価を維持。実データ・モデル・利用者稼働サービス・full scheduler／全初期pipeline・AT・全suiteは未実行で、下記の以前の区切りを現在の未実装判定に流用しない。
 
 ## 作業と記録の分担
 
@@ -287,3 +297,21 @@ PPTX sampleはネイティブの編集可能text object、JSON/notesにrun・入
 - PPTXはpackage／geometry／EA font指定／native chartとembedded workbook参照／first-party importの検査を通過。描画はartifact-toolであり、Windows PowerPointの実表示と編集操作、実ブラウザー一連操作は未検証。相対API参照は引き続きグルモジ内の照合用
 
 生成器依存は既存python-pptxのまま。追加AI、課金、実会話／実研究Vaultを使う検証は0。source-only ZIP、完全Git bundle、検証資料を別々の20MB未満ファイルにし、別フォルダー復元でsource全hashとbundleのHEAD／tree／fsckを照合する。サンプルのスライド数を固定する契約ではなく、保存内容と安全な分割により実runの枚数は変わる。
+
+
+## 2026-10-09: Windows 選別受入と次の所有者
+
+共有baseline `f52e95948e4fef3abe8afbe2d0ddd617c69ade3b` 上で、Dot #25 固定 `6534303820148b6b679e35e1ccd9ea7dbd4792a7` のpure pooling helper/test二fileだけを `deaa6751a566c7c22a8f1e205e26165e28b74bb3` に選別した。既存carrierを再利用し、原分母と欠測/観測zeroを保持する。原snapshot evidence対応、現在projection/policy、HC採択、execute/save/fresh権限の確認は既存Store owner責務である（Issue #25 確認6068361583）。
+
+Windows Python3.13関連14件と別3会話合成例が成功。count/sum/mean・発話加重平均5.25・projection原分母と現在context・異なる定義の拒否を確認した。frontend14の凍結bytes/未stage/indexは不変。研究者データと実DB/Vault/モデルへ接触していない。実複数会話Handler保存/fresh橋、PNG接続、利用者Edge経路は未実行で、helper合格をそれらの完了へ拡張しない。
+
+S6最終 `178bc53b136394784fd89f982c1f8dd403519ee2` の明示6fileは基点2805d998とのpatch hashを照合して読取り受領済み。独立レビュー後にWindows ownerがbackend-only shared index leaseで3way統合し、frontendへ固定ready版とleaseを返す。Lunaは受入済み公開SHAの通常push/通知のみ、仕様変更/担当競合はC0へ戻す。公開正本は `docs/GIT_HANDOFF.md` とmanifest、検証receiptはOrca Run `run_30240e5eb510` / Dispatch `ctx_b1d0fd9e06ef` を参照する。
+
+
+## 2026-10-09: S6 通常受入の完了と延期境界
+
+S6原最終178bc53/base2805d998の明示6fileは独立8＋隣接2件PASSを受領後、共有 `213ee596a60a48b18677b5262a233929ef3cc42a` に3way選別した。固定Git bytes/hash・AST6・diff・最小smokeが成功し、作者suiteの重複実行はしていない。frontend14の凍結を統合前後で保護してから、通常9pathのsource編集/受入を元ownerへ返した。
+
+通常UIは実API5件、Edge1440/390の1テスト内2操作シナリオ、隣接3件、入口1件で成功した。固定原文と現在の対応・版・権限を保った射影→HC→平均→保存/fresh、graph/bundle HC、取消/revoke拒否、根拠往復の選択/scroll/focusを確認。選択欄ラベル不備を修正し、初回fixture5失敗・HTTP期待2失敗・Edge製品ラベル1失敗を消さずに閉鎖した。最終normal8全fileとhistory CSS focusだけを `1949833c1c20e898fe935cbad5df382d2c18fb23` に選別、receiptの9hashとstage一致。PNG専用3fileと図表CSS6rulesは作業bytesを保全し非commit。
+
+実複数会話Store/Handlerと6e8/options複数source seamは未実装、PNG Store/Web/Vault接続は延期。full app/default AI/実利用者DB/Vault/モデル/認証/main/AT/full scheduler・全suite反復は未実行、Node/jsdom engine差はPARTIAL。合成fixtureのみで実データ接触0。原helper2の追加は今回不要で原checkoutへ書き込まなかった。受入source/index leaseは最終receiptでC0へ返却し、Luna新Dispatch `ctx_2496f7f8f44e` が受入済み公開SHAの通常forward push/readback/Dot通知を担当する。割当・仕様/担当競合はC0責務のまま。根拠はRun `run_30240e5eb510` / Dispatch `ctx_015ad29dbb33`、公開正本はGit受渡資料とmanifest。
