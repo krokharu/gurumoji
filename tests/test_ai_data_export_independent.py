@@ -95,6 +95,11 @@ class IndependentExportTests(unittest.TestCase):
         self.persist(self.current, increment=True)
         with app.database_connection() as connection:
             row = connection.execute("SELECT * FROM library_items WHERE id=?", (self.item_id,)).fetchone()
+            # Ordinary persistence adds profiles such as UNKNOWN with a saved
+            # empty name. Read that source before export, distinguishing empty,
+            # absent and excluded names without consulting the projection.
+            self.saved_profiles = json.loads(row["speaker_profiles_json"])
+            self.saved_names = json.loads(row["speaker_names_json"])
             before = preparation.view(connection, row, app.row_segments(row))
             preparation.save(connection, row, app.row_segments(row), {
                 "revision": before["revision"], "source_hash": before["source_hash"],
@@ -369,11 +374,16 @@ class IndependentExportTests(unittest.TestCase):
         for speaker in speakers:
             self.assertEqual(set(speaker), {"speaker_no", "raw_label", "display_name", "attributes"})
             label = speaker["raw_label"]
-            self.assertEqual(speaker["display_name"], self.names.get(label) if names else None)
-            self.assertTrue(set(speaker["attributes"]).issubset(attributes))
-            if label in self.profiles:
-                self.assertEqual(speaker["attributes"], {
-                    key: self.profiles[label][key] for key in attributes if key in self.profiles[label]})
+            profile = self.saved_profiles.get(label, {})
+            expected_name = None
+            if names:
+                if "display_name" in profile and isinstance(profile["display_name"], str):
+                    expected_name = profile["display_name"]
+                elif label in self.saved_names and isinstance(self.saved_names[label], str):
+                    expected_name = self.saved_names[label]
+            self.assertEqual(speaker["display_name"], expected_name)
+            self.assertEqual(speaker["attributes"], {
+                key: profile[key] for key in attributes if key in profile})
         for expected, actual in zip(self.expected_preparation["rows"], rows, strict=True):
             self.assertEqual({key: actual[key] for key in preparation.FIELDS}, expected)
             self.assertEqual(actual["raw_speaker_label"], expected["speaker_id"])
@@ -769,6 +779,63 @@ class IndependentExportTests(unittest.TestCase):
         for name, content in cases.items():
             with self.subTest(case=name), self.assertRaises(ValueError):
                 validate_ai_bundle_zip(content)
+
+    def test_large_frame_request_times_reject_invalid_grids_after_rehash(self):
+        from gurumoji.services import ai_data_export_bundle as bundle
+
+        video = self.synthetic_video()
+        with app.database_connection() as connection:
+            connection.execute("UPDATE library_items SET media_path=? WHERE id=?", (str(video), self.item_id))
+        before = self.snapshot()
+        with patch.object(bundle, "build_ai_bundle", wraps=bundle.build_ai_bundle) as builder:
+            response = self.export(frames={"enabled": True, "start": 0, "end": 1,
+                                          "interval": 1, "max_frames": 2, "max_dimension": 64})
+        self.assertEqual(response.status_code, 200, response.data[:1000])
+        payload = builder.call_args.args[0]
+        archive = self.parse_zip(response.data)
+        original = {name: archive.read(name) for name in archive.namelist()}
+        self.assertEqual(bundle.validate_ai_bundle_zip(response.data), json.loads(original["manifest.json"]))
+        decimal_payload = copy.deepcopy(payload)
+        decimal_times = (1.3, 2.3)
+        self.assertLess(decimal_times[1] - decimal_times[0], 1,
+                        "exercise ordinary decimal subtraction rounding")
+        for frame, requested in zip(decimal_payload["frames"]["items"], decimal_times, strict=True):
+            frame["requested_time"] = requested
+        decimal_zip = bundle.build_ai_bundle(decimal_payload)
+        decimal_archive = self.parse_zip(decimal_zip)
+        self.assertEqual(bundle.validate_ai_bundle_zip(decimal_zip),
+                         json.loads(decimal_archive.read("manifest.json")))
+        self.assertEqual([json.loads(line)["requested_time"] for line in
+                          decimal_archive.read("frames/index.jsonl").decode().splitlines()], list(decimal_times))
+        for label, times in (("duplicate", (1e16, 1e16)), ("descending", (1e16, 1e16 - 2)),
+                             ("subsecond", (1e15, 1e15 + 0.75))):
+            changed_payload = copy.deepcopy(payload)
+            for frame, requested in zip(changed_payload["frames"]["items"], times, strict=True):
+                frame["requested_time"] = requested
+            values = dict(original)
+            index = [json.loads(line) for line in values["frames/index.jsonl"].decode().splitlines()]
+            for frame, requested in zip(index, times, strict=True):
+                frame["requested_time"] = requested
+            values["frames/index.jsonl"] = ("\n".join(json.dumps(frame) for frame in index) + "\n").encode()
+            manifest = json.loads(values["manifest.json"])
+            for entry in manifest["files"]:
+                data = values[entry["path"]]
+                entry.update(sha256=hashlib.sha256(data).hexdigest(), size=len(data))
+            values["manifest.json"] = json.dumps(manifest).encode()
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as output:
+                for path, data in values.items():
+                    output.writestr(path, data)
+            altered = stream.getvalue()
+            self.parse_zip(altered)
+            evidence = os.environ.get("GURUMOJI_AI_EXPORT_EVIDENCE_DIR")
+            if evidence:
+                (Path(evidence) / f"large-time-{label}.zip").write_bytes(altered)
+            with self.subTest(case=label, boundary="payload"), self.assertRaises(ValueError):
+                bundle.build_ai_bundle(changed_payload)
+            with self.subTest(case=label, boundary="archive"), self.assertRaises(ValueError):
+                bundle.validate_ai_bundle_zip(altered)
+        self.assertEqual(before, self.snapshot())
 
     def test_archive_oversize_rejects_before_member_decompression(self):
         from gurumoji.services.ai_data_export_bundle import validate_ai_bundle_zip
