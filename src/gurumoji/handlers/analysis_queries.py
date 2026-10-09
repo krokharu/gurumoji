@@ -176,12 +176,31 @@ class AnalysisQueries:
             },
         }
 
-    def _fixed_package(self, item_id: str, run_id: str):
+    def _fixed_package(self, item_id: str, run_id: str, *, allow_comparison: bool = False):
         run = self._store.get(run_id)
-        item = self._find_item(item_id)
-        if not run or run["item_id"] != item_id or item is None:
+        comparison = bool(allow_comparison and run and run.get("kind") == "interview_comparison")
+        # Like retry_vault, comparison exports use their saved synthetic identity.
+        # Item-scoped run/preview reads still require the actual library item.
+        item = None if comparison else self._find_item(item_id)
+        if (not run or run["item_id"] != item_id
+                or (run.get("status") != "completed" if comparison else item is None)):
             raise AnalysisQueryNotFound("指定した会話の保存結果が見つかりません。")
         snapshot, result, manifest, content = self._store.verified_package(run_id)
+        if comparison:
+            # Compare stored identities only; never infer members or join current
+            # conversations, which may have changed since this fixed run.
+            members = snapshot.get("members")
+            if (snapshot.get("kind") != run["kind"] or manifest.get("kind") != run["kind"]
+                    or snapshot.get("conversation_id") != item_id or manifest.get("conversation_id") != item_id
+                    or not isinstance(members, list) or not members
+                    or any(not isinstance(member, dict) or not isinstance(member.get("conversation_id"), str)
+                           or not member["conversation_id"] for member in members)):
+                raise ValueError("保存した比較の種類・対象が一致しません。")
+            member_ids = [member["conversation_id"] for member in members]
+            if (len(set(member_ids)) != len(member_ids)
+                    or result.get("parameters", {}).get("item_ids") != member_ids
+                    or self._store.members(run_id) != sorted(member_ids)):
+                raise ValueError("保存した比較の対象会話が一致しません。")
         # All saved tables must be readable, even if only one preview is requested.
         # This validates stored rows; it does not calculate scientific results.
         for artifact in self._store.artifacts(run_id):
@@ -273,7 +292,19 @@ class AnalysisQueries:
         except LookupError as exc:
             raise AnalysisQueryNotFound("保存ファイルが見つかりません。") from exc
         run = self._store.get(metadata["run_id"])
-        if not run or self._find_item(run["item_id"]) is None:
+        if not run:
+            raise AnalysisQueryNotFound("保存ファイルが見つかりません。")
+        if run.get("kind") == "interview_comparison":
+            try:
+                _run, _item, _manifest, content = self._fixed_package(
+                    run["item_id"], run["id"], allow_comparison=True)
+                data = content[metadata["name"]]
+            except AnalysisQueryNotFound:
+                raise
+            except (TypeError, KeyError, LookupError, csv.Error) as exc:
+                # The existing artifact HTTP adapter reports ValueError as 409.
+                raise ValueError("保存した比較の固定成果物を読み取れません。") from exc
+        elif self._find_item(run["item_id"]) is None:
             raise AnalysisQueryNotFound("保存ファイルが見つかりません。")
         return AnalysisArtifact(
             data=data,
@@ -283,9 +314,9 @@ class AnalysisQueries:
 
     def run_bundle(self, run_id: str) -> AnalysisArtifact:
         run = self._store.get(run_id)
-        if not run or run.get("status") != "completed" or self._find_item(run["item_id"]) is None:
+        if not run or run.get("status") != "completed":
             raise AnalysisQueryNotFound("保存結果が見つかりません。")
-        _run, _item, _manifest, content = self._fixed_package(run["item_id"], run_id)
+        _run, _item, _manifest, content = self._fixed_package(run["item_id"], run_id, allow_comparison=True)
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in content.items():
