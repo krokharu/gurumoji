@@ -18,7 +18,7 @@ from gurumoji.services.ai import client
 from gurumoji.services.ai.request_budget import BatchQuota, BudgetHold, payload_hash
 from gurumoji.services.analysis_orchestration_adapters import make_orchestration_adapters, ADAPTER_VERSION
 from gurumoji.services.subprocesses import run_cancellable_subprocess
-from test_ai_request_budget import Clock, make_budget, count_proof, CONDITIONS
+from test_ai_request_budget import Clock, make_budget, make_m_budget, count_proof, CONDITIONS
 import test_analysis_orchestration as runtime_fixture
 import test_expert_data_hooks as hook_fixture
 from test_analysis_orchestration import core, stop, intent
@@ -685,6 +685,115 @@ class LoopbackLifecycleTests(BudgetFixture, unittest.TestCase):
         CPU_PROOF.append({"case": "hook_two_rounds", "wire_count": 2, "child_count": 2,
             "ledger": ledger, "task_statuses": [task["status"]], "real_model_calls": 0,
             "external_http_calls": 0, "synthetic_only": True})
+
+
+class MProfileLifecycleTests(BudgetFixture, unittest.TestCase):
+    def make_factory(self, batch):
+        def factory(*, run_id, run_started_at, clock):
+            budget = make_m_budget(clock, batch=batch, run_id=run_id, run_started_at=run_started_at)
+            self.budgets.append(budget)
+            return budget
+        return factory
+
+    def test_initial_preparation_uses_original_M_deadline_and_ledger(self):
+        origin = self.clock()
+        original = self.service.snapshot_builder
+        def slow(item):
+            self.clock.advance(700)
+            return original(item)
+        self.service.snapshot_builder = slow
+        run = self.start()
+        guard = self.service._run_budgets[run["run_id"]]
+        self.assertEqual(guard.origin, origin)
+        self.assertEqual(guard.deadline, origin + 1800)
+        self.assertEqual(guard.deadline, guard.snapshot()["ledger"]["run_deadline"])
+        self.assertIsNone(guard.reason())
+        self.clock.advance(1099.75)
+        self.assertIsNone(guard.reason())
+        self.clock.advance(.25)
+        self.assertEqual(guard.reason(), "time_limit")
+        self.assertEqual(guard.snapshot()["ledger"]["entry_count"], 0)
+
+    def test_initial_preparation_at_M_deadline_is_never_promoted(self):
+        def slow(item):
+            self.clock.advance(1800)
+            return self.fixture.build(item)
+        self.service.snapshot_builder = slow
+        with self.assertRaises(AnalysisContractError) as caught:
+            self.start()
+        self.assertEqual(caught.exception.code, "time_limit")
+        with self.service._db() as db:
+            self.assertEqual(db.execute("SELECT status FROM orchestration_initials").fetchone()[0], "failed")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_runs").fetchone()[0], 0)
+        self.assertEqual(self.budgets[0].ledger()["entry_count"], 0)
+
+    def test_M_guard_keeps_task_240_and_rejects_inconsistent_initial_ledger(self):
+        budget = make_m_budget(self.clock)
+        guard = OrchestrationBudget(budget, run_id="test-run", run_started_at=self.clock(), clock=self.clock)
+        self.clock.advance(700); guard.register("later", self.clock())
+        self.clock.advance(239.999); self.assertIsNone(guard.reason("later"))
+        self.clock.advance(.001); self.assertEqual(guard.reason("later"), "call_timeout")
+        ledger = budget.ledger(); ledger["run_deadline"] += 1
+        with patch.object(budget, "ledger", return_value=ledger), self.assertRaises(AnalysisContractError) as caught:
+            OrchestrationBudget(budget, run_id="test-run", run_started_at=ledger["run_started_at"], clock=self.clock)
+        self.assertEqual(caught.exception.code, "budget_origin_mismatch")
+
+
+class MProfileIPCAndCancellationTests(unittest.TestCase):
+    def fixture(self):
+        fixture = LoopbackLifecycleTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        def factory(*, run_id, run_started_at, clock):
+            budget = make_m_budget(clock, batch=fixture.batch, run_id=run_id, run_started_at=run_started_at)
+            fixture.budgets.append(budget)
+            return budget
+        fixture.factory = factory
+        return fixture
+
+    def test_M_exact_existing_worker_roundtrip_known_usage(self):
+        fixture = self.fixture()
+        fixture.test_worker_valid_usage_through_service_context_adapter_app_guard()
+        ledger = fixture.budgets[0].ledger()
+        self.assertEqual(ledger["profile"], "M")
+        self.assertEqual(ledger["run_deadline"] - ledger["run_started_at"], 1800)
+        self.assertEqual(ledger["entries"][0]["ticket"]["trial_call_limit"], 32)
+
+    def test_M_existing_worker_missing_usage_retains_cost_and_blocks_next(self):
+        fixture = self.fixture()
+        fixture.test_worker_usage_absent_holds_next_post_reservation_null()
+        self.assertEqual(fixture.budgets[0].ledger()["profile"], "M")
+
+    def test_M_cancel_after_actual_fixture_wire_retains_unknown_no_retry(self):
+        fixture = self.fixture()
+        fixture.test_cancel_after_actual_wire_stops_worker_and_holds_unknown_usage()
+        ledger = fixture.budgets[0].ledger()
+        self.assertEqual(ledger["profile"], "M")
+        self.assertEqual(ledger["charged_or_reserved_tokens"], 4106)
+
+    def test_M_worker_rejects_rehashed_invalid_profile_limits_before_HTTP(self):
+        fixture = self.fixture()
+        from test_ai_request_budget import PAYLOAD
+        budget = make_m_budget(time.monotonic)
+        received = []
+        def corrupt_and_run(command, **kwargs):
+            wire = json.loads(kwargs["input_text"])
+            ticket = wire["request_budget"]
+            ticket["profile_limits"]["run_seconds"] = 1801
+            ticket["ticket_hash"] = payload_hash({k: v for k, v in ticket.items() if k != "ticket_hash"})
+            kwargs["input_text"] = json.dumps(wire)
+            result = run_cancellable_subprocess(command, **kwargs)
+            received.append(json.loads(result.stdout))
+            return result
+        with self.assertRaises(BudgetHold):
+            client.post_json(f"http://127.0.0.1:{fixture.server.server_port}/v1/chat/completions", {}, PAYLOAD,
+                worker_file=ROOT / "src/gurumoji/ai_http_worker.py", run_subprocess=corrupt_and_run,
+                request_budget=budget, task_id="task", attempt_id="invalid-profile", timeout=240, retry_delays=())
+        self.assertEqual(fixture.received, [])
+        self.assertEqual(received[0]["kind"], "guard")
+        self.assertIs(received[0]["budget_receipt"]["sent"], False)
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+        self.assertEqual(budget.ledger()["unknown_usage_entries"], 1)
 
 
 if __name__ == "__main__":

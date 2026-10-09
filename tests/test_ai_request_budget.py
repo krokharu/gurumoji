@@ -1,5 +1,6 @@
 """CPU synthetic counter evidence only; no model, SDK, or external HTTP."""
 import copy
+from dataclasses import FrozenInstanceError
 import traceback
 import threading
 import unittest
@@ -7,6 +8,7 @@ from unittest.mock import patch
 
 from gurumoji.services.ai.request_budget import (
     BatchQuota, BudgetHold, COVERAGE, RequestBudget, payload_hash, wire_timeout, prepare_wire,
+    C0ProfileReceipt, profile_limits,
 )
 
 
@@ -49,6 +51,23 @@ def make_budget(clock=None, batch=None, **changes):
     budget = RequestBudget(**values)
     budget.register_task("task", values["run_started_at"])
     return budget
+
+
+def synthetic_m_receipt(conditions=None, **changes):
+    """CPU-only external-verifier fixture, never a real C0 approval."""
+    values = dict(receipt_ref="CPU-only-NOT-C0-EXECUTION-APPROVAL",
+        receipt_hash=payload_hash("synthetic-receipt-bytes"), source_sha="0" * 40,
+        profile="M", conditions_hash=payload_hash(CONDITIONS if conditions is None else conditions),
+        limits_hash=payload_hash(profile_limits("M")))
+    values.update(changes)
+    return C0ProfileReceipt(**values)
+
+
+def make_m_budget(clock=None, batch=None, **changes):
+    values = dict(profile="M", trial_call_limit=32, trial_token_limit=917504,
+        profile_receipt=synthetic_m_receipt(), verify_profile_receipt=lambda receipt: receipt.receipt_hash)
+    values.update(changes)
+    return make_budget(clock, batch, **values)
 
 
 def reserve(budget, attempt="attempt", payload=None):
@@ -94,6 +113,38 @@ class RequestBudgetTests(unittest.TestCase):
         self.assertEqual((ledger["entry_count"], ledger["actual_wire_calls"], ledger["charged_or_reserved_tokens"]), (1, 1, 12))
         self.assertFalse(ledger["measurement_ready"])
         self.assertFalse(ledger["handler_connected"])
+
+    def test_fresh_counter_seam_deadline_cost_and_hashed_evidence(self):
+        clock = Clock()
+        class Counter:
+            def __call__(self, payload):
+                return count_proof(payload, fresh_verification_required=True)
+            def verify_before_dispatch(self, payload, proof):
+                self_seen.append((payload_hash(payload), payload_hash(proof)))
+                clock.advance(.5)
+        self_seen = []
+        budget = make_budget(clock, token_counter=Counter(), run_started_at=clock() - 233.8)
+        value = reserve(budget)
+        ticket = value["ticket"]
+        self.assertEqual(ticket["conditions_hash"], payload_hash(budget._conditions))
+        self.assertEqual(ticket["counter_proof_hash"], payload_hash(count_proof(value["payload"], fresh_verification_required=True)))
+        with self.assertRaisesRegex(BudgetHold, "parent_deadline_or_ticket"):
+            budget.dispatch_timeout(ticket, value["payload"])
+        self.assertEqual(self_seen, [(ticket["payload_hash"], ticket["counter_proof_hash"])])
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+        self.assertEqual(budget.ledger()["entries"][0]["state"], "unknown")
+
+    def test_conditions_and_counter_proof_ticket_changes_rejected_in_common_IPC_validator(self):
+        clock = Clock(); budget = make_budget(clock); value = reserve(budget)
+        for field in ("conditions_hash", "counter_proof_hash"):
+            changed = copy.deepcopy(value["ticket"]); changed[field] = payload_hash("different")
+            with self.subTest(field=field), self.assertRaisesRegex(BudgetHold, "ticket_changed"):
+                prepare_wire(changed, value["payload"], clock)
+        # Even a rehashed peer ticket cannot replace the parent's saved entry.
+        changed["ticket_hash"] = payload_hash({k: v for k, v in changed.items() if k != "ticket_hash"})
+        with self.assertRaisesRegex(BudgetHold, "ticket_changed"):
+            budget.dispatch_timeout(changed, value["payload"])
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
 
     def test_strict_constructor_types_and_bounds(self):
         bad = [("run_started_at", v) for v in (True, -1, float("nan"), float("inf"), 10**400)]
@@ -425,6 +476,136 @@ class RequestBudgetTests(unittest.TestCase):
         self.assertNotIn("synthetic-private", str(raised.exception))
         self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
         self.assertEqual(budget.ledger()["entries"][0]["state"], "unknown")
+
+
+class MProfileTests(unittest.TestCase):
+    def test_explicit_verified_M_seven_then_32_allowed_33_rejected(self):
+        clock = Clock(); budget = make_m_budget(clock)
+        for n in range(32):
+            finish(budget, reserve(budget, str(n)), clock)
+            if n == 6:
+                self.assertEqual(budget.ledger()["actual_wire_calls"], 7)
+        with self.assertRaisesRegex(BudgetHold, "call_limit"): reserve(budget, "33")
+        ledger = budget.ledger()
+        self.assertEqual(ledger["entry_count"], 32)
+        self.assertEqual(ledger["charged_or_reserved_tokens"], 32 * 12)
+        self.assertEqual(ledger["profile"], "M")
+        self.assertEqual(ledger["run_deadline"] - ledger["run_started_at"], 1800)
+        self.assertEqual(ledger["trial_token_limit"], 917504)
+        self.assertFalse(ledger["measurement_ready"])
+
+    def test_legacy_six_and_600_are_unchanged_and_no_receipt_needed(self):
+        clock = Clock(); budget = make_budget(clock)
+        for n in range(6): finish(budget, reserve(budget, str(n)), clock)
+        with self.assertRaisesRegex(BudgetHold, "call_limit"): reserve(budget, "7")
+        ledger = budget.ledger()
+        self.assertEqual(ledger["profile"], "legacy")
+        self.assertIsNone(ledger["profile_receipt"])
+        self.assertEqual(ledger["run_deadline"] - ledger["run_started_at"], 600)
+        self.assertEqual((ledger["trial_call_limit"], ledger["trial_token_limit"]), (6, 172032))
+
+    def test_M_needs_immutable_receipt_and_external_exact_verification(self):
+        for changes in ({"profile_receipt": None}, {"verify_profile_receipt": None},
+                        {"profile_receipt": True}, {"profile_receipt": {}},
+                        {"verify_profile_receipt": lambda _: True},
+                        {"verify_profile_receipt": lambda _: payload_hash("other")},
+                        {"profile_receipt": synthetic_m_receipt(conditions_hash=payload_hash("other"))},
+                        {"profile_receipt": synthetic_m_receipt(limits_hash=payload_hash("other"))},
+                        {"profile_receipt": synthetic_m_receipt(profile="legacy")},
+                        {"profile_receipt": synthetic_m_receipt(source_sha="unknown")},
+                        {"trial_call_limit": 33}, {"trial_token_limit": 917505}):
+            with self.subTest(changes=changes), self.assertRaises(BudgetHold): make_m_budget(**changes)
+        receipt = synthetic_m_receipt()
+        with self.assertRaises(FrozenInstanceError): receipt.profile = "legacy"
+        calls = []
+        budget = make_m_budget(profile_receipt=receipt,
+            verify_profile_receipt=lambda received: calls.append(received) or received.receipt_hash)
+        self.assertEqual(calls, [receipt])
+        ledger = budget.ledger(); ledger["profile_receipt"]["receipt_hash"] = payload_hash("changed")
+        self.assertEqual(budget.ledger()["profile_receipt"]["receipt_hash"], receipt.receipt_hash)
+        for profile in (None, True, "m", "unknown"):
+            with self.subTest(profile=profile), self.assertRaisesRegex(BudgetHold, "invalid_profile"):
+                make_budget(profile=profile)
+        with self.assertRaisesRegex(BudgetHold, "profile_receipt_invalid"):
+            make_budget(profile_receipt=receipt)
+
+    def test_M_external_verifier_failure_does_not_leak_and_never_consumes_run(self):
+        batch = BatchQuota(max_calls=216, max_tokens=6193152)
+        def denied(_): raise RuntimeError("private-approval-details")
+        try:
+            make_m_budget(batch=batch, verify_profile_receipt=denied)
+        except BudgetHold as exc:
+            self.assertNotIn("private-approval-details", "".join(traceback.format_exception(exc)))
+        else: self.fail("receipt verification must fail closed")
+        self.assertEqual(batch.snapshot()["reserved_entries"], 0)
+        self.assertEqual(make_m_budget(batch=batch).ledger()["entry_count"], 0)
+
+    def test_M_task_wire_cleanup_limits_and_external_origins_are_unchanged(self):
+        clock = Clock(); origin = clock(); budget = make_m_budget(clock)
+        clock.advance(700); budget.register_task("later", clock())
+        value = budget.reserve(PAYLOAD, task_id="later", attempt_id="1", timeout=1000)
+        self.assertEqual(value["ticket"]["run_deadline"], origin + 1800)
+        self.assertEqual(value["ticket"]["task_deadline"], origin + 940)
+        self.assertEqual(wire_timeout(value["ticket"], value["payload"], clock), 235)
+        clock.advance(234)
+        self.assertEqual(wire_timeout(value["ticket"], value["payload"], clock), 1)
+        clock.advance(.001)
+        with self.assertRaisesRegex(BudgetHold, "parent_deadline_or_ticket"):
+            budget.dispatch_timeout(value["ticket"], value["payload"])
+
+    def test_M_common_worker_validation_rejects_profile_caps_receipt_and_deadline_changes(self):
+        clock = Clock(); budget = make_m_budget(clock); value = reserve(budget)
+        ticket = value["ticket"]
+        fields = {"profile": "legacy", "profile_receipt": None, "trial_call_limit": 33,
+            "trial_token_limit": 917505, "batch_call_limit": 217, "batch_token_limit": 6193153,
+            "run_deadline": clock() + 1801, "task_deadline": clock() + 241,
+            "requested_timeout": 236, "conditions_hash": payload_hash("different")}
+        changes = [{key: bad} for key, bad in fields.items()]
+        for key in ticket["profile_limits"]:
+            changes.append({"profile_limits": {**ticket["profile_limits"], key: "changed"}})
+        for key in ("profile", "conditions_hash", "limits_hash", "source_sha"):
+            changes.append({"profile_receipt": {**ticket["profile_receipt"], key: "changed"}})
+        for patch in changes:
+            changed = copy.deepcopy(ticket); changed.update(patch)
+            # Even internally rehashed impossible profiles/ceilings are rejected.
+            changed["ticket_hash"] = payload_hash({k: v for k, v in changed.items() if k != "ticket_hash"})
+            with self.subTest(patch=patch), self.assertRaises(BudgetHold):
+                prepare_wire(changed, value["payload"], clock)
+        changed = copy.deepcopy(ticket)
+        changed["profile_receipt"]["receipt_hash"] = payload_hash("different-approval")
+        changed["ticket_hash"] = payload_hash({k: v for k, v in changed.items() if k != "ticket_hash"})
+        with self.assertRaisesRegex(BudgetHold, "ticket_changed"):
+            budget.dispatch_timeout(changed, value["payload"])
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+
+    def test_M_unknown_transport_usage_duplicate_and_same_run_cannot_reset(self):
+        for reason in ("transport_unknown", "usage_unknown"):
+            clock = Clock(); batch = BatchQuota(max_calls=216, max_tokens=6193152)
+            budget = make_m_budget(clock, batch); value = reserve(budget)
+            with self.assertRaisesRegex(BudgetHold, "duplicate_request"): reserve(budget)
+            if reason == "usage_unknown":
+                with self.assertRaisesRegex(BudgetHold, reason):
+                    finish(budget, value, clock, response(usage={}))
+            else: budget.unknown(value["ticket"]["reservation_id"])
+            with self.assertRaisesRegex(BudgetHold, "batch_held"): reserve(budget, "retry")
+            with self.assertRaisesRegex(BudgetHold, "duplicate_run_budget"):
+                make_m_budget(clock, batch)
+            self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+            self.assertEqual(budget.ledger()["unknown_usage_entries"], 1)
+
+    def test_M_batch_216_cannot_expand_and_schema_is_full_payload_bound(self):
+        clock = Clock(); batch = BatchQuota(max_calls=216, max_tokens=6193152)
+        for run in range(7):
+            budget = make_m_budget(clock, batch, run_id="M-" + str(run))
+            for attempt in range(32 if run < 6 else 24):
+                finish(budget, reserve(budget, str(attempt)), clock)
+        with self.assertRaisesRegex(BudgetHold, "call_limit"): reserve(budget, "217")
+        self.assertEqual(batch.snapshot()["reserved_entries"], 216)
+        budget = make_m_budget(clock); value = reserve(budget)
+        changed = copy.deepcopy(value["payload"])
+        changed["response_format"]["json_schema"]["schema"]["description"] = "changed"
+        with self.assertRaisesRegex(BudgetHold, "request_changed"):
+            prepare_wire(value["ticket"], changed, clock)
 
 
 if __name__ == "__main__":

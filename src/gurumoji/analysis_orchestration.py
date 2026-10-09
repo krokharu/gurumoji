@@ -245,13 +245,14 @@ class OrchestrationBudget:
     never recreates this controller from persisted clock numbers on restart.
     """
     def __init__(self, request_budget, *, run_id, run_started_at, clock):
-        from .services.ai.request_budget import RUN_SECONDS, TASK_SECONDS, payload_hash
+        from .services.ai.request_budget import TASK_SECONDS, payload_hash, profile_limits
         ledger = request_budget.ledger()
         if (request_budget._clock is not clock or ledger["run_started_at"] != run_started_at
-                or ledger["run_id"] != payload_hash(run_id)):
+                or ledger["run_id"] != payload_hash(run_id)
+                or ledger["run_deadline"] != run_started_at + profile_limits(ledger["profile"])["run_seconds"]):
             raise _error("budgetの時計と起点が一致しません。", "budget_origin_mismatch")
         self.request_budget, self.clock = request_budget, clock
-        self.origin, self.deadline = run_started_at, run_started_at + RUN_SECONDS
+        self.origin, self.deadline = run_started_at, ledger["run_deadline"]
         self.task_seconds, self.tasks = TASK_SECONDS, {}
         self.clock_id = uuid.uuid4().hex
         self.last_clock = run_started_at
