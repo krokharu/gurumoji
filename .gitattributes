@@ -126,3 +126,8 @@ tests/test_analysis_unit_groups.py -text
 tests/test_analysis_unit_pool_independent.py -text
 tests/test_analysis_unit_pool_ui.cjs -text
 tests/test_legacy_expert_fixture_contract.py -text
+docs/program-vault/50-Analysis-Methods/10-Experts/focus-group-interaction/07-Agent-Contract.md -text
+docs/program-vault/50-Analysis-Methods/10-Experts/focus-group-interaction/08-Skill-Hook-Binding.md -text
+tests/test_focus_group_interaction_contract.py -text
+tests/test_focus_group_interaction_independent.py -text
+tests/dom/ai-export-keyboard.test.cjs -text
