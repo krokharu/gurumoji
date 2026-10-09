@@ -20,6 +20,10 @@ G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowl
 
 ## 固定対象と確認範囲
 
+2026-10-10 05:04 JST追補：下表は作成時の状態を保持する。公開固定 `89aa95844d911ea8e1abee6337cc4f4b229e439d` の17定義について、Dotの [[50-Analysis-Methods/50-Knowledge-Evaluation/expert-methodology-review]]（固定 `2793c91d844331f01c25b1e7fd917a1b47f4175a`）を別作者が照合した。現行の明示07は5（TA・統計3・FGI）、AI許可9／禁止8、既定C1のAI許可は4、08 readerは統計3とTAの4である。下の「07は4」「既定C1は5」や08未接続等の旧記述を、現行版の件数・未実装判定として利用しない。版・raw hash・actor／step・局所参照の一致は文書・契約の整合性であり、方法品質や研究者の採用の証明ではない。
+
+利用者の再開指示後に実Gemmaの323件試験を1回実行したが、最初のCoreがtransport timeoutで失敗し、専門家へ実送信できた本文は0／323だった。使用量不明と予約は保持し、CPU原因修正・独立検証を継続中。G0.5b/cの実比較は未実行で、currentPack暫定を維持する。17専門家の意味品質・実モデル品質・研究者採否は未受入。方法論票の3群のうち、会話間比較のモデル出力観測分母はDot backend／C0表示の別ownerで実装中であり、保存旧結果の不明を0に補完しない。統計式の呼称・近似条件とFrameworkの製品gate／ケース数の説明は後続の限定修正対象とする。
+
 2026-10-10追補（FGI一専門家・CPU契約のみ）：Dot `de601683175fa2a115f9f256313801a07a4401ae` を統合した固定 `0ff1a84f529e24ee73df8ce476bf9f70eb034523` で、別作者の独立20件（10.614秒）と旧隣接5件（0.729秒）が各PASS、FAIL/ERROR/SKIP0。明示S1の既存Handler→raw保存→実AnalysisStore.save→freshと、実UNKNOWN／単一話者の解釈agent呼出0を確認した。receipt SHA256 `ba1da647dea28956531899db98adbe94cf9b6abf580ac82b26fa60885ea1afe9`。旧18PASS／2FAILは保存し修正版だけを受入。FGI既定C1は維持し、HumanRecord採用・手動リンク変更・新asset登録はない。実モデル／意味品質／方法論の適否／研究者採否／残る専門家のG5評価は未実施で、表全体のdraft/plannedとcurrentPack暫定・G0.5b/c未測定を維持する。
 
 | 対象 | 取得元ID・版・hashと確認範囲 |
