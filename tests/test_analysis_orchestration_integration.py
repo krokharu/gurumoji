@@ -1,10 +1,15 @@
 """Full Flask/SQLite/real-adapter integration with synthetic provider responses."""
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 import app
+from gurumoji.method_experts import ExpertCatalog
+from gurumoji.services.expert_agents import ExpertAgentRegistry
 import test_content_analysis as support
+
+EXPERT = "exp-thematic-analysis"
 
 
 class OrchestrationIntegrationTests(unittest.TestCase):
@@ -16,11 +21,13 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         self.url = self.fixture.url + "/orchestration"
         self.config_patch = patch.object(app, "load_token_config", return_value=app.TokenConfig(lmstudio_model="synthetic-local"))
         self.config_patch.start(); self.addCleanup(self.config_patch.stop)
+        self.registry = ExpertAgentRegistry(ExpertCatalog(
+            root=Path(__file__).resolve().parents[1] / "docs/program-vault",
+            local_root=Path(self.fixture.temp.name) / "local_knowledge"))
+        registry_patch = patch.object(app, "make_expert_agent_registry", return_value=self.registry)
+        registry_patch.start(); self.addCleanup(registry_patch.stop)
         self.service = app.analysis_orchestration_service()
         self.service.schedule = False
-        # This legacy general-agent fixture supplies no expert_report. Typed
-        # knowledge/outputs are exercised by test_analysis_typed_assets instead.
-        self.service.expert_provider = None
         self.calls = []
 
     def payload(self, request_id="integration-run-request-0001"):
@@ -28,6 +35,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         return {"request_id": request_id, "source_revision": value["item"]["revision_count"],
                 "analysis_revision": value["item"]["analysis_revision"],
                 "question": "合成会話の発話内容と参加量を観察する", "provider": "lmstudio",
+                "expert_ids": [EXPERT], "expert_inputs": {EXPERT: {"analysis_premises": None}},
                 "provider_policy": "local_only", "stop_mode": "auto", "max_iterations": None,
                 "time_limit_seconds": None, "max_calls": 20, "max_tasks": 40}
 
@@ -44,6 +52,8 @@ class OrchestrationIntegrationTests(unittest.TestCase):
             intents = []
             if context["task"]["iteration"] == 1:
                 intents = [{"role": target, "kind": "analysis", "result_id": "",
+                            "expert_id": EXPERT if target == "interpretation" else "",
+                            "initial_sections": [], "label_field": "",
                             "question": "対象全体の原文か参加量を確認", "why_now": "問いの根拠を集める",
                             "success_criteria": "根拠IDまたは集計結果を提示",
                             "method_id": "participation" if target == "statistics" else "",
@@ -52,10 +62,32 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                            for target in ("interpretation", "statistics", "verification")]
             return {"summary": "発話の観察は支持されるが、人物属性を推定しない。", "claims": [claim],
                     "intents": intents, "stop": None if intents else {"reason": "question_satisfied", "summary": "対象範囲で回答", "unresolved": []},
-                    "critique_responses": [], "label_decisions": []}
+                    "alternatives": [], "unresolved": [], "critique_responses": [], "label_decisions": []}
         result = {"summary": "合成会話の原文を確認", "claims": [claim], "analysis_requests": [], "label_patches": []}
+        if role == "interpretation" and "expert_request" in context:
+            request = context["expert_request"]
+            profile = request["knowledge"]
+            self.assertEqual(request["expert_id"], EXPERT)
+            self.assertEqual(request["data_version"], context["data_version"])
+            self.assertEqual(request["annotation_version"], context["annotation_version"])
+            self.assertEqual(request["evidence"], [
+                {key: row[key] for key in ("evidence_id", "utterance_id")}
+                for row in context["raw_evidence"]])
+            self.assertTrue(all(step["actor"] == "ai_draft" for step in profile["allowed_steps"]))
+            result["expert_report"] = {
+                "expert_id": EXPERT, "profile_hash": request["profile_hash"],
+                "knowledge_hash": request["knowledge_hash"], "status": "draft",
+                "outputs": {field: "合成原文の価格言及を観察。研究者の確定解釈は未実施。"
+                            for field in (entry["id"] for entry in profile["output_fields"])},
+                "evidence_ids": [evidence_id],
+                "knowledge_note_ids": [profile["knowledge"][0]["note_id"]],
+                "performed_step_ids": [profile["allowed_steps"][0]["id"]],
+                "missing_inputs": [], "limitations": "合成会話のみ。未読範囲と研究者の判断は未確認。",
+            }
         if role == "critic":
             result.update(review_status="no_issues", reviewed_scope="限定的な観察と終了案", limitations="合成会話のみ", issues=[])
+        if "expert_response" in schema["properties"]:
+            return {"expert_response": {"mode": "report", "result": result}}
         return result
 
     def start(self, payload=None):
@@ -79,6 +111,11 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 self.client.get(self.url + "/" + rid)
                 self.client.get(self.url)
             exported = self.client.get(self.url + "/" + rid + "/export.json").get_json()
+            expert_results = [row for row in exported["raw_results"] if "expert_report" in row["raw"]]
+            self.assertEqual(len(expert_results), 1)
+            self.assertEqual(expert_results[0]["validation_status"], "valid")
+            self.assertEqual(expert_results[0]["raw"]["expert_report"]["expert_id"], EXPERT)
+            self.assertEqual(expert_results[0]["dataset_version"], exported["initial"]["snapshot"]["input_hash"])
             self.assertIn("initial", exported)
             self.assertIn("label_versions", exported)
             note = self.client.get(self.url + "/" + rid + "/export.md")
@@ -123,18 +160,22 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                 # The initial builder is now durable/asynchronous. Capture its
                 # completed immutable output before the first Core decision.
                 initial = self.service.result("content", rid)["initial"]
-            result = self.response(*args)
+            wire = self.response(*args)
+            result = wire.get("expert_response", {}).get("result", wire)
             if role == "interpretation":
                 source = context["raw_evidence"][0]
                 result["label_patches"] = [{
                     "utterance_id": source["utterance_id"], "field": "theme",
+                    "operation": "add",
                     "old_value": context["labels"].get(source["utterance_id"], {}).get("theme"),
                     "new_value": "price", "reason": "原文中の価格への言及", "evidence_ids": [source["evidence_id"]],
                     "base_annotation_version": context["annotation_version"],
                     "codebook_version": context["task"]["codebook_version"],
                 }]
             if role == "core":
-                task = {"role": "statistics", "question": "固定版テーマの頻度を確認",
+                task = {"role": "statistics", "expert_id": "", "question": "固定版テーマの頻度を確認",
+                        "kind": "analysis", "result_id": "", "initial_sections": [],
+                        "dependencies": [], "replicate_id": "",
                         "why_now": "ラベル版に対応する集計が必要", "success_criteria": "対象数と欠測を保持",
                         "method_id": "label_frequency", "label_field": "theme", "evidence_ids": [],
                         "importance": "high", "importance_reason": "解釈への影響", "label_dependent": True}
@@ -144,7 +185,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
                     result["label_decisions"] = [{"proposal_id": value["proposal_id"], "disposition": "adopt", "reason": "原文根拠を確認"}
                                                  for value in context["label_proposals"]]
                     result["intents"] = [task]; result["stop"] = None
-            return result
+            return wire
         with patch.object(app, "call_orchestration_ai_json", side_effect=response):
             rid = self.start()
             self.service.run(rid)
