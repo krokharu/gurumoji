@@ -264,6 +264,181 @@ class CoreMetadataSavedBoundaryTests(unittest.TestCase):
                 self.assertNotIn("_result_metadata_hash", self.h.context(self.h.register(role, **extra)))
 
 
+class CoreRoleAuthorityTests(unittest.TestCase):
+    """Actual saved adoption, with mutations confined to temporary SQL rows."""
+    def setUp(self):
+        self.history = core_support.CoreHistoryDeliveryTests(methodName="runTest")
+        self.history.setUp(); self.addCleanup(self.history.doCleanups)
+        self.h = self.history.h
+        self.prior = self.history.produce_core()
+        self.consumers = [self.h.register(role) for role in ("core", "critic")]
+        for consumer in self.consumers:
+            self.history.assert_reference(self.h.context(consumer)["results"][0], self.prior)
+        with self.h.service._db() as db:
+            self.originals = {table: dict(db.execute(f"SELECT rowid AS saved_rowid,* FROM {table} WHERE {key}=?",
+                (self.prior["task_id"] if key == "task_id" else self.prior["result_id"],)).fetchone())
+                for table, key in (("orchestration_results", "result_id"), ("orchestration_tasks", "task_id"),
+                                   ("orchestration_decisions", "result_id"))}
+        decision = self.originals["orchestration_decisions"]
+        self.assertEqual(json.loads(decision["payload_json"])["role"], "core")
+        self.assertEqual(decision["result_id"], self.prior["result_id"])
+
+    def restore(self):
+        with self.h.service._db() as db:
+            for table, saved in self.originals.items():
+                fields = [key for key in saved if key != "saved_rowid"]
+                db.execute(f"UPDATE {table} SET " + ",".join(f"{key}=?" for key in fields) + " WHERE rowid=?",
+                           [saved[key] for key in fields] + [saved["saved_rowid"]])
+
+    def mutate(self, table, *, physical=None, changes=None, missing=()):
+        column = "payload_json" if table == "orchestration_decisions" else "state_json"
+        rowid = self.originals[table]["saved_rowid"]
+        with self.h.service._db() as db:
+            row = dict(db.execute(f"SELECT * FROM {table} WHERE rowid=?", (rowid,)).fetchone())
+            updates = dict(physical or {})
+            if changes is not None or missing:
+                state = json.loads(row[column]); state.update(changes or {})
+                for field in missing: state.pop(field, None)
+                updates[column] = canonical(state).decode()
+            db.execute(f"UPDATE {table} SET " + ",".join(f"{key}=?" for key in updates) + " WHERE rowid=?",
+                       [*updates.values(), rowid])
+
+    def reject_readonly(self):
+        before, calls = self.h.path.read_bytes(), len(self.h.calls)
+        statements = []
+        for consumer in self.consumers:
+            with self.subTest(consumer=consumer["role"]), self.h.service._db() as db:
+                run = self.h.service._read_run(db, self.h.run["run_id"])
+                db.set_trace_callback(statements.append)
+                with self.assertRaises(AnalysisContractError) as caught:
+                    self.h.service._context(db, run, consumer)
+                self.assertEqual(caught.exception.code, "result_integrity_mismatch")
+        self.assertEqual(self.h.path.read_bytes(), before)
+        self.assertEqual(len(self.h.calls), calls)
+        self.assertFalse([sql for sql in statements if sql.lstrip().split()[0].upper() in
+                          {"INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP"}])
+
+    def test_saved_result_role_alone_cannot_demote_adopted_core(self):
+        for role in ("critic", "interpretation", "statistics", "verification", "", None):
+            with self.subTest(result_role=role):
+                self.restore(); self.mutate("orchestration_results", changes={"role": role})
+                with self.h.service._db() as db:
+                    result = dict(db.execute("SELECT * FROM orchestration_results WHERE result_id=?", (self.prior["result_id"],)).fetchone())
+                    for field in ("result_id", "run_id", "task_id", "raw_json"):
+                        self.assertEqual(result[field], self.originals["orchestration_results"][field])
+                    self.assertEqual(json.loads(result["state_json"])["raw_hash"],
+                                     json.loads(self.originals["orchestration_results"]["state_json"])["raw_hash"])
+                    self.assertEqual(dict(db.execute("SELECT rowid AS saved_rowid,* FROM orchestration_decisions WHERE result_id=?",
+                        (self.prior["result_id"],)).fetchone()), self.originals["orchestration_decisions"])
+                self.reject_readonly()
+        self.restore(); self.mutate("orchestration_results", missing=("role",))
+        self.reject_readonly()
+
+    def test_saved_source_role_alone_cannot_demote_adopted_core(self):
+        for role in ("critic", "interpretation", "statistics", "verification", "", None):
+            with self.subTest(source_role=role):
+                self.restore(); self.mutate("orchestration_tasks", changes={"role": role})
+                self.reject_readonly()
+
+    def test_both_saved_roles_cannot_override_actual_committed_decision(self):
+        for role in ("critic", "interpretation", "statistics", "verification", "", None):
+            with self.subTest(both_roles=role):
+                self.restore()
+                for table in ("orchestration_results", "orchestration_tasks"):
+                    self.mutate(table, changes={"role": role})
+                with self.h.service._db() as db:
+                    self.assertEqual(dict(db.execute("SELECT rowid AS saved_rowid,* FROM orchestration_decisions WHERE result_id=?",
+                        (self.prior["result_id"],)).fetchone()), self.originals["orchestration_decisions"])
+                self.reject_readonly()
+
+    def test_result_metadata_identity_cannot_redirect_role_authority(self):
+        other = self.h.produce("Unrelated legitimate expert result")
+        for field, value in (("result_id", other["result_id"]), ("task_id", other["task_id"]),
+                             ("run_id", "foreign-run"), ("result_id", None), ("task_id", None)):
+            with self.subTest(field=field, value=value):
+                self.restore()
+                self.mutate("orchestration_results", changes={"role": "critic", field: value})
+                self.mutate("orchestration_tasks", changes={"role": "critic"})
+                self.reject_readonly()
+
+    def test_physical_source_and_result_identities_are_not_repaired(self):
+        for table, physical in (("orchestration_results", {"task_id": "foreign-task"}),
+                                ("orchestration_results", {"result_id": "foreign-result"}),
+                                ("orchestration_tasks", {"task_id": "foreign-task"}),
+                                ("orchestration_tasks", {"run_id": "foreign-run"})):
+            with self.subTest(table=table, physical=physical):
+                self.restore()
+                self.mutate("orchestration_results", changes={"role": "critic"})
+                self.mutate("orchestration_tasks", changes={"role": "critic"})
+                self.mutate(table, physical=physical)
+                self.reject_readonly()
+
+    def test_original_source_and_result_validation_still_gates_core_history(self):
+        mutations = {
+            "orchestration_results": ({"dataset_version": "old"}, {"attempt_id": None}, {"attempt_id": "other"},
+                {"raw_hash": "sha256:other"}, {"stale": True}, {"validation_status": "quarantined"}),
+            "orchestration_tasks": ({"task_id": "other"}, {"result_id": "other"}, {"run_id": "foreign"},
+                {"dataset_version": "old"}, {"attempt_id": None}, {"attempt_id": "other"}, {"stale": True},
+                {"status": "cancelled"}, {"status": "queued"}, {"validation_status": "quarantined"})}
+        for table, cases in mutations.items():
+            for change in cases:
+                with self.subTest(table=table, change=change):
+                    self.restore(); self.mutate(table, changes=change); self.reject_readonly()
+
+    def test_committed_decision_identity_role_and_content_remain_authoritative(self):
+        for change in ({"role": "critic"}, {"task_id": "other"}, {"result_id": "other"},
+                       {"summary": "Changed adopted summary"}, {"alternatives": ["Changed adopted content"]}):
+            with self.subTest(change=change):
+                self.restore(); self.mutate("orchestration_decisions", changes=change); self.reject_readonly()
+        self.restore(); self.mutate("orchestration_decisions", missing=("result_id",))
+        self.reject_readonly()
+        self.restore(); self.mutate("orchestration_decisions", physical={"run_id": "foreign-run"})
+        self.reject_readonly()
+        self.restore()
+        raw = json.loads(self.originals["orchestration_results"]["raw_json"])
+        raw["summary"] = "Changed raw with matching self hash"
+        self.mutate("orchestration_results", physical={"raw_json": canonical(raw).decode()}, changes={"raw_hash": fingerprint(raw)})
+        self.reject_readonly()
+
+    def test_real_execute_rejects_wrong_role_before_dispatch(self):
+        self.mutate("orchestration_results", changes={"role": "critic"})
+        self.mutate("orchestration_tasks", changes={"role": "critic"})
+        calls = len(self.h.calls)
+        before = self.h.saved()["raw_results"]
+        self.h.service._execute(self.h.run["run_id"], self.consumers[0]["task_id"])
+        self.assertEqual(len(self.h.calls), calls)
+        saved = self.h.saved()
+        self.assertEqual(saved["raw_results"], before)
+        task = next(row for row in saved["run"]["tasks"] if row["task_id"] == self.consumers[0]["task_id"])
+        self.assertEqual((task["status"], task["error"]), ("failed", "result_integrity_mismatch"))
+        self.assertEqual(saved["run"]["calls_started"], 1)
+
+    def test_valid_mixed_results_and_unadopted_core_keep_original_bodies(self):
+        unadopted = self.history.produce_core(adopt=False)
+        expert = self.h.produce("Legitimate expert result")
+        critic = self.h.register("critic")
+        self.h.response = support.critic({})
+        self.h.service._execute(self.h.run["run_id"], critic["task_id"])
+        self.h.service.method_runner = lambda name, snapshot: {"method": {"method_id": name},
+            "datasets": {"summary": {"fields": ["n"], "rows": [{"n": 7}]}}}
+        statistic = self.h.register("statistics", method_id="participation")
+        self.h.service._execute(self.h.run["run_id"], statistic["task_id"])
+        expected = self.h.saved()
+        with self.h.service._db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_decisions").fetchone()[0], 1)
+        for role in ("core", "critic"):
+            consumer = self.h.register(role)
+            before = self.h.path.read_bytes()
+            delivered = self.h.context(consumer)["results"]
+            self.history.assert_reference(delivered[0], self.prior)
+            bodies = {row["task_id"]: row for row in delivered if "content" in row}
+            for task in (unadopted, expert, critic, statistic):
+                original = next(row for row in expected["raw_results"] if row["task_id"] == task["task_id"])
+                self.assertEqual(original["validation_status"], "valid")
+                self.assertEqual(bodies[task["task_id"]], {**{k: v for k, v in original.items() if k != "raw"}, "content": original["raw"]})
+            self.assertEqual(self.h.path.read_bytes(), before)
+
+
 class CoreMetadataServiceTests(unittest.TestCase):
     def run_cycle(self, project):
         import app

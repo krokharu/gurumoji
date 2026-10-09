@@ -1785,7 +1785,14 @@ class AnalysisOrchestrationService:
         accepted = []
         unrelated_results = 0
         core_references = False
-        for result in public["results"]:
+        # Keep physical identities available when discovering Core authority;
+        # mutable result/task role labels cannot demote a committed decision.
+        result_rows = ((result, None) for result in public["results"])
+        if history_scoped:
+            result_rows = ((json.loads(row["state_json"]), row) for row in db.execute(
+                "SELECT result_id,run_id,task_id,state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid",
+                (run["run_id"],)).fetchall())
+        for result, saved_row in result_rows:
             if dependency_scoped:
                 # Neither metadata nor bodies of unrelated results belong to an
                 # independent expert's input. The complete ledger stays saved.
@@ -1804,13 +1811,19 @@ class AnalysisOrchestrationService:
                         or source.get("attempt_id") != result.get("attempt_id")):
                     accepted.append({**result, "body_not_delivered": True})
                     continue
-            core_history = history_scoped and result["role"] == "core"
-            if core_history:
-                # Read the actual source task, not a caller-supplied adoption flag.
+            source, decision_row = {}, None
+            if history_scoped:
+                if any(result.get(key) != saved_row[key] for key in ("result_id", "run_id", "task_id")):
+                    raise _error("保存済み結果の参照が一致しません。", "result_integrity_mismatch")
                 source_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
-                                        (result["task_id"], run["run_id"])).fetchone()
+                                        (saved_row["task_id"], run["run_id"])).fetchone()
                 source = json.loads(source_row[0]) if source_row else {}
-                if (result["validation_status"] != "valid" or result.get("stale")
+                decision_row = db.execute("SELECT * FROM orchestration_decisions WHERE result_id=?",
+                                          (saved_row["result_id"],)).fetchone()
+            core_history = history_scoped and (result.get("role") == "core" or source.get("role") == "core"
+                                               or decision_row is not None)
+            if core_history:
+                if (result.get("role") != "core" or result["validation_status"] != "valid" or result.get("stale")
                         or result.get("run_id") != run["run_id"] or result.get("dataset_version") != run["input_hash"]
                         or source.get("task_id") != result["task_id"] or source.get("run_id") != run["run_id"]
                         or source.get("role") != "core" or source.get("dataset_version") != run["input_hash"]
@@ -1832,8 +1845,6 @@ class AnalysisOrchestrationService:
                 if fingerprint(content) != result["raw_hash"]:
                     raise _error("保存済み結果のhashが一致しません。", "result_integrity_mismatch")
                 if core_history:
-                    decision_row = db.execute("SELECT * FROM orchestration_decisions WHERE result_id=?",
-                                              (result["result_id"],)).fetchone()
                     if decision_row is not None:
                         decision = json.loads(decision_row["payload_json"])
                         # _apply_core saves the raw response plus these Handler
