@@ -113,3 +113,16 @@ tests/test_ai_data_export_api.py -text
 tests/test_ai_data_export_bundle.py -text
 tests/test_ai_data_export_independent.py -text
 tests/test_ai_data_export_route_security.py -text
+docs/program-vault/60-Operations/dot-cloud-development-handoff.md -text
+src/gurumoji/services/analysis_unit_groups.py -text
+src/gurumoji/static/analysis-history.css -text
+src/gurumoji/static/analysis-history.js -text
+src/gurumoji/static/analysis-method-view.js -text
+tests/dom/analysis-history.test.cjs -text
+tests/support_analysis_unit_kernel.py -text
+tests/test_analysis_asset_plan_options.py -text
+tests/test_analysis_multi_conversation_units.py -text
+tests/test_analysis_unit_groups.py -text
+tests/test_analysis_unit_pool_independent.py -text
+tests/test_analysis_unit_pool_ui.cjs -text
+tests/test_legacy_expert_fixture_contract.py -text
