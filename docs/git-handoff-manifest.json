@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "6b8fd8c774d564041aedd624b5a41689ae670a27",
+  "source_commit": "a1ee73c610861a5a90fd66800f263856c884a960",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "a20f518e5438d782402ac4512926c3ca02896730cb8ea31130c2971c1f23c9b2",
-      "bytes": 27944
+      "sha256": "37df86fd7f155d44cf16a5f2ffab2c6f7c6b9e48aff815a071caabf93b0733b0",
+      "bytes": 32046
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -72,6 +72,16 @@
       "path": "docs/program-vault/50-Analysis-Methods/10-Experts/descriptive-statistics/07-Agent-Contract.md",
       "sha256": "97a8dfc961a2c469bd22f76897b790e1bd4a5de0fcf2b6df5a4743b10412ad4a",
       "bytes": 16238
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/focus-group-interaction/07-Agent-Contract.md",
+      "sha256": "18e3f05b356806c9fe2bb625c7e7ae7d5fb20f7cf4ab002926aefe891f5f2942",
+      "bytes": 6797
+    },
+    {
+      "path": "docs/program-vault/50-Analysis-Methods/10-Experts/focus-group-interaction/08-Skill-Hook-Binding.md",
+      "sha256": "1eb5e6ef2fe06f4a264ace022b53ec44522f9abfba68f4798ad177bbff998c37",
+      "bytes": 3359
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/10-Experts/group-comparison-statistics/00-Overview.md",
@@ -145,8 +155,8 @@
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness.md",
-      "sha256": "7c9bc4bbbc11011d936d4572da9fdbf579787cc4d0dbdd914564c045a58ccbd7",
-      "bytes": 32184
+      "sha256": "107006bc2418664e4ad8b43e5a24e81413cd758f0d24982acdbdb833c280ed85",
+      "bytes": 33390
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/50-Knowledge-Evaluation/g3-connection-fixtures.md",
@@ -220,8 +230,8 @@
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "a21e68428d4ddd60231a0b0d9f7066de2d3c61fadc5a08254841cd616f3faa4e",
-      "bytes": 223912
+      "sha256": "5fc4301372e2a9368b190c9b6e78f8169ad2a48a81dde79cd5e733dc48ce1130",
+      "bytes": 225260
     },
     {
       "path": "src/gurumoji/analysis_store.py",
@@ -235,8 +245,8 @@
     },
     {
       "path": "src/gurumoji/method_experts.py",
-      "sha256": "a859994762095d225ca99f472eb8c711538ce3cedac83190c5388e20fc2f5fc1",
-      "bytes": 86330
+      "sha256": "d25c92310fe3d766a90e20f615d3a61bf2c8c529967dab4fd27ab9401bcbc021",
+      "bytes": 87489
     },
     {
       "path": "src/gurumoji/research_analysis.py",
@@ -295,8 +305,8 @@
     },
     {
       "path": "src/gurumoji/services/expert_agents.py",
-      "sha256": "ffdcfae4c0a899a54926e75ebc78675c34b98db8203f1a5fa003171aa5c65476",
-      "bytes": 59707
+      "sha256": "cb13e99fe2bc2bbac97e60d58371ce2cbba4efe95cb98d5f9ec130e2b536fa48",
+      "bytes": 74785
     },
     {
       "path": "src/gurumoji/services/expert_data_hooks.py",
@@ -585,8 +595,8 @@
     },
     {
       "path": "tests/test_expert_agents.py",
-      "sha256": "5d3731ba125816f854cd8f7327fd73008872792ed36cab8fa418d4c802bc9481",
-      "bytes": 30293
+      "sha256": "45590d5dc64741f20625242d4b69ff1f48fc3f9506f025966f72facc1cc72949",
+      "bytes": 31153
     },
     {
       "path": "tests/test_expert_data_hooks.py",
@@ -600,8 +610,18 @@
     },
     {
       "path": "tests/test_expert_skill_bindings.py",
-      "sha256": "f197cfdc9ed1dd1b6491762e6b8b8240ee1e3f4f5356fec288906049130fb217",
-      "bytes": 25339
+      "sha256": "fa0a318cbb51b6b4cd290d69c97d9ef91f87359ea17644036dfc05601e2339c1",
+      "bytes": 25337
+    },
+    {
+      "path": "tests/test_focus_group_interaction_contract.py",
+      "sha256": "f34d7399bd45ff0545fd9e28a6cc336a7fe91ec71781286b4a59e5cdc055a73e",
+      "bytes": 35980
+    },
+    {
+      "path": "tests/test_focus_group_interaction_independent.py",
+      "sha256": "59e6ea48e6dc87cdf4ee52a5584a3f7e0881266842b4b593de995a245df8440f",
+      "bytes": 24104
     },
     {
       "path": "tests/test_git_handoff.py",
