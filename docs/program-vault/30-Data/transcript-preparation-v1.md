@@ -67,13 +67,13 @@ tags:
 
 ### API・データ出力
 
-#### AI向け生データZIP v1（2026-10-09、独立受入前）
+#### AI向け生データZIP v1（2026-10-10、部分受入・最終受入前）
 
-[#29](https://github.com/krokharu/gurumoji/issues/29)の凍結契約。backend候補は`4e3ddf643b14b4aeb63c9d3cbd3f269b20633ffa`、成功ZIP・最終統合は未受入。Dotがserializer／validator・payload整形・frame抽出・対応test、OrcaがUIとWindows独立受入、C0がroute／app登録と統合を所有する。以下は仕様であり、Linux・実研究者・外部AIの評価成功を意味しない。
+[#29](https://github.com/krokharu/gurumoji/issues/29)の凍結契約。Dotのbackend候補`85b8d89ae2a40ec7866b4552ce0fcc5c44404b3e`（親4e3）をUI・routeと合成した固定`64dc581980765af7ebb6bcbc382ac45fa2829f7b`で、Windows独立通常Edge1440／390の実ZIPダウンロード4回・hash／参照／JPEG decode・読取専用性が成功した。pure validatorの大時刻における重複／逆順／1秒未満の間隔受理は未解決で、最終受入・共有版更新は保留。Dotがserializer／validator・payload整形・frame抽出・対応test、OrcaがUIとWindows独立受入、C0がroute／app登録と統合を所有する。以下は契約であり、実研究者・外部AIの評価成功を意味しない。
 
 - 明示`POST /api/library/<id>/ai-export.zip`で端末へダウンロードする。外部AI送信、分析実行、DB／Vault／原媒体の更新は行わない。既存preparation JSONはそのまま維持する。
 - 1つの読取snapshotの原本／全入力版／確認履歴を使い、原文・現行・lineage、原本の`initial_import`／`migrated_current_snapshot`／`unavailable`、時刻nullと0を区別する。保存済みoutlineを出し、欠落ならnull。派生・切詰めoutlineや現在版とのfresh性を推測しない。
-- 氏名OFF・属性未選択が既定。選択を全入力履歴の話者profileにも適用し、組織／部署／役職／会話内役割／その根拠だけを選べる。未保存属性を補完しない。raw label／UNKNOWNと会話内stable speaker_noを対応させる。氏名を除いても本文・自由記述・動画の匿名化を保証しない。
+- 氏名OFF・属性未選択が既定。選択を全入力履歴の話者profileにも適用し、組織／部署／役職／会話内役割／その根拠だけを選べる。未保存属性を補完しない。氏名は除外／欠落ならnull、保存済み空文字は空文字を保持する。raw label／UNKNOWNと会話内stable speaker_noを対応させる。氏名を除いても本文・自由記述・動画の匿名化を保証しない。
 - `source_hash`は元snapshotの域、既存`rows_sha256`は追加speaker keys前の元preparation行の域。ZIP内各fileのhashは選択投影後の正確なbytesを対象とし、これらを混同しない。manifest／schema／conversation／speakers／utterances JSONL／outline／READMEを照合し、frame参照・hash・不正ZIPも検証する。
 - 動画frameは明示opt-in、item許可媒体だけ。最大24枚・範囲600秒・間隔1秒以上・長辺1280px・各2MiB／計32MiB・全subprocess合計30秒、ZIP展開64MiB／text32MiBを上限とする。任意path／URLを入力にしない。要求時刻と実decoder PTSを分け、欠落／音声のみ／partial／timeout／取消を空の成功にしない。stat identityはcontent hashではない。
 - source／preparation revision／媒体の変更を出力前に再照合する。UI取消は遅い応答からのdownloadも抑止し、server停止確認とは区別する。合成隔離fixtureのみを使い、ZIP作者による試験と独立通常UI→実API→ZIP/hash/frame decodeを分けて記録する。PNG Store／Web／Vault延期とGemma HOLDは変更しない。
