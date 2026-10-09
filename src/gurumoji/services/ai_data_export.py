@@ -6,8 +6,10 @@ created here; the established preparation export is the provenance source.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
+from fractions import Fraction
 
 from .. import transcript_preparation as preparation
 from ..text_utils import json_load
@@ -62,16 +64,22 @@ def validate_export_request(value):
             if not finite:
                 raise ExportError("invalid_frame_number")
         start, end, interval = (frames[k] for k in ("start", "end", "interval"))
+        # JSON numbers arrive as int/float. Interpret their standard decimal
+        # spellings exactly for range/count arithmetic: binary subtraction can
+        # turn (4.1 - 0.1) / 1 into 3.999..., silently omitting the endpoint.
+        # Fraction avoids both an epsilon policy and Decimal context rounding.
+        first, last, step = (Fraction(str(n)) for n in (start, end, interval))
         maximum, dimension = frames.get("max_frames", 24), frames.get("max_dimension", 1280)
-        if start < 0 or end < start or end - start > 600 or interval < 1 or \
+        if first < 0 or last < first or last - first > 600 or step < 1 or \
                 type(maximum) is not int or not 1 <= maximum <= 24 or \
                 type(dimension) is not int or not 16 <= dimension <= 1280:
             raise ExportError("frame_bounds")
         # Count before constructing any list. Never silently truncate a request.
-        count = math.floor((end - start) / interval) + 1
+        count = (last - first) // step + 1
         if count > maximum:
             raise ExportError("frame_count")
-        times = [start + k * interval for k in range(count)]
+        as_number = float if type(start) is float or type(interval) is float else int
+        times = [as_number(first + k * step) for k in range(count)]
         if any(not math.isfinite(t) or t > end for t in times) or len(set(times)) != count:
             raise ExportError("invalid_frame_number")
         frames = {"enabled": True, "times": times, "max_dimension": dimension}
@@ -85,20 +93,31 @@ def _label(segment):
 
 
 def _segments(segments):
+    if not isinstance(segments, list) or any(not isinstance(s, dict) for s in segments):
+        raise ValueError("invalid saved segments")
     return [{k: v for k, v in s.items() if k in SEGMENT_KEYS} for s in segments]
 
 
 def ai_export_payload(row, segments, prepared, selection):
     """Project saved metadata; keep original source hashes in their own domain."""
+    # Projection must not alter even the caller's in-memory snapshot.
+    prepared = copy.deepcopy(prepared)
+    if len(prepared["rows"]) != len(segments):
+        raise ValueError("row/segment mismatch")
     current = preparation.source(row)
     sources = [current] + [v["source"] for v in prepared["versions"]]
     labels = set()
     for source in sources:
+        if not isinstance(source, dict) or any(not isinstance(source.get(k), dict)
+                for k in ("speaker_profiles", "speaker_names", "session_profile")):
+            raise ValueError("invalid saved source")
+        _segments(source["segments"])
         labels.update(filter(None, (_label(s) for s in source["segments"])))
         labels.update(k for k in source["speaker_profiles"] if isinstance(k, str) and k)
+    _segments(prepared["original_segments"])
     labels.update(filter(None, (_label(s) for s in prepared["original_segments"])))
     numbers = {label: i + 1 for i, label in enumerate(sorted(labels))}
-    attrs, names = selection["speaker_attributes"], selection["include_names"]
+    attrs, names = list(selection["speaker_attributes"]), selection["include_names"]
 
     def profile(value, label):
         value = value if isinstance(value, dict) else {}
@@ -112,7 +131,9 @@ def ai_export_payload(row, segments, prepared, selection):
     for label in sorted(labels):
         saved = current["speaker_profiles"].get(label, {})
         saved = saved if isinstance(saved, dict) else {}
-        display = saved.get("display_name") or current["speaker_names"].get(label)
+        display = saved.get("display_name")
+        if not isinstance(display, str):
+            display = current["speaker_names"].get(label)
         speakers.append({"speaker_no": numbers[label], "raw_label": label,
                          "display_name": display if names and isinstance(display, str) else None,
                          "attributes": {k: saved[k] for k in attrs if k in saved}})
@@ -126,6 +147,8 @@ def ai_export_payload(row, segments, prepared, selection):
         version["source"] = filtered
     prepared["original_segments"] = _segments(prepared["original_segments"])
     for turn, segment in zip(prepared["rows"], segments):
+        if turn["segment_id"] != segment.get("id"):
+            raise ValueError("row/segment ID mismatch")
         label = _label(segment)
         turn.update(raw_speaker_label=label, speaker_no=numbers.get(label))
     # The established rows digest remains in the original preparation.FIELDS
@@ -144,7 +167,7 @@ def preparation_export_snapshot(connection, row, segments):
     """Read the complete preparation export within the caller's snapshot."""
     value = preparation.view(connection, row, segments)
     value["original_segments"] = json_load(row["original_segments_json"], [])
-    value["original_status"] = row["original_segments_status"]
+    value["original_status"] = row["original_segments_status"] or "unavailable"
     value["versions"] = [
         {"version": v["version"], "source_hash": v["source_hash"],
          "source": json.loads(v["source_json"]), "origin": v["origin"],

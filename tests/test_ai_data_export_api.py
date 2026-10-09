@@ -1,5 +1,6 @@
 """Isolated synthetic SQLite/Flask tests; no app runtime or researcher data."""
 
+import copy
 import io
 import json
 import sqlite3
@@ -23,7 +24,10 @@ from werkzeug.serving import make_server
 from gurumoji import transcript_preparation as preparation
 from gurumoji.services.library_rows import row_segments, row_session_profile, row_speaker_profiles
 from gurumoji.services.durable_files import path_is_within
-from gurumoji.services.ai_data_export import ExportError, validate_export_request
+from gurumoji.services.ai_data_export import (
+    ExportError, ai_export_payload, preparation_export_snapshot, validate_export_request,
+)
+from gurumoji.services.ai_data_export_bundle import validate_ai_bundle_zip
 from gurumoji.services.ai_data_export_frames import extract_frames, permitted_media
 from gurumoji.web.export_routes import register_export_routes
 
@@ -129,6 +133,7 @@ class AIDataExportAPITests(unittest.TestCase):
         self.assertEqual(response.mimetype, "application/zip")
         self.assertIn("attachment", response.headers["Content-Disposition"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+        validate_ai_bundle_zip(response.data)
         archive = zipfile.ZipFile(io.BytesIO(response.data))
         manifest = json.loads(archive.read("manifest.json"))
         for record in manifest["files"]:
@@ -363,6 +368,7 @@ class AIDataExportAPITests(unittest.TestCase):
                 self.assertEqual(response.headers.get_content_type(), "application/zip")
                 self.assertIn("attachment", response.headers["Content-Disposition"])
                 data = response.read()
+            validate_ai_bundle_zip(data)
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 self.assertEqual(json.loads(archive.read("manifest.json"))["item_id"], "sample")
         finally:
@@ -390,6 +396,168 @@ class AIDataExportAPITests(unittest.TestCase):
                 extract_frames(row, [], {"times": list(range(24)), "max_dimension": 1280},
                                media_directory=lambda: self.root / "media", path_is_within=path_is_within)
         self.assertEqual(caught.exception.reason, "frame_total_limit")
+
+
+    def test_projection_does_not_mutate_preparation_or_selection(self):
+        with self.connection() as c:
+            row = c.execute("SELECT * FROM library_items").fetchone()
+            segments = row_segments(row)
+            prepared = preparation_export_snapshot(c, row, segments)
+        options = validate_export_request({"speaker_attributes": ["organization"]})
+        before = copy.deepcopy((prepared, segments, options))
+        payload = ai_export_payload(row, segments, prepared, options)
+        self.assertEqual((prepared, segments, options), before)
+        payload["selection"]["speaker_attributes"].clear()
+        self.assertEqual(options["speaker_attributes"], ["organization"])
+        self.assertNotIn("speaker_no", prepared["rows"][0])
+        with self.assertRaises(ValueError):
+            ai_export_payload(row, segments[:1], prepared, options)
+
+    def test_all_saved_label_sources_selected_profiles_and_narrative_preserved(self):
+        with self.connection() as c:
+            original = [{"id": "original_only", "speaker": "Original", "text": "原保存", "path": "/private"}]
+            segments = [{"id": "now", "speaker": "Current", "text": "名前は本文に残る", "start": 0, "end": 1},
+                        {"id": "none", "text": "話者なし"}]
+            profiles = {"Current": {"display_name": "", "organization": "", "department": "除外部門",
+                                    "session_role_source": "manual", "global_speaker_id": "never-export", "notes": "private-note"},
+                        "ProfileOnly": {"organization": "保存組織"}}
+            c.execute("UPDATE library_items SET segments_json=?, original_segments_json=?, speaker_profiles_json=?, "
+                      "speaker_names_json=?, session_profile_json=?", (json.dumps(segments), json.dumps(original), json.dumps(profiles),
+                      json.dumps({"Current": "fallback-name"}), json.dumps({"note": "ユーザー本文の名前"})))
+            row = c.execute("SELECT * FROM library_items").fetchone()
+            preparation.capture(c, row, "synthetic_current")
+        archive = self.archive(self.post({"speaker_attributes": ["organization"]}))
+        speakers = json.loads(archive.read("speakers.json"))
+        self.assertEqual([s["raw_label"] for s in speakers], ["Current", "Original", "ProfileOnly", "S1", "S2"])
+        prepared = json.loads(archive.read("conversation.json"))["preparation"]
+        self.assertIsNone(prepared["rows"][1]["speaker_no"])
+        self.assertEqual(speakers[0]["attributes"], {"organization": ""})
+        self.assertNotIn("path", prepared["original_segments"][0])
+        text = archive.read("conversation.json").decode()
+        for secret in ("fallback-name", "private-note", "never-export", "除外部門"):
+            self.assertNotIn(secret, text)
+        self.assertIn("ユーザー本文の名前", text)
+        self.assertIn("名前は本文に残る", text)
+        named = self.archive(self.post({"include_names": True, "speaker_attributes": ["session_role_source"]}))
+        saved = json.loads(named.read("speakers.json"))[0]
+        self.assertEqual(saved["display_name"], "")
+        self.assertEqual(saved["attributes"], {"session_role_source": "manual"})
+
+    def test_migrated_and_unavailable_original_status_remain_explicit(self):
+        for status in ("migrated_current_snapshot", None):
+            with self.connection() as c:
+                c.execute("UPDATE library_items SET original_segments_status=?", (status,))
+            value = json.loads(self.archive(self.post()).read("conversation.json"))["preparation"]
+            self.assertEqual(value["original_status"], status or "unavailable")
+            self.assertEqual(value["rows"][0]["original_status"], status or "unavailable")
+
+    def test_frames_unknown_pts_never_substitutes_requested_time(self):
+        from PIL import Image
+        self.video()
+        data = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(data, format="JPEG")
+        with patch("gurumoji.services.ai_data_export_frames._run_bounded", return_value=(0, data.getvalue(), b"unrelated pts_time:0")):
+            archive = self.archive(self.post(self.frame_options()))
+        entries = [json.loads(line) for line in archive.read("frames/index.jsonl").splitlines()]
+        self.assertEqual([f["requested_time"] for f in entries], [0, 1])
+        self.assertTrue(all(f["actual_time"] is None and not f["utterance_ids"] and
+                            f["method"] == "ffmpeg_pts_unavailable" for f in entries))
+
+    def test_partial_extraction_is_422_and_never_downloads_a_zip(self):
+        from PIL import Image
+        self.video()
+        data = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(data, format="JPEG")
+        outputs = [(0, data.getvalue(), b"[Parsed_showinfo_1 @ x] n: 0 pts_time:0"), (1, b"", b"error")]
+        with patch("gurumoji.services.ai_data_export_frames._run_bounded", side_effect=outputs):
+            response = self.post(self.frame_options())
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["frames"]["status"], "partial")
+        self.assertEqual(response.mimetype, "application/json")
+        self.assertNotIn("Content-Disposition", response.headers)
+
+    def test_subprocess_timeout_after_one_frame_is_408_without_zip(self):
+        from PIL import Image
+        self.video()
+        data = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(data, format="JPEG")
+        outputs = [(0, data.getvalue(), b""), ExportError("frame_timeout", 408, frame_status="failed")]
+        with patch("gurumoji.services.ai_data_export_frames._run_bounded", side_effect=outputs):
+            response = self.post(self.frame_options())
+        self.assertEqual(response.status_code, 408)
+        self.assertEqual(response.get_json()["frames"]["reason"], "frame_timeout")
+        self.assertNotIn("Content-Disposition", response.headers)
+
+    def test_expired_subprocess_budget_does_not_spawn(self):
+        from gurumoji.services.ai_data_export_frames import _run_bounded
+        with patch("gurumoji.services.ai_data_export_frames.subprocess.Popen", side_effect=AssertionError("must not spawn")):
+            with self.assertRaises(ExportError) as caught:
+                _run_bounded(["unused"], time.monotonic() - 1, None)
+        self.assertEqual(caught.exception.status, 408)
+
+    def test_symlink_cannot_escape_saved_item_media_root(self):
+        outside = self.root / "outside.mp4"
+        outside.write_bytes(b"synthetic")
+        directory = self.root / "media" / "sample"
+        directory.mkdir(parents=True)
+        link = directory / "linked.mp4"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink unavailable")
+        with self.connection() as c:
+            c.execute("UPDATE library_items SET media_path=?", (str(link),))
+        response = self.post(self.frame_options())
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["frames"]["reason"], "media_not_permitted")
+
+    def test_playlist_disguised_as_video_is_not_decoded(self):
+        path = self.video()
+        playlist = path.with_name("playlist.mp4")
+        playlist.write_text("ffconcat version 1.0\nfile 'synthetic.mp4'\n", encoding="utf-8")
+        with self.connection() as c:
+            c.execute("UPDATE library_items SET media_path=?", (str(playlist),))
+        response = self.post(self.frame_options())
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["frames"]["reason"], "frame_extraction_failed")
+        self.assertNotIn("Content-Disposition", response.headers)
+
+    def test_decimal_frame_grid_includes_endpoint_and_rejects_overflow(self):
+        cases = [
+            (0.1, 4.1, 1, [0.1, 1.1, 2.1, 3.1, 4.1]),
+            (0.1, 3.4, 1.1, [0.1, 1.2, 2.3, 3.4]),
+            (0.1, 3.3999999999999995, 1.1, [0.1, 1.2, 2.3]),
+        ]
+        for start, end, interval, expected in cases:
+            request = {"frames": {"enabled": True, "start": start, "end": end, "interval": interval,
+                                  "max_frames": len(expected)}}
+            with self.subTest(start=start, end=end, interval=interval):
+                self.assertEqual(validate_export_request(request)["frames"]["times"], expected)
+                request["frames"]["max_frames"] -= 1
+                with self.assertRaises(ExportError) as caught:
+                    validate_export_request(request)
+                self.assertEqual(caught.exception.reason, "frame_count")
+                with patch("gurumoji.web.export_routes.preparation_export_snapshot", side_effect=AssertionError("no snapshot")), \
+                        patch("gurumoji.web.export_routes.extract_frames", side_effect=AssertionError("no media")):
+                    self.assertEqual(self.post(request).status_code, 400)
+        # Decimal arithmetic does not relax the frozen >=1 second interval.
+        with self.assertRaises(ExportError) as caught:
+            validate_export_request({"frames": {"enabled": True, "start": 0.1, "end": 0.3, "interval": 0.1}})
+        self.assertEqual(caught.exception.reason, "frame_bounds")
+
+    def test_request_maximum_bounds_and_nonfinite_saved_data(self):
+        valid = {"frames": {"enabled": True, "start": 0.1, "end": 23.1, "interval": 1, "max_frames": 24, "max_dimension": 16}}
+        self.assertEqual(len(validate_export_request(valid)["frames"]["times"]), 24)
+        for key, value in (("max_frames", True), ("max_frames", 25), ("max_dimension", 15), ("start", 10 ** 400), ("end", float("inf"))):
+            request = copy.deepcopy(valid)
+            request["frames"][key] = value
+            with self.subTest(key=key), self.assertRaises(ExportError):
+                validate_export_request(request)
+        with self.connection() as c:
+            c.execute("UPDATE library_items SET outline_json=?", ('{"invalid": NaN}',))
+        response = self.post()
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["error"], "invalid_saved_export_data")
 
 
 if __name__ == "__main__":
