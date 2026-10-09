@@ -222,10 +222,17 @@
       const observation = item.emotion_observation;
       const validScope = observation?.version === 1
         && observation.target_scope === 'included_nonempty_segments'
-        && count(observation.target_count);
+        && count(observation.target_count)
+        && (item.included_segment_count === undefined
+          || (count(item.included_segment_count) && item.included_segment_count === observation.target_count));
+      const union = observation?.any_model;
+      const consistentCounts = !validScope || union?.status !== 'known'
+        || !Array.isArray(observation.models) || !observation.models.some(model =>
+          model?.status === 'known' && count(model.observed_count) && count(union.observed_count)
+          && model.observed_count > union.observed_count);
       const appendRow = (label, value) => {
         const n = validScope ? observation.target_count : null;
-        const known = n > 0 && value?.status === 'known' && value.source === 'analysis.segments[].emotion_details'
+        const known = consistentCounts && n > 0 && value?.status === 'known' && value.source === 'analysis.segments[].emotion_details'
           && count(value.observed_count) && count(value.missing_prediction_count)
           && value.observed_count + value.missing_prediction_count === n;
         const empty = n === 0 && value?.status === 'not_applicable' && value.source === 'analysis.segments[].emotion_details'

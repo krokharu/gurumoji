@@ -59,13 +59,14 @@ test('legacy, unknown and malformed metadata never become zero observations', as
 
 test('known zero, empty scope, same-name distinct IDs and hostile labels remain distinct', async () => {
   const h = await render([
-    {item_id:'a',source_name:'<img src=x onerror=alert(1)>',emotion_observation:observation(known(0,100),[
+    {item_id:'a',source_name:'<img src=x onerror=alert(1)>',emotion_observation:observation(known(5,95),[
       {...known(0,100),model_id:'m1',model_name:'same'}, {...known(5,95),model_id:'m2',model_name:'same'}])},
     {item_id:'b',source_name:'B',emotion_observation:{...observation({...known(0,0),status:'not_applicable'}),target_count:0}}
   ]);
   try {
     const actual = rows(h);
-    assert.deepEqual(actual[0].slice(1),['100件','0件','100件']);
+    assert.deepEqual(actual[0].slice(1),['100件','5件','95件']);
+    assert.deepEqual(actual[1].slice(1),['100件','0件','100件']);
     assert.match(actual[1][0],/same \(m1\)/); assert.match(actual[2][0],/same \(m2\)/);
     assert.deepEqual(actual[3].slice(1),['0件','対象なし','対象なし']);
     assert.equal(h.document.querySelector('[data-emotion-observation] img'),null);
@@ -77,5 +78,15 @@ test('duplicate or absent model IDs are shown as unknown', async () => {
     {...known(5,95),model_id:'dup'}, {...known(5,95),model_id:'dup'}, known(5,95)
   ])}]);
   try {for (const row of rows(h).slice(1)) assert.deepEqual(row,['A / モデル不明','100件','不明','不明']);}
+  finally {h.close();}
+});
+
+test('contradictory target scope or model counts cannot display known observations', async () => {
+  const h = await render([
+    {item_id:'a',source_name:'A',included_segment_count:1,emotion_observation:observation(known(5,95))},
+    {item_id:'b',source_name:'B',included_segment_count:100,emotion_observation:observation(known(0,100),[
+      {...known(5,95),model_id:'m',model_name:'M'}])}
+  ]);
+  try {for (const row of rows(h)) assert.deepEqual(row.slice(2),['不明','不明']);}
   finally {h.close();}
 });
