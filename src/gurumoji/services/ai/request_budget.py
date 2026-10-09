@@ -27,6 +27,7 @@ MAX_CONTEXT_TOKENS = 32768
 MAX_TRIAL_CALLS = 6
 MAX_BATCH_CALLS = 216
 M_RUN_SECONDS = 1800
+M_EXTENDED_RUN_SECONDS = 8400
 M_MAX_TRIAL_CALLS = 32
 COVERAGE = frozenset({"model", "system", "messages", "template", "special_tokens", "schema"})
 HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -81,11 +82,12 @@ def _identity(value: Any) -> str:
 
 
 def profile_limits(profile: str = "legacy") -> dict:
-    """Fresh immutable-by-value ceilings; selecting M does not approve execution."""
-    if type(profile) is not str or profile not in {"legacy", "M"}:
+    """Fresh immutable-by-value ceilings; selecting a profile never approves execution."""
+    if type(profile) is not str or profile not in {"legacy", "M", "M_extended"}:
         raise BudgetHold("invalid_profile")
     calls = MAX_TRIAL_CALLS if profile == "legacy" else M_MAX_TRIAL_CALLS
-    return {"profile": profile, "run_seconds": RUN_SECONDS if profile == "legacy" else M_RUN_SECONDS,
+    run_seconds = {"legacy": RUN_SECONDS, "M": M_RUN_SECONDS, "M_extended": M_EXTENDED_RUN_SECONDS}[profile]
+    return {"profile": profile, "run_seconds": run_seconds,
         "trial_calls": calls, "trial_tokens": calls * (MAX_INPUT_TOKENS + OUTPUT_TOKENS),
         "task_seconds": TASK_SECONDS, "wire_seconds": MAX_WIRE_SECONDS, "cleanup_seconds": CLEANUP_SECONDS,
         "context_tokens": MAX_CONTEXT_TOKENS, "input_tokens": MAX_INPUT_TOKENS,
@@ -306,7 +308,7 @@ class RequestBudget:
             raise BudgetHold("profile_receipt_invalid")
         self._profile_receipt = asdict(profile_receipt) if profile_receipt is not None else None
         _validate_profile_receipt(self._profile_receipt, profile, payload_hash(self._conditions))
-        if profile == "M":
+        if profile in {"M", "M_extended"}:
             if not callable(verify_profile_receipt):
                 raise BudgetHold("profile_receipt_required")
             try:
