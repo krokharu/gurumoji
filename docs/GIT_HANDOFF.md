@@ -19,6 +19,22 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 既存の共有checkoutでは `python scripts/check_git_handoff.py --fetch --expected-commit <通知された完全SHA>` を使う。fetchはrefの更新だけで、checkoutを自動更新しない。`received=false` ならcommit・dirty・mismatchesを確認し、成果を退避せずに強制上書きしない。Gitの読取だけ可能なDotはcommitの取得とファイルmanifest照合を報告し、Python未実行を明記する。GitHub Issue/PRが双方の永続的な通知・受領経路であり、ChatGPTの会話は短い通知に使う。バックグラウンドの自動受信や監視は設定していない。
 
+## 2026-10-10: AI向け生データZIPの選別受入
+
+[#29](https://github.com/krokharu/gurumoji/issues/29)／[Draft PR30](https://github.com/krokharu/gurumoji/pull/30)のbackendはDot主担当。公開4e3で旧API作者をfreezeし、Dotの5path候補85b8と修正版 `d87be47feac6c04584a3fd7d8d50047cd263d358` を既存実装へ選別した。Dotは`ai_data_export_bundle.py`／`ai_data_export.py`／`ai_data_export_frames.py`とbundle／API testを所有し、OrcaはUI／独立Windows QA、C0はroute／app登録／共有index／統合を所有する。同じpathの重複実装・main mergeは行わない。
+
+受入sourceは `69e95ebac32957ae9a739d7764afcc7f95b5c23f`、独立testは `f0a552c3c349542ea33e9c0b38ec48ff3d2c3956`。UI作者54aの3path、Dot最終5path、独立test1path、C0のroute／app・route fixture・request guard testを合成し、後続の資料／byte pin／manifest変更でproduction7blobを変えない。manifestは既存114と明示追加12pathの計126を固定し、private docs・raw破損履歴・延期visual・Downloads別WIP系列を混ぜない。
+
+- 既存保存preparation exportをreadonly snapshotで再利用し、原文／現行／全入力版／lineage・時刻nullと0・保存outline／欠落・元snapshotと出力file hashの別domainを保持する。氏名OFF・属性未選択が既定、全入力履歴にも同じ選択を適用する。氏名除外は本文や動画の匿名化を保証しない。
+- 動画frameは明示opt-in、item許可mediaだけ。24枚／600秒／間隔1秒以上／長辺1280px／各2MiB／計32MiB／subprocess合計30秒を制限し、部分失敗・timeoutをZIP成功にしない。実PTSと要求時刻を分け、stat identityをcontent hashと呼ばない。ZIP展開64MiB／text32MiB、schema／hash／参照・unsafe path／bombを検証する。
+- C0は旧合成64dcでbundle／API／route隣接60methodを実行し、59PASS／FAIL0／Windows symlink権限1SKIP（2.299秒）。pure validatorの大時刻grid不備を別途再現し、Dot最終修正を取り込んだ69e95ebではbundle25methodがPASS／FAIL0／SKIP0（0.067秒）。同じ試験を合算して種類数を水増ししない。
+- 別作者のWindows独立受入は旧64dcの累積25PASS（初回23＋保存済み空文字の期待値補正2）、大時刻grid6subcase FAILを保存した上で、新69e95ebの差分6methodがPASS／FAIL0／SKIP0（8.382秒）。重複／逆順／正の1秒未満をpayloadとhash再計算後ZIPの双方で拒否し、正常decimal `(1.3,2.3)` を保持した。通常Edge1440／390は新版で文字ZIP＋氏名／組織／実3frame ZIPの計4実download→HTTP200→hash／参照／PIL decode・readonly・pageerror0・横overflow0まで確認、未解決製品所見0。実Windows Junction escapeは拒否、権限不足の実symlinkは未実行として分ける。
+- 実行環境はWindows11／Python3.12.9／Edge154.0.4258.53／Playwright1.63.0／FFmpeg7.1.1／Pillow12.2.0、install／設定変更0。独立receipt SHA256は `04c930c03a77d2fb4ed4673bd2f96a36370ae3697b2971e774b36670fb7e26f7`、Run `run_30240e5eb510`／Task `task_13d75c4de7c3`／Dispatch `ctx_70df24e7118c`。正規doneを照合してworkerをreleaseした。
+
+Dotの[修正版作者報告](https://github.com/krokharu/gurumoji/issues/29#issuecomment-6083739323)はpure25／combined54PASS（0FAIL／ERROR／SKIP、2.341秒）と別review22caseを述べる。これはDot報告として区別し、Orca自身のLinux実行やWindows独立受入へ置換しない。実command／版／exit／cleanの補足確認はLuna窓口が追跡する。再現入口は`PYTHONPATH=src:tests python -B -m unittest test_ai_data_export_bundle test_ai_data_export_api -v`（WindowsではPYTHONPATH区切りを`;`にする）と独立testの対象method。独立全26methodを最終版で一括再実行したとは主張しない。
+
+実利用者DB／研究Vault／実媒体の変更・外部AI自動送信・モデル推論は0。Linux独立試験／全app suite／AT／実研究者の理解と採否は未実行。PNG Store／Web／Vault延期、Gemma full323 HOLD、G0.5b/c未測定・currentPack暫定・G5未評価を維持し、manifestの`engineering_hold`は解除しない。共有SHAの取得とmanifest一致は、この限定機能以外の工程合格を意味しない。
+
 ## 2026-10-09: 実複数source接続の選別受入
 
 23:35 JSTのLinux追補：[Dotの固定429 receipt](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6082993355)で、指定2blobと下記の純kernelコマンド、Git2.52.0／Python3.12.14、4 PASS／0 SKIP／0 FAIL（0.769秒）、隔離checkout clean・編集／install 0を確認した。C0は公開本文をreadbackした。以下の旧環境不可／未実行は当時の履歴であり、この限定4件は現在実行済み。legacy Flask suite／full app／モデルや別機能の受入を意味しない。

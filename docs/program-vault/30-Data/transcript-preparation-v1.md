@@ -5,7 +5,7 @@ title: 逐語録の分析準備・版と確認状態
 summary: 逐語録を分析用に準備する際の版、確認状態、根拠、匿名化の契約を定める。
 status: current
 feature: transcript-preparation
-updated: 2026-10-09
+updated: 2026-10-10
 tags:
   - gurumoji/program
   - gurumoji/analysis
@@ -67,9 +67,9 @@ tags:
 
 ### API・データ出力
 
-#### AI向け生データZIP v1（2026-10-10、部分受入・最終受入前）
+#### AI向け生データZIP v1（2026-10-10、Windows合成受入済み）
 
-[#29](https://github.com/krokharu/gurumoji/issues/29)の凍結契約。Dotのbackend候補`85b8d89ae2a40ec7866b4552ce0fcc5c44404b3e`（親4e3）をUI・routeと合成した固定`64dc581980765af7ebb6bcbc382ac45fa2829f7b`で、Windows独立通常Edge1440／390の実ZIPダウンロード4回・hash／参照／JPEG decode・読取専用性が成功した。pure validatorの大時刻における重複／逆順／1秒未満の間隔受理は未解決で、最終受入・共有版更新は保留。Dotがserializer／validator・payload整形・frame抽出・対応test、OrcaがUIとWindows独立受入、C0がroute／app登録と統合を所有する。以下は契約であり、実研究者・外部AIの評価成功を意味しない。
+[#29](https://github.com/krokharu/gurumoji/issues/29)の凍結契約。Dotのbackend修正版`d87be47feac6c04584a3fd7d8d50047cd263d358`をUI・routeと合成した固定`69e95ebac32957ae9a739d7764afcc7f95b5c23f`をWindows合成fixtureで独立受入した。大時刻の重複／逆順／1秒未満の間隔をpure payload／改変ZIPの両境界で拒否し、正常decimalを保持する。独立差分6methodと通常Edge1440／390の実ZIPダウンロード4回・hash／参照／JPEG decode・読取専用性が成功、未解決製品所見0。旧64dcの累積25PASSと新grid6subcase FAIL、保存済み空文字のfixture期待値補正履歴は保持する。Dotがserializer／validator・payload整形・frame抽出・対応test、OrcaがUIとWindows独立受入、C0がroute／app登録と統合を所有する。実研究者・外部AIの評価成功を意味しない。
 
 - 明示`POST /api/library/<id>/ai-export.zip`で端末へダウンロードする。外部AI送信、分析実行、DB／Vault／原媒体の更新は行わない。既存preparation JSONはそのまま維持する。
 - 1つの読取snapshotの原本／全入力版／確認履歴を使い、原文・現行・lineage、原本の`initial_import`／`migrated_current_snapshot`／`unavailable`、時刻nullと0を区別する。保存済みoutlineを出し、欠落ならnull。派生・切詰めoutlineや現在版とのfresh性を推測しない。
