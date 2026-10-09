@@ -238,11 +238,44 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
                 expert_prompt += STATISTICAL_EXPERT_PROMPT
                 role_prompt = ""
             context = render_expert_context(context)
+        normal_core = role in {"core", "critic"} and context.get("task", {}).get("intent", {}).get("kind") != "clarification"
         if "evidence_index" in context.get("coverage", {}):
             context = copy.deepcopy(context)
-            context["coverage"]["evidence_index"] = [{"evidence_id": row["evidence_id"]}
-                                                      for row in context["coverage"]["evidence_index"]]
-            context["coverage"]["evidence_index_format"] = "evidence_id only; utterance_id is supplied with raw_evidence"
+            index = context["coverage"]["evidence_index"]
+            if normal_core:
+                if isinstance(index, list):
+                    index = {"columns": ["evidence_id"], "rows": [[row["evidence_id"]] for row in index]}
+                elif (not isinstance(index, dict) or set(index) != {"columns", "rows"}
+                        or index["columns"] != ["evidence_id"] or not isinstance(index["rows"], list)
+                        or any(not isinstance(row, list) or len(row) != 1 or not isinstance(row[0], str)
+                               for row in index["rows"])):
+                    raise AnalysisContractError("配送済み根拠索引の形式が不正です。", code="evidence_index_invalid")
+                context["coverage"]["evidence_index"] = index
+                context["coverage"]["evidence_index_format"] = "columns_rows_v1; evidence_id only; utterance_id is supplied with raw_evidence"
+            else:
+                context["coverage"]["evidence_index"] = [{"evidence_id": row["evidence_id"]} for row in index]
+                context["coverage"]["evidence_index_format"] = "evidence_id only; utterance_id is supplied with raw_evidence"
+        if normal_core:
+            context = copy.deepcopy(context)
+            if "task" in context:
+                task = context["task"]
+                fields = ("task_id", "role", "attempt_id", "run_id", "dataset_version", "annotation_version",
+                          "codebook_version", "iteration", "phase", "dependencies", "intent", "title")
+                context["task"] = {key: task[key] for key in fields if key in task}
+                question = context.get("question")
+                references = []
+                if isinstance(question, str):
+                    if task.get("title") == question:
+                        context["task"]["title"] = {"ref": "question"}
+                        references.append("task.title")
+                    if task.get("intent", {}).get("question") == question:
+                        context["task"]["intent"]["question"] = {"ref": "question"}
+                        references.append("task.intent.question")
+                context["task_delivery"] = {"format": "identity_intent_v1",
+                    "question_references": references, "reference_target": "question",
+                    "diagnostic_fields_not_delivered": sorted(set(task) - set(fields)),
+                    "full_task_preserved": True}
+            role_prompt += "\n配送形式: coverage.evidence_indexのcolumns/rowsは全IDを元順序で保持する可逆表です。task内の{ref:question}は同じtop-level questionへの参照です。result_id/raw_hash/body_not_deliveredのみのCore履歴は検証済み採択記録への参照で、本文の読了ではありません。非配送の項目は保存履歴に残り、取得済み・成功・欠測0を意味しません。\n"
         if role == "core":
             for field, references, key in (("critique_responses", "issues", "issue_id"),
                                             ("label_decisions", "label_proposals", "proposal_id")):
