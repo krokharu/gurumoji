@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533",
+  "source_commit": "46d4177cb8de91eacc117ae63aea7a35f2fac5fd",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -10,8 +10,8 @@
   "files": [
     {
       "path": ".gitattributes",
-      "sha256": "ab2b9ae5328e610692fab418cc22fd50c9f7d7a51c8139afaadcceb5f97a83f7",
-      "bytes": 6200
+      "sha256": "1148a4be155562f88e8461914f3e3615cd06d5af159edd603cc0adc210259e6c",
+      "bytes": 7398
     },
     {
       "path": "AGENTS.md",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "5376c13e482fd18a6ab2eca943d66c4d155bd5f3f411e748ff484dd8bb2b9534",
-      "bytes": 20845
+      "sha256": "66a32e0ca55e0cc54493fb4a2e709ba80c60836431fe5b28cef36eaae6a836f3",
+      "bytes": 25721
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -32,6 +32,11 @@
       "path": "docs/program-vault/30-Data/analysis-asset-connection-v1.md",
       "sha256": "00c42234f95ab433542432cddaf61b29191e0b9f00ae645127d882230bd5e9a5",
       "bytes": 15948
+    },
+    {
+      "path": "docs/program-vault/30-Data/transcript-preparation-v1.md",
+      "sha256": "1585793639032f36128ed1b41622df295e43f9a19198bd6e4602deead3995581",
+      "bytes": 12826
     },
     {
       "path": "docs/program-vault/50-Analysis-Methods/10-Experts/00-Index.md",
@@ -225,8 +230,8 @@
     },
     {
       "path": "src/gurumoji/app.py",
-      "sha256": "20863e0d6ce820cfd8568b8a3d115c58683550f840a287e03593bcd4187b9b20",
-      "bytes": 92975
+      "sha256": "eb63220075a4b3d6a657efdcf2b5a95e6b266d44ebd710acb4588c7aeecea7dc",
+      "bytes": 93063
     },
     {
       "path": "src/gurumoji/method_experts.py",
@@ -247,6 +252,21 @@
       "path": "src/gurumoji/services/ai/request_budget.py",
       "sha256": "4e80f854bf3273f8b1943396fcd9a14c0f5c103f304830e78cbf11ec4bb87923",
       "bytes": 25266
+    },
+    {
+      "path": "src/gurumoji/services/ai_data_export.py",
+      "sha256": "2e30e21daec56654adf90928d79dbf261051126c5e6b5f58f70695207c43d6eb",
+      "bytes": 10019
+    },
+    {
+      "path": "src/gurumoji/services/ai_data_export_bundle.py",
+      "sha256": "8c91841e1bc6bf387392f485a7b6c2c7a41b1723431a5cd4124e3eb605a6267d",
+      "bytes": 30167
+    },
+    {
+      "path": "src/gurumoji/services/ai_data_export_frames.py",
+      "sha256": "6d28c5d005bf20609be4e2c8ab0868d20dfb1cfa7789a8aa138223c26bec1c6e",
+      "bytes": 8666
     },
     {
       "path": "src/gurumoji/services/analysis_orchestration_adapters.py",
@@ -315,8 +335,13 @@
     },
     {
       "path": "src/gurumoji/static/app.js",
-      "sha256": "aed10afa17abea09f3cf9f1173be7de7fcb55190a01b890cb5d2b4d6702a8187",
-      "bytes": 442385
+      "sha256": "b4a12aa619338af7c2a340dfd0684033b49ee0baf947594dec66ec83bbe194d4",
+      "bytes": 451774
+    },
+    {
+      "path": "src/gurumoji/templates/views/analysis.html",
+      "sha256": "9ad1c7191ebc4c5d9ecb258b279f1222fad687b7ed2e3af60270955bb8c9912e",
+      "bytes": 15877
     },
     {
       "path": "src/gurumoji/templates/views/analysis-orchestration.html",
@@ -332,6 +357,16 @@
       "path": "src/gurumoji/web/analysis_orchestration_routes.py",
       "sha256": "2448cc4a6263249d5905b2fcdabe004432802c0efe1017517e18fa1d18a599ba",
       "bytes": 16626
+    },
+    {
+      "path": "src/gurumoji/web/export_routes.py",
+      "sha256": "f83057f99b257ccab627bd7fe213384400d2d45bdfab1176b56842edad0cfbc3",
+      "bytes": 17488
+    },
+    {
+      "path": "tests/dom/ai-data-export.test.cjs",
+      "sha256": "334bf76375058009ab0682f83b186f31c711fff7a81c8d891fc719fe2747720f",
+      "bytes": 12518
     },
     {
       "path": "tests/dom/analysis-history.test.cjs",
@@ -374,6 +409,11 @@
       "bytes": 885
     },
     {
+      "path": "tests/fixtures/route_map.json",
+      "sha256": "5ad7b5eea282dcf17fb5b41753a278e1616c31ff3cfa2e76fa1eb65f10743108",
+      "bytes": 12648
+    },
+    {
       "path": "tests/support_analysis_unit_kernel.py",
       "sha256": "c3abc7e92376ee8937a5e1af8d0129ee6b9182def3d1cbd50dd15e34409a9045",
       "bytes": 4989
@@ -382,6 +422,26 @@
       "path": "tests/test_ai_client_responses.py",
       "sha256": "c34b152ad9a44d1c46befd6b907fa45b838bf75b8511dd58b07bb2768dfc469a",
       "bytes": 25692
+    },
+    {
+      "path": "tests/test_ai_data_export_api.py",
+      "sha256": "006a0ecc1d0a5438ea81531a01af4645a253f6c46011c60d26cdcd5f9e64e21e",
+      "bytes": 32815
+    },
+    {
+      "path": "tests/test_ai_data_export_bundle.py",
+      "sha256": "1b1aeafc28a7ca98d93450548b912782dfecdf039871083f04fb7cdc20559808",
+      "bytes": 21280
+    },
+    {
+      "path": "tests/test_ai_data_export_independent.py",
+      "sha256": "f8bef2ebf5fd81c5459a06a108a9ae757073a7783a641ea1489d59e9301204bc",
+      "bytes": 64683
+    },
+    {
+      "path": "tests/test_ai_data_export_route_security.py",
+      "sha256": "6cf853909d5d6ec579a640d54d876eebaff6506714eebbe1017005530c8e6318",
+      "bytes": 3346
     },
     {
       "path": "tests/test_ai_http_worker.py",
