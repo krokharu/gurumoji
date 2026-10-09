@@ -7797,7 +7797,9 @@ async function downloadAiDataExport(panel, selection, prepared) {
     && analysisState.data?.manual?.preparation?.source_hash === owner.sourceHash
     && analysisState.data?.manual?.preparation?.revision === owner.revision;
   selection.message = 'ZIPを作成しています… ダウンロードを取り消せます。';
+  const startedWithFocus = document.activeElement === panel.querySelector('[data-ai-export-download]');
   syncAiDataExportControls();
+  if (startedWithFocus) panel.querySelector('[data-ai-export-cancel]').focus();
   try {
     const response = await apiFetch(`/api/library/${encodeURIComponent(owner.itemId)}/ai-export.zip`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, signal: owner.controller.signal,
@@ -7836,7 +7838,9 @@ async function downloadAiDataExport(panel, selection, prepared) {
     if (aiDataExportOwner === owner) {
       if (!current()) selection.message = '対象または入力版が変わったため、ダウンロードを取り消しました。サーバー側の処理停止は確認していません。';
       aiDataExportOwner = null;
+      const restoreFocus = panel.isConnected && document.activeElement === panel.querySelector('[data-ai-export-cancel]');
       syncAiDataExportControls();
+      if (restoreFocus) panel.querySelector('[data-ai-export-download]').focus();
     }
   }
 }
@@ -7850,6 +7854,16 @@ function renderAiDataExport(prepared, key) {
   }
   const selection = aiDataExportSelection;
   const panel = document.querySelector('#ai-data-export-template').content.firstElementChild.cloneNode(true);
+  // Native Tab scrolling can leave this inline panel's focus behind the sticky save bar.
+  panel.addEventListener('focusin', event => {
+    const control = event.target;
+    requestAnimationFrame(() => {
+      if (!control.isConnected || document.activeElement !== control || !document.elementFromPoint) return;
+      const rect = control.getBoundingClientRect();
+      const visible = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      if (!control.contains(visible)) control.scrollIntoView({block: 'center', behavior: 'instant'});
+    });
+  });
   panel.querySelectorAll('input').forEach(input => {
     input.addEventListener('input', () => {
       if (aiDataExportOwner || selection !== aiDataExportSelection) return;
