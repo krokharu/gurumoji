@@ -190,6 +190,14 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
                            ("context_evidence_limit", 1, 120), ("context_text_limit", 1, 60000)):
         if type(config[key]) is not int or not low <= config[key] <= high:
             raise _error(f"{key}は{low}〜{high}の整数です。", field=key)
+    if "context_evidence_limits_by_role" in payload:
+        limits = payload["context_evidence_limits_by_role"]
+        if (not isinstance(limits, dict) or any(role not in ROLES or type(limit) is not int
+                or not 1 <= limit <= config["context_evidence_limit"] for role, limit in limits.items())):
+            raise _error("役割別の根拠行数は既知の役割と1〜共有上限の整数で指定してください。",
+                         field="context_evidence_limits_by_role")
+        # Omission must retain legacy config/hash bytes and shared-cap behavior.
+        config["context_evidence_limits_by_role"] = copy.deepcopy(limits)
     if type(config["context_index_limit"]) is not int or not 0 <= config["context_index_limit"] <= 120:
         raise _error("context_index_limitは0〜120の整数です。0は索引の省略なしです。", field="context_index_limit")
     for key in ("max_iterations", "time_limit_seconds"):
@@ -1707,9 +1715,11 @@ class AnalysisOrchestrationService:
         if selected:
             raw = [e for e in raw if e["evidence_id"] in selected]
         available_count = len(raw)
+        evidence_limit = run["config"].get("context_evidence_limits_by_role", {}).get(
+            task["role"], run["config"]["context_evidence_limit"])
         bounded, size = [], 0
         for evidence in raw:
-            if len(bounded) >= run["config"]["context_evidence_limit"] or size + len(evidence["text"]) > run["config"]["context_text_limit"]:
+            if len(bounded) >= evidence_limit or size + len(evidence["text"]) > run["config"]["context_text_limit"]:
                 break
             bounded.append(evidence); size += len(evidence["text"])
         raw = bounded
@@ -1739,7 +1749,7 @@ class AnalysisOrchestrationService:
             relevant = [e for e in initial["evidence"] if not e["excluded"] and e["evidence_id"] in references]
             provided, size = [], 0
             for evidence in relevant:
-                if len(provided) >= run["config"]["context_evidence_limit"] or size + len(evidence["text"]) > run["config"]["context_text_limit"]:
+                if len(provided) >= evidence_limit or size + len(evidence["text"]) > run["config"]["context_text_limit"]:
                     break
                 provided.append(evidence); size += len(evidence["text"])
             return {"schema_version": SCHEMA_VERSION, "task": {"task_id": task["task_id"], "role": "verification"},
