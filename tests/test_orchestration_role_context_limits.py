@@ -356,7 +356,14 @@ class RoleCapAppIntegrationTests(unittest.TestCase):
             coverage = context["coverage"]
             self.assertEqual((coverage["available_count"], coverage["provided_count"], coverage["omitted_count"]), (323, 12, 311))
             self.assertEqual((coverage["index_available_count"], coverage["index_provided_count"], coverage["index_omitted_count"]), (323, 323, 0))
-            self.assertEqual(len(coverage["evidence_index"]), 323)
+            index = coverage["evidence_index"]
+            self.assertEqual(set(index), {"columns", "rows"})
+            self.assertEqual(index["columns"], ["evidence_id"])
+            self.assertEqual(len(index["rows"]), 323)
+            self.assertTrue(all(len(row) == 1 for row in index["rows"]))
+            self.assertEqual([dict(zip(index["columns"], row)) for row in index["rows"]],
+                             [{"evidence_id": row["evidence_id"]} for row in before["initial"]["snapshot"]["evidence"]])
+            self.assertIn("columns_rows_v1", coverage["evidence_index_format"])
             self.assertFalse(coverage["complete"])
         expert = next(c for role, c in self.wire_contexts if role == "interpretation")
         self.assertEqual(expert["expert_hooks"]["context_evidence_limit"], 120)
@@ -432,7 +439,11 @@ class RoleCapAppIntegrationTests(unittest.TestCase):
                     context = json.loads(args[4])
                     role = args[5].removeprefix("analysis_orchestration_")
                     if role == "core" and not selected:
-                        ids = [r["evidence_id"] for r in context["coverage"]["evidence_index"]]
+                        index = context["coverage"]["evidence_index"]
+                        self.assertEqual(index["columns"], ["evidence_id"])
+                        self.assertEqual(len(index["rows"]), 323)
+                        self.assertTrue(all(len(row) == 1 for row in index["rows"]))
+                        ids = [row[0] for row in index["rows"]]
                         selected.extend(ids[20:40]); invalid_id.append(ids[-1])
                     value = self.response(*args, **kwargs)
                     if role == "core":
@@ -453,11 +464,22 @@ class RoleCapAppIntegrationTests(unittest.TestCase):
                 state = self.service.status("synthetic323", rid)
                 task = next(t for t in state["tasks"] if t["role"] == "interpretation")
                 self.assertNotEqual(task["status"], "succeeded", task)
+                self.assertEqual((task["status"], task["error"]),
+                                 ("uncertain", "expert_hook_scope_mismatch") if mode == "read"
+                                 else ("quarantined", "expert_reference_mismatch"))
+                self.assertNotIn(invalid_id[0], task["expert_evidence_ids"])
                 self.assertNotIn("expert_hook_reads", task)
                 self.assertFalse(any(r["task_id"] == task["task_id"] and r["validation_status"] == "valid" for r in state["results"]))
+                if mode == "report":
+                    saved = self.service.result("synthetic323", rid, task["result_id"])
+                    self.assertEqual(saved["raw"]["expert_report"]["evidence_ids"], invalid_id)
+                    self.assertEqual(saved["validation_status"], "quarantined")
+                    self.assertEqual(saved["raw_hash"], fingerprint(saved["raw"]))
                 for role, context in self.wire_contexts:
                     if role == "core":
-                        self.assertFalse(any(r["task_id"] == task["task_id"] for r in context["results"]))
+                        self.assertFalse(any(r.get("task_id") == task["task_id"] for r in context["results"]))
+                        if task.get("result_id"):
+                            self.assertNotIn(task["result_id"], [r["result_id"] for r in context["results"]])
                 self.assert_no_external_effects()
 
 

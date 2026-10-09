@@ -1768,13 +1768,14 @@ class AnalysisOrchestrationService:
                     "raw_evidence": copy.deepcopy(raw), "coverage": coverage, "blind_first": True,
                     "research_mode": "exploratory"}
         public = self._public(db, run)
-        dependency_scoped = task["role"] == "interpretation" and task["intent"].get("kind", "analysis") == "analysis"
+        history_scoped = task["role"] in {"core", "critic"} and task["intent"].get("kind") != "clarification"
+        dependency_scoped = task["role"] == "interpretation" and task["intent"].get("kind") != "clarification"
         if dependency_scoped and task.get("expert_agent") and "expert_agents" in run:
             from .services.expert_agents import expert_profile
             profile = expert_profile(run["expert_agents"], task["expert_agent"]["expert_id"])
             # Statistical plans/explanations retain the existing Handler delivery.
             dependency_scoped = "statistical_tools" not in profile
-        if dependency_scoped:
+        if dependency_scoped or history_scoped:
             dependencies = task.get("dependencies")
             if (not isinstance(dependencies, list)
                     or any(not isinstance(value, str) or not value.strip() for value in dependencies)):
@@ -1782,14 +1783,24 @@ class AnalysisOrchestrationService:
             dependencies = set(dependencies)
             source_tasks = {source["task_id"]: source for source in public["tasks"]}
         accepted = []
-        for index, result in enumerate(public["results"]):
+        unrelated_results = 0
+        core_references = False
+        # Keep physical identities available when discovering Core authority;
+        # mutable result/task role labels cannot demote a committed decision.
+        result_rows = ((result, None) for result in public["results"])
+        if history_scoped:
+            result_rows = ((json.loads(row["state_json"]), row) for row in db.execute(
+                "SELECT result_id,run_id,task_id,state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid",
+                (run["run_id"],)).fetchall())
+        for result, saved_row in result_rows:
             if dependency_scoped:
-                # Keep the recent metadata window, plus explicit dependencies even
-                # when older. Undelivered bodies are not reads or successful work.
-                if index < len(public["results"]) - 20 and result["task_id"] not in dependencies:
+                # Neither metadata nor bodies of unrelated results belong to an
+                # independent expert's input. The complete ledger stays saved.
+                if result["task_id"] not in dependencies:
+                    unrelated_results += 1
                     continue
                 source = source_tasks.get(result["task_id"], {})
-                if (result["task_id"] not in dependencies or result["validation_status"] != "valid"
+                if (result["validation_status"] != "valid"
                         or result.get("run_id") != run["run_id"] or result.get("stale")
                         or result.get("dataset_version") != run["input_hash"]
                         or source.get("run_id") != run["run_id"] or source.get("stale")
@@ -1800,8 +1811,30 @@ class AnalysisOrchestrationService:
                         or source.get("attempt_id") != result.get("attempt_id")):
                     accepted.append({**result, "body_not_delivered": True})
                     continue
+            source, decision_row = {}, None
+            if history_scoped:
+                if any(result.get(key) != saved_row[key] for key in ("result_id", "run_id", "task_id")):
+                    raise _error("保存済み結果の参照が一致しません。", "result_integrity_mismatch")
+                source_row = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                        (saved_row["task_id"], run["run_id"])).fetchone()
+                source = json.loads(source_row[0]) if source_row else {}
+                decision_row = db.execute("SELECT * FROM orchestration_decisions WHERE result_id=?",
+                                          (saved_row["result_id"],)).fetchone()
+            core_history = history_scoped and (result.get("role") == "core" or source.get("role") == "core"
+                                               or decision_row is not None)
+            if core_history:
+                if (result.get("role") != "core" or result["validation_status"] != "valid" or result.get("stale")
+                        or result.get("run_id") != run["run_id"] or result.get("dataset_version") != run["input_hash"]
+                        or source.get("task_id") != result["task_id"] or source.get("run_id") != run["run_id"]
+                        or source.get("role") != "core" or source.get("dataset_version") != run["input_hash"]
+                        or source.get("stale") or source.get("status") != "succeeded"
+                        or source.get("validation_status") != "valid" or source.get("result_id") != result["result_id"]
+                        or canonical(source.get("annotation_version")) != canonical(result.get("annotation_version"))
+                        or not isinstance(source.get("attempt_id"), str) or not source["attempt_id"].strip()
+                        or source["attempt_id"] != result.get("attempt_id")):
+                    raise _error("Core履歴の入力版・実行来歴が一致しません。", "result_integrity_mismatch")
             if result["validation_status"] == "valid":
-                if dependency_scoped:
+                if dependency_scoped or core_history:
                     row = db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=? AND run_id=? AND task_id=?",
                                      (result["result_id"], run["run_id"], result["task_id"])).fetchone()
                     if row is None:
@@ -1811,10 +1844,42 @@ class AnalysisOrchestrationService:
                 content = json.loads(row[0])
                 if fingerprint(content) != result["raw_hash"]:
                     raise _error("保存済み結果のhashが一致しません。", "result_integrity_mismatch")
+                if core_history:
+                    if decision_row is not None:
+                        decision = json.loads(decision_row["payload_json"])
+                        # _apply_core saves the raw response plus these Handler
+                        # fields. Verify both before replacing even a large body.
+                        if not isinstance(decision, dict):
+                            raise _error("採択済みCore判断が不正です。", "result_integrity_mismatch")
+                        generated = ("created_at", "after_annotation_version", "view_version")
+                        expected = {**content, **{key: decision.get(key) for key in generated},
+                            "decision_id": decision_row["decision_id"], "result_id": result["result_id"],
+                            "iteration": source["iteration"], "task_id": source["task_id"],
+                            "annotation_version": source["annotation_version"], "role": "core",
+                            "before_annotation_version": source["annotation_version"],
+                            "model": source.get("model"), "provider": source.get("provider")}
+                        if (decision_row["run_id"] != run["run_id"]
+                                or not isinstance(decision.get("decision_id"), str) or not decision["decision_id"].strip()
+                                or not isinstance(decision.get("created_at"), str) or not decision["created_at"].strip()
+                                or decision.get("before_annotation_version") != source["annotation_version"]
+                                or type(decision.get("after_annotation_version")) is not int
+                                or not source["annotation_version"] <= decision["after_annotation_version"] <= run["annotation_version"]
+                                or type(decision.get("view_version")) is not int
+                                or not 0 <= decision["view_version"] <= run["view_version"]
+                                or canonical(decision) != canonical(expected)):
+                            raise _error("採択済みCore判断と保存原結果が一致しません。", "result_integrity_mismatch")
+                        if result["task_id"] not in dependencies:
+                            accepted.append({"result_id": result["result_id"], "raw_hash": result["raw_hash"],
+                                             "body_not_delivered": True})
+                            core_references = True
+                            continue
                 if len(row[0]) > 16000:
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", [])[:24], "omitted_full_result": True}
                 accepted.append({**result, "content": content})
-        if not dependency_scoped:
+        if history_scoped:
+            accepted = [result for index, result in enumerate(accepted)
+                        if index >= len(accepted) - 20 or result.get("task_id") in dependencies]
+        elif not dependency_scoped:
             accepted = accepted[-20:]
         context = {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task), "question": run["config"]["question"],
                    "data_version": run["input_hash"], "annotation_version": task["annotation_version"],
@@ -1830,6 +1895,20 @@ class AnalysisOrchestrationService:
                               "min_iterations": run["config"].get("min_iterations", 0),
                               "completed_core_iterations": self._completed_core_iterations(db, run),
                               "deadline": run["deadline"]}, "stop_proposal": run["pending_stop"]}
+        if core_references:
+            context["result_delivery"] = {"core_history": "verified_committed_decision_references",
+                "reference_fields": ["result_id", "raw_hash", "body_not_delivered"],
+                "full_results_preserved": True, "reference_is_body_read": False}
+        elif dependency_scoped:
+            context["result_delivery"] = {"scope": "explicit_dependencies_only",
+                "unrelated_results_not_delivered": unrelated_results,
+                "unrelated_result_metadata": "not_delivered", "full_results_preserved": True,
+                "omission_is_body_read": False}
+        if history_scoped and sum("content" in row and row.get("role") != "core"
+                                  and row.get("task_id") not in dependencies for row in accepted) >= 2:
+            # Bind the adapter's reversible metadata projection to this exact
+            # validated delivery and order. Never rewrite the saved/full rows.
+            context["_result_metadata_hash"] = fingerprint(accepted)
         gate = self._statistical_review_gate(db, run)
         if gate:
             context["statistical_review_gate"] = gate
