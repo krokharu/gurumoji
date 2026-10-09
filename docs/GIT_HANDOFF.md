@@ -19,13 +19,25 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 既存の共有checkoutでは `python scripts/check_git_handoff.py --fetch --expected-commit <通知された完全SHA>` を使う。fetchはrefの更新だけで、checkoutを自動更新しない。`received=false` ならcommit・dirty・mismatchesを確認し、成果を退避せずに強制上書きしない。Gitの読取だけ可能なDotはcommitの取得とファイルmanifest照合を報告し、Python未実行を明記する。GitHub Issue/PRが双方の永続的な通知・受領経路であり、ChatGPTの会話は短い通知に使う。バックグラウンドの自動受信や監視は設定していない。
 
+## 2026-10-10: FGI候補CPU契約の限定受入
+
+[#31](https://github.com/krokharu/gurumoji/issues/31)／[Draft PR32](https://github.com/krokharu/gurumoji/pull/32) のbackendはDot単独owner。公開 `02e09613e9dbca2557ea50f6d1aa91a3e80346e9` と修正子 `de601683175fa2a115f9f256313801a07a4401ae` の8編集pathを既存実装へ選別し、C0固定fixture2path・別作者QA `73c4ae035c4a2b15f6f40dea532de6d1b63133fb` を統合した受入sourceは `0ff1a84f529e24ee73df8ce476bf9f70eb034523`。以後の変更はこの記録・readinessのFGI行・manifestだけで、受入したproduction/test/契約pin bytesは維持する。Downloads rawや私有履歴・実データは共有しない。
+
+- 明示 `expert_inputs[exp-focus-group-interaction].typed_contract=focus_group_interaction_candidates_v1` のみ、既存Registry/Profile／Handler／immutable snapshot／実Store authorityへ接続した。既定C1/currentPackは維持。source.version=input_hashとcontent_hash=fingerprint(snapshot)を分け、1会話dataset、配信済み本文、2〜16異なる発話ID/hash/順序、実actor/stepを照合する。07/08/01〜04は毎回固定pin照合、同size/mtime変更も拒否する。
+- report-only候補はhuman_pending・意味undetermined・HumanRecord未入力・確定根拠不適格。手動interaction_links不変、claims/label_patches/analysis_requests空。実UNKNOWN／欠落／型偽装／正規化後単一話者／非参加者役割不足はモデル前と受入時に拒否。全本文配送不足は成功draftにしない。新method／保存先／scheduler／asset登録／UI責務は追加していない。
+- Windows別作者はexact Git archiveで独立20/20 PASS（10.614秒）と旧隣接5/5 PASS（0.729秒）、FAIL/ERROR/SKIP0。UNKNOWN／単一話者の2負例は解釈agent呼出0、正常Handler raw保存→実AnalysisStore.save→fresh packageと原manual不変を確認した。Python3.13.7／PyYAML6.0.3／Windows11 26200。受入receipt SHA256 `ba1da647dea28956531899db98adbe94cf9b6abf580ac82b26fa60885ea1afe9`、旧18PASS/2FAILを保存、正式done後QAをreleaseした。再現入口はPowerShellで `$env:PYTHONPATH='src;tests'; python -B -m unittest test_focus_group_interaction_independent -v`、Linuxで `PYTHONPATH=src:tests python -B -m unittest test_focus_group_interaction_independent -v` と下記旧5method。
+- 旧隣接5methodは `test_expert_agents.SkillContextAgentTests.test_default_currentPack_matches_fixed_previous_reader`／`test_render_path_keeps_complete_registered_skill_body` と、`test_expert_skill_bindings.SkillBindingReaderTests.test_actual_fixed_context_13_quotes_6_tables_paragraph_and_02_sections`／`test_opt_in_registry_freezes_fullbody_without_cached_default_reader`／`test_workflow_omitted_unaffected_selected_missing_controls_stops_consumer`。preparation noteの公開bytesにpin3fieldを更新し、歴史private Git object依存を固定code fixtureへ置換した。元note巻戻し／ガード弱体化はない。
+- C0のWindows役割境界4件は別母数で4PASS（2.561秒）、receipt `ed02b9225cd0dd8629c4bf39cee9aafea8d8df77cc4a83e4db7508bcc7556a9d`。Dotの[Linux作者receipt](https://github.com/krokharu/gurumoji/issues/31#issuecomment-6085884197)はoriginal40・追加P1四件・旧隣接5件を各PASS、別review五件も区別。作者実行はC0固定fixture2pathをreadonlyで置いたuntracked overlayで、clean author commitと同一視しない。C0最終共有版ではfixtureも追跡済み。先行UI共有717のDot新Linux checkoutでの129件一致・received=true・clean・exit0も同receiptで実受領済み。
+
+全app suite／実FGIモデル／実研究DB・Vault・媒体／実AT／意味品質・方法妥当性・研究者採否・他専門家の展開は未実行。PNG Store/Web/Vault延期、Gemma full323 HOLD、G0.5b/c未測定・currentPack暫定、G5意味評価保留、engineering_holdを維持する。合成CPU受入を工程全体の合格へ置き換えない。
+
 ## 2026-10-10: exportキーボード修正と固定readerの受け渡し
 
 UI作者 `ecb9aafadcf90c938bff627afc4383f28d304fda` の2path（app.js、新規DOM test）を選別した。開始ボタンの無効化によるfocus喪失、保存バーによるfocus遮蔽、tablistによる修飾キーの横取りを修正。作者DOMは新7＋既存15の22 PASS / FAIL0 / SKIP0。別作者C0は統合 `ca2614cbd3b45be7d7b5c50c3a6f13b67e97f65d` の同一2blobで実Edge1440/390を確認し、修飾キー32＋通常キー8条件と、取消・失敗・非奪取6条件がPASS、ERROR/SKIP0。変更前の32失敗と環境指定不足による1skipは別記録に保持した。独立receipt SHA256は `14788313c11d0a8cbf5db9d739e43a3f2d0a5e9864e358e550e967967511b893`。native history Back/Forward後の再到達は作者確認、OSのブラウザーshortcut acceleratorと実AT/screenreaderは未実行。実DB/Vault・実媒体・モデル・外部AIへの接触0。作者Dispatch `ctx_882f3ec3393b` は正式doneを受理しreleaseした。
 
-隣接互換試験の歴史Git object依存を解消するため、旧readerのcode bytesだけを `tests/fixtures/expert_reader_history/6f1d532c5a0ce995b03e3dca191f358eeed6d42f/expert_agents.py` へ固定した。元blob `8c86a20ed9cb54e977376afc9f6a90c0176649cd`、45572 bytes、SHA256 `7cccfdd6188cd6b25641c673516c9012d83a7bd90c43b1c5bb0f86e49a74bff8`。私有履歴そのものは含めない。この受渡時点で既存testのfixture接続とtranscript-preparation pin修正はDotの後続scopeであり、完了扱いにしない。
+隣接互換試験の歴史Git object依存を解消するため、旧readerのcode bytesだけを `tests/fixtures/expert_reader_history/6f1d532c5a0ce995b03e3dca191f358eeed6d42f/expert_agents.py` へ固定した。元blob `8c86a20ed9cb54e977376afc9f6a90c0176649cd`、45572 bytes、SHA256 `7cccfdd6188cd6b25641c673516c9012d83a7bd90c43b1c5bb0f86e49a74bff8`。私有履歴そのものは含めない。先行UI受渡時点ではfixture接続とtranscript-preparation pin修正はDotの後続scopeで未完だった。その後の受入結果は上段のFGI契約受入を参照する。
 
-[#31](https://github.com/krokharu/gurumoji/issues/31) のFGI backendはDot主担当、Windows独立QAは別作者、統合はC0。固定候補は取得済みで独立受入が進行中。PNG Store/Web/Vault延期、Gemma full323 HOLD、G0.5b/c未測定・currentPack暫定、G5の意味品質・残る専門家の評価は維持する。manifestのengineering_holdは解除しない。
+[#31](https://github.com/krokharu/gurumoji/issues/31) のFGI backendはDot主担当、Windows独立QAは別作者、統合はC0。先行UI共有717時点ではFGI独立受入が進行中だった。その後の結果は上段に記録した。PNG Store/Web/Vault延期、Gemma full323 HOLD、G0.5b/c未測定・currentPack暫定、G5の意味品質・残る専門家の評価は維持する。manifestのengineering_holdは解除しない。
 
 追記の初回公開fb207d2はPowerShellのstdin文字コード変換で日本語が疑問符になったため、この文書だけを訂正した。コード・固定fixture・試験receiptのbytesは変えない。既存公開履歴は保全する。
 
