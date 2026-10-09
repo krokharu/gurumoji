@@ -1374,6 +1374,7 @@ function syncTabStops() {
 }
 document.querySelectorAll('[role="tablist"]').forEach(tablist => {
   listen(tablist, 'keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const tabs = [...tablist.querySelectorAll('[role="tab"]')].filter(tab => !tab.hidden && !tab.disabled);
     const index = tabs.indexOf(document.activeElement);
     const targets = {ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1};

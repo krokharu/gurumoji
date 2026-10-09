@@ -75,3 +75,30 @@ test('focus obscured by another surface scrolls into view; later focus is not sc
   h.start.blur(); h.start.focus(); const stale = h.timers.at(-1);
   h.panel.querySelector('summary').focus(); stale.callback(); assert.equal(scrolls, 1);
 });
+
+test('tablists leave modified navigation keys unhandled and keep current focus', async t => {
+  const h = await createHarness(); t.after(() => h.close());
+  const tabs = [...h.document.querySelector('#processed-data-hub').querySelectorAll('[role="tab"]')];
+  for (const modifier of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey']) {
+    for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+      tabs[1].focus();
+      const event = new h.w.KeyboardEvent('keydown', {key, [modifier]: true, bubbles: true, cancelable: true});
+      tabs[1].dispatchEvent(event);
+      assert.equal(event.defaultPrevented, false, `${modifier} ${key}`);
+      assert.equal(h.document.activeElement, tabs[1], `${modifier} ${key} focus`);
+    }
+  }
+});
+
+test('plain tablist arrows wrap and Home/End still move focus without activating another screen', async t => {
+  const h = await createHarness(); t.after(() => h.close());
+  const tabs = [...h.document.querySelector('#processed-data-hub').querySelectorAll('[role="tab"]')];
+  const view = h.document.body.dataset.view;
+  for (const [start, key, expected] of [[1, 'ArrowLeft', 0], [0, 'ArrowLeft', 1], [1, 'ArrowRight', 0], [1, 'Home', 0], [0, 'End', 1]]) {
+    tabs[start].focus();
+    const event = new h.w.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+    tabs[start].dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true); assert.equal(h.document.activeElement, tabs[expected]);
+    assert.equal(h.document.body.dataset.view, view);
+  }
+});
