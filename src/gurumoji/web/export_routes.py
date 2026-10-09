@@ -100,9 +100,10 @@ def register_export_routes(
                 if options["frames"]["enabled"]:
                     try:
                         current_path = permitted_media(fresh, media_directory, path_is_within)
+                        current_identity = media_identity(current_path)
                     except (OSError, ExportError) as exc:
                         raise ExportError("media_changed", 409, frame_status="failed") from exc
-                    if media_identity(current_path) != payload["frames"]["media"]["identity"]:
+                    if current_identity != payload["frames"]["media"]["identity"]:
                         raise ExportError("media_changed", 409, frame_status="failed")
         except ExportError as exc:
             body = {"error": exc.reason}

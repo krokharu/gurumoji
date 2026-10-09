@@ -6,7 +6,11 @@ import sqlite3
 import hashlib
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
+import threading
+import urllib.request
 import unittest
 import zipfile
 from contextlib import contextmanager
@@ -14,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from flask import Flask
+from werkzeug.serving import make_server
 
 from gurumoji import transcript_preparation as preparation
 from gurumoji.services.library_rows import row_segments, row_session_profile, row_speaker_profiles
@@ -332,6 +337,59 @@ class AIDataExportAPITests(unittest.TestCase):
             response = self.post(self.frame_options())
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json()["frames"]["reason"], "media_changed")
+
+    def test_subprocess_pipe_limit_and_shared_deadline_are_enforced(self):
+        from gurumoji.services.ai_data_export_frames import _run_bounded
+        with self.assertRaises(ExportError) as overflow:
+            _run_bounded([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * (2*1024*1024+1))"],
+                         time.monotonic() + 5, None)
+        self.assertEqual(overflow.exception.reason, "frame_output_limit")
+        started = time.monotonic()
+        with self.assertRaises(ExportError) as timeout:
+            _run_bounded([sys.executable, "-c", "import time; time.sleep(5)"], started + .1, None)
+        self.assertEqual(timeout.exception.status, 408)
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_actual_loopback_http_download(self):
+        server = make_server("127.0.0.1", 0, self.app)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/api/library/sample/ai-export.zip",
+                data=b"{}", headers={"Content-Type": "application/json", "X-Gurumoji-Request": "1"}, method="POST")
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers.get_content_type(), "application/zip")
+                self.assertIn("attachment", response.headers["Content-Disposition"])
+                data = response.read()
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                self.assertEqual(json.loads(archive.read("manifest.json"))["item_id"], "sample")
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
+
+    def test_decoded_dimensions_and_aggregate_jpeg_limit(self):
+        from PIL import Image
+        self.video()
+        with self.connection() as c:
+            row = c.execute("SELECT * FROM library_items").fetchone()
+        image_data = io.BytesIO()
+        Image.new("RGB", (321, 1)).save(image_data, format="JPEG")
+        with patch("gurumoji.services.ai_data_export_frames._run_bounded", return_value=(0, image_data.getvalue(), b"")):
+            response = self.post(self.frame_options())
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["frames"]["reason"], "frame_dimensions")
+        image_data = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(image_data, format="JPEG")
+        jpeg = image_data.getvalue()
+        jpeg += b"\x00" * (2 * 1024 * 1024 - len(jpeg) - 2) + b"\xff\xd9"
+        with patch("gurumoji.services.ai_data_export_frames._run_bounded", return_value=(0, jpeg, b"")):
+            with self.assertRaises(ExportError) as caught:
+                extract_frames(row, [], {"times": list(range(24)), "max_dimension": 1280},
+                               media_directory=lambda: self.root / "media", path_is_within=path_is_within)
+        self.assertEqual(caught.exception.reason, "frame_total_limit")
 
 
 if __name__ == "__main__":

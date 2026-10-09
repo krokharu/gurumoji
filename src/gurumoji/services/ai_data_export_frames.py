@@ -34,15 +34,18 @@ def permitted_media(row, media_directory, path_is_within):
     if not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item_id) or \
             is_unc_path(raw) or media_directory is None or path_is_within is None:
         raise ExportError("media_not_permitted", 422, frame_status="unavailable")
-    base = Path(media_directory()).resolve()
-    item_root = (base / item_id).resolve()
-    if item_root.parent != base or not path_is_within(path, item_root):
-        raise ExportError("media_not_permitted", 422, frame_status="unavailable")
-    if not path.is_file():
-        raise ExportError("missing_media", 422, frame_status="unavailable")
-    if not is_video_path(path):
-        raise ExportError("audio_only", 422, frame_status="unsupported")
-    return path.resolve()
+    try:
+        base = Path(media_directory()).resolve()
+        item_root = (base / item_id).resolve()
+        if item_root.parent != base or not path_is_within(path, item_root):
+            raise ExportError("media_not_permitted", 422, frame_status="unavailable")
+        if not path.is_file():
+            raise ExportError("missing_media", 422, frame_status="unavailable")
+        if not is_video_path(path):
+            raise ExportError("audio_only", 422, frame_status="unsupported")
+        return path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ExportError("missing_media", 422, frame_status="unavailable") from exc
 
 
 def verify_media_unchanged(row, path, identity, media_directory, path_is_within):
@@ -75,8 +78,8 @@ def _run_bounded(args, deadline, check_cancelled):
         finally:
             stream.close()
 
-    threads = [threading.Thread(target=drain, args=(process.stdout, 0, FRAME_BYTES)),
-               threading.Thread(target=drain, args=(process.stderr, 1, 65536))]
+    threads = [threading.Thread(target=drain, args=(process.stdout, 0, FRAME_BYTES), daemon=True),
+               threading.Thread(target=drain, args=(process.stderr, 1, 65536), daemon=True)]
     try:
         for thread in threads:
             thread.start()
@@ -104,7 +107,10 @@ def _run_bounded(args, deadline, check_cancelled):
 
 def extract_frames(row, rows, options, *, media_directory, path_is_within, check_cancelled=None):
     path = permitted_media(row, media_directory, path_is_within)
-    identity = media_identity(path)
+    try:
+        identity = media_identity(path)
+    except OSError as exc:
+        raise ExportError("missing_media", 422, frame_status="unavailable") from exc
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise ExportError("ffmpeg_unavailable", 422, frame_status="unavailable")
