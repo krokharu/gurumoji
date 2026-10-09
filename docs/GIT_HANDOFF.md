@@ -21,6 +21,8 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 ## 2026-10-09: 実複数source接続の選別受入
 
+23:35 JSTのLinux追補：[Dotの固定429 receipt](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6082993355)で、指定2blobと下記の純kernelコマンド、Git2.52.0／Python3.12.14、4 PASS／0 SKIP／0 FAIL（0.769秒）、隔離checkout clean・編集／install 0を確認した。C0は公開本文をreadbackした。以下の旧環境不可／未実行は当時の履歴であり、この限定4件は現在実行済み。legacy Flask suite／full app／モデルや別機能の受入を意味しない。
+
 共有sourceは `3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533`。公開bc0基点からbackend `4f4a2903c9ac0e995426b22843d68b8c5b8a6f66` の6path、UI `211587f9400bc87c5204ce51d70716c2e972c1b9` の3path、別作者の独立test `80f148babc424e63c128db53d74ffab886dfa822` の1pathだけを選別した。共有indexはC0のみが所有し、全10pathのGit／index／作業bytesを照合、AST7・diff・統合後の隣接kernel4件が成功した。以下の以前の区切りは履歴であり、現在の接続範囲は本節を使う。
 
 - 既存options GETの`unit_pool`と既存asset-plansの`unit-pool-request-1` explicit POSTを接続した。GETはreadonlyでscopeを生成せず、POSTが2〜16の完全utterance carrierからStoreの閉じたgroup scopeを作る。`pool-source-option-1`は表示用metadataで、互換性・原入力・現在policyのauthorityにはしない。主会話を含む許可済み2会話がない場合は選択を無効にする。
