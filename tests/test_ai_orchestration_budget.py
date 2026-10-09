@@ -360,10 +360,35 @@ class InitialPromotionTests(BudgetFixture, unittest.TestCase):
         if not old:
             import gurumoji.analysis_orchestration as module
             return module
-        source = subprocess.check_output(["git", "show", self.OLD + ":src/gurumoji/analysis_orchestration.py"])
+        import hashlib
+        # Independent pins keep coordinated fixture/manifest edits from redefining history.
+        expected = {
+            "source_commit": "113f2f94214e411644256af8342da0099736530e",
+            "source_path": "src/gurumoji/analysis_orchestration.py",
+            "git_blob": "f625fb702d9998079bfafda0b18fe759814ab576",
+            "sha256": "9ac84563489a93953f1d25ed7776521d58ce09663af5d8e29783c48bc799fca7",
+            "bytes": 165604,
+            "purpose": "Public code-only fixed previous initial-promotion fixture; original Git history excluded.",
+        }
+        fixture_root = ROOT / "tests/fixtures/orchestration_history"
+        fixture_path = fixture_root / expected["source_commit"] / "analysis_orchestration.py"
+        try:
+            manifest_bytes = (fixture_root / "manifest.json").read_bytes()
+            source = fixture_path.read_bytes()
+        except OSError as exc:
+            self.fail(f"IR-L01 historical fixture unavailable: {exc}")
+        self.assertEqual(hashlib.sha256(manifest_bytes).hexdigest(),
+            "37b62804cc8695ff30134a49340ec9c40220b85a9e5856882bd9a6a0a56474ce",
+            "IR-L01 manifest integrity mismatch")
+        self.assertEqual(json.loads(manifest_bytes), expected, "IR-L01 manifest metadata mismatch")
+        self.assertEqual(len(source), expected["bytes"], "IR-L01 fixture size mismatch")
+        self.assertEqual(hashlib.sha256(source).hexdigest(), expected["sha256"],
+            "IR-L01 fixture SHA256 mismatch")
+        git_blob = hashlib.sha1(b"blob " + str(len(source)).encode("ascii") + b"\0" + source).hexdigest()
+        self.assertEqual(git_blob, expected["git_blob"], "IR-L01 fixture Git blob mismatch")
         module = types.ModuleType("gurumoji._old_lifecycle_fixture")
         module.__package__ = "gurumoji"
-        exec(compile(source, "<Git113f2f9 lifecycle fixture>", "exec"), module.__dict__)
+        exec(compile(source, str(fixture_path), "exec"), module.__dict__)
         return module  # Never check out or replace the installed module/global paths.
 
     def probe(self, case, old=False, staged=False, event_delay=0):
