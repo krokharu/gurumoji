@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "b23a3ae458544f43a798c41c71f4fbe60588dce0",
+  "source_commit": "6b8fd8c774d564041aedd624b5a41689ae670a27",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "963cd00b7318d500def7c5c12a68f7d6258353724e3e438cec255bc277fcbafb",
-      "bytes": 26988
+      "sha256": "a20f518e5438d782402ac4512926c3ca02896730cb8ea31130c2971c1f23c9b2",
+      "bytes": 27944
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
