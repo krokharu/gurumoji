@@ -15,6 +15,7 @@ import stat
 import struct
 import zipfile
 import zlib
+from fractions import Fraction
 
 MAX_ROWS = 100000
 MAX_FRAMES = 24
@@ -341,8 +342,12 @@ def _validate(payload):
         total += len(data)
     _require(total <= MAX_FRAME_TOTAL, "frame total limit")
     if times:
-        _require(times[-1] - times[0] <= 600 and all(b - a >= 1 or math.isclose(b - a, 1, rel_tol=0,
-                     abs_tol=max(math.ulp(a), math.ulp(b)) * 2) for a, b in zip(times, times[1:])), "frame request bounds")
+        # Match the request adapter's exact decimal/wire semantics. An ULP-
+        # scaled tolerance can exceed a second at large timestamps and admit
+        # duplicate, descending or sub-second frames. Never relax this bound.
+        grid = [Fraction(str(value)) for value in times]
+        _require(grid[-1] - grid[0] <= 600 and all(b - a >= 1 for a, b in zip(grid, grid[1:])),
+                 "frame request bounds")
     # Bytes are permitted only in the frame data field.
     for key, value in payload.items():
         if key != "frames":

@@ -211,6 +211,30 @@ class AIDataExportBundleTests(unittest.TestCase):
         self.payload["frames"]["items"].append(copy.deepcopy(self.payload["frames"]["items"][-1]))
         self.assert_invalid(self.payload)
 
+    def test_strict_frame_grid_rejects_large_duplicate_descending_and_subsecond_times(self):
+        invalid = [(1e16, 1e16), (1e16, 1e16 - 2), (1e15, 1e15 + 0.75)]
+        for times in invalid:
+            with self.subTest(times=times):
+                self.assert_invalid(with_frames(copy.deepcopy(self.payload), times))
+                # Independently forge a hash-consistent archive. The reader
+                # must enforce the same bound without relying on the builder.
+                files = zip_files(bundle.build_ai_bundle(with_frames(copy.deepcopy(self.payload))))
+                frames = [json.loads(line) for line in files["frames/index.jsonl"].splitlines()]
+                for entry, requested in zip(frames, times):
+                    entry["requested_time"] = requested
+                files["frames/index.jsonl"] = b"".join(json.dumps(entry).encode() + b"\n" for entry in frames)
+                with self.assertRaises(ValueError):
+                    bundle.validate_ai_bundle_zip(pack(rehash(files)))
+
+    def test_strict_frame_grid_preserves_decimal_endpoints_and_exact_large_intervals(self):
+        valid = [(0.1, 1.1), (0.1, 1.1, 2.1, 3.1, 4.1), (0.1, 1.2, 2.3, 3.4),
+                 (1e15, 1e15 + 1), (1e16, 1e16 + 2), (0.1, 600.1)]
+        for times in valid:
+            with self.subTest(times=times):
+                payload = with_frames(copy.deepcopy(self.payload), times)
+                bundle.validate_ai_bundle(payload)
+                self.assertEqual(bundle.validate_ai_bundle_zip(bundle.build_ai_bundle(payload))["frames"]["count"], len(times))
+
     def test_reject_frame_bytes_ids_temporal_refs_and_partial_states(self):
         with_frames(self.payload)
         for key, value in (("data", b"bad"), ("frame_id", "../../bad"), ("requested_time", True),
