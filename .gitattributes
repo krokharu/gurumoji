@@ -131,3 +131,7 @@ docs/program-vault/50-Analysis-Methods/10-Experts/focus-group-interaction/08-Ski
 tests/test_focus_group_interaction_contract.py -text
 tests/test_focus_group_interaction_independent.py -text
 tests/dom/ai-export-keyboard.test.cjs -text
+
+tests/fixtures/expert_reader_history/6f1d532c5a0ce995b03e3dca191f358eeed6d42f/expert_agents.py -text
+
+tests/fixtures/expert_reader_history/hashes.json -text

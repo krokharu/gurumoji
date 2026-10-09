@@ -1,0 +1,8 @@
+{
+  "source_commit": "6f1d532c5a0ce995b03e3dca191f358eeed6d42f",
+  "source_path": "src/gurumoji/services/expert_agents.py",
+  "git_blob": "8c86a20ed9cb54e977376afc9f6a90c0176649cd",
+  "sha256": "7cccfdd6188cd6b25641c673516c9012d83a7bd90c43b1c5bb0f86e49a74bff8",
+  "bytes": 45572,
+  "purpose": "Public code-only fixed previous reader fixture; original history excluded."
+}
