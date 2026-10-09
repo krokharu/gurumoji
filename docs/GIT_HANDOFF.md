@@ -19,9 +19,23 @@ python scripts/check_git_handoff.py --expected-commit <通知された完全SHA>
 
 既存の共有checkoutでは `python scripts/check_git_handoff.py --fetch --expected-commit <通知された完全SHA>` を使う。fetchはrefの更新だけで、checkoutを自動更新しない。`received=false` ならcommit・dirty・mismatchesを確認し、成果を退避せずに強制上書きしない。Gitの読取だけ可能なDotはcommitの取得とファイルmanifest照合を報告し、Python未実行を明記する。GitHub Issue/PRが双方の永続的な通知・受領経路であり、ChatGPTの会話は短い通知に使う。バックグラウンドの自動受信や監視は設定していない。
 
-## 2026-10-09 の共有固定候補
+## 2026-10-09: 実複数source接続の選別受入
 
-現在の共有sourceは `1949833c1c20e898fe935cbad5df382d2c18fb23`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。manifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にする。進行中の未コミット画面実装は含めない。
+共有sourceは `3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533`。公開bc0基点からbackend `4f4a2903c9ac0e995426b22843d68b8c5b8a6f66` の6path、UI `211587f9400bc87c5204ce51d70716c2e972c1b9` の3path、別作者の独立test `80f148babc424e63c128db53d74ffab886dfa822` の1pathだけを選別した。共有indexはC0のみが所有し、全10pathのGit／index／作業bytesを照合、AST7・diff・統合後の隣接kernel4件が成功した。以下の以前の区切りは履歴であり、現在の接続範囲は本節を使う。
+
+- 既存options GETの`unit_pool`と既存asset-plansの`unit-pool-request-1` explicit POSTを接続した。GETはreadonlyでscopeを生成せず、POSTが2〜16の完全utterance carrierからStoreの閉じたgroup scopeを作る。`pool-source-option-1`は表示用metadataで、互換性・原入力・現在policyのauthorityにはしない。主会話を含む許可済み2会話がない場合は選択を無効にする。
+- 実group HumanRecordの明示participant mappingを採択して既存unit_aggregateへ渡す。単一会話HCを多会話へ転用せず、定義の同名だけで互換にしない。snapshot content_hashとinput_hash、元発話／qualified ID対応、元分母／現在除外、全sourceと親policyをprepare・実行・save・freshで照合する。missing／unknown／unprocessed／excludedと観測0を区別し、無発話名簿を観測0にしない。
+- 保存はunit_poolだけ`connected-provenance-3`を使う。完全unit_contractと値を含む全receiptを保ち、重複parentsだけを同packageの`receipt.bindings`への閉じたtarget／hash／domain参照にする。freshでは実durable task／raw ledgerとの全体一致と現在の元bytes・権限を再検証する。旧`connected-assets-2`と他methodは保持し、131072／65536上限、SQL、保存先、schedulerは増減しない。
+- 別作者の最終4f4境界8件（415.614s）、有効な16source47発話の実SAVE上限拒否1件（74.628s）、receipt実値改変拒否1件、4f4＋211のEdge1440通常操作1件（118.425s）が成功、open製品指摘0。縮小していない16source・5変数・21発話は実GET→POST→Handler→immutable save→fresh成功、全receiptを保った122014 bytesで上限内。実保存2会話`[0,2]`と`[4]`の同参加者HCからsum6／mean2／observed分母3を確認した。390px正常操作とprimaryなし無効化は723＋f042で成功し、UI2 blobは最終211と同じ。初期options／重送／保存サイズの失敗とfixture修正履歴を保持し、最終版の成功で過去を消さない。
+- 旧mock5回帰は実ExpertCatalog／Registry選択へ接続し、C0のexact5＋欠落ID拒否／一般互換2が成功。別の2pathで既存UnitKernelTestsを純粋supportへ分離し、fixture・4本体のASTと旧export／discovery4 uniqueを保持した。C0のFlask遮断4と旧入口4は同じ4件の入口別検証であり、8種類の意味品質試験とは数えない。Linux用は`PYTHONPATH=src:tests python -m unittest support_analysis_unit_kernel.UnitKernelTests -v`。Dot [#28](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6074192102)は環境利用不可で未実行、[所有者移管](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6074232023)後にWindowsで完成させた。#27の旧bc0 Linux109照合／helper14成功とは別の受入である。
+
+作者端末のcapacityエラーで完了報告が止まった試行はfailedとして保持し、同じ既定modelの正式retryで固定4f4のreadonly照合・回復receiptだけを完成した。旧試行の未確認overgate結果は不明のまま、上記の合否は別作者の実ログを根拠にする。Run `run_30240e5eb510`、独立Task `task_7f86196b7e4b`／Dispatch `ctx_168b62300154` が技術受入の根拠。
+
+実DB・研究者Vault・認証・実モデル・Downloads原本への書込0。UIは合成loopback appのproduction画面と実scoped API／Handlerを操作し、full scheduler、全初期pipeline、利用者稼働サービス、AT、全suiteは未実行。今回のNode検証は既存24.21.0を使用し通常PATH22.19は変更しない。PNG Store／Web／Vault延期、Gemma323 fullMready=false／HOLD、G0.5b/c未実測・currentPack暫定・G5残14未展開と意味品質未認定を維持する。私有checkpoint／延期visual／raw破損snapshot／実データ・認証・私有Drive資料は共有へ入れず、Downloads別公開branchも自動mergeしない。manifestの`engineering_hold`を維持し、通常forward pushと固定SHA受領を工程全体の合格にしない。
+
+## 2026-10-09 06:58以前の共有固定候補（履歴）
+
+当時の共有sourceは `1949833c1c20e898fe935cbad5df382d2c18fb23`。元の私有作業ブランチをpushせず、公開共通基点から次のcode/testを選別した。当時のmanifestはこの固定sourceのGit bytesと公開受け渡し資料を対象にした。進行中だった未コミット画面実装は含めない。
 
 - 実際に保存された研究者記録を持つTA候補から発話単位・明示対応による参加者単位へ変換し、count/sum/mean、完全な一対一join、探索的相関を既存Handler／Storeで保存してfresh再利用する。無発話の名簿を観測ゼロにしない。現在の実接続は単一会話。複数会話はkernelだけでなく、全保存元／原票／現在の権限を照合する実Store橋を必須後続に残す。
 - 同Handlerの資産依存計画を接続し、選択したfrom_stepの実保存receiptを待つ。重送／順序違い／欠落通知／再開は実台帳から照合する。旧世代resumeの計算・保存を0で拒否し、正常completed後の新run再利用を保持する。独立最終関連11件、独立unittest12件、standalone4probesが成功。初期のP1/P2失敗は履歴として保持し、修正版だけで閉鎖した。通信先の不確定な実LLM結果にexactly-onceを主張しない。

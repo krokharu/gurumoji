@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_commit": "1949833c1c20e898fe935cbad5df382d2c18fb23",
+  "source_commit": "3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533",
   "base_commit": "75ebbb6d5ab2cda50e5b90712bc3298e8b8c714b",
   "branch": "krokharu/dot-orca-git-share",
   "status": "engineering_hold",
@@ -20,8 +20,8 @@
     },
     {
       "path": "docs/GIT_HANDOFF.md",
-      "sha256": "8243b3f2476409cb2d57d485444d28977e7e0ec8faa2945df6f9996ef09d6592",
-      "bytes": 16114
+      "sha256": "5376c13e482fd18a6ab2eca943d66c4d155bd5f3f411e748ff484dd8bb2b9534",
+      "bytes": 20845
     },
     {
       "path": "docs/OBSIDIAN_VAULTS.md",
@@ -160,8 +160,8 @@
     },
     {
       "path": "docs/program-vault/60-Operations/dot-cloud-development-handoff.md",
-      "sha256": "d06f8149d5a7e3f3dd4f7b4d4e3a3db6335dec6a62eeeab9d0cf825060b5740d",
-      "bytes": 47885
+      "sha256": "f1f15f606b30b438a10ed0d9a9b3f5c4f6a001c5ad1347e97f34cde5ef32fb2f",
+      "bytes": 50381
     },
     {
       "path": "docs/program-vault/90-Templates/knowledge-evaluation.md",
@@ -205,23 +205,23 @@
     },
     {
       "path": "src/gurumoji/analysis_core.py",
-      "sha256": "351ac35ba9f3adfd2d31fcca575b0aafdeef8aba4d0d0961bdf57c9eefc2d82b",
-      "bytes": 78607
+      "sha256": "9954872afeec5cfb118d5c01577ca89904f62c3df8c0000909b5f6d8994bf28a",
+      "bytes": 79044
     },
     {
       "path": "src/gurumoji/analysis_method_registry.py",
-      "sha256": "5a8a38396383c6d874c8a31c0bd7bf0688233dd13f920ae3a42fb75bc64dc701",
-      "bytes": 34609
+      "sha256": "504a63139a2bc78f94a9db0435a7dce5a786c45396c0f6e6327404463d940985",
+      "bytes": 34738
     },
     {
       "path": "src/gurumoji/analysis_orchestration.py",
-      "sha256": "effd0acbde6d8b99c51c32d66ea9c9387577adec947c42590ef0c44c4e469ebc",
-      "bytes": 222254
+      "sha256": "a21e68428d4ddd60231a0b0d9f7066de2d3c61fadc5a08254841cd616f3faa4e",
+      "bytes": 223912
     },
     {
       "path": "src/gurumoji/analysis_store.py",
-      "sha256": "c2ae6a777a5ede4c5de85af1144aa6913803dc6763c73017b469d15f71392de9",
-      "bytes": 255950
+      "sha256": "27111efd4c7a4f84ef9a77a084a78bc7c5d5397a7f5dd651f0dd39ccdd7036b7",
+      "bytes": 283449
     },
     {
       "path": "src/gurumoji/app.py",
@@ -235,8 +235,8 @@
     },
     {
       "path": "src/gurumoji/research_analysis.py",
-      "sha256": "d6834d9c082f427adc767e17daea9c46b09ddcf8e187b6b947b01c02dc4b858b",
-      "bytes": 110588
+      "sha256": "7c0a7f78c8dd13f30bb341a4926b4a65b59455c5fef8a3a7adc29d414b1359fe",
+      "bytes": 111041
     },
     {
       "path": "src/gurumoji/services/ai/client.py",
@@ -310,8 +310,8 @@
     },
     {
       "path": "src/gurumoji/static/analysis-orchestration.js",
-      "sha256": "f7f39a52d291972d0ff78a16b31b8b5d925c14b6f2f92fcc8291135f9006af5a",
-      "bytes": 145535
+      "sha256": "9d3ca90cab2979d82c55de67dbb605db5f0ec450756b47fe7a782b832e1ff34a",
+      "bytes": 157348
     },
     {
       "path": "src/gurumoji/static/app.js",
@@ -320,8 +320,8 @@
     },
     {
       "path": "src/gurumoji/templates/views/analysis-orchestration.html",
-      "sha256": "23e2ebae0cd9dd0f39f1b4f89404308b9006ae98959bd6b2103cb30f552d2fb7",
-      "bytes": 26257
+      "sha256": "adc72cea492ed46b7ed2211872f8a2ce389eb29c02bf16cda1ee971cf47c667d",
+      "bytes": 27017
     },
     {
       "path": "src/gurumoji/vault_registry.py",
@@ -372,6 +372,11 @@
       "path": "tests/fixtures/expert_skill_history/hashes.json",
       "sha256": "da2400c6de312b5794424a762b62334219911db925e6b73221dc1de674225ed7",
       "bytes": 885
+    },
+    {
+      "path": "tests/support_analysis_unit_kernel.py",
+      "sha256": "c3abc7e92376ee8937a5e1af8d0129ee6b9182def3d1cbd50dd15e34409a9045",
+      "bytes": 4989
     },
     {
       "path": "tests/test_ai_client_responses.py",
@@ -434,6 +439,11 @@
       "bytes": 24486
     },
     {
+      "path": "tests/test_analysis_multi_conversation_units.py",
+      "sha256": "530e4d6666bdea28ff447fe497af09c64b0afc94e93f57288faf408f80397b25",
+      "bytes": 40928
+    },
+    {
       "path": "tests/test_analysis_orchestration.py",
       "sha256": "1e9f9b6a0a1246ed99380031d13c5279429d40bc89add47505a5192a47e83184",
       "bytes": 35738
@@ -465,8 +475,8 @@
     },
     {
       "path": "tests/test_analysis_table_units.py",
-      "sha256": "f449638ee18c492444b42cf8cef65740ed4889b9fcb85334464d1fe31eebb52b",
-      "bytes": 14059
+      "sha256": "ce2ac2213de7f27265d72cf0e4ce31dbbfe480473d208415bc0cf4f0ded6cfb4",
+      "bytes": 9281
     },
     {
       "path": "tests/test_analysis_typed_assets.py",
@@ -477,6 +487,16 @@
       "path": "tests/test_analysis_unit_groups.py",
       "sha256": "9561ff9a87397f4ea619a7f5a7ec214263e1b2e0553711be2018e4b526edb16d",
       "bytes": 26178
+    },
+    {
+      "path": "tests/test_analysis_unit_pool_independent.py",
+      "sha256": "4146b384fe1c1cd65c0bfc4cd87b9e01c9cfe91d25d450c8b849e6211e28e825",
+      "bytes": 83596
+    },
+    {
+      "path": "tests/test_analysis_unit_pool_ui.cjs",
+      "sha256": "f356f293366af06aa74b5b411dfeabaa4163dbf7a1d8b6b2034b649c0f137021",
+      "bytes": 28223
     },
     {
       "path": "tests/test_analysis_visual_package.py",
@@ -512,6 +532,11 @@
       "path": "tests/test_git_handoff.py",
       "sha256": "823d966a9dde68b87e0785439378651b46e06c11077028c8f044b008bfa10297",
       "bytes": 9740
+    },
+    {
+      "path": "tests/test_legacy_expert_fixture_contract.py",
+      "sha256": "d9a6a926630c56492d1c74c79875098f37632778ecd33ec9600807c8cf0b19e1",
+      "bytes": 2887
     },
     {
       "path": "tests/test_method_experts.py",

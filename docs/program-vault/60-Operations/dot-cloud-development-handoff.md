@@ -14,6 +14,16 @@ tags:
 
 # dot クラウド開発とローカルへの引継ぎ
 
+## 2026-10-09: 実多会話接続とCPU残件の最新受入
+
+公開選別sourceは`3bb09c2ce0b80ee7b6f52d1a39d7f3dfcc662533`。C0が固定backend4f4／UI211／別作者test80の10pathをbytesで選別し、旧mock実Registry修正3pathと純粋kernel import分離2pathを保持した。閉じたunit_poolの2〜16 source POST、実group HumanRecord、Handler保存／fresh、元発話・入力版・現在権限と元分母／現在除外を接続。GETはreadonly、同名定義や単一会話HCを互換としない。保存v3は全unit_contractと全receipt値を保ち、重複parentsだけを閉じたhash参照にする。
+
+別作者の最終境界8件、有効な47発話のSAVE上限拒否1件、receipt実値改変拒否1件、同固定版の1440通常画面→実API→Handler→group HC→sum6／mean2／分母3→save／freshが成功、open製品指摘0。16source・5変数・21発話の正常保存は122014bytesで131072上限内。390正常画面とprimaryなし無効化は前723版で成功、UI2 blobは最終版と一致する。初期失敗、作者capacity停止と同modelのreadonly回復、未確認の旧試験を分けて保持する。固定SHA・コマンド・対象別検証は[公開引継ぎ正本](../../GIT_HANDOFF.md)とmanifestを参照。
+
+Dotの[#27 Linux受領](https://github.com/krokharu/gurumoji/issues/27#issuecomment-6073765543)は旧bc0の109照合とhelper14成功、純kernel4はFlask未導入でloader BLOCKED。後続[#28](https://github.com/krokharu/gurumoji/issues/28#issuecomment-6074192102)はクラウド環境利用不可・編集0で、C0が2testpathのownerをWindowsへ移管して完成・独立受入した。Linuxでの新固定版試験は未実行であり、環境復旧後もC0が固定SHAと専用scopeを渡すまでDotが同じ2pathを再編集しない。Lunaは受入済み公開版の通常push／readback／通知、C0は割当・共有index・技術受入を所有する。
+
+私有checkpointと延期PNGは別branchでローカル保持、Downloads原本・私有履歴・実DB／Vault／資格情報は共有しない。Node24.21による今回検証は通常PATHの変更ではない。PNG Store／Web／Vault延期、Gemma323 HOLD、G0.5b/c未実測／currentPack暫定、G5残14と意味品質未評価を維持。実データ・モデル・利用者稼働サービス・full scheduler／全初期pipeline・AT・全suiteは未実行で、下記の以前の区切りを現在の未実装判定に流用しない。
+
 ## 作業と記録の分担
 
 基本的な調査、整理、編集、実行、検証、進捗確認は利用可能な dot の機能を優先する。ローカル PC でも開発を再開できるよう、意味のある節目で Software Vault の関連ノートへ、設計判断と理由、変更背景、テスト結果と未実行範囲、未解決事項、次の作業、対象 commit と根拠を残す（利用者の方針、2026-10-02）。
