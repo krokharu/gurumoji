@@ -616,6 +616,32 @@ def _fgi_applicability(profile, analysis):
             or preparation["unknown_speaker_turns"] != 0
             or type(participants) is not int or participants < 2):
         fail("expert_not_applicable")
+    from ..text_utils import clean_single_line
+    from .group_analysis import ANALYSIS_NON_PARTICIPANT_ROLES
+    from .speaker_registry import SPEAKER_ROLES
+    segments = analysis.get("segments")
+    if not isinstance(segments, list) or not segments:
+        fail("expert_not_applicable")
+    observed_roles = {}
+    for row in segments:
+        if not isinstance(row, dict): fail("expert_not_applicable")
+        if row.get("excluded"):
+            continue
+        speaker, role = row.get("speaker"), row.get("role", "participant")
+        # Reuse the saved-label trim/newline normalization after rejecting type
+        # coercion and overlength values. Never invent participant identities.
+        if not isinstance(speaker, str) or len(speaker) > 80 or not isinstance(role, str):
+            fail("expert_not_applicable")
+        speaker = clean_single_line(speaker, 80)
+        role = clean_single_line(role, 40)
+        if not speaker or speaker.casefold() == "unknown" or role not in SPEAKER_ROLES:
+            fail("expert_not_applicable")
+        observed_roles.setdefault(speaker, set()).add(role)
+    # Match existing group-analysis role accounting: mixed roles do not prove
+    # distinct participants; moderators/observers are context, not participants.
+    if (any(len(roles) != 1 for roles in observed_roles.values())
+            or sum(not (roles & ANALYSIS_NON_PARTICIPANT_ROLES) for roles in observed_roles.values()) < 2):
+        fail("expert_not_applicable")
 
 
 def focus_group_interaction_delivery(source, context):
