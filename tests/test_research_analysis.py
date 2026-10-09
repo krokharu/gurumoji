@@ -1,5 +1,7 @@
+import copy
 import importlib.util
 import io
+import json
 import unittest
 from unittest.mock import patch
 
@@ -97,6 +99,18 @@ def fixture_analysis(item_id="research_fixture"):
     }
 
 
+def statistical_note_fixture(durations, characters, speakers):
+    analysis = fixture_analysis("statistical_notes")
+    source = analysis["segments"][0]
+    analysis["segments"] = [
+        {**source, "id": f"s{index}", "duration": duration, "end": duration,
+         "valid_time": duration is not None, "characters": count,
+         "speaker": speaker, "speaker_name": speaker}
+        for index, (duration, count, speaker) in enumerate(zip(durations, characters, speakers))
+    ]
+    return analysis
+
+
 class ResearchAnalysisTests(unittest.TestCase):
     def setUp(self):
         research_analysis._RESEARCH_CACHE.clear()
@@ -153,6 +167,123 @@ class ResearchAnalysisTests(unittest.TestCase):
         chars = next(row for row in result["descriptives"]
                      if row["scope"] == "overall" and row["variable"] == "characters")
         self.assertEqual(chars["n"], 3)
+
+    def test_kruskal_note_identifies_current_formula_without_renaming_effect(self):
+        analysis = statistical_note_fixture(range(1, 21), range(3, 23), "A" * 7 + "B" * 7 + "C" * 6)
+        with patch("scipy.stats.kruskal", return_value=(8.0, 0.125)):
+            result = research_analysis.build_research_statistics(analysis, {"morphemes": []})
+        row = next(row for row in result["statistics"]["tests"]
+                   if row["test"] == "Kruskal–Wallis検定" and row["outcome"] == "duration_seconds")
+        self.assertEqual((row["statistic"], row["n"], row["groups"], row["p_value"], row["status"]),
+                         (8.0, 20, 3, 0.125, "computed"))
+        self.assertEqual(row["effect_size"], round(6 / 17, 8))
+        self.assertNotEqual(row["effect_size"], round(8 / 19, 8))
+        self.assertEqual(row["effect_name"], "epsilon_squared")
+        note = row["assumption_note"]
+        for text in ("max(0,(H-k+1)/(N-k))", "H: 検定統計量", "N: 有効観測数", "k: 群数",
+                     "effect_name=epsilon_squared", "互換", "方法論的", "未確定",
+                     "観測の独立性は必要", "探索的", research_analysis.INFERENTIAL_NOTE):
+            self.assertIn(text, note)
+
+    def test_statistical_notes_preserve_synthetic_boundary_results(self):
+        from scipy import stats
+
+        cases = (
+            ("normal", tuple(range(1, 21)), tuple((i * 7) % 23 + 3 for i in range(20)),
+             "A" * 7 + "B" * 7 + "C" * 6, "computed", "computed"),
+            ("small", (1, 2, 4), (3, 5, 4), "AAB", "not_computable", "computed"),
+            ("ties", (1, 1, 2, 2, 3, 3), (4, 5, 5, 6, 6, 7), "AAABBB", "computed", "computed"),
+            ("constant", (2,) * 6, (4,) * 6, "AAABBB", "not_computable", "not_computable"),
+            ("missing", (1, None, 3, 5, None, 9), (3, 7, 5, 6, 10, 13), "AAABBB", "computed", "computed"),
+            ("uncomputed", (1, 2), (3, 4), "AB", "not_computable", "not_computable"),
+        )
+        for name, durations, characters, speakers, kruskal_status, correlation_status in cases:
+            with self.subTest(case=name):
+                analysis = statistical_note_fixture(durations, characters, speakers)
+                before = copy.deepcopy(analysis)
+                result = research_analysis.build_research_statistics(analysis, {"morphemes": []})["statistics"]
+                self.assertEqual(analysis, before)
+                kruskal = next(row for row in result["tests"]
+                               if row["test"] == "Kruskal–Wallis検定" and row["outcome"] == "duration_seconds")
+                pairs = [(x, y) for x, y in zip(durations, characters) if x is not None]
+                self.assertEqual((kruskal["n"], kruskal["missing"], kruskal["status"]),
+                                 (len(pairs), len(durations) - len(pairs), kruskal_status))
+                self.assertEqual(kruskal["effect_name"], "epsilon_squared")
+                self.assertIn("max(0,(H-k+1)/(N-k))", kruskal["assumption_note"])
+                if kruskal_status == "computed":
+                    samples = [[x for x, group in zip(durations, speakers) if x is not None and group == key]
+                               for key in sorted(set(speakers))]
+                    statistic, p_value = stats.kruskal(*samples)
+                    self.assertEqual(kruskal["statistic"], round(float(statistic), 8))
+                    self.assertEqual(kruskal["p_value"], float(p_value))
+                    self.assertEqual(kruskal["effect_size"],
+                                     round(max(0, (float(statistic) - len(samples) + 1) / (len(pairs) - len(samples))), 8))
+                else:
+                    for key in ("statistic", "p_value", "effect_size"):
+                        self.assertIsNone(kruskal[key])
+                for row in result["correlations"]:
+                    if (row["variable_a"], row["variable_b"]) != ("duration_seconds", "characters"):
+                        continue
+                    self.assertEqual((row["n"], row["missing"], row["status"]),
+                                     (len(pairs), len(durations) - len(pairs), correlation_status))
+                    self.assertEqual(row["p_value_adjustment"], "none")
+                    self.assertTrue(row["exploratory"])
+                    old_note = research_analysis.INFERENTIAL_NOTE + " 定義上関連する指標を含み、因果関係は示しません。"
+                    if row["method"] == "Spearman":
+                        self.assertTrue(row["assumption_note"].startswith(old_note))
+                        self.assertIn("小標本では漸近p値の精度に注意が必要", row["assumption_note"])
+                    else:
+                        self.assertEqual(row["assumption_note"], old_note)
+                    if correlation_status == "computed":
+                        function = stats.spearmanr if row["method"] == "Spearman" else stats.pearsonr
+                        coefficient, p_value = function(*zip(*pairs))
+                        self.assertEqual(row["coefficient"], round(float(coefficient), 8))
+                        self.assertEqual(row["p_value"], float(p_value))
+                    else:
+                        self.assertIsNone(row["coefficient"])
+                        self.assertIsNone(row["p_value"])
+                self.assertFalse(result["inference_policy"]["independence_verified"])
+
+    def test_statistical_note_hashes_cover_new_rows_and_preserve_legacy_receipts(self):
+        from gurumoji.analysis_core import fingerprint
+        from gurumoji.services.analysis_orchestration_methods import (
+            calculation_packet, run_statistical_tool, validate_statistical_result,
+        )
+
+        analysis = statistical_note_fixture((1, 2, 4, 5, 7, 9), (3, 7, 5, 6, 10, 13), "AAABBB")
+        analysis["research"] = {"linguistics": {"morphemes": []}}
+        evidence = [{"evidence_id": row["id"], "excluded": False} for row in analysis["segments"]]
+        for method, dataset, new_text in (("kruskal_wallis", "tests", "max(0,(H-k+1)/(N-k))"),
+                                          ("spearman", "correlations", "小標本では漸近p値の精度に注意が必要")):
+            with self.subTest(method=method):
+                task = {"method_id": method, "dataset_version": "synthetic-v1"}
+                snapshot = {"analysis": analysis, "evidence": evidence, "orchestration_task": task}
+                before = copy.deepcopy(snapshot)
+                current = run_statistical_tool(method, snapshot)
+                rows = current["datasets"][dataset]["rows"]
+                self.assertTrue(all(new_text in row["assumption_note"] for row in rows))
+                self.assertEqual(current["manifest"]["rows_hash"], fingerprint(rows))
+                validate_statistical_result(current, task, evidence)
+                legacy = copy.deepcopy(current)
+                for index, row in enumerate(legacy["datasets"][dataset]["rows"]):
+                    row["assumption_note"] = (
+                        "順位に基づく比較ですが、観測の独立性は必要です。発話の反復・"
+                        "話者内相関があるため探索的に扱ってください。 " + research_analysis.INFERENTIAL_NOTE
+                        if method == "kruskal_wallis" else research_analysis.INFERENTIAL_NOTE
+                        + " 定義上関連する指標を含み、因果関係は示しません。")
+                    del row["row_id"]
+                    row["row_id"] = fingerprint([method, index, row])
+                legacy["manifest"]["rows_hash"] = fingerprint(legacy["datasets"][dataset]["rows"])
+                saved_bytes = json.dumps(legacy, ensure_ascii=False, sort_keys=True)
+                metadata = {"result_id": "legacy-result", "task_id": "legacy-task", "raw_hash": fingerprint(legacy)}
+                validate_statistical_result(legacy, task, evidence)
+                packet = calculation_packet(legacy, metadata)
+                self.assertEqual(packet["manifest"]["rows_hash"], legacy["manifest"]["rows_hash"])
+                self.assertEqual(packet["raw_hash"], metadata["raw_hash"])
+                self.assertNotEqual(current["manifest"]["rows_hash"], legacy["manifest"]["rows_hash"])
+                self.assertEqual(run_statistical_tool(method, snapshot), current)
+                self.assertEqual(json.dumps(legacy, ensure_ascii=False, sort_keys=True), saved_bytes)
+                self.assertEqual(snapshot, before)
 
     def test_fallback_keeps_analysis_available_and_labels_limit(self):
         analysis = fixture_analysis("fallback_fixture")

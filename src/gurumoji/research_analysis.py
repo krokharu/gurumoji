@@ -1629,6 +1629,10 @@ def _statistics_analysis(
         kruskal["assumption_note"] = (
             "順位に基づく比較ですが、観測の独立性は必要です。発話の反復・"
             "話者内相関があるため探索的に扱ってください。"
+            " 現行実装の効果量式はmax(0,(H-k+1)/(N-k))です"
+            "（H: 検定統計量、N: 有効観測数、k: 群数）。"
+            "effect_name=epsilon_squaredは互換のため保持しており、"
+            "効果量の呼称の方法論的選択は未確定です。"
         )
         if (
             stats is not None
@@ -1767,6 +1771,8 @@ def _statistics_analysis(
                       unit_a=NUMERIC_UNITS[result["variable_a"]], unit_b=NUMERIC_UNITS[result["variable_b"]],
                       p_value_adjustment="none", exploratory=True,
                       assumption_note=INFERENTIAL_NOTE + " 定義上関連する指標を含み、因果関係は示しません。")
+        if result["method"] == "Spearman":
+            result["assumption_note"] += " 小標本では漸近p値の精度に注意が必要です。"
     return {
         "analysis_unit": "発話",
         "inference_policy": {"mode": "exploratory", "p_value_adjustment": "none", "comparison_family": None,
