@@ -39,13 +39,25 @@ function initialRun(overrides={}) {
 }
 test('autonomous settings are opt-in, local by default; explicit flat stop contract',async t=>{
  const h=await setup(t);assert.equal(node(h,'settings').open,true);assert.equal(h.document.querySelector('#analysis-run-dialog').open,false);
- let payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.provider_policy,'local_only');assert.equal(payload.cloud_consent,false);assert.equal(payload.max_calls,24);assert.equal(payload.max_tasks,48);assert.equal(payload.stop_mode,'auto');assert.equal(payload.max_iterations,null);assert.equal(payload.time_limit_seconds,null);assert.match(node(h,'stop-explanation').textContent,/最低3回/);
+ let payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.provider_policy,'local_only');assert.equal(payload.cloud_consent,false);assert.equal(payload.max_calls,160);assert.equal(payload.max_tasks,400);assert.equal(payload.model_context_version,1);assert.equal(payload.context_reference_version,1);assert.equal(payload.context_evidence_limit,24);assert.equal(payload.context_text_limit,6000);assert.equal(payload.stop_mode,'auto');assert.equal(payload.max_iterations,null);assert.equal(payload.time_limit_seconds,null);assert.match(node(h,'stop-explanation').textContent,/専門側/);
  h.click('input[name="orchestration_stop"][value="auto"]');input(h,'iterations','');input(h,'time','');payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.max_iterations,null);assert.equal(payload.time_limit_seconds,null);
- input(h,'iterations','2');assert.throws(()=>h.evaluate('orchestrationPayload()'),/最低3回/);input(h,'iterations','');
+ input(h,'iterations','1');assert.equal(h.evaluate('orchestrationPayload().max_iterations'),1);input(h,'iterations','');
  h.click('input[name="orchestration_stop"][value="iterations"]');input(h,'iterations','1');assert.equal(h.evaluate('orchestrationPayload().max_iterations'),1);
  h.click('input[name="orchestration_stop"][value="time"]');assert.throws(()=>h.evaluate('orchestrationPayload()'),/時間上限/);input(h,'time','2');payload=plain(h.evaluate('orchestrationPayload()'));assert.equal(payload.time_limit_seconds,120);
  h.click('input[name="orchestration_stop"][value="importance"]');assert.equal(h.evaluate('orchestrationPayload().importance_threshold'),'medium');assert.match(node(h,'stop-explanation').textContent,/未校正/);assert.equal(posts(h).length,0);
 });
+test('initial specialist scales are readable without generating more work',async t=>{
+ const h=await setup(t),config={...snapshot().config,initial_label_definitions_version:1};
+ const run=snapshot({config,initial_label_catalog:{status:'ai_draft',created_by:'interpretation',result_id:'L1',definitions:[{name:'Draft scale'}]}});
+ await started(h,run);assert.match(node(h,'conclusion-notes').textContent,/専門エージェント作成のAI下書き 1件/);
+ const button=node(h,'conclusion-notes').querySelector('button');button.click();
+ h.reply(pending(h,'/results/L1'),{raw:{label_definitions:[{name:'<img src=x onerror=alert(1)>',measurement_level:'ordinal',missing_rule:'null_with_reason'}]}});await h.flush();
+ assert.match(node(h,'result-content').textContent,/null_with_reason/);assert.equal(node(h,'result-content').querySelectorAll('img').length,0);assert.equal(posts(h).length,1);
+ h.fixture({...run,status:'stopped',phase:'stopped',initial_label_catalog:null,stop_reason:'initial_labels_missing',allowed_actions:[]});h.evaluate('orchestrationAdopt(window.fixture,"A")');
+ assert.match(node(h,'stop-reason').textContent,/初回の専門家によるラベル・尺度出力が未完了/);
+ assert.match(node(h,'conclusion-notes').textContent,/出力待ち/);assert.equal(node(h,'conclusion-notes').querySelectorAll('button').length,0);
+});
+
 test('cloud overrides require source-data consent and reset it when recipient changes',async t=>{
  const h=await setup(t);input(h,'provider-critic','openai');assert.equal(node(h,'cloud-disclosure').hidden,false);assert.match(node(h,'cloud-targets').textContent,/OpenAI/);assert.throws(()=>h.evaluate('orchestrationPayload()'),/同意/);
  h.click('#orchestration-cloud-consent');const p=plain(h.evaluate('orchestrationPayload()'));assert.equal(p.cloud_consent,true);assert.equal(p.provider_policy,'cloud_allowed');assert.equal(p.roles.critic.provider,'openai');
@@ -53,7 +65,7 @@ test('cloud overrides require source-data consent and reset it when recipient ch
 });
 test('start, rendering and reopening never add AI work; code roles and unknown usage are honest',async t=>{
  const h=await setup(t);const request=await started(h);const payload=JSON.parse(request.options.body);assert.equal(payload.source_revision,2);assert.equal(payload.analysis_revision,3);assert.equal(node(h,'live').open,true);
- assert.match(node(h,'metrics').textContent,/未計測/);assert.match(node(h,'role-handler').textContent,/CODE/);assert.match(node(h,'role-handler').textContent,/LLM呼出しなし/);assert.match(node(h,'specialists').textContent,/Python集計/);
+ assert.match(node(h,'metrics').textContent,/未計測/);assert.match(node(h,'role-handler').textContent,/CODE/);assert.match(node(h,'role-handler').textContent,/LLM呼出しなし/);assert.match(node(h,'specialists').textContent,/Python集計/);assert.match(node(h,'specialists').textContent,/専門オーケストレータ/);
  h.evaluate('renderAnalysisOrchestration();renderAnalysisOrchestration()');assert.equal(posts(h).length,1);
  h.click('#orchestration-live-close');assert.equal(node(h,'live').open,false);assert.equal(h.evaluate('orchestrationState.run.status'),'running');
  h.click('#orchestration-chip');assert.equal(node(h,'live').open,true);h.reply(pending(h,'/orchestration/R1'),{run:snapshot()});await h.flush();assert.equal(posts(h).length,1);
@@ -63,6 +75,19 @@ test('late status cannot undo a stop; snapshot ownership survives navigation wit
  const h=await setup(t);await started(h);h.click('#orchestration-refresh');const late=pending(h,'/orchestration/R1');h.click('#orchestration-stop');const stop=pending(h,'/R1/cancel','POST');
  h.reply(stop,{run:snapshot({status:'cancelled',phase:'stopped',stop_reason:'user_stop',allowed_actions:[]})});await h.flush();h.reply(late,{run:snapshot()});await h.flush();assert.equal(h.evaluate('orchestrationState.run.status'),'cancelled');assert.equal(node(h,'stop').hidden,true);
  h.click('#show-library-button');assert.equal(node(h,'live').open,false);assert.equal(h.w.location.hash,'#/data');h.evaluate('void pollAnalysisOrchestration()');h.reply(pending(h,'/orchestration/R1'),{run:snapshot({status:'cancelled',allowed_actions:[]})});await h.flush();assert.equal(node(h,'live').open,false);assert.equal(h.document.body.dataset.view,'library');
+});
+
+test('repeated reasoning stops without displaying successful calls as adopted Core judgments',async t=>{
+ const h=await setup(t);
+ await started(h,snapshot({status:'stopped',phase:'stopped',iteration:3,completed_core_iterations:2,stop_reason:'no_progress',allowed_actions:[]}));
+ assert.match(node(h,'stop-reason').textContent,/同じ判断の繰り返し・進展なし/);
+ assert.equal(node(h,'metrics').querySelector('strong').textContent,'2');
+ assert.match(node(h,'metrics').textContent,/採用済みCore判断/);
+ assert.equal(node(h,'stop').hidden,true);
+ assert.equal(posts(h).length,1);
+ h.evaluate("orchestrationState.run.stop_reason='unreviewed_results';renderAnalysisOrchestration()");
+ assert.match(node(h,'stop-reason').textContent,/専門家結果の採否未完了/);
+ assert.equal(posts(h).length,1);
 });
 test('server-approved manual resume and recovery blockers are distinct from completion',async t=>{
  const h=await setup(t);await started(h,snapshot({status:'recovery_required',allowed_actions:['resume'],error:'Interrupted worker'}));assert.equal(node(h,'resume').hidden,false);assert.match(node(h,'status').textContent,/手動復旧待ち/);

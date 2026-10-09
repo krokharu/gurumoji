@@ -66,7 +66,7 @@ function orchestrationSyncForm() {
     time:'開始からの経過時間で新規発注を止めます。進行中の呼出しを必ず期限内に終える保証ではありません。',
     iterations:'Coreの結果統合から次の実行案選択までを1巡と数えます。並列タスク数や再試行回数とは別です。',
     importance:'問いへの影響を高・中・低で暫定評価します。頻度・モデルの自信とは異なり、基準は未校正です。',
-    auto:'Coreが最低3回、根拠・批判・未解決点を検討し、その後は継続・終了を判断します。時間・回数は空欄で無上限にできます。手動停止・安全上限・実行障害は最低回数より優先します。'
+    auto:'専門側が結果と批判を検討し、Coreが分野間の統合と終了を判断します。必要な追加分析を行い、時間・回数は空欄で無上限にできます。'
   }[mode]);
   for (const role of orchestrationRoles.filter(role => role.kind === 'ai')) {
     const provider = orchestrationNode(`provider-${role.id}`)?.value;
@@ -112,7 +112,6 @@ function orchestrationPayload() {
     if (!raw && !required) return null;
     const number = Number(raw);
     if (!Number.isInteger(number) || number < 1 || number > max) throw Error(`${orchestrationNode(id).closest('label').querySelector('span').textContent}を1〜${max}の整数で指定してください。`);
-    if (id === 'iterations' && mode === 'auto' && number < 3) throw Error('AIお任せの回数上限は最低3回以上にしてください。');
     return number;
   };
   const cloud = orchestrationCloudProviders();
