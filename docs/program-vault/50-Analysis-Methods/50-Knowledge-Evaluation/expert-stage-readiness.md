@@ -20,6 +20,10 @@ G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowl
 
 ## 固定対象と確認範囲
 
+2026-10-10 06:44 JST追補：通常fullapp1440／390から実比較builder／API、Handler／archive／Store保存、fresh画面／Store、ZIP／全14artifactのbytes一致まで別作者が2条件PASS。390pxでは実横wheel0→371で右端列を確認した。固定 `f2462ab5e066679b340c78f2f65208a445cdc942` の261artifact＋168source hashをC0が照合し、対象0／既知0／不明と保存原版を維持する画面・保存経路を限定受入した。初回browser／shell記録失敗と最終sandbox有効／audit exit0を分離する。研究者本人の理解・方法採用の合格ではない。
+
+明示receipt付きM_extended固定 `ab7c674fdab6e9e47aea1b76890b8505066e4530` は別作者Windows54＋独立3＝57PASS、旧legacy／Mの期限・hash・費用不変をCPU限定受入した。推論の再許可ではない。保存本文の最終非実装projectionでもCore29=24648／Core31=25152>24576で容量FAIL、Dotへ既存Core配送境界の追加3path修正を正式割当し、固定版・Windows独立受入・実本文容量の再確認を待つ。Framework説明 `4310b2eb` はLinux作者7＋隣接4／独立7＋1を受領しWindows独立検証中。修正後G0.5b/cは旧18FAILを保持する別IDのraw-only比較としてCPU準備中で、currentPack暫定・strict形式HOLD・方法意味品質・研究者採否を未受入のまま分ける。
+
 2026-10-10 06:23 JST追補：保存比較のHTTP修正 `ed6ca0b59baf740d01806fb9c80b278206fa61c2` は別作者Windows15、実Flask→Handler→archive→Store保存→fresh ZIP／全14artifact取得、破損409・通常欠落404・stale保存原版のbytes維持を限定受入した。通常fullapp画面→実比較builder→保存→freshと390px実横gestureは別担当が追加検証中。配送修正ec85はWindows32＋独立2PASSだが、実保存本文を用いた短い合成reportのCore進行では後半入力が上限を超え、最大36830>24576となった。全323本文配送・実モデル成功・安定3回は未達、上限緩和や無断切捨てを行わず既存Core履歴の重複配送をCPU解析する。
 
 統計注記 `30df9733c1603f39d69eb86efa56dad207c66917` はLinux作者72／別作者11と、C0別作者Windows11＋旧版対照6条件（通常・小標本・同順位・定数・欠測・未計算）を区別して確認した。Kruskal現式 `max(0,(H-k+1)/(N-k))` と互換名称未確定、Spearman小標本漸近p値の注意を新規注記へ追加し、数値・schema・status・nullと保存済み旧hashを維持する限定受入である。Frameworkの話者gate／ケース数説明は後続、効果量名称の方法論的正規化・方法意味品質・研究者本人の採否は未受入。初期18実測の失敗とcurrentPack暫定／strict形式HOLDは維持する。
