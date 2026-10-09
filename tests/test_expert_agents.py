@@ -424,10 +424,23 @@ class SkillContextAgentTests(unittest.TestCase):
             self.assertEqual(profile["skill_binding_context"]["human_adoption"], "unanswered")
 
     def test_default_currentPack_matches_fixed_previous_reader(self):
-        import subprocess
+        import hashlib
         import types
         catalog, _ = self.catalog(); config = {"expert_ids": [EXPERT]}
-        source = subprocess.check_output(["git", "show", "6f1d532c5a0ce995b03e3dca191f358eeed6d42f:src/gurumoji/services/expert_agents.py"])
+        history = ROOT / "tests/fixtures/expert_reader_history"
+        manifest = json.loads((history / "hashes.json").read_text(encoding="utf-8"))
+        expected = {"source_commit": "6f1d532c5a0ce995b03e3dca191f358eeed6d42f",
+                    "source_path": "src/gurumoji/services/expert_agents.py",
+                    "git_blob": "8c86a20ed9cb54e977376afc9f6a90c0176649cd",
+                    "sha256": "7cccfdd6188cd6b25641c673516c9012d83a7bd90c43b1c5bb0f86e49a74bff8",
+                    "bytes": 45572}
+        for key, value in expected.items():
+            self.assertEqual(manifest[key], value, key)
+        source = (history / expected["source_commit"] / "expert_agents.py").read_bytes()
+        self.assertEqual(len(source), expected["bytes"])
+        self.assertEqual(hashlib.sha256(source).hexdigest(), expected["sha256"])
+        self.assertEqual(hashlib.sha1(b"blob " + str(len(source)).encode("ascii") + b"\0" + source).hexdigest(),
+                         expected["git_blob"])
         previous = types.ModuleType("gurumoji.services._fixed_expert_reader"); previous.__package__ = "gurumoji.services"
         exec(compile(source, "<fixed B expert reader>", "exec"), previous.__dict__)
         old = previous.ExpertAgentRegistry(catalog).freeze(config)

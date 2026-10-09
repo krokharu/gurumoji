@@ -402,6 +402,65 @@ class FocusGroupInteractionContractTests(unittest.TestCase):
         self.assertEqual(task["error"], "fgi_source_or_delivery_mismatch")
         self.assertFalse(self.raw_sent)
 
+    def test_actual_speaker_unknown_missing_empty_and_type_spoofs_stop_before_model(self):
+        original = copy.deepcopy(self.snapshot)
+        for value in ("UNKNOWN", " unknown ", "", " \r\n", None, True, False, 1, [], {}, "x" * 81):
+            with self.subTest(speaker=value):
+                self.snapshot = copy.deepcopy(original)
+                self.snapshot["analysis"]["segments"][1]["speaker"] = value
+                self.snapshot["input_hash"] = fingerprint({"speaker_negative": value})
+                before = len(self.raw_sent)
+                _, _, result = self.drive()
+                task = next(t for t in result["run"]["tasks"] if t["role"] == "interpretation")
+                self.assertEqual(task["error"], "expert_not_applicable", task)
+                self.assertEqual(len(self.raw_sent), before)
+                self.assertFalse(any("expert_report" in row["raw"] for row in result["raw_results"]))
+        self.snapshot = copy.deepcopy(original)
+        self.snapshot["analysis"]["segments"][1].pop("speaker")
+        self.snapshot["input_hash"] = fingerprint({"speaker_negative": "missing"})
+        _, _, result = self.drive()
+        task = next(t for t in result["run"]["tasks"] if t["role"] == "interpretation")
+        self.assertEqual(task["error"], "expert_not_applicable")
+
+    def test_actual_single_speaker_and_nonparticipant_or_mixed_roles_stop(self):
+        original = copy.deepcopy(self.snapshot)
+        cases = [
+            ("single", lambda rows: [row.update(speaker="TEST-A") for row in rows]),
+            ("normalized_single", lambda rows: [row.update(speaker=" TEST-A " if i % 2 else "TEST-A") for i, row in enumerate(rows)]),
+            ("one_participant_and_moderator", lambda rows: [row.update(role="moderator") for row in rows if row["speaker"] == "TEST-B"]),
+            ("one_participant_and_observer", lambda rows: [row.update(role="observer") for row in rows if row["speaker"] == "TEST-B"]),
+            ("mixed_role", lambda rows: rows[1].update(role="moderator")),
+            ("unknown_role", lambda rows: rows[1].update(role="unknown")),
+            ("role_type", lambda rows: rows[1].update(role=True)),
+        ]
+        for name, mutate in cases:
+            with self.subTest(case=name):
+                self.snapshot = copy.deepcopy(original); mutate(self.snapshot["analysis"]["segments"])
+                self.snapshot["input_hash"] = fingerprint({"actual_speaker_negative": name})
+                before = len(self.raw_sent)
+                _, _, result = self.drive()
+                task = next(t for t in result["run"]["tasks"] if t["role"] == "interpretation")
+                self.assertEqual(task["error"], "expert_not_applicable", task)
+                self.assertEqual(len(self.raw_sent), before)
+
+    def test_actual_two_participants_and_moderator_preserve_draft_and_snapshot(self):
+        for row in self.snapshot["analysis"]["segments"]:
+            row["role"] = "participant"
+        self.snapshot["analysis"]["segments"].append({"id": "TEST-u5", "speaker": "TEST-M", "role": "moderator", "text": "Synthetic closing question."})
+        self.snapshot["analysis"]["automatic"]["overview"].update(segment_count=5, included_segment_count=5, speaker_count=3)
+        before = copy.deepcopy(self.snapshot)
+        self.test_handler_store_fresh_preserves_raw_and_manual_records()
+        self.assertEqual(self.snapshot, before)
+
+    def test_actual_speaker_validation_cannot_be_bypassed_at_report_acceptance(self):
+        self.accepted()
+        for value in ("UNKNOWN", None, True):
+            analysis = copy.deepcopy(self.snapshot["analysis"])
+            analysis["segments"][1]["speaker"] = value
+            with self.subTest(value=value), self.assertRaises(AnalysisContractError) as caught:
+                self.validate(analysis=analysis)
+            self.assertEqual(caught.exception.code, "expert_not_applicable")
+
     def test_missing_wrong_store_other_conversation_and_partial_scope_stop(self):
         other = SyntheticStore(handler=True); self.addCleanup(other.close)
         for options, code in [({"missing_store": True}, "typed_source_missing"),

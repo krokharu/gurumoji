@@ -303,11 +303,13 @@ class FocusGroupInteractionIndependentTests(unittest.TestCase):
     def test_unknown_actual_speaker_cannot_hide_behind_confirmed_counts(self):
         self.snapshot["analysis"]["segments"][1]["speaker"] = "UNKNOWN"
         self.assert_no_valid_draft()
+        self.assertEqual(self.calls, [], "Unconfirmed actual speaker must stop before the interpretation agent")
 
     def test_single_actual_speaker_cannot_hide_behind_two_participant_count(self):
         for row in self.snapshot["analysis"]["segments"]:
             row["speaker"] = "QA-A"
         self.assert_no_valid_draft()
+        self.assertEqual(self.calls, [], "Missing second actual participant must stop before the interpretation agent")
 
     def test_same_input_hash_different_text_rejects_old_snapshot_reference(self):
         _service, _run, first = self.execute()
