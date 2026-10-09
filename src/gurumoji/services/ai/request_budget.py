@@ -14,6 +14,7 @@ import math
 import re
 import threading
 import time
+from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 RUN_SECONDS = 600
@@ -25,6 +26,8 @@ OUTPUT_TOKENS = 4096
 MAX_CONTEXT_TOKENS = 32768
 MAX_TRIAL_CALLS = 6
 MAX_BATCH_CALLS = 216
+M_RUN_SECONDS = 1800
+M_MAX_TRIAL_CALLS = 32
 COVERAGE = frozenset({"model", "system", "messages", "template", "special_tokens", "schema"})
 HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 SAFE_REASONS = frozenset({"invalid_integer", "invalid_clock", "invalid_identity", "invalid_ticket",
@@ -36,7 +39,8 @@ SAFE_REASONS = frozenset({"invalid_integer", "invalid_clock", "invalid_identity"
     "transport_or_usage_unknown", "usage_unknown", "response_truncated", "deadline_overrun",
     "receipt_or_usage_unknown", "local_endpoint_required", "renderer_payload_not_supported",
     "renderer_messages_not_supported", "renderer_schema_not_supported",
-    "renderer_conditions_changed", "renderer_tokenizer_unknown"})
+    "renderer_conditions_changed", "renderer_tokenizer_unknown",
+    "invalid_profile", "profile_receipt_required", "profile_receipt_invalid"})
 
 
 class BudgetHold(RuntimeError):
@@ -76,9 +80,60 @@ def _identity(value: Any) -> str:
     return value
 
 
+def profile_limits(profile: str = "legacy") -> dict:
+    """Fresh immutable-by-value ceilings; selecting M does not approve execution."""
+    if type(profile) is not str or profile not in {"legacy", "M"}:
+        raise BudgetHold("invalid_profile")
+    calls = MAX_TRIAL_CALLS if profile == "legacy" else M_MAX_TRIAL_CALLS
+    return {"profile": profile, "run_seconds": RUN_SECONDS if profile == "legacy" else M_RUN_SECONDS,
+        "trial_calls": calls, "trial_tokens": calls * (MAX_INPUT_TOKENS + OUTPUT_TOKENS),
+        "task_seconds": TASK_SECONDS, "wire_seconds": MAX_WIRE_SECONDS, "cleanup_seconds": CLEANUP_SECONDS,
+        "context_tokens": MAX_CONTEXT_TOKENS, "input_tokens": MAX_INPUT_TOKENS,
+        "output_tokens": OUTPUT_TOKENS, "batch_calls": MAX_BATCH_CALLS,
+        "batch_tokens": MAX_BATCH_CALLS * (MAX_INPUT_TOKENS + OUTPUT_TOKENS)}
+
+
+@dataclass(frozen=True)
+class C0ProfileReceipt:
+    """Reference/binding to an immutable external C0 execution-approval receipt.
+
+    This object is NOT an approval issuer. A trusted external verifier must read
+    the referenced receipt, verify its digest, author/approval, exact source SHA,
+    condition and ceiling bindings, then return receipt_hash. Neither a CLI flag
+    nor a self-attested 'accepted' boolean suffices. The worker checks structural
+    integrity, not authenticity; the parent owns verification and IPC trust.
+    All fields are immutable scalar strings, with no mutable nested receipt data.
+    """
+    receipt_ref: str
+    receipt_hash: str
+    source_sha: str
+    profile: str
+    conditions_hash: str
+    limits_hash: str
+
+
+def _validate_profile_receipt(value: Any, profile: str, conditions_hash: str) -> None:
+    if profile == "legacy":
+        if value is not None:
+            raise BudgetHold("profile_receipt_invalid")
+        return
+    if not isinstance(value, dict) or set(value) != set(C0ProfileReceipt.__dataclass_fields__):
+        raise BudgetHold("profile_receipt_required")
+    if (type(value["receipt_ref"]) is not str or not value["receipt_ref"].strip()
+            or len(value["receipt_ref"]) > 512 or type(value["source_sha"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{40}", value["source_sha"])
+            or value["profile"] != profile or value["conditions_hash"] != conditions_hash
+            or value["limits_hash"] != payload_hash(profile_limits(profile))):
+        raise BudgetHold("profile_receipt_invalid")
+    for key in ("receipt_hash", "conditions_hash", "limits_hash"):
+        if type(value[key]) is not str or not HASH_PATTERN.fullmatch(value[key]):
+            raise BudgetHold("profile_receipt_invalid")
+
+
 TICKET_KEYS = frozenset({"budget_id", "run_id", "task_id", "attempt_id", "reservation_id",
     "payload_hash", "model_hash", "conditions_hash", "counter_proof_hash", "run_started_at", "task_started_at", "run_deadline",
-    "task_deadline", "requested_timeout", "ticket_hash"})
+    "task_deadline", "requested_timeout", "ticket_hash", "profile", "profile_limits",
+    "profile_receipt", "trial_call_limit", "trial_token_limit", "batch_call_limit", "batch_token_limit"})
 
 
 def _validate_ticket(ticket: dict, payload: dict) -> None:
@@ -97,9 +152,16 @@ def _validate_ticket(ticket: dict, payload: dict) -> None:
     if ticket["reservation_id"] != payload_hash([ticket[k] for k in (
             "budget_id", "run_id", "task_id", "attempt_id", "payload_hash")]):
         raise BudgetHold("ticket_changed")
+    limits = profile_limits(ticket["profile"])
+    if payload_hash(ticket["profile_limits"]) != payload_hash(limits):
+        raise BudgetHold("invalid_profile")
+    _validate_profile_receipt(ticket["profile_receipt"], ticket["profile"], ticket["conditions_hash"])
+    for key, ceiling in (("trial_call_limit", "trial_calls"), ("trial_token_limit", "trial_tokens"),
+                         ("batch_call_limit", "batch_calls"), ("batch_token_limit", "batch_tokens")):
+        _integer(ticket[key], 1, limits[ceiling])
     run_start, task_start = _instant(ticket["run_started_at"]), _instant(ticket["task_started_at"])
     run_end, task_end = _instant(ticket["run_deadline"]), _instant(ticket["task_deadline"])
-    if (run_end != run_start + RUN_SECONDS or task_end != min(run_end, task_start + TASK_SECONDS)
+    if (run_end != run_start + limits["run_seconds"] or task_end != min(run_end, task_start + TASK_SECONDS)
             or not run_start <= task_start < run_end):
         raise BudgetHold("invalid_deadline")
     requested = _instant(ticket["requested_timeout"])
@@ -214,16 +276,21 @@ class RequestBudget:
             model: str, context_tokens: int, tokenizer_id: str, template_id: str,
             proof_source: str, acceptance_anchor: str, model_conditions_hash: str,
             synthetic_only: bool, usage_policy: str | None,
-            trial_call_limit: int, clock: Callable[[], float] = time.monotonic):
+            trial_call_limit: int, clock: Callable[[], float] = time.monotonic,
+            profile: str = "legacy", profile_receipt: C0ProfileReceipt | None = None,
+            verify_profile_receipt: Callable[[C0ProfileReceipt], str] | None = None):
         if not isinstance(batch, BatchQuota) or not callable(token_counter) or not callable(clock):
             raise BudgetHold("invalid_budget")
         self._batch, self._clock, self._counter = batch, clock, token_counter
+        self._limits = profile_limits(profile)
+        self._profile = profile
+        self._run_seconds = self._limits["run_seconds"]
         self._run_start = _instant(run_started_at)
-        if self._run_start > _instant(clock()) or self._run_start + RUN_SECONDS <= self._run_start:
+        if self._run_start > _instant(clock()) or self._run_start + self._run_seconds <= self._run_start:
             raise BudgetHold("invalid_deadline")
         self._budget_id, self._run_id = payload_hash(_identity(budget_id)), payload_hash(_identity(run_id))
-        self._call_limit = _integer(trial_call_limit, 1, MAX_TRIAL_CALLS)
-        self._token_limit = _integer(trial_token_limit, 1, MAX_TRIAL_CALLS * (MAX_INPUT_TOKENS + OUTPUT_TOKENS))
+        self._call_limit = _integer(trial_call_limit, 1, self._limits["trial_calls"])
+        self._token_limit = _integer(trial_token_limit, 1, self._limits["trial_tokens"])
         self._model = _identity(model)
         self._context = _integer(context_tokens, OUTPUT_TOKENS, MAX_CONTEXT_TOKENS)
         if type(synthetic_only) is not bool or (usage_policy is not None and usage_policy not in {"output_includes_reasoning", "reasoning_disabled"}):
@@ -235,6 +302,21 @@ class RequestBudget:
             "usage_policy": usage_policy}
         if not HASH_PATTERN.fullmatch(model_conditions_hash):
             raise BudgetHold("invalid_conditions")
+        if profile_receipt is not None and type(profile_receipt) is not C0ProfileReceipt:
+            raise BudgetHold("profile_receipt_invalid")
+        self._profile_receipt = asdict(profile_receipt) if profile_receipt is not None else None
+        _validate_profile_receipt(self._profile_receipt, profile, payload_hash(self._conditions))
+        if profile == "M":
+            if not callable(verify_profile_receipt):
+                raise BudgetHold("profile_receipt_required")
+            try:
+                verified_hash = verify_profile_receipt(profile_receipt)
+                if type(verified_hash) is not str or verified_hash != profile_receipt.receipt_hash:
+                    raise BudgetHold("profile_receipt_invalid")
+            except Exception:
+                raise BudgetHold("profile_receipt_invalid") from None
+        elif verify_profile_receipt is not None:
+            raise BudgetHold("profile_receipt_invalid")
         self._proofs: dict[str, dict] = {}
         self._tasks: dict[str, float] = {}
         self._entries: dict[str, dict] = {}
@@ -257,7 +339,7 @@ class RequestBudget:
     def register_task(self, task_id: str, task_started_at: float) -> None:
         key, start = payload_hash(_identity(task_id)), _instant(task_started_at)
         with self._batch._lock:
-            if not self._run_start <= start < self._run_start + RUN_SECONDS or start > _instant(self._clock()):
+            if not self._run_start <= start < self._run_start + self._run_seconds or start > _instant(self._clock()):
                 self._hold("invalid_deadline")
             if key in self._tasks and self._tasks[key] != start:
                 self._hold("task_origin_changed")
@@ -290,9 +372,13 @@ class RequestBudget:
                 ticket = {"budget_id": self._budget_id, "run_id": self._run_id, "task_id": task,
                     "attempt_id": attempt, "payload_hash": request_hash, "model_hash": payload_hash(self._model),
                     "conditions_hash": payload_hash(self._conditions), "counter_proof_hash": payload_hash(None),
+                    "profile": self._profile, "profile_limits": copy.deepcopy(self._limits),
+                    "profile_receipt": copy.deepcopy(self._profile_receipt),
+                    "trial_call_limit": self._call_limit, "trial_token_limit": self._token_limit,
+                    "batch_call_limit": self._batch._max_calls, "batch_token_limit": self._batch._max_tokens,
                     "run_started_at": self._run_start, "task_started_at": self._tasks[task],
-                    "run_deadline": self._run_start + RUN_SECONDS,
-                    "task_deadline": min(self._run_start + RUN_SECONDS, self._tasks[task] + TASK_SECONDS),
+                    "run_deadline": self._run_start + self._run_seconds,
+                    "task_deadline": min(self._run_start + self._run_seconds, self._tasks[task] + TASK_SECONDS),
                     "requested_timeout": min(requested, MAX_WIRE_SECONDS)}
                 ticket["reservation_id"] = payload_hash([self._budget_id, self._run_id, task, attempt, request_hash])
                 ticket["ticket_hash"] = payload_hash(ticket)
@@ -456,7 +542,9 @@ class RequestBudget:
             observed = sum(e["sent"] is True for e in entries)
             uncertain = sum(e["sent"] == "unknown" for e in entries)
             return {"budget_id": self._budget_id, "run_id": self._run_id,
-                "run_started_at": self._run_start, "run_deadline": self._run_start + RUN_SECONDS,
+                "run_started_at": self._run_start, "run_deadline": self._run_start + self._run_seconds,
+                "profile": self._profile, "profile_limits": copy.deepcopy(self._limits),
+                "profile_receipt": copy.deepcopy(self._profile_receipt),
                 "trial_call_limit": self._call_limit, "trial_token_limit": self._token_limit,
                 "entry_count": len(entries), "actual_wire_calls": None if uncertain else observed,
                 "observed_wire_calls": observed, "reserved_unknown_calls": uncertain,
