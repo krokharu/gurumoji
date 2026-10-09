@@ -36,6 +36,37 @@
       </div>
 
       <div id="analysis-message" class="alert" role="alert" hidden></div>
+      <template id="ai-data-export-template">
+        <details class="analysis-cautions" data-ai-data-export>
+          <summary>AI向け生データZIPをダウンロード</summary>
+          <p class="analysis-section-help">保存済みの本文・原本・入力版・確認履歴・アウトラインを、この端末へダウンロードします。未保存の編集は含みません。外部AIへ自動送信しません。</p>
+          <p class="analysis-orphan-warning">氏名を含めなくても、本文・自由記述や動画に個人を特定できる情報が残る場合があります。匿名化を保証する出力ではありません。外部AIへ渡す前に内容と利用条件を確認してください。</p>
+          <fieldset>
+            <legend>含める話者情報（初期値はすべてOFF）</legend>
+            <label class="field analysis-field"><span>話者の氏名・表示名を含める</span><input type="checkbox" data-ai-export-names></label>
+            <label class="field analysis-field"><span>組織</span><input type="checkbox" data-ai-export-attribute="organization"></label>
+            <label class="field analysis-field"><span>部署</span><input type="checkbox" data-ai-export-attribute="department"></label>
+            <label class="field analysis-field"><span>役職</span><input type="checkbox" data-ai-export-attribute="job_title"></label>
+            <label class="field analysis-field"><span>会話内の役割</span><input type="checkbox" data-ai-export-attribute="session_role"></label>
+            <label class="field analysis-field"><span>会話内の役割の確認根拠</span><input type="checkbox" data-ai-export-attribute="session_role_source"></label>
+          </fieldset>
+          <label class="field analysis-field"><span>動画フレームを含める（初期値OFF）</span><input type="checkbox" data-ai-export-frames></label>
+          <p class="analysis-section-help">保存済み動画のみ。最大24枚、間隔1秒以上、指定範囲600秒以内、長辺1280px以下。1枚2MiB・合計32MiB以下、抽出時間は合計30秒以内です。音声のみ・動画なし・抽出できない場合はエラーとなり、ZIPはダウンロードされません。</p>
+          <fieldset data-ai-export-frame-options disabled>
+            <legend>動画フレームの範囲・画質</legend>
+            <div class="analysis-settings-grid">
+              <label class="field analysis-field"><span>開始時刻（秒）</span><input type="number" min="0" step="any" value="0" data-ai-export-frame="start"></label>
+              <label class="field analysis-field"><span>終了時刻（秒・開始から600秒以内）</span><input type="number" min="0" step="any" value="20" data-ai-export-frame="end"></label>
+              <label class="field analysis-field"><span>抽出間隔（秒・1以上）</span><input type="number" min="1" step="any" value="1" data-ai-export-frame="interval"></label>
+              <label class="field analysis-field"><span>最大枚数（1〜24枚）</span><input type="number" min="1" max="24" step="1" value="24" data-ai-export-frame="max_frames"></label>
+              <label class="field analysis-field"><span>画像の長辺上限（16〜1280px）</span><input type="number" min="16" max="1280" step="1" value="1280" data-ai-export-frame="max_dimension"></label>
+            </div>
+          </fieldset>
+          <p class="analysis-section-help" data-ai-export-status role="status" aria-live="polite" aria-atomic="true">必要な情報を選び、ZIPをダウンロードしてください。</p>
+          <button class="secondary-button" type="button" data-ai-export-download>AI向け生データZIPをダウンロード</button>
+          <button class="secondary-button" type="button" data-ai-export-cancel disabled>ダウンロードを取り消す</button>
+        </details>
+      </template>
       <div id="analysis-loading" class="analysis-loading" aria-live="polite" hidden>
         <i aria-hidden="true"></i>
         <div><strong>研究分析データを集計しています</strong><span>発話、形態素、係り受け、語彙、統計を確認中です…</span></div>
