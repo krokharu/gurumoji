@@ -1768,17 +1768,54 @@ class AnalysisOrchestrationService:
                     "raw_evidence": copy.deepcopy(raw), "coverage": coverage, "blind_first": True,
                     "research_mode": "exploratory"}
         public = self._public(db, run)
+        dependency_scoped = task["role"] == "interpretation" and task["intent"].get("kind", "analysis") == "analysis"
+        if dependency_scoped and task.get("expert_agent") and "expert_agents" in run:
+            from .services.expert_agents import expert_profile
+            profile = expert_profile(run["expert_agents"], task["expert_agent"]["expert_id"])
+            # Statistical plans/explanations retain the existing Handler delivery.
+            dependency_scoped = "statistical_tools" not in profile
+        if dependency_scoped:
+            dependencies = task.get("dependencies")
+            if (not isinstance(dependencies, list)
+                    or any(not isinstance(value, str) or not value.strip() for value in dependencies)):
+                raise _error("タスク依存関係の形式が不正です。", "dependency_missing")
+            dependencies = set(dependencies)
+            source_tasks = {source["task_id"]: source for source in public["tasks"]}
         accepted = []
-        for result in public["results"]:
+        for index, result in enumerate(public["results"]):
+            if dependency_scoped:
+                # Keep the recent metadata window, plus explicit dependencies even
+                # when older. Undelivered bodies are not reads or successful work.
+                if index < len(public["results"]) - 20 and result["task_id"] not in dependencies:
+                    continue
+                source = source_tasks.get(result["task_id"], {})
+                if (result["task_id"] not in dependencies or result["validation_status"] != "valid"
+                        or result.get("run_id") != run["run_id"] or result.get("stale")
+                        or result.get("dataset_version") != run["input_hash"]
+                        or source.get("run_id") != run["run_id"] or source.get("stale")
+                        or source.get("dataset_version") != run["input_hash"]
+                        or source.get("status") != "succeeded" or source.get("validation_status") != "valid"
+                        or source.get("result_id") != result["result_id"]
+                        or not isinstance(source.get("attempt_id"), str) or not source["attempt_id"].strip()
+                        or source.get("attempt_id") != result.get("attempt_id")):
+                    accepted.append({**result, "body_not_delivered": True})
+                    continue
             if result["validation_status"] == "valid":
-                row = db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=?", (result["result_id"],)).fetchone()
+                if dependency_scoped:
+                    row = db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=? AND run_id=? AND task_id=?",
+                                     (result["result_id"], run["run_id"], result["task_id"])).fetchone()
+                    if row is None:
+                        raise _error("保存済み結果の参照が一致しません。", "result_integrity_mismatch")
+                else:
+                    row = db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=?", (result["result_id"],)).fetchone()
                 content = json.loads(row[0])
                 if fingerprint(content) != result["raw_hash"]:
                     raise _error("保存済み結果のhashが一致しません。", "result_integrity_mismatch")
                 if len(row[0]) > 16000:
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", [])[:24], "omitted_full_result": True}
                 accepted.append({**result, "content": content})
-        accepted = accepted[-20:]
+        if not dependency_scoped:
+            accepted = accepted[-20:]
         context = {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task), "question": run["config"]["question"],
                    "data_version": run["input_hash"], "annotation_version": task["annotation_version"],
                    "raw_evidence": copy.deepcopy(raw), "coverage": coverage, "research_mode": "exploratory",
