@@ -202,6 +202,59 @@
     parent.append(wrap);
   }
 
+  function addEmotionObservationTable(parent, interviews) {
+    parent.append(element('p', 'interview-comparison-caption', '非除外・本文ありの発話に対するモデル出力の有無です。推論の実行履歴や本人の感情を示すものではありません。情報がない保存結果は不明と表示します。'));
+    const wrap = element('div', 'interview-comparison-table-wrap');
+    const table = element('table', 'interview-comparison-table compact');
+    table.dataset.emotionObservation = '';
+    table.append(element('caption', '', '感情推定の出力を観測できた発話'));
+    const head = element('thead');
+    const headings = element('tr');
+    ['インタビュー・モデル', '対象発話', '出力あり', '出力を観測できない発話'].forEach(label => {
+      const cell = element('th', '', label);
+      cell.scope = 'col';
+      headings.append(cell);
+    });
+    head.append(headings);
+    const body = element('tbody');
+    const count = value => Number.isSafeInteger(value) && value >= 0;
+    interviews.forEach(item => {
+      const observation = item.emotion_observation;
+      const validScope = observation?.version === 1
+        && observation.target_scope === 'included_nonempty_segments'
+        && count(observation.target_count);
+      const appendRow = (label, value) => {
+        const n = validScope ? observation.target_count : null;
+        const known = n > 0 && value?.status === 'known' && value.source === 'segments.emotion_details'
+          && count(value.observed_count) && count(value.missing_prediction_count)
+          && value.observed_count + value.missing_prediction_count === n;
+        const empty = n === 0 && value?.status === 'not_applicable' && value.source === 'segments.emotion_details'
+          && value.observed_count === 0 && value.missing_prediction_count === 0;
+        const row = element('tr');
+        const title = element('th', '', `${item.source_name || item.item_id} / ${label}`);
+        title.scope = 'row';
+        row.append(title);
+        [n === null ? '不明' : `${number(n)}件`,
+          known ? `${number(value.observed_count)}件` : empty ? '対象なし' : '不明',
+          known ? `${number(value.missing_prediction_count)}件` : empty ? '対象なし' : '不明'
+        ].forEach(text => row.append(element('td', '', text)));
+        body.append(row);
+      };
+      appendRow('いずれかのモデル', validScope ? observation.any_model : null);
+      if (validScope && Array.isArray(observation.models)) {
+        const ids = observation.models.map(model => model?.model_id);
+        observation.models.forEach(model => {
+          const id = model?.model_id;
+          const validId = typeof id === 'string' && id.trim() && ids.filter(value => value === id).length === 1;
+          appendRow(validId ? `${model.model_name || id} (${id})` : 'モデル不明', validId ? model : null);
+        });
+      }
+    });
+    table.append(head, body);
+    wrap.append(table);
+    parent.append(wrap);
+  }
+
   function panel(title, description) {
     const section = element('section', 'interview-comparison-panel');
     section.append(element('h4', '', title));
@@ -367,6 +420,7 @@
     addCategoricalTable(codes, data.code_comparison || [], 'コード', data.interviews || []);
     result.append(codes);
     const emotions = panel('感情ラベルの比較', 'モデル名ごとの推定ラベルです。本人の感情を確定するものではありません。');
+    addEmotionObservationTable(emotions, data.interviews || []);
     addCategoricalTable(emotions, data.emotion_comparison || [], '感情モデル・ラベル', data.interviews || []);
     result.append(emotions);
   }
