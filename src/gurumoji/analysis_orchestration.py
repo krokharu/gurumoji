@@ -450,7 +450,15 @@ class AnalysisOrchestrationService:
 
     def _thematic_source(self, db, run, profile, snapshot):
         """Opt-in only: actual Store authority and immutable Handler snapshot."""
-        if profile.get("typed_contract") != "thematic_candidates_v1": return None
+        if profile.get("typed_contract") not in {"thematic_candidates_v1", "focus_group_interaction_candidates_v1"}: return None
+        if profile.get("typed_contract") == "focus_group_interaction_candidates_v1":
+            initial = db.execute("SELECT item_id,snapshot_hash FROM orchestration_initials WHERE initial_id=?",
+                                 (run["initial_id"],)).fetchone()
+            if (initial is None or initial["item_id"] != run["item_id"]
+                    or initial["snapshot_hash"] != fingerprint(snapshot)
+                    or snapshot.get("conversation_id", run["item_id"]) != run["item_id"]
+                    or snapshot.get("input_hash") != run["input_hash"]):
+                raise _error("固定入力の会話・版が一致しません。", "fgi_source_or_delivery_mismatch")
         if self.table_store is None:
             raise _error("型付き候補の固定保存先が利用できません。", "typed_source_missing")
         from pathlib import Path
@@ -1844,6 +1852,9 @@ class AnalysisOrchestrationService:
                     from .services.expert_data_hooks import prepare_context
                     context = prepare_context(context, evidence_limit=run["config"]["context_evidence_limit"],
                                               text_limit=run["config"]["context_text_limit"])
+                if profile.get("typed_contract") == "focus_group_interaction_candidates_v1":
+                    from .services.expert_agents import focus_group_interaction_delivery
+                    context["expert_request"]["delivery_coverage"] = focus_group_interaction_delivery(typed_source, context)
         return copy.deepcopy(context)
 
     def _check(self, run_id, generation, task_id=None):
@@ -2029,6 +2040,8 @@ class AnalysisOrchestrationService:
             task.update(status="running", started_at=_now(), started_epoch=time.time(), generation=run["generation"])
             if task.get("expert_agent"):
                 task["expert_evidence_ids"] = [row["evidence_id"] for row in context["raw_evidence"]]
+                if "delivery_coverage" in context["expert_request"]:
+                    task["expert_fgi_delivery"] = copy.deepcopy(context["expert_request"]["delivery_coverage"])
                 if "calculations" in context["expert_request"]:
                     task["expert_calculation_refs"] = [{key: row[key] for key in ("result_id", "task_id", "raw_hash")}
                                                        for row in context["expert_request"]["calculations"]]
@@ -2455,6 +2468,7 @@ class AnalysisOrchestrationService:
             cells = validate_report(profile, raw, task["expert_evidence_ids"], calculation_ids, calculations=calculations,
                                     response_phase=task.get("expert_response_phase"),
                                     thematic_source=self._thematic_source(db, run, profile, initial),
+                                    source_analysis=initial["analysis"], expected_delivery=task.get("expert_fgi_delivery"),
                                     expected_producer={"kind": "ai", "actor_id": task["task_id"], "model_id": task["model"],
                                         "provider": task["provider"], "revision": "unverified"} if profile.get("typed_contract") else None)
             if profile.get("contract_schema_version") == 2:

@@ -133,7 +133,7 @@ class SkillBindingReaderTests(unittest.TestCase):
         registered = catalog.index()
         self.assertEqual(len(registered), 17)
         other = sorted(set(registered) - set(experts.SKILL_EXPERTS))
-        self.assertEqual(len(other), 14)
+        self.assertEqual(len(other), 13)
         for expert_id in other:
             with self.subTest(expert_id=expert_id):
                 with self.assertRaises(experts.SkillContextError) as caught:
@@ -144,7 +144,7 @@ class SkillBindingReaderTests(unittest.TestCase):
             catalog.skill_context("exp-TEST-unknown")
         self.assertEqual(caught.exception.decision, "rejected")
         self.assertEqual(caught.exception.code, "expert_skill_expert_unregistered")
-        PROBE_LOG.append({"case": "registered17-prototype3-other14", "normal": "unsupported14",
+        PROBE_LOG.append({"case": "registered17-prototype4-other13", "normal": "unsupported13",
                           "negative": "unknown_rejected", "runtime_execution": False})
 
     def setUp(self):

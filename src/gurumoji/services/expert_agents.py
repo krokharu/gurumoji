@@ -23,6 +23,11 @@ from .analysis_orchestration_methods import EXPERT_STATISTICAL_TOOLS
 
 VERSION = "obsidian-expert-agents-3"
 CONTRACT_NOTE = "07-Agent-Contract.md"
+FGI_EXPERT = "exp-focus-group-interaction"
+FGI_CONTRACT = "focus_group_interaction_candidates_v1"
+FGI_STEPS = ("fgi-p3", "fgi-p5")
+FGI_RELATIONS = ("question_answer", "agreement_candidate", "disagreement_candidate",
+                 "addition_candidate", "reformulation_candidate", "minority_candidate", "opinion_change_candidate")
 MAX_EXPERTS = 9
 MAX_KNOWLEDGE_CHARS = 8000
 MAX_FIELD_COUNT = 16
@@ -167,10 +172,18 @@ class ExpertAgentRegistry:
         if (not isinstance(chosen, list) or not chosen or len(chosen) > MAX_EXPERTS
                 or any(not isinstance(eid, str) for eid in chosen) or len(set(chosen)) != len(chosen)):
             fail("expert_selection_invalid")
+        supplied = config.get("expert_inputs", {})
+        if not isinstance(supplied, dict):
+            fail("expert_selection_invalid")
         profiles = {}
         for eid in chosen:
             try:
-                context = self.catalog.skill_context(eid, workflow=selection["workflow"]) if selection is not None else None
+                # FGI S1 always freezes registered exact bytes. The legacy
+                # currentPack does not acquire this contract merely by upgrade.
+                fgi_typed = (eid == FGI_EXPERT and isinstance(supplied.get(eid), dict)
+                             and "typed_contract" in supplied[eid])
+                context = (self.catalog.skill_context(eid, workflow=selection["workflow"] if selection else False)
+                           if selection is not None or fgi_typed else None)
             except SkillContextError as exc:
                 fail(exc.code)
             profiles[eid] = self._profile(eid, skill_context=context)
@@ -185,8 +198,9 @@ class ExpertAgentRegistry:
             typed_requested = "typed_contract" in inputs
             typed_contract = inputs.pop("typed_contract", None)
             if typed_requested:
-                if (eid != "exp-thematic-analysis" or typed_contract != "thematic_candidates_v1"
-                        or not profile.get("_typed_contract_available")):
+                supported = {"exp-thematic-analysis": "thematic_candidates_v1", FGI_EXPERT: FGI_CONTRACT}
+                if (typed_contract != supported.get(eid) or typed_contract is None
+                        or profile.get("_typed_contract_available") != typed_contract):
                     fail("expert_typed_contract_invalid")
                 profile.update(typed_contract=typed_contract, contract_version=2)
             profile.pop("_typed_contract_available", None)
@@ -214,7 +228,7 @@ class ExpertAgentRegistry:
         if skill_context is None:
             folder = self.catalog.index()[expert_id]["folder"]
             relative = EXPERTS_DIR / folder / CONTRACT_NOTE
-            contract_note = self.catalog._note(relative)
+            contract_note = None if expert_id == FGI_EXPERT else self.catalog._note(relative)
         else:
             source = next(row for row in skill_context["sources"] if row["note_id"] == "expert-" + expert_id[4:] + "-agent-contract")
             contract_note = {"sha256": source["raw_byte_hash"][7:], "props": {"note_id": source["note_id"]},
@@ -304,6 +318,17 @@ class ExpertAgentRegistry:
                              "schema_id": "gurumoji.thematic-candidate", "schema_version": 1}:
                     fail("expert_typed_contract_invalid")
                 profile["_typed_contract_available"] = "thematic_candidates_v1"
+        if contract_note is not None and expert_id == FGI_EXPERT:
+            typed_match = re.search(r"^```yaml focus_group_interaction_candidates_v1\s*\n(.*?)\n```", contract_note["body"], re.M | re.S)
+            try:
+                typed = yaml.safe_load(typed_match[1]) if typed_match else None
+            except yaml.YAMLError:
+                fail("expert_typed_contract_invalid")
+            if (typed != {"version": FGI_CONTRACT, "contract_version": 2, "schema_version": 1}
+                    or [step["id"] for step in profile["allowed_steps"]] != list(FGI_STEPS)
+                    or any(step["actor"] != "ai_draft" for step in profile["allowed_steps"])):
+                fail("expert_typed_contract_invalid")
+            profile["_typed_contract_available"] = FGI_CONTRACT
         if expert_id in EXPERT_STATISTICAL_TOOLS:
             profile["statistical_tools"] = list(EXPERT_STATISTICAL_TOOLS[expert_id])
             profile.update(phase_contract)
@@ -458,8 +483,12 @@ def request_packet(profile, context, analysis, *, thematic_source=None):
               "inputs": copy.deepcopy(profile["inputs"]), "applicability": checks,
               "knowledge": copy.deepcopy(profile), "coverage": copy.deepcopy(context["coverage"])}
     validate_shape(profile["input_schema"], packet["inputs"])
-    if profile.get("typed_contract") == "thematic_candidates_v1":
+    if profile.get("typed_contract") in {"thematic_candidates_v1", FGI_CONTRACT}:
         if thematic_source is None: fail("typed_source_missing")
+        if profile["typed_contract"] == FGI_CONTRACT:
+            _fgi_applicability(profile, analysis)
+            if context["coverage"].get("scope") != "dataset" or context["task"].get("intent", {}).get("evidence_ids"):
+                fail("fgi_dataset_scope_required")
         # Supply hashes for the entire fixed input, but only deliver utterance
         # bodies already selected by the Handler. An index is not a read receipt.
         packet["thematic_source"] = {"source_ref": copy.deepcopy(thematic_source["source_ref"]),
@@ -515,6 +544,10 @@ def report_schema(profile, evidence_ids, calculation_result_ids=(), *, calculati
         from ..analysis_core import thematic_candidates_schema
         schema["properties"]["thematic_candidates_v1"] = {"anyOf": [thematic_candidates_schema(), {"type": "null"}]}
         schema["required"].append("thematic_candidates_v1")
+    if profile.get("typed_contract") == FGI_CONTRACT:
+        schema["properties"][FGI_CONTRACT] = {"anyOf": [focus_group_interaction_schema(), {"type": "null"}]}
+        schema["required"].append(FGI_CONTRACT)
+        schema["properties"]["limitations"]["maxLength"] = 2000
     if "statistical_tools" in profile:
         schema["properties"]["status"]["enum"] = (["draft", "needs_input"] if calculation_result_ids
             else ["needs_calculation", "needs_input"])
@@ -538,6 +571,169 @@ def report_schema(profile, evidence_ids, calculation_result_ids=(), *, calculati
             schema["properties"]["numeric_bindings"] = numeric_binding_schema(calculations)
             schema["required"].append("numeric_bindings")
     return schema
+
+
+def focus_group_interaction_schema():
+    """Bounded report-only S1. No asset kind, manual link or human record creation."""
+    def enum(*values): return {"type": "string", "enum": list(values)}
+    text = {"type": "string", "minLength": 1, "maxLength": 2000}
+    identifier = {"type": "string", "minLength": 1, "maxLength": 200}
+    ids = {"type": "array", "maxItems": 2000, "items": identifier}
+    source = obj({"target_type": enum("snapshot"), "target_id": identifier, "version": identifier,
+                  "content_hash": identifier, "hash_domain": enum("canonical-json-v1"), "library_id": identifier})
+    scope = obj({"scope_id": identifier, "mode": enum("dataset"),
+                 "input_refs": {"type": "array", "minItems": 1, "maxItems": 1, "items": source},
+                 "conversation_ids": {"type": "array", "minItems": 1, "maxItems": 1, "items": identifier},
+                 "member_ids": ids, "context_ids": ids, "manifest_hash": identifier})
+    steps = {"type": "array", "minItems": 1, "maxItems": 2, "items": enum(*FGI_STEPS)}
+    producer = obj({"kind": enum("ai"), "actor_id": identifier, "model_id": identifier,
+                    "provider": identifier, "revision": enum("unverified"), "step_ids": steps})
+    evidence = obj({"evidence_id": identifier, "utterance_id": identifier, "utterance_hash": identifier})
+    coverage = obj({"source_utterance_count": {"type": "integer"}, "included_utterance_count": {"type": "integer"},
+                    "excluded_utterance_count": {"type": "integer"}, "delivered_evidence_ids": ids,
+                    "undelivered_utterance_ids": ids, "complete": {"type": "boolean"}, "statement": text})
+    candidate = obj({"candidate_id": identifier, "step_id": enum(*FGI_STEPS), "relation_kind": enum(*FGI_RELATIONS),
+                     "text": text, "limitations": text,
+                     "evidence_refs": {"type": "array", "minItems": 2, "maxItems": 16, "items": evidence}})
+    return obj({"version": enum(FGI_CONTRACT), "source_ref": source, "scope": scope, "producer": producer,
+                "coverage": coverage, "human_status": enum("human_pending"), "human_record_state": enum("not_entered"),
+                "human_records": {"type": "array", "maxItems": 0, "items": {"type": "null"}},
+                "semantic_review": enum("undetermined"), "eligible_as_confirmed_evidence": {"type": "boolean", "enum": [False]},
+                "candidates": {"type": "array", "maxItems": 80, "items": candidate}})
+
+
+def _fgi_applicability(profile, analysis):
+    """Use the frozen analysis prerequisites, never model assertions or manual links."""
+    if not isinstance(analysis, dict): fail("typed_source_missing")
+    checks = [evaluate_check(spec, analysis, {}) for spec in profile["applicability_checks"]]
+    if any(row["severity"] == "block" and row["result"] != "pass" for row in checks):
+        fail("expert_not_applicable")
+    preparation = analysis.get("manual", {}).get("preparation", {})
+    participants = analysis.get("automatic", {}).get("overview", {}).get("participant_count")
+    # Do not inherit the legacy check's truthiness/number coercion for S1.
+    if (preparation.get("order_verified") is not True
+            or type(preparation.get("unknown_speaker_turns")) is not int
+            or preparation["unknown_speaker_turns"] != 0
+            or type(participants) is not int or participants < 2):
+        fail("expert_not_applicable")
+
+
+def focus_group_interaction_delivery(source, context):
+    """Initial actual body delivery after Handler bounds/hooks, not an index receipt.
+
+    S1 requires the complete dataset context. Excluded or truncated context stays
+    unavailable; later hook retrieval alone does not upgrade this frozen receipt.
+    """
+    evidence = source["evidence"]
+    supplied = {row["evidence_id"]: row for row in context["raw_evidence"]}
+    delivered = []
+    for row in evidence:
+        actual = supplied.get(row["evidence_id"])
+        if (not row["excluded"] and actual is not None and actual.get("utterance_id") == row["utterance_id"]
+                and actual.get("text") == row["text"] and actual.get("speaker") == row.get("speaker")
+                and actual.get("text_offset", 0) == 0 and actual.get("omitted_text_characters", 0) == 0):
+            delivered.append(row["evidence_id"])
+    undelivered = [row["utterance_id"] for row in evidence if row["evidence_id"] not in delivered]
+    complete = (not undelivered and bool(evidence) and context["coverage"].get("scope") == "dataset"
+                and context["coverage"].get("complete") is True)
+    return {"source_utterance_count": len(evidence),
+            "included_utterance_count": sum(not row["excluded"] for row in evidence),
+            "excluded_utterance_count": sum(row["excluded"] for row in evidence),
+            "delivered_evidence_ids": delivered, "undelivered_utterance_ids": undelivered, "complete": complete,
+            "statement": ("Complete fixed dataset text delivered; interpretation and human reading remain unverified."
+                          if complete else "Incomplete fixed dataset text delivery; S1 draft unavailable, needs_input.")}
+
+
+def prohibited_fgi_assertion(text):
+    """Small known-assertion quarantine only; never general semantic policing.
+
+    A caution must govern this exact quotation/predicate. An unrelated no/not
+    elsewhere in the sentence must not exempt an affirmative assertion.
+    """
+    quote = r'''(?:"[^"\n]+"|“[^”\n]+”|'[^'\n]+')'''
+    text = re.sub(rf'(?:do not claim|avoid claiming|do not assert)\s*{quote}', " ", text, flags=re.I)
+    text = re.sub(rf'{quote}\s+(?:is unsupported|is prohibited|must not be adopted|is not justified)', " ", text, flags=re.I)
+    text = re.sub(r'「[^」\n]+」(?:と断定しない|と主張しない|とは言えない)', " ", text)
+    japanese = r"(?:沈黙|相づち|相槌)(?:は|が)(?:同意|合意)(?:を示す|を証明する|を意味する|である|だ)"
+    denial = r"(?:わけではない|ものではない|とは限らない|とは言えない|と(?:断定|主張)しない)"
+    for clause in re.split(r"[.;!?。！？；]", text):
+        if re.search(r"\b(?:silence|backchannels?|nodding|voice tone|facial expressions?)\s+(?:proves?|confirms?|means?|shows?|is)\s+(?:agreement|consensus|disagreement)\b", clause, re.I):
+            return True
+        for match in re.finditer(japanese, clause):
+            if not re.match(denial, clause[match.end():]):
+                return True
+        if re.search(r"\b(?:these|the|this)\s+(?:AI\s+)?(?:candidates?|pairs?|interactions?)\s+(?:are|is)\s+(?:human|researcher)[- ]confirmed\b", clause, re.I):
+            return True
+    return False
+
+
+def _validate_fgi_report(profile, raw, evidence_ids, source, analysis, expected_producer, delivery):
+    report = raw["expert_report"]
+    typed = report[FGI_CONTRACT]
+    if any(raw.get(key) for key in ("claims", "label_patches", "analysis_requests")):
+        fail("fgi_auto_action_forbidden")
+    if report["status"] != "draft":
+        if typed is not None: fail("expert_report_state_mismatch")
+        return
+    if typed is None or source is None or delivery is None or expected_producer is None:
+        fail("typed_source_missing")
+    _fgi_applicability(profile, analysis)
+    if (typed["source_ref"] != source["source_ref"] or typed["scope"] != source["scope"]
+            or typed["coverage"] != delivery):
+        fail("fgi_source_or_delivery_mismatch")
+    evidence = source["evidence"]
+    scope = source["scope"]
+    if (len(scope["conversation_ids"]) != 1 or scope["mode"] != "dataset"
+            or scope["input_refs"] != [source["source_ref"]]
+            or scope["manifest_hash"] != fingerprint({k: v for k, v in scope.items() if k != "manifest_hash"})
+            or scope["member_ids"] != [r["utterance_id"] for r in evidence if not r["excluded"]]
+            or scope["context_ids"] != [r["utterance_id"] for r in evidence if r["excluded"]]):
+        fail("fgi_source_or_delivery_mismatch")
+    expected_ids = [row["evidence_id"] for row in evidence]
+    if (delivery["complete"] is not True or delivery["undelivered_utterance_ids"]
+            or delivery["delivered_evidence_ids"] != expected_ids or not set(expected_ids) <= set(evidence_ids)
+            or delivery["source_utterance_count"] != len(evidence)
+            or delivery["included_utterance_count"] != len(scope["member_ids"])
+            or delivery["excluded_utterance_count"] != len(scope["context_ids"])):
+        fail("fgi_incomplete_delivery")
+    steps = report["performed_step_ids"]
+    if (not steps or len(steps) != len(set(steps)) or not set(steps) <= set(FGI_STEPS)
+            or typed["producer"] != {**expected_producer, "step_ids": steps}):
+        fail("typed_execution_provenance")
+    used_ids = report["evidence_ids"]
+    if len(used_ids) != len(set(used_ids)):
+        fail("expert_reference_mismatch")
+    rows = {row["evidence_id"]: (index, row) for index, row in enumerate(evidence)}
+    if len(rows) != len(evidence): fail("fgi_source_or_delivery_mismatch")
+    seen = set()
+    for candidate in typed["candidates"]:
+        if not candidate["candidate_id"].strip() or candidate["candidate_id"] in seen:
+            fail("fgi_candidate_id_invalid")
+        seen.add(candidate["candidate_id"])
+        if (candidate["step_id"] not in steps
+                or (candidate["step_id"] == "fgi-p3" and candidate["relation_kind"] not in FGI_RELATIONS[:5])
+                or (candidate["step_id"] == "fgi-p5" and candidate["relation_kind"] not in
+                    {"disagreement_candidate", "minority_candidate", "opinion_change_candidate"})):
+            fail("typed_actor_unpermitted")
+        refs = candidate["evidence_refs"]
+        ids = [ref["evidence_id"] for ref in refs]
+        if len(set(ids)) != len(ids) or not set(ids) <= set(used_ids) or not set(ids) <= set(delivery["delivered_evidence_ids"]):
+            fail("fgi_evidence_mismatch")
+        previous = -1
+        for ref in refs:
+            if ref["evidence_id"] not in rows: fail("fgi_evidence_mismatch")
+            index, row = rows[ref["evidence_id"]]
+            if (index <= previous or row["excluded"] or ref["utterance_id"] != row["utterance_id"]
+                    or ref["utterance_hash"] != "sha256:" + hashlib.sha256(row["text"].encode("utf-8")).hexdigest()):
+                fail("fgi_evidence_mismatch")
+            previous = index
+        if not candidate["text"].strip() or not candidate["limitations"].strip():
+            fail("expert_report_incomplete")
+    if not report["limitations"].strip() or any(not v.strip() for v in report["outputs"].values()):
+        fail("expert_report_incomplete")
+    prose = [raw.get("summary", ""), report["limitations"], *report["outputs"].values()]
+    prose += [c[key] for c in typed["candidates"] for key in ("text", "limitations")]
+    if any(prohibited_fgi_assertion(text) for text in prose): fail("expert_prohibited_conclusion")
 
 
 def numeric_binding_schema(calculations):
@@ -710,7 +906,8 @@ def thematic_execution_producer(task):
             "provider": task["provider"], "revision": "unverified"}
 
 
-def validate_report(profile, raw, evidence_ids, calculation_result_ids=(), *, calculations=(), response_phase=None, thematic_source=None, expected_producer=None):
+def validate_report(profile, raw, evidence_ids, calculation_result_ids=(), *, calculations=(), response_phase=None,
+                    thematic_source=None, expected_producer=None, source_analysis=None, expected_delivery=None):
     report = raw.get("expert_report")
     validate_shape(report_schema(profile, evidence_ids, calculation_result_ids, calculations=calculations), report)
     if report["status"] == "draft" and (not report["evidence_ids"] or not report["performed_step_ids"] or report["missing_inputs"]):
@@ -741,6 +938,9 @@ def validate_report(profile, raw, evidence_ids, calculation_result_ids=(), *, ca
                     elif isinstance(node, list):
                         for child in node: check(child)
                 check(typed)
+    if profile.get("typed_contract") == FGI_CONTRACT:
+        _validate_fgi_report(profile, raw, evidence_ids, thematic_source, source_analysis,
+                             expected_producer, expected_delivery)
     if "statistical_tools" in profile:
         requests = raw.get("analysis_requests", [])
         for request in requests:
