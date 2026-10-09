@@ -20,6 +20,10 @@ G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowl
 
 ## 固定対象と確認範囲
 
+2026-10-10 06:23 JST追補：保存比較のHTTP修正 `ed6ca0b59baf740d01806fb9c80b278206fa61c2` は別作者Windows15、実Flask→Handler→archive→Store保存→fresh ZIP／全14artifact取得、破損409・通常欠落404・stale保存原版のbytes維持を限定受入した。通常fullapp画面→実比較builder→保存→freshと390px実横gestureは別担当が追加検証中。配送修正ec85はWindows32＋独立2PASSだが、実保存本文を用いた短い合成reportのCore進行では後半入力が上限を超え、最大36830>24576となった。全323本文配送・実モデル成功・安定3回は未達、上限緩和や無断切捨てを行わず既存Core履歴の重複配送をCPU解析する。
+
+統計注記 `30df9733c1603f39d69eb86efa56dad207c66917` はLinux作者72／別作者11と、C0別作者Windows11＋旧版対照6条件（通常・小標本・同順位・定数・欠測・未計算）を区別して確認した。Kruskal現式 `max(0,(H-k+1)/(N-k))` と互換名称未確定、Spearman小標本漸近p値の注意を新規注記へ追加し、数値・schema・status・nullと保存済み旧hashを維持する限定受入である。Frameworkの話者gate／ケース数説明は後続、効果量名称の方法論的正規化・方法意味品質・研究者本人の採否は未受入。初期18実測の失敗とcurrentPack暫定／strict形式HOLDは維持する。
+
 2026-10-10 06:00 JST追補：以下の時刻付き記述と表は各時点の履歴として保持する。G0.5b/cの初期固定18比較は実Gemmaで実測済みになったが、全18の計画応答が既存Handler検証で隔離され、独立品質判定は18FAIL／0PASS、不必要拒否9だった。正式計算・結果説明は0件、研究者採否は未実行。全18の実入力とusageは確認済みで、合計229284token／試行時間合計2516.650281秒（失敗を含む）。cache／KV再利用はUNKNOWNのまま旧strict形式のvalid=false／HOLDを維持し、currentPack暫定と新方式未採用を変更しない。後保存のpreflight再生成が原formalとCPU完全一致しても、実行前memoryobjectの原本保存証明とはしない。
 
 会話間比較の観測分母はDot固定 `b1c2fc5805f7ef8f2ca2470879dd8be37e874ac3` をWindows関連25＋独立11PASS後に限定統合した。対象0はnot_applicable、妥当な空予測は既知0、欠落・不正来歴はunknownとして、旧率・元scopeを維持する。通常表示は独立DOM／境界／1440・390の限定受入済みだが、修正backendとの通常画面／保存／fresh／HTTP取得の全経路は追加確認中。保存済み比較runのHTTP404は親にもある独立不具合としてDotが別修正中。無関係な過去結果本文の配送修正 `ec85dce2fcbbb5dfd89e67342463ea702c35e1d6` はLinux作者・独立結果を受領し、Windows受入中である。実323本文の配送・安定3回・意味品質の合格証明にはしない。
