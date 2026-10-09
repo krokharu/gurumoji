@@ -12,6 +12,10 @@ from flask import Flask, jsonify, request, send_file
 
 from .. import transcript_preparation as preparation
 from ..research_analysis import build_analysis_workbook
+from ..services.ai_data_export import (
+    ExportError, ai_export_payload, preparation_export_snapshot, validate_export_request,
+)
+from ..services.ai_data_export_frames import extract_frames, media_identity, permitted_media
 from ..services.group_analysis import (
     ANALYSIS_CSV_FIELDS,
     analysis_csv_content,
@@ -41,6 +45,8 @@ def register_export_routes(
     row_segments: Any,
     row_session_profile: Any,
     row_speaker_profiles: Any,
+    media_directory: Any = None,
+    path_is_within: Any = None,
 ) -> None:
     def export_speaker_registry():
         content = speaker_registry_csv_bytes(list_speaker_registry())
@@ -57,27 +63,60 @@ def register_export_routes(
             row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
             if row is None:
                 return jsonify({"error": "データが見つかりません。"}), 404
-            value = preparation.view(connection, row, row_segments(row))
-            value["original_segments"] = json_load(row["original_segments_json"], [])
-            value["original_status"] = row["original_segments_status"]
-            value["versions"] = [
-                {**dict(v), "source": json.loads(v["source_json"])} for v in connection.execute(
-                    "SELECT version, source_hash, source_json, origin, created_at FROM transcript_versions WHERE item_id=? ORDER BY version", (item_id,))
-            ]
-            for version in value["versions"]:
-                version.pop("source_json")
-            value["review_history"] = [
-                {"revision": v["revision"], "created_at": v["created_at"], "state": json.loads(v["state_json"])}
-                for v in connection.execute("SELECT * FROM transcript_preparation_events WHERE item_id=? ORDER BY revision", (item_id,))
-            ]
-            value["manifest"] = {"schema_version": 1, "encoding": "UTF-8", "row_count": len(value["rows"]),
-                "rows_sha256": preparation.digest(value["rows"]), "columns": preparation.FIELDS,
-                "missing_value": "JSON null / CSV empty", "order_basis": "saved transcript array; verification is separate",
-                "ids": "application-managed IDs; split/merge lineage is researcher-confirmed",
-                "csv_note": "CSV applies spreadsheet formula escaping; JSON preserves exact text.",
-                "privacy": "Local export may contain personal data. Review before sharing. Media not included."}
+            value = preparation_export_snapshot(connection, row, row_segments(row))
         return send_file(io.BytesIO(preparation.encode(value).encode("utf-8")),
                          mimetype="application/json", as_attachment=True, download_name=f"{item_id}_preparation.json")
+
+    def export_ai_data_bundle(item_id: str):
+        try:
+            options = validate_export_request(request.get_json(silent=True))
+            with database_connection() as connection:
+                connection.execute("PRAGMA query_only=ON")
+                connection.execute("BEGIN")
+                row = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+                if row is None:
+                    raise ExportError("unknown_item", 404)
+                segments = row_segments(row)
+                prepared = preparation_export_snapshot(connection, row, segments)
+                if options["expected_source_hash"] is not None and options["expected_source_hash"] != prepared["source_hash"] or \
+                        options["expected_revision"] is not None and options["expected_revision"] != prepared["revision"]:
+                    raise ExportError("source_changed", 409)
+                # Capture all saved fields before selective metadata projection.
+                row_token = dict(row)
+                revision = prepared["revision"]
+                payload = ai_export_payload(row, segments, prepared, options)
+            if options["frames"]["enabled"]:
+                payload["frames"] = extract_frames(row, prepared["rows"], options["frames"],
+                    media_directory=media_directory, path_is_within=path_is_within)
+            # Dot owns this pure serializer; import only when the feature runs.
+            from ..services.ai_data_export_bundle import build_ai_bundle
+            content = build_ai_bundle(payload)
+            with database_connection() as connection:
+                connection.execute("PRAGMA query_only=ON")
+                connection.execute("BEGIN")
+                fresh = connection.execute("SELECT * FROM library_items WHERE id=?", (item_id,)).fetchone()
+                if fresh is None or dict(fresh) != row_token or preparation.load_state(connection, item_id)[0] != revision:
+                    raise ExportError("source_changed", 409)
+                if options["frames"]["enabled"]:
+                    try:
+                        current_path = permitted_media(fresh, media_directory, path_is_within)
+                    except (OSError, ExportError) as exc:
+                        raise ExportError("media_changed", 409, frame_status="failed") from exc
+                    if media_identity(current_path) != payload["frames"]["media"]["identity"]:
+                        raise ExportError("media_changed", 409, frame_status="failed")
+        except ExportError as exc:
+            body = {"error": exc.reason}
+            if exc.frame_status:
+                body["frames"] = {"status": exc.frame_status, "reason": exc.reason}
+            return jsonify(body), exc.status
+        except (ValueError, TypeError, KeyError, OverflowError, sqlite3.Error):
+            return jsonify({"error": "invalid_saved_export_data"}), 422
+        except (ImportError, OSError):
+            return jsonify({"error": "export_unavailable"}), 503
+        response = send_file(io.BytesIO(content), mimetype="application/zip", as_attachment=True,
+                             download_name=f"{safe_output_stem(str(row['source_name']))[:72]}_ai-export.zip")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def export_library_analysis_json(item_id: str):
         row = library_row(item_id)
@@ -289,6 +328,7 @@ def register_export_routes(
     endpoints = (
         ('/api/speakers/export.csv', 'export_speaker_registry', export_speaker_registry, 'GET'),
         ('/api/library/<item_id>/preparation/export.json', 'export_transcript_preparation', export_transcript_preparation, 'GET'),
+        ('/api/library/<item_id>/ai-export.zip', 'export_ai_data_bundle', export_ai_data_bundle, 'POST'),
         ('/api/library/<item_id>/analysis/export.json', 'export_library_analysis_json', export_library_analysis_json, 'GET'),
         ('/api/library/<item_id>/analysis/export.md', 'export_library_analysis_report', export_library_analysis_report, 'GET'),
         ('/api/library/<item_id>/analysis/export.xlsx', 'export_library_analysis_xlsx', export_library_analysis_xlsx, 'GET'),

@@ -2067,6 +2067,8 @@ def create_app() -> Flask:
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
         row_speaker_profiles=lambda *args, **kwargs: row_speaker_profiles(*args, **kwargs),
+        media_directory=lambda: MEDIA_DIRECTORY,
+        path_is_within=path_is_within,
     )
 
     register_analysis_view_routes(
