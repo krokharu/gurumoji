@@ -95,6 +95,38 @@ class RequestBudgetTests(unittest.TestCase):
         self.assertFalse(ledger["measurement_ready"])
         self.assertFalse(ledger["handler_connected"])
 
+    def test_fresh_counter_seam_deadline_cost_and_hashed_evidence(self):
+        clock = Clock()
+        class Counter:
+            def __call__(self, payload):
+                return count_proof(payload, fresh_verification_required=True)
+            def verify_before_dispatch(self, payload, proof):
+                self_seen.append((payload_hash(payload), payload_hash(proof)))
+                clock.advance(.5)
+        self_seen = []
+        budget = make_budget(clock, token_counter=Counter(), run_started_at=clock() - 233.8)
+        value = reserve(budget)
+        ticket = value["ticket"]
+        self.assertEqual(ticket["conditions_hash"], payload_hash(budget._conditions))
+        self.assertEqual(ticket["counter_proof_hash"], payload_hash(count_proof(value["payload"], fresh_verification_required=True)))
+        with self.assertRaisesRegex(BudgetHold, "parent_deadline_or_ticket"):
+            budget.dispatch_timeout(ticket, value["payload"])
+        self.assertEqual(self_seen, [(ticket["payload_hash"], ticket["counter_proof_hash"])])
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+        self.assertEqual(budget.ledger()["entries"][0]["state"], "unknown")
+
+    def test_conditions_and_counter_proof_ticket_changes_rejected_in_common_IPC_validator(self):
+        clock = Clock(); budget = make_budget(clock); value = reserve(budget)
+        for field in ("conditions_hash", "counter_proof_hash"):
+            changed = copy.deepcopy(value["ticket"]); changed[field] = payload_hash("different")
+            with self.subTest(field=field), self.assertRaisesRegex(BudgetHold, "ticket_changed"):
+                prepare_wire(changed, value["payload"], clock)
+        # Even a rehashed peer ticket cannot replace the parent's saved entry.
+        changed["ticket_hash"] = payload_hash({k: v for k, v in changed.items() if k != "ticket_hash"})
+        with self.assertRaisesRegex(BudgetHold, "ticket_changed"):
+            budget.dispatch_timeout(changed, value["payload"])
+        self.assertEqual(budget.ledger()["charged_or_reserved_tokens"], 4106)
+
     def test_strict_constructor_types_and_bounds(self):
         bad = [("run_started_at", v) for v in (True, -1, float("nan"), float("inf"), 10**400)]
         bad += [("trial_call_limit", v) for v in (True, 0, 7, 1.0)]

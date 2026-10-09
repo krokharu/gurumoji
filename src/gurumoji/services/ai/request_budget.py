@@ -34,7 +34,9 @@ SAFE_REASONS = frozenset({"invalid_integer", "invalid_clock", "invalid_identity"
     "token_proof_unknown", "context_limit", "call_limit", "token_limit", "parent_deadline_or_ticket",
     "transport_unknown", "receipt_mismatch", "receipt_clock", "receipt_deadline",
     "transport_or_usage_unknown", "usage_unknown", "response_truncated", "deadline_overrun",
-    "receipt_or_usage_unknown", "local_endpoint_required"})
+    "receipt_or_usage_unknown", "local_endpoint_required", "renderer_payload_not_supported",
+    "renderer_messages_not_supported", "renderer_schema_not_supported",
+    "renderer_conditions_changed", "renderer_tokenizer_unknown"})
 
 
 class BudgetHold(RuntimeError):
@@ -75,7 +77,7 @@ def _identity(value: Any) -> str:
 
 
 TICKET_KEYS = frozenset({"budget_id", "run_id", "task_id", "attempt_id", "reservation_id",
-    "payload_hash", "model_hash", "run_started_at", "task_started_at", "run_deadline",
+    "payload_hash", "model_hash", "conditions_hash", "counter_proof_hash", "run_started_at", "task_started_at", "run_deadline",
     "task_deadline", "requested_timeout", "ticket_hash"})
 
 
@@ -87,7 +89,7 @@ def _validate_ticket(ticket: dict, payload: dict) -> None:
     """
     if not isinstance(ticket, dict) or set(ticket) != TICKET_KEYS:
         raise BudgetHold("invalid_ticket")
-    for key in ("budget_id", "run_id", "task_id", "attempt_id", "reservation_id", "payload_hash", "model_hash", "ticket_hash"):
+    for key in ("budget_id", "run_id", "task_id", "attempt_id", "reservation_id", "payload_hash", "model_hash", "conditions_hash", "counter_proof_hash", "ticket_hash"):
         if not isinstance(ticket[key], str) or not HASH_PATTERN.fullmatch(ticket[key]):
             raise BudgetHold("invalid_ticket")
     if ticket["ticket_hash"] != payload_hash({k: v for k, v in ticket.items() if k != "ticket_hash"}):
@@ -233,6 +235,7 @@ class RequestBudget:
             "usage_policy": usage_policy}
         if not HASH_PATTERN.fullmatch(model_conditions_hash):
             raise BudgetHold("invalid_conditions")
+        self._proofs: dict[str, dict] = {}
         self._tasks: dict[str, float] = {}
         self._entries: dict[str, dict] = {}
         self._requests: dict[tuple[str, str], str] = {}
@@ -273,6 +276,9 @@ class RequestBudget:
                     raise BudgetHold("invalid_timeout")
                 if not isinstance(payload, dict) or payload.get("model") != self._model:
                     raise BudgetHold("model_changed")
+                validator = getattr(self._counter, "validate_payload", None)
+                if validator is not None:
+                    validator(copy.deepcopy(payload))
                 final = copy.deepcopy(payload)
                 final["max_tokens"] = OUTPUT_TOKENS
                 request_hash = payload_hash(final)
@@ -283,6 +289,7 @@ class RequestBudget:
                     raise BudgetHold("duplicate_request")
                 ticket = {"budget_id": self._budget_id, "run_id": self._run_id, "task_id": task,
                     "attempt_id": attempt, "payload_hash": request_hash, "model_hash": payload_hash(self._model),
+                    "conditions_hash": payload_hash(self._conditions), "counter_proof_hash": payload_hash(None),
                     "run_started_at": self._run_start, "task_started_at": self._tasks[task],
                     "run_deadline": self._run_start + RUN_SECONDS,
                     "task_deadline": min(self._run_start + RUN_SECONDS, self._tasks[task] + TASK_SECONDS),
@@ -298,6 +305,11 @@ class RequestBudget:
                         or not isinstance(coverage, list) or any(not isinstance(k, str) for k in coverage)
                         or len(coverage) != len(COVERAGE) or set(coverage) != COVERAGE):
                     raise BudgetHold("token_proof_unknown")
+                if (proof.get("fresh_verification_required") is True
+                        and not callable(getattr(self._counter, "verify_before_dispatch", None))):
+                    raise BudgetHold("token_proof_unknown")
+                ticket["counter_proof_hash"] = payload_hash(proof)
+                ticket["ticket_hash"] = payload_hash({k: v for k, v in ticket.items() if k != "ticket_hash"})
                 counted = _integer(proof.get("input_tokens"), 0, MAX_INPUT_TOKENS)
                 total = counted + OUTPUT_TOKENS
                 if total > self._context:
@@ -317,6 +329,7 @@ class RequestBudget:
             self._batch._tokens += total
             self._batch._calls += 1
             self._requests[key] = request_hash
+            self._proofs[ticket["reservation_id"]] = copy.deepcopy(proof)
             self._entries[ticket["reservation_id"]] = {"ticket": copy.deepcopy(ticket),
                 "input_reserved": counted, "output_reserved": OUTPUT_TOKENS, "maximum_reserved": total,
                 "charged_tokens": total, "reserved_at": _instant(self._clock()), "sent": "unknown",
@@ -341,6 +354,13 @@ class RequestBudget:
                 self._available()
                 if entry["ticket"] != ticket or entry["state"] != "reserved":
                     raise BudgetHold("ticket_changed")
+                proof = self._proofs[ticket["reservation_id"]]
+                if (ticket["conditions_hash"] != payload_hash(self._conditions)
+                        or ticket["counter_proof_hash"] != payload_hash(proof)):
+                    raise BudgetHold("token_proof_unknown")
+                if proof.get("fresh_verification_required") is True:
+                    self._counter.verify_before_dispatch(copy.deepcopy(payload), copy.deepcopy(proof))
+                # Sample the clock after fresh condition IO and full hash validation.
                 return wire_timeout(ticket, payload, self._clock) + CLEANUP_SECONDS
             except Exception:
                 self.unknown(ticket["reservation_id"], "parent_deadline_or_ticket")
