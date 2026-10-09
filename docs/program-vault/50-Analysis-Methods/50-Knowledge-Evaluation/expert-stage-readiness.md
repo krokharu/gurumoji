@@ -20,6 +20,8 @@ G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowl
 
 ## 固定対象と確認範囲
 
+2026-10-10 06:55 JST追補：Framework説明 `4310b2eb862854e3f62f636b757be9f6f522f409` はWindows新7＋別作者独立4＝11PASS、208artifact＋198の親／候補source hashをC0が照合し限定統合した。3message以外の全定義、6／5／7段階、actor・AI権限・min2／block・version1は不変、知識hash更新で旧AI文脈をstale拒否する。研究者が定義するケース数と現製品の話者条件を区別する説明の受入であり、Framework一般の適否・方法意味品質・研究者本人の採否は未承認。Core配送の追加修正はDotが隔離3pathで実着手、修正後G0.5b/cの新raw-only固定版は独立CPU71／模擬wire125／実行入口19項目を確認済みだが、新実推論と実品質は別受入とする。
+
 2026-10-10 06:44 JST追補：通常fullapp1440／390から実比較builder／API、Handler／archive／Store保存、fresh画面／Store、ZIP／全14artifactのbytes一致まで別作者が2条件PASS。390pxでは実横wheel0→371で右端列を確認した。固定 `f2462ab5e066679b340c78f2f65208a445cdc942` の261artifact＋168source hashをC0が照合し、対象0／既知0／不明と保存原版を維持する画面・保存経路を限定受入した。初回browser／shell記録失敗と最終sandbox有効／audit exit0を分離する。研究者本人の理解・方法採用の合格ではない。
 
 明示receipt付きM_extended固定 `ab7c674fdab6e9e47aea1b76890b8505066e4530` は別作者Windows54＋独立3＝57PASS、旧legacy／Mの期限・hash・費用不変をCPU限定受入した。推論の再許可ではない。保存本文の最終非実装projectionでもCore29=24648／Core31=25152>24576で容量FAIL、Dotへ既存Core配送境界の追加3path修正を正式割当し、固定版・Windows独立受入・実本文容量の再確認を待つ。Framework説明 `4310b2eb` はLinux作者7＋隣接4／独立7＋1を受領しWindows独立検証中。修正後G0.5b/cは旧18FAILを保持する別IDのraw-only比較としてCPU準備中で、currentPack暫定・strict形式HOLD・方法意味品質・研究者採否を未受入のまま分ける。
