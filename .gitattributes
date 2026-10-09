@@ -101,3 +101,15 @@ tests/test_analysis_human_record_ui.cjs -text
 tests/test_analysis_qualitative_assets.py -text
 tests/test_analysis_table_units.py -text
 tests/test_analysis_visual_package.py -text
+docs/program-vault/30-Data/transcript-preparation-v1.md -text
+src/gurumoji/services/ai_data_export.py -text
+src/gurumoji/services/ai_data_export_bundle.py -text
+src/gurumoji/services/ai_data_export_frames.py -text
+src/gurumoji/templates/views/analysis.html -text
+src/gurumoji/web/export_routes.py -text
+tests/dom/ai-data-export.test.cjs -text
+tests/fixtures/route_map.json -text
+tests/test_ai_data_export_api.py -text
+tests/test_ai_data_export_bundle.py -text
+tests/test_ai_data_export_independent.py -text
+tests/test_ai_data_export_route_security.py -text
