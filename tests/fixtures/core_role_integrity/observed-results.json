@@ -1,0 +1,105 @@
+{
+  "scope": "Public synthetic CPU only; local originals remain immutable. Absolute paths and generated synthetic SQL IDs omitted from this derivative.",
+  "command": "PYTHONPATH=<fixed-public-source>/src;<fixed-public-source>/tests python -X utf8 -B forged_role_repro.py <fresh-synthetic-output-dir>",
+  "expected": "all3 cases reject before in-memory callback; no model/network",
+  "observed": [
+    {
+      "label": "base",
+      "public_source": "4d92d0a45dcede55ebb1c991343fe12a2a8295f3",
+      "original_result_sha256": "27860ee60234c1d988fbe5b45f159db73d64da259e732f9fdc43b9aadd505e71",
+      "PASS": 1,
+      "FAIL": 2,
+      "ERROR": 0,
+      "exit": 1,
+      "public_source_hashes": {
+        "gurumoji.analysis_orchestration": "e82036ba1f7c4f41f0938a36782939d8c07b40d6848f3e5eaa623cdeecf9f5ff",
+        "gurumoji.services.analysis_orchestration_adapters": "6fae57444f0ee3d9987e3bb9b0c62d67d20d7065ad5c5a131fe67a19c8a16276"
+      },
+      "cases": [
+        {
+          "case": "result_state_role_only",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "NOERROR",
+          "FAIL": true,
+          "synthetic_transport_calls": 1,
+          "body_delivered": true,
+          "body_not_delivered": null,
+          "delivered_role": "critic",
+          "readers_DB_bytes_unchanged": true
+        },
+        {
+          "case": "both_result_and_task_state_role",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "NOERROR",
+          "FAIL": true,
+          "synthetic_transport_calls": 1,
+          "body_delivered": true,
+          "body_not_delivered": null,
+          "delivered_role": "critic",
+          "readers_DB_bytes_unchanged": true
+        },
+        {
+          "case": "task_state_role_only",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "AnalysisContractError",
+          "PASS": true,
+          "error": "result_integrity_mismatch",
+          "synthetic_transport_calls": 0,
+          "readers_DB_bytes_unchanged": true
+        }
+      ]
+    },
+    {
+      "label": "candidate",
+      "public_source": "764b2d12aeb5d33d42dc621f6e48e30519a8cc25",
+      "original_result_sha256": "02ae15e35f34df0776d14261005887a442f276e8c046e478f40a3b1f6ae4a718",
+      "PASS": 1,
+      "FAIL": 2,
+      "ERROR": 0,
+      "exit": 1,
+      "public_source_hashes": {
+        "gurumoji.analysis_orchestration": "18abd78cc1bcca739cd69a5efca8fb4d457a3006174f30791793eb57dcfbd748",
+        "gurumoji.services.analysis_orchestration_adapters": "c8133f4f31f2fb59b6827cff2e02ac5f1a9ed184a283ac0fa91a59724aead4cb"
+      },
+      "cases": [
+        {
+          "case": "result_state_role_only",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "NOERROR",
+          "FAIL": true,
+          "synthetic_transport_calls": 1,
+          "body_delivered": true,
+          "body_not_delivered": null,
+          "delivered_role": "critic",
+          "readers_DB_bytes_unchanged": true
+        },
+        {
+          "case": "both_result_and_task_state_role",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "NOERROR",
+          "FAIL": true,
+          "synthetic_transport_calls": 1,
+          "body_delivered": true,
+          "body_not_delivered": null,
+          "delivered_role": "critic",
+          "readers_DB_bytes_unchanged": true
+        },
+        {
+          "case": "task_state_role_only",
+          "changed_only": "state_json.role; SQL IDs/raw/hash/committed decision untouched",
+          "expected": "reject before synthetic transport",
+          "actual": "AnalysisContractError",
+          "PASS": true,
+          "error": "result_integrity_mismatch",
+          "synthetic_transport_calls": 0,
+          "readers_DB_bytes_unchanged": true
+        }
+      ]
+    }
+  ]
+}
