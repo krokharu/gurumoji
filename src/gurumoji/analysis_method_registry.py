@@ -107,7 +107,7 @@ def connection_method_descriptor(method_id: str) -> dict | None:
                 "registry_version": REGISTRY_VERSION, "method_version": "connected-assets-2", "output_names": ["table"],
                 "logical_output_kinds": ["claim_set" if qualitative else "observation_table"], "input_contracts": contracts,
                 "native_input_schema": contracts[0]["schema"], "native_adapter": contracts[0]["adapter"],
-                "original_source_types": ["snapshot"] if qualitative else [], "units": ["dataset_claim"] if method_id == "theme_evidence_table" else
+                "original_source_types": ["snapshot"] if qualitative else [], "units": ["utterance"] if method_id == "unit_pool" else ["dataset_claim"] if method_id == "theme_evidence_table" else
                     ["utterance", "conversation_speaker", "conversation", "participant"]+(["dataset_claim","report_claim"] if qualitative else []),
                 "reference_roles": ["data_input","selection_basis","evidence_context"] if qualitative else ["data_input"], "input_actor_kinds": ["ai", "code", "system","researcher"] if qualitative else ["ai","code","system"],
                 "scope_modes": ["dataset"], "scope_policy": "all_included_initial", "purposes": ["exploratory"],
@@ -221,6 +221,7 @@ TABLE_PILOT_METHODS = {
 
 # Explicit versioned operations; the original five pilot contracts remain fixed.
 CONNECTED_METHODS = {
+    "unit_pool": ("columns",),
     "theme_evidence_table": ("theme_id",),
     "unit_projection": ("columns", "unit_ids"),
     "unit_aggregate": ("value_column", "operation", "unit", "participant_mapping"),
@@ -244,9 +245,9 @@ def qualitative_bundle_contract():
 def connected_slot(method_id):
     from .analysis_core import TABLE_PILOT_MAX_BYTES,fingerprint
     descriptor = connection_method_descriptor(method_id)
-    count = 2 if method_id == "unit_join" else 1
+    count = 2 if method_id in {"unit_join", "unit_pool"} else 1
     qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
-    slot={"slot_id": "table", "required": True, "min_items": count, "max_items": 32 if qualitative else count,
+    slot={"slot_id": "table", "required": True, "min_items": count, "max_items": 32 if qualitative else 16 if method_id == "unit_pool" else count,
             "roles": descriptor["reference_roles"], "accept_kinds": list(dict.fromkeys(c["kind"] for c in descriptor["input_contracts"] if c["kind"]!="snapshot")),
             "accept_schemas": [c["schema"] for c in descriptor["input_contracts"]], "accept_units": descriptor["units"],
             "scope_modes": ["dataset"], "actors": descriptor["input_actor_kinds"],

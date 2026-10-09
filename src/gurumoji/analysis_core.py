@@ -1018,6 +1018,8 @@ def validate_connected_request(method_id, request):
     parameters=request["parameters"]
     qualitative=method_id in {"qualitative_compare","qualitative_reuse"}
     if method_id=="theme_evidence_table":require(_connection_id(parameters["theme_id"]),"connected_theme_id")
+    elif method_id=="unit_pool":require(_connection_list(parameters["columns"],empty=False)
+        and {"unit_id","conversation_id","speaker_id","value_status"} <= set(parameters["columns"]),"connected_group_columns")
     elif method_id=="unit_projection":require(_connection_list(parameters["columns"],empty=False) and _connection_list(parameters["unit_ids"],empty=False),"connected_projection")
     elif method_id=="unit_aggregate":require(_connection_id(parameters["value_column"]) and parameters["operation"] in {"count","sum","mean"}
         and parameters["unit"] in {"conversation_speaker","conversation","participant"} and
@@ -1036,7 +1038,7 @@ def validate_connected_request(method_id, request):
             and all(_connection_id(context[k]) for k in ("plan_id", "consumer_task_id", "scope_id"))
             and all(_connection_hash(context[k]) for k in ("plan_hash", "scope_manifest_hash")), "connected_context_identity")
     refs = bindings["inputs"]; seen = set()
-    require(isinstance(refs, list) and (1<=len(refs)<=32 if qualitative else len(refs)==bindings["slot"]["min_items"]), "connected_cardinality")
+    require(isinstance(refs, list) and (1<=len(refs)<=32 if qualitative else 2<=len(refs)<=16 if method_id=="unit_pool" else len(refs)==bindings["slot"]["min_items"]), "connected_cardinality")
     for ref in refs:
         require(_connection_object(ref, ("plan_id", "plan_version", "plan_hash", "generation", "consumer_task_id", "slot_id", "input_ref_id", "role", "selection", "omission_reason"),("source","selector")), "connected_ref")
         require(ref["role"] in bindings["slot"]["roles"] and ref["slot_id"] == "table"
@@ -1078,9 +1080,10 @@ def connected_web_methods():
     """Registered capabilities, including only output columns known statically."""
     from .analysis_method_registry import CONNECTED_METHODS, connected_slot, connection_output_contract
     titles = {"theme_evidence_table": "テーマの根拠表", "unit_projection": "単位表の射影",
+        "unit_pool": "複数会話の単位表を準備",
         "unit_aggregate": "単位別集計", "unit_join": "完全キー結合", "unit_correlation": "探索的相関",
         "qualitative_compare": "質的比較", "qualitative_reuse": "根拠を選んで再読"}
-    fixed = {"theme_evidence_table": (["unit_id", "conversation_id", "speaker_id", "value_status", "support_count", "counter_count"], ["utterance"]),
+    fixed = {"unit_pool": ([], ["utterance"]), "theme_evidence_table": (["unit_id", "conversation_id", "speaker_id", "value_status", "support_count", "counter_count"], ["utterance"]),
         "unit_aggregate": (["unit_id", "conversation_id", "value_status", "value"], ["conversation_speaker", "conversation", "participant"]),
         "unit_correlation": (["statistic", "coefficient", "n", "status", "source_utterance_ids"], ["report_claim"]),
         "qualitative_compare": (["bundle_json"], ["dataset_claim"]), "qualitative_reuse": (["bundle_json"], ["dataset_claim"])}
@@ -1123,7 +1126,8 @@ def validate_asset_plan(value):
         require(_connection_object(step["scope"],("scope_id","manifest_hash")) and _connection_id(step["scope"]["scope_id"])
             and _connection_hash(step["scope"]["manifest_hash"]), "asset_plan_scope")
         slot=connected_slot(step["method_id"]);qualitative=step["method_id"] in {"qualitative_compare","qualitative_reuse"}
-        require(isinstance(step["inputs"],list) and (1<=len(step["inputs"])<=32 if qualitative else len(step["inputs"])==slot["min_items"]), "asset_plan_cardinality")
+        require(isinstance(step["inputs"],list) and (1<=len(step["inputs"])<=32 if qualitative else
+            2<=len(step["inputs"])<=16 if step["method_id"]=="unit_pool" else len(step["inputs"])==slot["min_items"]), "asset_plan_cardinality")
         refs=set(); deps=[]
         for ref in step["inputs"]:
             require(_connection_object(ref,("input_ref_id","role","selection","omission_reason"),("source",))

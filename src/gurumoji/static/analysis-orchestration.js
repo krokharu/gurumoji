@@ -464,6 +464,7 @@ function bindAnalysisOrchestration() {
   listen(orchestrationNode('participant-form'),'input',orchestrationParticipantEdit);
   listen(orchestrationNode('participant-form'),'change',orchestrationParticipantEdit);
   listen(orchestrationNode('participant-form'),'submit',orchestrationParticipantReview);
+  listen(orchestrationNode('participant-context'),'change',()=>{orchestrationParticipantCapture();orchestrationParticipantState.selectedContextKey=orchestrationNode('participant-context').value;orchestrationParticipantRender();});
   listen(orchestrationNode('participant-save'),'click',orchestrationParticipantSave);
   listen(orchestrationNode('participant-prepare'),'click',orchestrationAssetPrepareParticipant);
   listen(orchestrationNode('human-load'),'click',()=>orchestrationHumanLoad(orchestrationHumanState.options?.offset||0));
@@ -909,25 +910,26 @@ async function orchestrationHumanSave() {
 // scientific value, role eligibility, scope or future semantic target is made
 // by the browser. Queued dependencies are execution requests, not saved data.
 const orchestrationAssetState={options:null,steps:[],reviewed:null,loading:false,sending:false,uncertain:false,refreshRequired:false,request:0,runKey:'',choices:[]};
-const orchestrationAssetParameterFields={theme_evidence_table:['theme_id'],unit_projection:['columns','unit_ids'],unit_aggregate:['value_column','operation','unit','participant_mapping'],unit_join:['keys'],unit_correlation:['x_column','y_column','statistic'],qualitative_compare:['proposals'],qualitative_reuse:['relation_ids']};
+const orchestrationAssetParameterFields={unit_pool:['columns'],theme_evidence_table:['theme_id'],unit_projection:['columns','unit_ids'],unit_aggregate:['value_column','operation','unit','participant_mapping'],unit_join:['keys'],unit_correlation:['x_column','y_column','statistic'],qualitative_compare:['proposals'],qualitative_reuse:['relation_ids']};
 const orchestrationAssetRoleLabels={data_input:'処理の入力',selection_basis:'選択の根拠',evidence_context:'根拠の文脈'};
-const orchestrationAssetMethodNames={...orchestrationConnectedNames,qualitative_compare:'固定根拠の質的比較',qualitative_reuse:'同じ親根拠を用いた再読'};
+const orchestrationAssetMethodNames={...orchestrationConnectedNames,unit_pool:'複数会話の完全な発話表をまとめる',qualitative_compare:'固定根拠の質的比較',qualitative_reuse:'同じ親根拠を用いた再読'};
 const orchestrationAssetValueNames={count:'件数',sum:'合計',mean:'平均',conversation_speaker:'会話内の話者',conversation:'会話',participant:'参加者',pearson:'Pearson（探索用）',spearman:'Spearman（探索用）',support:'支持',counter:'反例',complement:'補完',conflict:'競合',incomparable:'比較できない'};
 const orchestrationAssetCopy=orchestrationHumanCopy;
 const orchestrationAssetOmissions=()=>orchestrationAssetMethod()?.omission_reason_choices||[];
-function orchestrationAssetInputName(input){const index=orchestrationAssetState.options?.inputs.findIndex(i=>i.option_id===input.option_id);return /(?:^|\/)\S+\.json$/.test(input.label)?`${{observation_table:'保存単位表',claim_set:'保存した解釈・主張',relation_graph:'保存した関係グラフ',snapshot:'固定した原文'}[input.kind]||'保存根拠'} ${index+1}`:input.label;}
+function orchestrationAssetInputName(input){const options=orchestrationAssetState.options,index=[...(options?.inputs||[]),...(options?.unit_pool?.sources||[])].findIndex(i=>i.option_id===input.option_id);return /(?:^|\/)\S+\.json$/.test(input.label)?`${{observation_table:'保存単位表',claim_set:'保存した解釈・主張',relation_graph:'保存した関係グラフ',snapshot:'固定した原文'}[input.kind]||'保存根拠'} ${index+1}`:input.label;}
 function orchestrationAssetReset(){
   const state=orchestrationAssetState;++state.request;Object.assign(state,{options:null,steps:[],reviewed:null,loading:false,sending:false,uncertain:false,refreshRequired:false,choices:[]});
   orchestrationNode('asset-form').hidden=true;orchestrationNode('asset-next').hidden=true;orchestrationNode('asset-confirmation').hidden=true;orchestrationNode('asset-steps').replaceChildren();orchestrationText('asset-message','');
-  orchestrationParticipantCapture();orchestrationParticipantState.context=null;orchestrationParticipantState.option=null;orchestrationParticipantState.key='';orchestrationNode('participant').hidden=true;
+  orchestrationParticipantCapture();orchestrationParticipantState.context=null;orchestrationParticipantState.option=null;orchestrationParticipantState.key='';orchestrationParticipantState.selectedContextKey='';orchestrationNode('participant').hidden=true;
 }
-function orchestrationAssetInvalidate(){if(orchestrationAssetState.uncertain)return;orchestrationAssetState.reviewed=null;orchestrationNode('asset-confirmation').hidden=true;}
-function orchestrationAssetReason(code){return ({human_pending:'必要な研究者記録がまだ揃っていません。',participant_mapping_missing:'参加者との対応を研究者が記録し、入力への接続を確認する必要があります。',permission_revoked:'利用許可が失効しています。',parent_permission_revoked:'元資料の利用許可が失効しています。',input_changed:'固定入力と現在の入力が一致しません。',run_stopped:'この実行は停止されています。',no_connected_inputs:'この実行には利用できる保存根拠がありません。',interface_draft_only:'この接続はまだ利用できません。'})[code]||'現在の保存状態・利用条件では使えません。状態を再取得して確認してください。';}
+function orchestrationAssetInvalidate(){if(orchestrationAssetState.uncertain)return;orchestrationAssetState.reviewed=null;orchestrationNode('asset-confirmation').hidden=true;for(const node of orchestrationNode('asset-form').querySelectorAll('[aria-invalid]'))node.removeAttribute('aria-invalid');}
+function orchestrationAssetReason(code){return ({pool_anchor_unavailable:'この実行の会話に結び付いた完全な発話表を利用できません。',pool_sources_insufficient:'異なる会話の利用可能な完全な発話表が2件以上必要です。',human_pending:'必要な研究者記録がまだ揃っていません。',participant_mapping_missing:'参加者との対応を研究者が記録し、入力への接続を確認する必要があります。',permission_revoked:'利用許可が失効しています。',parent_permission_revoked:'元資料の利用許可が失効しています。',input_changed:'固定入力と現在の入力が一致しません。',run_stopped:'この実行は停止されています。',no_connected_inputs:'この実行には利用できる保存根拠がありません。',interface_draft_only:'この接続はまだ利用できません。'})[code]||'現在の保存状態・利用条件では使えません。状態を再取得して確認してください。';}
 function orchestrationAssetAvailability(){
   const state=orchestrationAssetState,run=orchestrationState.run;
   const blocked=!run||!['accepted','queued','running'].includes(run.status)||run.stale||run.cancel_requested||state.options&&state.options.generation!==run.generation;
-  const ready=!blocked&&state.options?.enabled===true&&!state.refreshRequired;
-  orchestrationText('asset-availability',blocked?'現在の固定実行は追加処理を受け付けられません。停止・入力版・実行状態を確認してください。':state.options?.enabled===false?orchestrationAssetReason(state.options.reason_code):'処理は探索用です。研究者の判断・測定の妥当性・独立検証の認定とは別です。');
+  const pool=orchestrationAssetMethod()?.method_id==='unit_pool'||state.steps.some(step=>step.method_id==='unit_pool'),enabled=pool?state.options?.unit_pool?.enabled===true:state.options?.enabled===true;
+  const ready=!blocked&&enabled&&!state.refreshRequired;
+  orchestrationText('asset-availability',blocked?'現在の固定実行は追加処理を受け付けられません。停止・入力版・実行状態を確認してください。':pool&&!enabled?orchestrationAssetReason(state.options?.unit_pool?.reason_code):state.options?.enabled===false?orchestrationAssetReason(state.options.reason_code):'処理は探索用です。研究者の判断・測定の妥当性・独立検証の認定とは別です。');
   for(const id of ['load','next'])orchestrationNode(`asset-${id}`).disabled=!run||state.loading||state.sending||state.uncertain||orchestrationParticipantState.sending||Boolean(orchestrationParticipantDraft()?.uncertain);
   orchestrationNode('asset-add').disabled=!ready||state.loading||state.sending||state.uncertain||state.steps.length>=32;
   orchestrationNode('asset-review').disabled=!ready||state.loading||state.sending||state.uncertain||!state.steps.length;
@@ -940,11 +942,11 @@ function orchestrationAssetAvailability(){
 function orchestrationAssetOptionsValid(data){
   const integer=value=>Number.isSafeInteger(value)&&value>=0,hash=value=>typeof value==='string'&&/^sha256:[0-9a-f]{64}$/.test(value);
   const strings=(values,max)=>Array.isArray(values)&&values.length<=max&&values.every(value=>typeof value==='string'&&value.length>0&&value.length<=1000)&&new Set(values).size===values.length;
-  return data?.schema_id==='gurumoji.asset-plan-options'&&data.schema_version===1&&data.version==='asset-plan-options-1'&&data.item_id===orchestrationState.itemId&&data.run_id===orchestrationState.runId&&typeof data.library_id==='string'&&integer(data.generation)&&typeof data.enabled==='boolean'&&integer(data.offset)&&data.offset<=10000&&data.limit===20&&(data.next_offset===null||integer(data.next_offset)&&data.next_offset<=10000)&&
+  return orchestrationPoolOptionsValid(data?.unit_pool,data?.library_id)&&data?.schema_id==='gurumoji.asset-plan-options'&&data.schema_version===1&&data.version==='asset-plan-options-1'&&data.item_id===orchestrationState.itemId&&data.run_id===orchestrationState.runId&&typeof data.library_id==='string'&&integer(data.generation)&&typeof data.enabled==='boolean'&&integer(data.offset)&&data.offset<=10000&&data.limit===20&&(data.next_offset===null||integer(data.next_offset)&&data.next_offset<=10000)&&
     data.plan_template?.version==='asset-plan-1'&&typeof data.plan_template.plan_id==='string'&&data.plan_template.plan_id.length>0&&integer(data.plan_template.plan_version)&&data.plan_template.plan_version>=1&&
-    Array.isArray(data.methods)&&data.methods.length<=7&&new Set(data.methods.map(m=>m.method_id)).size===data.methods.length&&data.methods.every(m=>Object.hasOwn(orchestrationAssetParameterFields,m.method_id)&&strings(m.parameter_fields,8)&&m.parameter_fields.length===orchestrationAssetParameterFields[m.method_id].length&&m.parameter_fields.every(f=>orchestrationAssetParameterFields[m.method_id].includes(f))&&strings(m.roles,3)&&m.roles.length>0&&m.roles.every(r=>Object.hasOwn(orchestrationAssetRoleLabels,r))&&integer(m.min_inputs)&&integer(m.max_inputs)&&m.min_inputs>=1&&m.max_inputs<=32&&m.min_inputs<=m.max_inputs&&['observation_table','claim_set'].includes(m.output_kind)&&m.output_name==='tables/table.json'&&m.parameter_choices&&m.parameter_defaults)&&
+    Array.isArray(data.methods)&&data.methods.length<=8&&new Set(data.methods.map(m=>m.method_id)).size===data.methods.length&&data.methods.every(m=>Object.hasOwn(orchestrationAssetParameterFields,m.method_id)&&strings(m.parameter_fields,8)&&m.parameter_fields.length===orchestrationAssetParameterFields[m.method_id].length&&m.parameter_fields.every(f=>orchestrationAssetParameterFields[m.method_id].includes(f))&&strings(m.roles,3)&&m.roles.length>0&&m.roles.every(r=>Object.hasOwn(orchestrationAssetRoleLabels,r))&&integer(m.min_inputs)&&integer(m.max_inputs)&&m.min_inputs>=1&&m.max_inputs<=32&&m.min_inputs<=m.max_inputs&&['observation_table','claim_set'].includes(m.output_kind)&&m.output_name==='tables/table.json'&&m.parameter_choices&&m.parameter_defaults)&&
     Array.isArray(data.inputs)&&data.inputs.length<=20&&new Set(data.inputs.map(i=>i.option_id)).size===data.inputs.length&&new Set(data.inputs.map(i=>i.input_ref_id)).size===data.inputs.length&&data.inputs.every(i=>typeof i.option_id==='string'&&typeof i.input_ref_id==='string'&&typeof i.label==='string'&&typeof i.enabled==='boolean'&&i.scope?.mode==='dataset'&&typeof i.scope.scope_id==='string'&&hash(i.scope.manifest_hash)&&i.source&&['frozen','original'].includes(i.source.type)&&
-      (i.source.type==='frozen'?i.source.asset_key?.library_id===data.library_id&&hash(i.source.content_hash):i.source.source_ref?.library_id===data.library_id&&hash(i.source.source_ref.content_hash))&&strings(i.fields,128)&&strings(i.unit_ids,1024)&&strings(i.theme_ids,64)&&strings(i.relation_ids,64)&&strings(i.roles,3)&&i.roles.every(r=>Object.hasOwn(orchestrationAssetRoleLabels,r))&&Array.isArray(i.semantic_targets)&&i.semantic_targets.length<=128&&i.semantic_targets.every(t=>t.input_ref_id===i.input_ref_id&&typeof t.target_kind==='string'&&typeof t.target_id==='string'&&(integer(t.version)&&t.version>=1||typeof t.version==='string'&&t.version.length>0&&t.version.length<=1000)&&hash(t.content_hash))&&strings(i.compatible_methods,7)&&i.compatible_methods.every(m=>Object.hasOwn(orchestrationAssetParameterFields,m)));
+      (i.source.type==='frozen'?i.source.asset_key?.library_id===data.library_id&&hash(i.source.content_hash):i.source.source_ref?.library_id===data.library_id&&hash(i.source.source_ref.content_hash))&&strings(i.fields,128)&&strings(i.unit_ids,1024)&&strings(i.theme_ids,64)&&strings(i.relation_ids,64)&&strings(i.roles,3)&&i.roles.every(r=>Object.hasOwn(orchestrationAssetRoleLabels,r))&&Array.isArray(i.semantic_targets)&&i.semantic_targets.length<=128&&i.semantic_targets.every(t=>t.input_ref_id===i.input_ref_id&&typeof t.target_kind==='string'&&typeof t.target_id==='string'&&(integer(t.version)&&t.version>=1||typeof t.version==='string'&&t.version.length>0&&t.version.length<=1000)&&hash(t.content_hash))&&strings(i.compatible_methods,8)&&i.compatible_methods.every(m=>Object.hasOwn(orchestrationAssetParameterFields,m)));
 }
 async function orchestrationAssetLoad(offset=0){
   const state=orchestrationAssetState;if(state.loading||state.sending||state.uncertain||orchestrationParticipantState.sending||orchestrationParticipantDraft()?.uncertain)return;
@@ -959,17 +961,24 @@ async function orchestrationAssetLoad(offset=0){
     // exact request for inspection and require explicit clearing/rebuilding.
     if(state.steps.length){state.refreshRequired=true;orchestrationText('asset-message','保存条件を再取得しました。元の計画を保持しています。対象を確認して計画を取り消し、改めて選択してください。');}
     else{state.refreshRequired=false;orchestrationText('asset-message',data.inputs.length?'処理と保存参照を選択してください。':'この実行に利用できる保存根拠はありません。');}
-    orchestrationNode('asset-form').hidden=!data.inputs.length;orchestrationNode('asset-next').hidden=data.next_offset===null;
-    orchestrationNode('asset-method').replaceChildren(...data.methods.map(m=>{const n=orchestrationElement('option',orchestrationAssetMethodNames[m.method_id]);n.value=m.method_id;return n;}));orchestrationAssetInputs();orchestrationParticipantRender();
+    orchestrationNode('asset-form').hidden=!data.inputs.length&&!data.unit_pool?.sources.length;orchestrationNode('asset-next').hidden=data.next_offset===null;
+    const methods=[...data.methods.filter(m=>m.method_id!=='unit_pool'),...(data.unit_pool?.sources.length?[{method_id:'unit_pool'}]:[])];
+    orchestrationNode('asset-method').replaceChildren(...methods.map(m=>{const n=orchestrationElement('option',orchestrationAssetMethodNames[m.method_id]);n.value=m.method_id;return n;}));orchestrationAssetInputs();orchestrationParticipantRender();
   }catch(error){if(current()){state.refreshRequired=true;orchestrationNode('asset-form').hidden=true;orchestrationText('asset-message',`保存根拠の取得：${error.message}。未保存の計画は保持しています。`);}}
   finally{if(request===state.request){state.loading=false;orchestrationAssetAvailability();orchestrationParticipantAvailability();}}
 }
-function orchestrationAssetMethod(){return orchestrationAssetState.options?.methods.find(m=>m.method_id===orchestrationNode('asset-method').value);}
+function orchestrationAssetMethod(){
+  const options=orchestrationAssetState.options;
+  if(orchestrationNode('asset-method').value==='unit_pool'&&options?.unit_pool)return {method_id:'unit_pool',parameter_fields:options.unit_pool.parameter_fields,parameter_defaults:{},roles:['data_input'],min_inputs:options.unit_pool.min_sources,max_inputs:options.unit_pool.max_sources};
+  return options?.methods.find(m=>m.method_id===orchestrationNode('asset-method').value);
+}
 function orchestrationAssetInputs(){
   orchestrationAssetInvalidate();const state=orchestrationAssetState,m=orchestrationAssetMethod();if(!m)return;
   const host=orchestrationNode('asset-inputs');host.replaceChildren();state.choices=[];
-  for(const input of state.options.inputs){state.choices.push({input,source:input.source});}
+  const inputs=m.method_id==='unit_pool'?state.options.unit_pool.sources:state.options.inputs;
+  for(const input of inputs){state.choices.push({input,source:input.source});}
   for(const [index,step] of state.steps.entries()){
+    if(m.method_id==='unit_pool')continue; // Only already saved server choices.
     const producer=state.options.methods.find(method=>method.method_id===step.method_id);
     // Only explicit server capability metadata can offer a not-yet-saved
     // dependency. Its values/semantic targets remain unavailable until saved.
@@ -980,9 +989,9 @@ function orchestrationAssetInputs(){
   }
   for(const [index,{input}] of state.choices.entries()){
     const row=orchestrationElement('div',undefined,'orchestration-asset-input'),label=orchestrationElement('label',undefined,'check-row'),check=orchestrationElement('input');check.type='checkbox';check.dataset.choice=String(index);check.id=`orchestration-asset-choice-${index}`;
-    const compatible=input.enabled&&input.compatible_methods.includes(m.method_id);check.disabled=!compatible;check.dataset.fixed=String(!compatible);label.append(check,orchestrationElement('span',`${orchestrationAssetInputName(input)}${compatible?'':` · ${orchestrationAssetReason(input.reason_code)}`}`));row.append(label);
+    const compatible=m.method_id==='unit_pool'?state.options.unit_pool.enabled===true:input.enabled&&input.compatible_methods.includes(m.method_id);check.disabled=!compatible;check.dataset.fixed=String(!compatible);label.append(check,orchestrationElement('span',`${orchestrationAssetInputName(input)}${compatible?'':` · ${orchestrationAssetReason(m.method_id==='unit_pool'?state.options.unit_pool.reason_code:input.reason_code)}`}`));row.append(label);
     const roleLabel=orchestrationElement('label',undefined,'field'),roleCaption=orchestrationElement('span','この参照の役割');roleCaption.id=`orchestration-asset-role-${index}-label`;roleLabel.append(roleCaption);const role=orchestrationElement('select');role.id=`orchestration-asset-role-${index}`;role.setAttribute('aria-labelledby',roleCaption.id);
-    for(const value of input.roles.filter(r=>m.roles.includes(r))){const option=orchestrationElement('option',orchestrationAssetRoleLabels[value]);option.value=value;role.append(option);}roleLabel.append(role);row.append(roleLabel);host.append(row);
+    for(const value of (m.method_id==='unit_pool'?['data_input']:input.roles.filter(r=>m.roles.includes(r)))){const option=orchestrationElement('option',orchestrationAssetRoleLabels[value]);option.value=value;role.append(option);}roleLabel.append(role);row.append(roleLabel);host.append(row);
     if(['qualitative_compare','qualitative_reuse'].includes(m.method_id)&&Array.isArray(orchestrationAssetOmissions())&&orchestrationAssetOmissions().length){
       const omitLabel=orchestrationElement('label',undefined,'check-row'),omit=orchestrationElement('input');omit.type='checkbox';omit.dataset.omit=String(index);omitLabel.append(omit,orchestrationElement('span','この参照を処理せず、省略した理由を記録する'));row.append(omitLabel);
       const reasonLabel=orchestrationElement('label',undefined,'field'),reasonCaption=orchestrationElement('span','省略する理由');reasonCaption.id=`orchestration-asset-omit-${index}-label`;reasonLabel.append(reasonCaption);const reason=orchestrationElement('select');reason.id=`orchestration-asset-omit-${index}`;reason.setAttribute('aria-labelledby',reasonCaption.id);
@@ -993,6 +1002,25 @@ function orchestrationAssetInputs(){
   orchestrationAssetParameters();
 }
 function orchestrationAssetSelected(){return Array.from(orchestrationNode('asset-inputs').querySelectorAll('input[data-choice]:checked,input[data-omit]:checked'),check=>{const index=check.dataset.choice??check.dataset.omit,choice=orchestrationAssetState.choices[Number(index)];return {...choice,role:orchestrationNode(`asset-role-${index}`).value,omitted:check.dataset.omit!==undefined,omission_reason:check.dataset.omit!==undefined?orchestrationNode(`asset-omit-${index}`).value:null};});}
+function orchestrationPoolSelection(selected,options=orchestrationAssetState.options){
+  const reject=message=>{const error=Error(message);error.field='inputs';throw error;};
+  if(selected.length<2||selected.length>16)reject('完全な発話表を2〜16件選択してください。');
+  if(options?.unit_pool?.enabled!==true)reject('複数会話の利用許可を再取得して確認してください。');
+  const sourceKey=s=>JSON.stringify(['library_id','store_run_id','artifact_id','output_name'].map(k=>s.source?.asset_key?.[k]));
+  if(new Set(selected.map(s=>s.input?.option_id)).size!==selected.length||new Set(selected.map(sourceKey)).size!==selected.length)reject('同じ保存元を重複して選択できません。');
+  if(!selected.every(s=>!s.omitted&&s.role==='data_input'&&options?.unit_pool?.sources.includes(s.input)&&s.input.enabled!==false&&s.source===s.input.source&&s.source?.type==='frozen'))reject('現在利用できる完全な発話表を再取得して選択してください。');
+  if(!selected.every(s=>s.input.scope?.conversation_ids?.length===1)||new Set(selected.map(s=>s.input.scope.conversation_ids[0])).size!==selected.length)reject('各会話から一つずつ、異なる会話の完全な発話表を選択してください。');
+  return selected.map(s=>s.input.option_id);
+}
+function orchestrationPoolOptionsValid(pool,library){
+  if(pool===undefined)return true; // Old single-source servers remain usable.
+  const ids=values=>Array.isArray(values)&&values.length<=128&&new Set(values).size===values.length&&values.every(v=>typeof v==='string'&&v.length>0&&v.length<=1000);
+  const hash=value=>typeof value==='string'&&/^sha256:[0-9a-f]{64}$/.test(value);
+  return pool?.version==='unit-pool-request-1'&&typeof pool.enabled==='boolean'&&(pool.reason_code===null||typeof pool.reason_code==='string')&&pool.min_sources===2&&pool.max_sources===16&&Array.isArray(pool.sources)&&pool.sources.length<=1024&&new Set(pool.sources.map(s=>s.option_id)).size===pool.sources.length&&new Set(pool.sources.map(s=>s.input_ref_id)).size===pool.sources.length&&
+    pool.request_template?.version===pool.version&&Object.keys(pool.request_template).length===3&&typeof pool.request_template.plan_id==='string'&&pool.request_template.plan_id.length>0&&Number.isSafeInteger(pool.request_template.plan_version)&&pool.request_template.plan_version>=1&&
+    ids(pool.parameter_fields)&&pool.parameter_fields.length===1&&pool.parameter_fields[0]==='columns'&&ids(pool.required_columns)&&pool.required_columns.length===4&&['unit_id','conversation_id','speaker_id','value_status'].every(c=>pool.required_columns.includes(c))&&
+    pool.sources.every(s=>s.metadata_version==='pool-source-option-1'&&typeof s.option_id==='string'&&s.option_id.length>0&&typeof s.input_ref_id==='string'&&s.input_ref_id.length>0&&typeof s.label==='string'&&s.source?.type==='frozen'&&s.source.asset_key?.library_id===library&&hash(s.source.content_hash)&&s.scope?.mode==='dataset'&&typeof s.scope.scope_id==='string'&&hash(s.scope.manifest_hash)&&ids(s.scope.conversation_ids)&&s.scope.conversation_ids.length===1&&ids(s.fields)&&pool.required_columns.every(c=>s.fields.includes(c))&&Array.isArray(s.variables)&&s.variables.length<=128&&s.variables.every(v=>typeof v.variable_id==='string'&&s.fields.includes(v.variable_id)&&Number.isSafeInteger(v.version)&&v.version>=1&&hash(v.definition_hash)&&typeof v.value_type==='string'&&typeof v.scale==='string'&&typeof v.unit==='string'&&typeof v.validity==='string')&&Array.isArray(s.speakers)&&s.speakers.length<=256&&s.speakers.every(a=>a.conversation_id===s.scope.conversation_ids[0]&&typeof a.speaker_id==='string'));
+}
 function orchestrationAssetField(name,title,choices,multiple=false,fixed=[]){
   const host=orchestrationNode('asset-parameters'),label=orchestrationElement(multiple?'fieldset':'label',undefined,'field'),caption=orchestrationElement(multiple?'legend':'span',title);caption.id=`orchestration-asset-param-${name}-label`;label.append(caption);
   if(multiple){for(const [value,text] of choices){const row=orchestrationElement('label',undefined,'check-row'),n=orchestrationElement('input');n.type='checkbox';n.name=`asset-${name}`;n.value=value;n.checked=fixed.includes(value);n.dataset.fixed=String(fixed.includes(value));n.disabled=fixed.includes(value);row.append(n,orchestrationElement('span',text));label.append(row);}if(choices.length){const all=orchestrationElement('button','表示された選択肢をすべて選ぶ','secondary-button');all.type='button';all.addEventListener('click',()=>{for(const n of label.querySelectorAll('input'))n.checked=true;orchestrationAssetInvalidate();});label.append(all);}}
@@ -1001,10 +1029,10 @@ function orchestrationAssetField(name,title,choices,multiple=false,fixed=[]){
 }
 function orchestrationAssetParameters(){
   orchestrationAssetInvalidate();const m=orchestrationAssetMethod(),selected=orchestrationAssetSelected().filter(s=>!s.omitted),first=selected[0]?.input,host=orchestrationNode('asset-parameters');host.replaceChildren();if(!m)return;
-  orchestrationText('asset-scope',selected.map(({input,role})=>`${orchestrationAssetInputName(input)} · ${orchestrationAssetRoleLabels[role]} · 対象 ${input.scope.member_ids?.length??'未取得'}件 · 除外 ${input.scope.excluded_ids?.length??'未取得'}件 · 分析単位 ${{utterance:'発話',conversation_speaker:'会話内話者',conversation:'会話',participant:'参加者',report_claim:'探索結果',dataset_claim:'質的主張'}[input.unit]||'保存後に確認'}`).join(' / '));
+  orchestrationText('asset-scope',selected.map(({input,role})=>`${orchestrationAssetInputName(input)} · ${orchestrationAssetRoleLabels[role]} · 対象 ${input.scope.member_ids?.length??'未取得'}件 · 除外 ${input.scope.context_ids?.length??input.scope.excluded_ids?.length??'未取得'}件 · 分析単位 ${m.method_id==='unit_pool'?'発話':{utterance:'発話',conversation_speaker:'会話内話者',conversation:'会話',participant:'参加者',report_claim:'探索結果',dataset_claim:'質的主張'}[input.unit]||'保存後に確認'}`).join(' / '));
   const field=(name,title,values,multiple=false,fixed=[])=>orchestrationAssetField(name,title,values.map(v=>[v,orchestrationAssetValueNames[v]||v]),multiple,fixed);
   for(const name of m.parameter_fields){
-    if(name==='columns')field(name,'抽出する宣言済み列',first?.fields||[],true,['unit_id','conversation_id','value_status']);
+    if(name==='columns')field(name,m.method_id==='unit_pool'?'まとめる発話表の宣言済み列':'抽出する宣言済み列',m.method_id==='unit_pool'?first?.fields.filter(c=>selected.every(s=>s.input.fields.includes(c)))||[]:first?.fields||[],true,m.method_id==='unit_pool'?orchestrationAssetState.options.unit_pool.required_columns:['unit_id','conversation_id','value_status']);
     else if(name==='unit_ids')orchestrationAssetField(name,'抽出する保存単位',(first?.unit_ids||[]).map((id,index)=>[id,`保存単位 ${index+1}`]),true);
     else if(name==='keys')field(name,'両方の表に宣言された結合列',first?.fields.filter(f=>selected.every(({input})=>input.fields.includes(f)))||[],true,['unit_id']);
     else if(name==='theme_id')orchestrationAssetField(name,'記録されたテーマ',(first?.theme_ids||[]).map((id,index)=>[id,`保存テーマ ${index+1}`]));
@@ -1020,6 +1048,7 @@ function orchestrationAssetParameters(){
       host.append(orchestrationElement('p','これは研究者として明示した関係の提案です。原文に基づく採否は、保存後に別の研究者記録として確認します。','field-note'));
     }
   }
+  if(m.method_id==='unit_pool')host.append(orchestrationElement('p',`完全な発話表を2〜16件選びます（選択 ${selected.length}件）。発話の一部を切り出さず、現在の除外も保存時に照合します。対象集合は確認した計画の送信時に固定します。参加者の同一性は保存後に研究者が対応表として記録してください。`,'field-note'));
   if(m.method_id==='unit_aggregate'){
     orchestrationNode('asset-param-operation').addEventListener('change',()=>orchestrationAssetAggregateFields(first));orchestrationAssetAggregateFields(first);
   }
@@ -1036,13 +1065,23 @@ function orchestrationAssetAggregateFields(input){
 }
 function orchestrationAssetError(error){
   const field=error.field||'',leaf=field.split(/[.\[\]]/).filter(Boolean).at(-1),code=error.code||'';
-  const id=field.includes('parameters')||orchestrationAssetMethod()?.parameter_fields.includes(leaf)||/parameter|proposal|participant_mapping/.test(code)?'asset-parameters':/input|scope|source|asset_key/.test(field)||/scope|input|permission/.test(code)?'asset-inputs':'asset-method';
+  const id=field.includes('parameters')||orchestrationAssetMethod()?.parameter_fields.includes(leaf)||/parameter|proposal|participant_mapping/.test(code)?'asset-parameters':/input|scope|source|asset_key/.test(field)||/scope|input|permission|source|pool/.test(code)?'asset-inputs':'asset-method';
   const target=orchestrationNode(id);target.setAttribute('aria-invalid','true');target.setAttribute('aria-describedby','orchestration-asset-message');target.tabIndex=-1;orchestrationText('asset-message',`${error.message}。計画と入力した理由は保持しています。`);target.focus();
 }
 function orchestrationAssetAdd(event){
   event.preventDefault();orchestrationAssetAvailability();if(orchestrationNode('asset-add').disabled||!orchestrationNode('asset-form').reportValidity())return;
   const state=orchestrationAssetState,m=orchestrationAssetMethod(),selected=orchestrationAssetSelected(),params={};
   try{
+    if(m.method_id==='unit_pool'){
+      if(state.steps.length)throw Error('複数会話の発話表は一つの独立した計画として保存してください。現在の計画を取り消して選択できます。');
+      const source_ids=orchestrationPoolSelection(selected),columns=Array.from(orchestrationNode('asset-parameters').querySelectorAll('input[name="asset-columns"]:checked'),n=>n.value);
+      if(!state.options.unit_pool.required_columns.every(c=>columns.includes(c))||!columns.every(c=>selected.every(s=>s.input.fields.includes(c))))throw Error('すべての保存元に宣言された列と必須列を選択してください。');
+      const request={...orchestrationAssetCopy(state.options.unit_pool.request_template),source_ids,columns};
+      if(new TextEncoder().encode(JSON.stringify(request)).length>65536)throw Error('選択内容が保存上限を超えています。');
+      state.steps.push({step_id:'P1',method_id:'unit_pool',parameters:{columns},pool_request:request,inputs:selected.map(s=>({input_ref_id:s.input.input_ref_id,role:'data_input',selection:'selected',source:orchestrationAssetCopy(s.source)}))});
+      orchestrationAssetInvalidate();orchestrationAssetRenderSteps();orchestrationText('asset-message','複数会話の発話表を計画に追加しました。確認して送信すると、対象集合を固定します。');return;
+    }
+    if(state.steps.some(s=>s.method_id==='unit_pool'))throw Error('複数会話の発話表を先に保存し、保存根拠を再取得して次の処理を選択してください。');
     if(selected.length<m.min_inputs||selected.length>m.max_inputs)throw Error(`保存参照を${m.min_inputs}〜${m.max_inputs}件選択してください。`);
     if(!selected.every(s=>s.input.roles.includes(s.role)&&m.roles.includes(s.role)&&(s.omitted?['qualitative_compare','qualitative_reuse'].includes(m.method_id)&&orchestrationAssetOmissions().some(c=>c.value===s.omission_reason):s.input.enabled&&s.input.compatible_methods.includes(m.method_id))))throw Error('利用可能な入力と役割を再確認してください。');
     const included=selected.filter(s=>!s.omitted),scope=included[0]?.input.scope;if(!scope)throw Error('処理する保存参照を選択してください。');if(!['qualitative_compare','qualitative_reuse'].includes(m.method_id)&&!included.every(s=>s.input.scope.scope_id===scope.scope_id&&s.input.scope.manifest_hash===scope.manifest_hash))throw Error('固定対象集合が異なります。未対応の集合を結合しません。');
@@ -1076,7 +1115,7 @@ function orchestrationAssetRenderSteps(){
   orchestrationNode('asset-steps').replaceChildren(...state.steps.map((step,index)=>{
     const method=state.options?.methods.find(m=>m.method_id===step.method_id),labels={columns:'抽出列',keys:'結合列',x_column:'左の値',y_column:'右の値',statistic:'相関方法',...orchestrationTableFieldNames};
     const refs=step.inputs.map(ref=>{
-      const input=state.options?.inputs.find(input=>input.input_ref_id===ref.input_ref_id),name=input?orchestrationAssetInputName(input):'固定された保存参照';
+      const input=[...(state.options?.inputs||[]),...(state.options?.unit_pool?.sources||[])].find(input=>input.input_ref_id===ref.input_ref_id),name=input?orchestrationAssetInputName(input):'固定された保存参照';
       if(ref.selection==='omitted')return `${name} · 省略：${method?.omission_reason_choices?.find(choice=>choice.value===ref.omission_reason)?.label||'保存された理由'}`;
       if(ref.source.type==='from_step')return `計画の処理 ${state.steps.findIndex(parent=>parent.step_id===ref.source.step_id)+1}の保存後に実行 · ${orchestrationAssetRoleLabels[ref.role]}`;
       return `${name} · ${orchestrationAssetRoleLabels[ref.role]}`;
@@ -1090,8 +1129,8 @@ function orchestrationAssetRenderSteps(){
 }
 function orchestrationAssetReview(){
   const state=orchestrationAssetState;orchestrationAssetAvailability();if(orchestrationNode('asset-review').disabled)return;
-  state.reviewed={request:{...orchestrationAssetCopy(state.options.plan_template),steps:orchestrationAssetCopy(state.steps)},epoch:orchestrationState.epoch,viewer:orchestrationState.viewerEpoch};
-  orchestrationText('asset-summary',`${state.steps.length}件の処理を、表示された役割・固定対象集合・依存順にローカルコードで実行します。この実行の進行状況と保存結果はタスク台帳で確認できます。探索結果は研究者の採用や独立検証とは別です。`);orchestrationNode('asset-confirmation').hidden=false;orchestrationAssetAvailability();orchestrationNode('asset-execute').focus();
+  state.reviewed={request:state.steps[0]?.method_id==='unit_pool'?orchestrationAssetCopy(state.steps[0].pool_request):{...orchestrationAssetCopy(state.options.plan_template),steps:orchestrationAssetCopy(state.steps)},epoch:orchestrationState.epoch,viewer:orchestrationState.viewerEpoch};
+  orchestrationText('asset-summary',state.reviewed.request.version==='unit-pool-request-1'?`${state.reviewed.request.source_ids.length}件の完全な発話表と宣言済み列を保存処理へ送信します。現在の保存元・除外・利用条件を照合し、対象集合を固定して保存します。参加者の対応と採否は保存後に研究者が記録してください。`:`${state.steps.length}件の処理を、表示された役割・固定対象集合・依存順にローカルコードで実行します。この実行の進行状況と保存結果はタスク台帳で確認できます。探索結果は研究者の採用や独立検証とは別です。`);orchestrationNode('asset-confirmation').hidden=false;orchestrationAssetAvailability();orchestrationNode('asset-execute').focus();
 }
 async function orchestrationAssetExecute(){
   const state=orchestrationAssetState,r=state.reviewed;orchestrationAssetAvailability();if(!r||state.sending||orchestrationNode('asset-execute').disabled||r.epoch!==orchestrationState.epoch||r.viewer!==orchestrationState.viewerEpoch)return;
@@ -1099,9 +1138,10 @@ async function orchestrationAssetExecute(){
   try{
     const {data,status}=await orchestrationHumanJson(`${base}/asset-plans`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r.request)});
     if(![200,202].includes(status)||typeof data.duplicate!=='boolean'||!data.tasks||data.identity?.plan_id!==r.request.plan_id||data.identity.plan_version!==r.request.plan_version)throw Error('受付の結果を確認できません。');
+    if(r.request.version==='unit-pool-request-1'&&(!data.scope||data.scope.mode!=='dataset'||typeof data.scope.scope_id!=='string'||!/^sha256:[0-9a-f]{64}$/.test(data.scope.manifest_hash)||!Array.isArray(data.scope.conversation_ids)||data.scope.conversation_ids.length<2||data.scope.conversation_ids.length>16||!Array.isArray(data.scope.member_ids)||!Array.isArray(data.scope.context_ids)))throw Error('保存処理で固定した対象集合の応答を確認できません。');
     if(r.epoch!==orchestrationState.epoch)return;
     state.uncertain=false;state.refreshRequired=true;state.reviewed=null;orchestrationNode('asset-confirmation').hidden=true;
-    orchestrationText('asset-message',data.duplicate?'同じ計画は受付済みです。重複して実行していません。保存結果を確認してください。':'計画を受け付けました。未処理・失敗・保存済み結果はタスク台帳で確認してください。');if(r.viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open)pollAnalysisOrchestration();
+    orchestrationText('asset-message',`${data.duplicate?'同じ計画は受付済みです。重複して実行していません。保存結果を確認してください。':'計画を受け付けました。未処理・失敗・保存済み結果はタスク台帳で確認してください。'}${r.request.version==='unit-pool-request-1'?` 固定対象：${data.scope.conversation_ids.length}会話 · 対象${data.scope.member_ids.length}発話 · 除外${data.scope.context_ids.length}発話。保存後に計画を取り消し、保存根拠を再取得して参加者対応を記録できます。`:''}`);if(r.viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open)pollAnalysisOrchestration();
   }catch(error){
     if(r.epoch!==orchestrationState.epoch)return;
     if(error.status>=400&&error.status<500){state.reviewed=null;state.refreshRequired=true;state.uncertain=false;orchestrationNode('asset-confirmation').hidden=true;}
@@ -1109,7 +1149,15 @@ async function orchestrationAssetExecute(){
     if(r.viewer===orchestrationState.viewerEpoch&&orchestrationNode('live').open)orchestrationAssetError(error);
   }finally{if(r.epoch===orchestrationState.epoch){state.sending=false;orchestrationAssetAvailability();}}
 }
-const orchestrationParticipantState={drafts:new Map(),key:'',option:null,context:null,sending:false,request:0};
+const orchestrationParticipantState={drafts:new Map(),key:'',option:null,context:null,selectedContextKey:'',sending:false,request:0};
+function orchestrationParticipantContextKey(context){const option=context?.human_record_option;return option?JSON.stringify([option.owner_item_id,option.owner_run_id,option.asset_key,option.target,context.scope||option.scope]):'';}
+function orchestrationParticipantScopeValid(context,option){
+  const scope=option?.scope,ids=scope?.conversation_ids;
+  return Array.isArray(ids)&&ids.length>=1&&ids.length<=16&&new Set(ids).size===ids.length&&ids.every(id=>typeof id==='string'&&id.length>0)&&
+    (ids.length===1||Array.isArray(option.speakers)&&JSON.stringify(option.speakers)===JSON.stringify(context.speakers))&&
+    (!context.scope||JSON.stringify(context.scope)===JSON.stringify(scope))&&Array.isArray(context.speakers)&&context.speakers.length>0&&context.speakers.length<=256&&
+    new Set(context.speakers.map(s=>JSON.stringify([s.conversation_id,s.speaker_id]))).size===context.speakers.length&&context.speakers.every(s=>Object.keys(s).length===2&&ids.includes(s.conversation_id)&&typeof s.speaker_id==='string'&&s.speaker_id.length>0)&&ids.every(id=>context.speakers.some(s=>s.conversation_id===id));
+}
 function orchestrationParticipantDraft(){return orchestrationParticipantState.drafts.get(orchestrationParticipantState.key);}
 function orchestrationParticipantCapture(){
   const draft=orchestrationParticipantDraft();if(!draft)return;
@@ -1117,16 +1165,22 @@ function orchestrationParticipantCapture(){
   draft.assignments=Array.from(orchestrationNode('participant-assignments').querySelectorAll('input'),input=>({conversation_id:input.dataset.conversation,speaker_id:input.dataset.speaker,participant_id:input.value}));
 }
 function orchestrationParticipantRender(){
-  const state=orchestrationParticipantState;orchestrationParticipantCapture();const context=orchestrationAssetState.options?.participant_context,option=context?.human_record_option;
+  const state=orchestrationParticipantState;orchestrationParticipantCapture();const root=orchestrationAssetState.options?.participant_context,contexts=root?.contexts;
+  const selectable=Array.isArray(contexts)&&contexts.length>0;
+  orchestrationNode('participant-context-field').hidden=!selectable;
+  orchestrationNode('participant-context').replaceChildren(...[{value:'',label:'固定対象を選択'},...(selectable?contexts.filter(c=>c.human_record_option).map(c=>({value:orchestrationParticipantContextKey(c),label:`${c.human_record_option.label} · 会話 ${(c.scope?.conversation_ids||[]).join(' / ')} · 保存 ${c.human_record_option.asset_key.store_run_id}`})):[])].map(c=>{const n=orchestrationElement('option',c.label);n.value=c.value;return n;}));
+  const context=selectable?contexts.find(c=>orchestrationParticipantContextKey(c)===state.selectedContextKey):root,option=context?.human_record_option;
+  orchestrationNode('participant-context').value=context&&selectable?state.selectedContextKey:'';
   const preparation=orchestrationAssetState.options?.inputs?.find(input=>input.option_id===context?.preparation_option_id&&input.input_ref_id===context?.preparation_input_ref_id&&input.enabled&&input.compatible_methods.includes('unit_projection'));
   const canPrepare=context?.reason_code==='require_saved_output'&&context.preparation_method==='unit_projection'&&preparation?.fields.length&&preparation.unit_ids.length;
   orchestrationNode('participant-prepare').hidden=!canPrepare;
-  const valid=context&&option?.target_kind==='participant_mapping'&&option.owner_item_id===orchestrationState.itemId&&typeof option.owner_run_id==='string'&&option.owner_run_id.length>0&&Array.isArray(context.speakers)&&context.speakers.length>0&&context.speakers.length<=128&&
-    new Set(context.speakers.map(s=>s.conversation_id)).size===1&&context.speakers.every(s=>Object.keys(s).length===2&&typeof s.conversation_id==='string'&&typeof s.speaker_id==='string')&&
-    Array.isArray(context.known_participants)&&context.known_participants.length<=128&&context.known_participants.every(p=>Object.keys(p).length===1&&typeof p.participant_id==='string')&&
+  const valid=context&&option?.target_kind==='participant_mapping'&&option.owner_item_id===orchestrationState.itemId&&typeof option.owner_run_id==='string'&&option.owner_run_id.length>0&&orchestrationParticipantScopeValid(context,option)&&
+    (!context.known_participants||Array.isArray(context.known_participants)&&context.known_participants.length<=128&&context.known_participants.every(p=>Object.keys(p).length===1&&typeof p.participant_id==='string'))&&
     orchestrationHumanOptionsValid({schema_id:'gurumoji.human-record-options',schema_version:1,item_id:orchestrationState.itemId,run_id:orchestrationState.runId,generation:orchestrationAssetState.options.generation,enabled:true,offset:0,limit:20,next_offset:null,options:[option]});
-  state.context=valid?context:null;state.option=valid?option:null;orchestrationNode('participant').hidden=!context;
-  if(!valid){orchestrationNode('participant-form').hidden=true;orchestrationText('participant-status',canPrepare?'対応を記録する保存済み単位表が必要です。元の表の宣言済み列と全保存単位をそのまま保存する処理を計画に追加し、確認して実行してください。':context?'対応を記録できる固定会話・話者・研究者対象を確認できません。自由記述から補いません。':'');return;}
+  state.context=valid?context:null;state.option=valid?option:null;orchestrationNode('participant').hidden=!root;
+  orchestrationNode('participant-target').hidden=!valid;
+  if(!valid){state.key='';orchestrationNode('participant-form').hidden=true;orchestrationText('participant-status',selectable&&!context?'対応表を記録する固定対象を選択してください。単一会話の記録を複数会話へ転用しません。':canPrepare?'対応を記録する保存済み単位表が必要です。元の表の宣言済み列と全保存単位をそのまま保存する処理を計画に追加し、確認して実行してください。':context?'対応を記録できる固定会話・話者・研究者対象を確認できません。自由記述から補いません。':'');orchestrationParticipantAvailability();return;}
+  const meta=orchestrationNode('participant-target-meta');meta.replaceChildren();for(const [title,value] of [['会話',option.scope.conversation_ids.join(' / ')],['対象集合',option.scope.scope_id],['対象集合hash',option.scope.manifest_hash],...Object.entries(option.asset_key).map(([k,v])=>[`保存対象 ${k}`,v]),...Object.entries(option.target).map(([k,v])=>[`固定版 ${k}`,v])])meta.append(orchestrationElement('dt',title),orchestrationElement('dd',String(value)));
   const key=`${orchestrationState.itemId}:${orchestrationState.runId}:${orchestrationHumanTargetKey(option)}`;state.key=key;
   const step=option.human_steps.find(step=>step.step_id==='participant-mapping-review');
   if(!state.drafts.has(key))state.drafts.set(key,{actor:step.latest_record?.record.actor.actor_id||'',reason:'',decision:'',assignments:context.speakers.map(s=>({...s,participant_id:context.confirmed_mapping?.assignments?.find(a=>a.conversation_id===s.conversation_id&&a.speaker_id===s.speaker_id)?.participant_id||''})),payload:null,uncertain:false,refreshRequired:false});
@@ -1151,6 +1205,7 @@ function orchestrationParticipantAvailability(){
   const ready=Boolean(state.option?.enabled&&orchestrationAssetState.options?.generation===run?.generation&&!run?.cancel_requested&&!run?.stale&&['accepted','queued','running','completed','succeeded','idle','paused'].includes(run?.status));
   orchestrationNode('participant-review').disabled=!ready||state.sending||Boolean(draft?.uncertain)||Boolean(draft?.refreshRequired);
   orchestrationNode('participant-save').disabled=!ready||state.sending||!draft?.payload;
+  orchestrationNode('participant-context').disabled=state.sending||Boolean(draft?.uncertain);
   for(const n of orchestrationNode('participant-form').querySelectorAll('input,select,textarea'))n.disabled=state.sending||Boolean(draft?.uncertain);
   if(!ready)orchestrationNode('participant-confirmation').hidden=true;
 }

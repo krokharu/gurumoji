@@ -116,7 +116,7 @@
     </section>
     <section class="orchestration-output orchestration-asset-plan" aria-labelledby="orchestration-asset-title">
       <h3 id="orchestration-asset-title">保存した根拠をつなぎ、局所分析 <span class="orchestration-kind">CODE</span></h3>
-      <p class="field-note">採用テーマの根拠、単位表、質的比較を選びます。表示の取得は計算しません。入力・対象集合・依存する処理を確認してから、ローカルのコード処理を明示的に実行します。</p>
+      <p class="field-note">採用テーマの根拠、単位表、質的比較を選びます。複数会話では完全な発話表を2〜16件選び、確認後の送信時に対象集合を固定します。表示の取得は計算しません。入力・対象集合・依存する処理を確認してから、ローカルのコード処理を明示的に実行します。</p>
       <p id="orchestration-asset-availability"></p>
       <button id="orchestration-asset-load" type="button" class="secondary-button">利用できる保存根拠を確認</button>
       <button id="orchestration-asset-next" type="button" class="secondary-button" hidden>次の保存根拠を確認</button>
@@ -135,7 +135,9 @@
       <div id="orchestration-asset-confirmation" hidden><p id="orchestration-asset-summary"></p><button id="orchestration-asset-execute" type="button" class="primary-button">確認した計画をローカルで実行</button></div>
       <details id="orchestration-participant" hidden>
         <summary>会話内の話者と参加者の対応を研究者が記録する</summary>
-        <p class="field-note">固定された一つの会話の話者について、同じ人物として集約する参加者を明示します。保存済み単位表の独立した確認記録として、この対応表そのものを保存します。既存のTA自由記述メモから対応を推測しません。訂正すると派生した入力が古くなるため、保存根拠を再取得して接続を確認してください。</p>
+        <p class="field-note">選択した固定対象の各会話・話者について、同じ人物として集約する参加者を明示します。複数会話でも同じ人物は研究者が明示してください。保存済み単位表の独立した確認記録として、この対応表そのものを保存します。既存のTA自由記述メモから対応を推測しません。訂正すると派生した入力が古くなるため、保存根拠を再取得して接続を確認してください。</p>
+        <label id="orchestration-participant-context-field" class="field" hidden><span id="orchestration-participant-context-label">参加者対応を記録する固定対象</span><select id="orchestration-participant-context" aria-labelledby="orchestration-participant-context-label"><option value="">固定対象を選択</option></select></label>
+        <details id="orchestration-participant-target" hidden><summary>選択した対象と固定版を確認</summary><dl id="orchestration-participant-target-meta" class="analysis-history-metadata"></dl></details>
         <p id="orchestration-participant-status"></p>
         <button id="orchestration-participant-prepare" type="button" class="secondary-button" hidden>対応を記録する単位表の保存を、計画に追加</button>
         <p id="orchestration-participant-message" role="status" aria-live="polite" tabindex="-1"></p>

@@ -315,6 +315,15 @@ class AnalysisOrchestrationService:
         self.memory_manager = memory_manager
         self.expert_provider = expert_provider
         self.table_store = table_store
+        if table_store is not None:
+            def current_source(item_id):
+                item = self.find_item(item_id)
+                if item is None or self.source_fingerprint is None: return None
+                value = dict(item)
+                return {"input_hash": self.source_fingerprint(item),
+                    "source_revision": int(value.get("revision_count", 0) or 0),
+                    "analysis_revision": int(value.get("analysis_revision", 0) or 0)}
+            table_store.current_source_lookup = current_source
         self._table_validation_lock = threading.Lock()
         self._budget_factory, self._budget_clock = budget_factory, budget_clock
         self._run_budgets: dict[str, OrchestrationBudget] = {}
@@ -1360,6 +1369,11 @@ class AnalysisOrchestrationService:
         while True:
             page = self.table_store.asset_plan_options(run=run, initial=initial, offset=offset)
             options.extend(page["inputs"])
+            options.extend({**o,"compatible_methods":["unit_pool"]} for o in page["unit_pool"]["sources"]
+                if not any(c["source"]==o["source"] for c in options))
+            for choice in options:
+                if choice["source"].get("type")=="frozen" and any(o["source"]==choice["source"] for o in page["unit_pool"]["sources"]):
+                    choice["compatible_methods"]=list(dict.fromkeys(choice["compatible_methods"]+["unit_pool"]))
             if page["next_offset"] is None: break
             offset = page["next_offset"]
         methods = {m["method_id"]: m for m in connected_web_methods()}
@@ -1393,12 +1407,14 @@ class AnalysisOrchestrationService:
                     choices.append(choice)
             if not choices: raise _error("固定入力を選択してください。", "asset_plan_input_unavailable")
             scope = step["scope"]
-            if not any(all(c["scope"].get(k) == scope[k] for k in scope) for c in choices):
+            if method != "unit_pool" and not any(all(c["scope"].get(k) == scope[k] for k in scope) for c in choices):
                 raise _error("保存済み範囲と一致しません。", "asset_plan_scope")
             first = choices[0]
             def require(value, reason="asset_plan_parameter_choice"):
                 if not value: raise _error("保存済み選択肢または宣言された能力と一致しません。", reason)
-            if method == "theme_evidence_table": require(params["theme_id"] in first["theme_ids"])
+            if method == "unit_pool":
+                require(all(set(params["columns"])<=set(c["fields"]) for c in choices))
+            elif method == "theme_evidence_table": require(params["theme_id"] in first["theme_ids"])
             elif method == "unit_projection":
                 require(not first.get("future"), "require_saved_output")
                 require({"unit_id", "conversation_id", "value_status"} <= set(params["columns"]) <= set(first["fields"])
@@ -1439,6 +1455,12 @@ class AnalysisOrchestrationService:
     def register_asset_plan(self,item_id,run_id,value):
         from .analysis_core import validate_asset_plan,validate_connected_request,web_asset_plan_template
         from .analysis_method_registry import connected_slot
+        group_scope=None
+        if isinstance(value,dict) and value.get("version")=="unit-pool-request-1":
+            with self._table_read(item_id) as db:
+                run=self._table_run(db,item_id,run_id)
+                initial=self._initial(db,run["initial_id"])
+            value,group_scope=self.table_store.pool_plan(value,run,initial)
         plan,ordered=validate_asset_plan(value); plan_hash=fingerprint(plan)
         with self._db() as db:
             run=self._read_run(db,run_id,item_id)
@@ -1468,7 +1490,8 @@ class AnalysisOrchestrationService:
                 if previous["plan_hash"] != plan_hash:raise _error("同じ計画版を変更できません。","asset_plan_conflict")
                 if web_bound:
                     self._check_web_plan_inputs(db, run, plan, existing_tasks=previous["tasks"])
-                return {"identity":previous["identity"],"tasks":previous["tasks"],"duplicate":True}
+                return {"identity":previous["identity"],"tasks":previous["tasks"],"duplicate":True,
+                    **({"scope":group_scope} if group_scope is not None else {})}
             run=self._table_run(db,item_id,run_id)
             if web_bound: self._check_web_plan_inputs(db, run, plan)
             versions=[p["plan_version"] for p in run.get("asset_plans",[]) if p["plan_id"]==plan["plan_id"]]
@@ -1506,7 +1529,8 @@ class AnalysisOrchestrationService:
             self._write_run(db,run)
             self._event(db,run_id,"asset_plan_registered","選択した依存とslotを固定しました。",plan_identity=identity,tasks=tasks)
         if self.schedule:self._schedule(run_id)
-        return {"identity":identity,"tasks":tasks,"duplicate":False}
+        return {"identity":identity,"tasks":tasks,"duplicate":False,
+            **({"scope":group_scope} if group_scope is not None else {})}
 
     def _register(self, db, run, intent: dict, *, phase: str, automatic=False, reuse_existing=False) -> dict | None:
         task_origin = self._budget_clock()

@@ -1274,7 +1274,10 @@ def run_connected_table(method_id, tables, parameters):
         r["unit_id"] in sources and sources[r["unit_id"]] for r in rows), "status_sources")
     fields = list(source["fields"])
     selected = rows
-    if method_id == "theme_evidence_table":
+    if method_id == "unit_pool":
+        require(source.get("group_source_set",{}).get("version") == "group-source-set-1"
+            and set(parameters) == {"columns"} and set(parameters["columns"]) == set(fields), "pool_prepared")
+    elif method_id == "theme_evidence_table":
         require(set(parameters) == {"theme_id"} and parameters["theme_id"] == source["theme_id"], "theme")
     elif method_id == "unit_projection":
         columns = parameters["columns"]; ids = parameters["unit_ids"]
@@ -1380,6 +1383,7 @@ def run_connected_table(method_id, tables, parameters):
                 "rows": [{"statistic":statistic,"coefficient":coefficient,"n":len(pairs),"status":status,
                           "source_utterance_ids": sorted({s for r in pairs for s in sources[r["unit_id"]]})}],
                 "unit_contract": {**{k:source[k] for k in ("input_hashes", "definition_adoption_refs", "scope")},
+                    **({"group_source_set":source["group_source_set"]} if "group_source_set" in source else {}),
                     "source_utterances":source.get("source_utterances",{}),
                     "version":"unit-table-2", "unit":"report_claim", "sources":sources, "variables":[],
                     "denominators":source["denominators"]}, "population": {"denominator":len(rows),"calculation_denominator":len(pairs)}}
@@ -1387,6 +1391,7 @@ def run_connected_table(method_id, tables, parameters):
     return {"fields": fields, "rows":rows, "population": {"denominator":sum(r["value_status"] != "excluded" for r in rows),
         "calculation_denominator":sum(r["value_status"] == "observed" for r in rows)},
         "unit_contract": {"version":"unit-table-2", "unit":unit, "input_hashes":source["input_hashes"],
+            **({"group_source_set":source["group_source_set"]} if "group_source_set" in source else {}),
             "source_utterances":source.get("source_utterances",{}),
             "definition_adoption_refs":source["definition_adoption_refs"], "sources":sources,
             "denominators":denominators if method_id == "unit_aggregate" else source["denominators"],
