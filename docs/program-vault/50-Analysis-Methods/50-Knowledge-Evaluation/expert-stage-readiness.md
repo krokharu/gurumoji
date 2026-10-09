@@ -20,6 +20,8 @@ G1b-entry-02（Task `task_04f5c063165c`、Run `run_9bb051ea8c4b`、owner W-knowl
 
 ## 固定対象と確認範囲
 
+2026-10-10 07:44 JST追補：DotのCore配送 `95a33e9acb85348f1c94982b6ff75abee090d9ff` をWindows新24／隣接9／独立負例19、実serviceの323件・9scope・Handler／Store保存／fresh、23wireの全ID順序・採択Core参照5・保存raw14の照合後に限定受入した。C0は1429artifact＋Git対応1328sourceを照合した。旧wire前提14methodは別のtest-only固定 `4d92d0a45dcede55ebb1c991343fe12a2a8295f3` へ移行し、Windows関連97unique（初回96成功＋固定資料の抽出不足1件のみ再実行成功）と独立6成功、932artifact＋親／候補892sourceを確認。初回失敗と旧7FAIL／8ERROR、他59method AST、production全体／新Core24不変を保持した。未採択履歴・明示依存・clarification・統計・blindの配送、保存全raw／来歴を維持し、検証を緩和していない。実本文の全wire容量、実Gemma全323件と安定3回、意味品質、研究者本人の採否は別ゲートで未受入。Dotは既存方法レビューの17節にある未実行合成例のCPU検証へ同ownerで継続し、AI許可9／禁止8、下書きと本人確定、未実行を分離する。
+
 2026-10-10 06:55 JST追補：Framework説明 `4310b2eb862854e3f62f636b757be9f6f522f409` はWindows新7＋別作者独立4＝11PASS、208artifact＋198の親／候補source hashをC0が照合し限定統合した。3message以外の全定義、6／5／7段階、actor・AI権限・min2／block・version1は不変、知識hash更新で旧AI文脈をstale拒否する。研究者が定義するケース数と現製品の話者条件を区別する説明の受入であり、Framework一般の適否・方法意味品質・研究者本人の採否は未承認。Core配送の追加修正はDotが隔離3pathで実着手、修正後G0.5b/cの新raw-only固定版は独立CPU71／模擬wire125／実行入口19項目を確認済みだが、新実推論と実品質は別受入とする。
 
 2026-10-10 06:44 JST追補：通常fullapp1440／390から実比較builder／API、Handler／archive／Store保存、fresh画面／Store、ZIP／全14artifactのbytes一致まで別作者が2条件PASS。390pxでは実横wheel0→371で右端列を確認した。固定 `f2462ab5e066679b340c78f2f65208a445cdc942` の261artifact＋168source hashをC0が照合し、対象0／既知0／不明と保存原版を維持する画面・保存経路を限定受入した。初回browser／shell記録失敗と最終sandbox有効／audit exit0を分離する。研究者本人の理解・方法採用の合格ではない。
