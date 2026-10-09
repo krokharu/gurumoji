@@ -11,6 +11,110 @@ def comparison_rate(count: int | float, denominator: int | float) -> float:
     return round(1000 * float(count) / float(denominator), 2) if denominator else 0.0
 
 
+def _emotion_model_id(entry: Any) -> str | None:
+    """Accept only the current projection's actual model key and valid label."""
+    if not isinstance(entry, dict):
+        return None
+    model_id = entry.get("model")
+    if (not isinstance(model_id, str) or not model_id.strip()
+            or model_id != model_id.strip() or model_id.casefold() == "unknown"):
+        return None
+    labels = [entry.get(key) for key in ("label", "label_ja")]
+    if any(value is not None and not isinstance(value, str) for value in labels):
+        return None
+    if not any(isinstance(value, str) and value.strip() for value in labels):
+        return None
+    name = entry.get("model_name")
+    if name is not None and not isinstance(name, str):
+        return None
+    return model_id
+
+
+def _emotion_observations(
+    projections: list[tuple[list[dict[str, Any]], dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Describe observable predictions, never inference execution or emotion absence.
+
+    Catalog identity comes only from actual model keys in included turn details.
+    Empty arrays are valid current projections; missing/legacy/malformed details
+    cannot establish counts. Conflicting display names leave a model unresolved,
+    rather than choosing a name or merging different IDs with the same name.
+    """
+    model_names: dict[str, set[str]] = {}
+    for included, _quality in projections:
+        for segment in included:
+            details = segment.get("emotion_details")
+            if not isinstance(details, list):
+                continue
+            for entry in details:
+                model_id = _emotion_model_id(entry)
+                if model_id is not None:
+                    names = model_names.setdefault(model_id, set())
+                    name = entry.get("model_name")
+                    if isinstance(name, str) and name.strip():
+                        names.add(name.strip())
+    catalog = {
+        model_id: next(iter(names)) if names else None
+        for model_id, names in sorted(model_names.items()) if len(names) <= 1
+    }
+    results = []
+    for included, quality in projections:
+        seen_ids: set[str] = set()
+        observed: Counter[str] = Counter()
+        any_observed = 0
+        known = True
+        for segment in included:
+            turn_id = segment.get("id")
+            if (not isinstance(turn_id, str) or not turn_id.strip()
+                    or turn_id != turn_id.strip() or turn_id in seen_ids):
+                known = False
+            else:
+                seen_ids.add(turn_id)
+            details = segment.get("emotion_details")
+            if not isinstance(details, list):
+                known = False
+                continue
+            models = set()
+            for entry in details:
+                model_id = _emotion_model_id(entry)
+                if model_id is None or model_id not in catalog:
+                    known = False
+                else:
+                    models.add(model_id)
+            # Multiple labels or repeated details on one turn count only once.
+            observed.update(models)
+            any_observed += bool(models)
+
+        def counts(count: int) -> dict[str, Any]:
+            return {
+                "observed_count": count if known else None,
+                "missing_prediction_count": len(included) - count if known else None,
+                # An empty target is inapplicable, not evidence of a model result.
+                "status": ("not_applicable" if not included else "known" if known else "unknown"),
+                "source": "analysis.segments[].emotion_details" if known else "unknown",
+            }
+
+        percent = quality.get("emotion_coverage_percent")
+        valid_percent = (type(percent) in (int, float) and 0 <= percent <= 100)
+        results.append({
+            "version": 1,
+            "target_scope": "included_nonempty_segments",
+            "target_count": len(included),
+            "any_model": counts(any_observed),
+            "models": [
+                {"model_id": model_id, "model_name": name, **counts(observed[model_id])}
+                for model_id, name in catalog.items()
+            ],
+            "legacy_any_model_coverage": {
+                "percent": percent if valid_percent else None,
+                "scope": "all_timeline_segments",
+                "source": ("analysis.automatic.data_quality.emotion_coverage_percent"
+                           if valid_percent else "unknown"),
+            },
+        })
+    return results
+
+
 def build_interview_comparison(
     rows: list[sqlite3.Row], *, allow_different_content: bool,
     row_session_profile: Callable[[sqlite3.Row], dict[str, str]],
@@ -41,6 +145,7 @@ def build_interview_comparison(
     term_totals: dict[str, int] = {}
     code_counts: dict[str, dict[str, int]] = {}
     emotion_counts: dict[str, dict[str, int]] = {}
+    emotion_projections: list[tuple[list[dict[str, Any]], dict[str, Any]]] = []
 
     for row, profile, identity in zip(rows, profiles, identities):
         analysis = group_analysis_for_row(row)
@@ -49,6 +154,7 @@ def build_interview_comparison(
             segment for segment in analysis["segments"]
             if not segment.get("excluded") and str(segment.get("text") or "").strip()
         ]
+        emotion_projections.append((included, analysis["automatic"]["data_quality"]))
         counter = text_mining_counter(
             included, set(analysis["config"].get("stop_words") or [])
         )
@@ -90,6 +196,9 @@ def build_interview_comparison(
             label = str(emotion.get("emotion") or emotion.get("label") or "未設定")
             emotions[f"{model}: {label}"] += int(emotion.get("count") or 0)
         emotion_counts[item_id] = dict(emotions)
+
+    for item, observation in zip(interviews, _emotion_observations(emotion_projections)):
+        item["emotion_observation"] = observation
 
     item_ids = [item["item_id"] for item in interviews]
     common_terms: list[dict[str, Any]] = []
