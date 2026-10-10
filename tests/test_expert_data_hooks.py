@@ -15,6 +15,9 @@ import test_expert_agents as expert_fixtures
 import test_analysis_orchestration as fixtures
 
 
+# Exact public 173545 descriptor; only the wire instructions change below.
+PARENT_EXPERT_WIRE_PROMPT = '\nexpert_wire_v1: expert_hooks.evidence_indexはcolumns/rowsの全ID索引です。labelsが表ならowners[i]が所有発話ID、rows[i]がcolumnsの値、field_orders[row_orders[i]]が存在する列の元キー順（0始まり）です。その順にだけキーを復元し、他列のnullは欠落用、存在列のnull/0/false/空値は元の値です。ID・本文・ラベルは省略せず、採否・読了・権限は変更しません。\n'
+
 def ordered_wire_hash(value):
     """Test authority is the original input, including nested JSON key order."""
     return fingerprint(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
@@ -870,7 +873,13 @@ class ExpertWireProjectionTests(unittest.TestCase):
             old_size = len(json.dumps(old, ensure_ascii=False, separators=(",", ":")).encode())
             new_size = len(json.dumps(captured, ensure_ascii=False, separators=(",", ":")).encode())
             self.assertLess(new_size, old_size)
-            sizes.append({"before": old_size, "after": new_size})
+            self.assertTrue(captured["prompt"].endswith(adapters._EXPERT_WIRE_PROMPT))
+            self.assertEqual(captured["prompt"].count(adapters._EXPERT_WIRE_PROMPT), 1)
+            parent = {**captured, "prompt": captured["prompt"].removesuffix(adapters._EXPERT_WIRE_PROMPT)
+                      + PARENT_EXPERT_WIRE_PROMPT}
+            parent_size = len(json.dumps(parent, ensure_ascii=False, separators=(",", ":")).encode())
+            self.assertLess(new_size, parent_size)
+            sizes.append({"before": old_size, "parent_projection": parent_size, "after": new_size})
         self.assertEqual(len(internal[0]["raw_evidence"]), 12)
         self.assertEqual(len(internal[1]["raw_evidence"]), 13)
         self.assertEqual(internal[1]["raw_evidence"][0]["utterance_id"], "u322")
@@ -907,6 +916,51 @@ class ExpertWireProjectionTests(unittest.TestCase):
             "delivered_label_owners": len(internal[0]["labels"]), "saved_label_owners": len(source_labels),
             "store_package_sha256": hashlib.sha256(payload).hexdigest(),
             "saved_raw_hash": exported["raw_results"][0]["raw_hash"], "model_execution": "NOTRUN", "tokens": "NOTRUN"})
+
+
+class ExpertWireInstructionDeltaTests(unittest.TestCase):
+    def test_version_one_inverse_and_full_escaped_delivery_cost(self):
+        # The format, binding and source are unchanged; do not estimate tokens.
+        for count in (0, 1, 8, 30, 323):
+            with self.subTest(count=count):
+                source = synthetic_wire_packet(count)
+                if count:
+                    source["labels"][next(iter(source["labels"]))]["escaped"] = {"q": '\"\\\n', "nested": [None, 0, False]}
+                before = json.dumps(source, ensure_ascii=False)
+                wire = adapters._project_expert_wire(source)
+                self.assertEqual(json.dumps(independently_decode_wire(wire, source), ensure_ascii=False), before)
+                self.assertEqual(json.dumps(source, ensure_ascii=False), before)
+                if "expert_wire_delivery" not in wire:
+                    self.assertEqual(json.dumps(wire, ensure_ascii=False), before)
+                    continue
+                self.assertEqual(wire["expert_wire_delivery"]["format"], "expert_wire_v1")
+                self.assertEqual(wire["expert_wire_delivery"]["source_hash"], ordered_wire_hash(source))
+                def cost(packet, instruction):
+                    return len(json.dumps({"input": json.dumps(packet, ensure_ascii=False, separators=(",", ":")),
+                        "prompt": instruction}, ensure_ascii=False, separators=(",", ":")).encode())
+                self.assertLess(cost(wire, adapters._EXPERT_WIRE_PROMPT), cost(source, ""))
+                self.assertLess(cost(wire, adapters._EXPERT_WIRE_PROMPT), cost(wire, PARENT_EXPERT_WIRE_PROMPT))
+        prompt = adapters._EXPERT_WIRE_PROMPT
+        self.assertIn("expert_wire_v1 (ordered, 0-based)", prompt)
+        self.assertIn("expert_hooks.evidence_index rows zip columns", prompt)
+        self.assertIn("labels[owners[i]]={columns[c]:rows[i][c] for c in field_orders[row_orders[i]]}", prompt)
+        self.assertIn("Other keys absent; values literal", prompt)
+        self.assertIn("No reading/adoption/permission change", prompt)
+
+    def test_tampered_marker_is_rejected_even_on_original_shape_fallback(self):
+        for count in (1, 323):
+            source = synthetic_wire_packet(count)
+            wire = adapters._project_expert_wire(source)
+            for marker in (None, False, 0, "expert_wire_v1", [], {},
+                           {"format": "future", "source_hash": ordered_wire_hash(source), "labels_table": False}):
+                with self.subTest(count=count, marker=marker):
+                    changed = copy.deepcopy(wire); changed["expert_wire_delivery"] = marker
+                    with self.assertRaises(ValueError): independently_decode_wire(changed, source)
+                    with self.assertRaises(AnalysisContractError) as caught:
+                        adapters._restore_expert_wire(changed, expected_hash=ordered_wire_hash(source))
+                    self.assertEqual(caught.exception.code, "expert_wire_delivery_mismatch")
+            self.assertEqual(independently_decode_wire(wire, source), source)
+            self.assertEqual(adapters._restore_expert_wire(wire, expected_hash=ordered_wire_hash(source)), source)
 
 
 class ReadHookBoundaryTests(unittest.TestCase):

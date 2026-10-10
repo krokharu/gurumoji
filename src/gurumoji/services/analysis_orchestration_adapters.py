@@ -20,7 +20,7 @@ PROVIDERS = {"lmstudio", "openai", "google"}
 _RESULT_METADATA_COLUMNS = ("run_id", "dataset_version", "annotation_version", "validation_status",
                             "content_status", "stale", "error")
 _RESULT_METADATA_PROMPT = "\nresult_metadataは可逆な共通metadata表です。referencesの各[result位置,row位置]について、columnsとrows[row位置]を対応するresults[result位置]へ併合して読みます。位置は0始まりで元の順序を保持します。本文や根拠IDは省略しておらず、参照は読了・採択・欠測0を意味しません。\n"
-_EXPERT_WIRE_PROMPT = "\nexpert_wire_v1: expert_hooks.evidence_indexはcolumns/rowsの全ID索引です。labelsが表ならowners[i]が所有発話ID、rows[i]がcolumnsの値、field_orders[row_orders[i]]が存在する列の元キー順（0始まり）です。その順にだけキーを復元し、他列のnullは欠落用、存在列のnull/0/false/空値は元の値です。ID・本文・ラベルは省略せず、採否・読了・権限は変更しません。\n"
+_EXPERT_WIRE_PROMPT = '\nexpert_wire_v1 (ordered, 0-based): expert_hooks.evidence_index rows zip columns; table labels[owners[i]]={columns[c]:rows[i][c] for c in field_orders[row_orders[i]]}. Other keys absent; values literal. No reading/adoption/permission change.\n'
 
 
 def _expert_wire_hash(packet):
@@ -44,8 +44,9 @@ def _restore_expert_wire(packet, *, expected_hash):
         if not condition:
             raise AnalysisContractError("専門家の配送表を復元できません。", code="expert_wire_delivery_mismatch")
     value = copy.deepcopy(packet)
+    has_marker = "expert_wire_delivery" in value
     marker = value.pop("expert_wire_delivery", None)
-    if marker is not None:
+    if has_marker:
         require(isinstance(marker, dict) and set(marker) == {"format", "source_hash", "labels_table"}
                 and marker["format"] == "expert_wire_v1" and marker["source_hash"] == expected_hash
                 and type(marker["labels_table"]) is bool)
