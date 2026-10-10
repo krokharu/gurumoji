@@ -456,9 +456,21 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         if role == "verification":
             from .expert_agents import bind_evidence_ids
             bind_evidence_ids(schema, [row["evidence_id"] for row in context.get("raw_evidence", [])])
-        if "expert_catalog" in context:
+        if role == "core" and "expert_catalog" in context:
             allowed_experts = [entry["expert_id"] for entry in context["expert_catalog"]["experts"]]
-            schema["properties"]["intents"]["items"]["properties"]["expert_id"] = {"type": "string", "enum": ["", *allowed_experts]}
+            intent = schema["properties"]["intents"]["items"]
+            other_roles = copy.deepcopy(intent)
+            other_roles["properties"]["role"]["enum"] = ["statistics", "verification", "critic"]
+            other_roles["properties"]["expert_id"] = {"type": "string", "enum": [""]}
+            variants = []
+            if allowed_experts:
+                interpretation = copy.deepcopy(intent)
+                interpretation["properties"]["role"]["enum"] = ["interpretation"]
+                interpretation["properties"]["expert_id"] = {"type": "string", "enum": allowed_experts}
+                variants.append(interpretation)
+            # Match Handler selection before generation; never infer or fill an ID.
+            variants.append(other_roles)
+            schema["properties"]["intents"]["items"] = {"anyOf": variants}
         if role == "core" and context.get("statistical_review_gate", {}).get("status") == "human_pending":
             schema["properties"]["claims"]["maxItems"] = 0
         if "expert_request" in context:

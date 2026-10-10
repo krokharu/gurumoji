@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 from gurumoji.analysis_core import AnalysisContractError
+from gurumoji.services.expert_agents import validate_shape
 from gurumoji.services.analysis_orchestration_adapters import (
     AI_ROLES, CORE_SCHEMA, CRITIC_SCHEMA, SPECIALIST_SCHEMA,
     make_orchestration_adapters,
@@ -26,6 +27,75 @@ class OrchestrationAdapterTests(unittest.TestCase):
             call_ai_json=call, load_token_config=lambda: self.config,
             configured_ai_credentials=lambda config, provider: self.keys[provider],
         )
+
+    @staticmethod
+    def catalog_intent(role="interpretation", expert_id="exp-synthetic-one", kind="analysis"):
+        return {"role": role, "expert_id": expert_id, "kind": kind, "result_id": "",
+                "initial_sections": [], "question": "Synthetic question", "why_now": "Synthetic reason",
+                "success_criteria": "Evidence-bound answer", "method_id": "", "label_field": "",
+                "evidence_ids": ["synthetic-e1"], "importance": "medium", "importance_reason": "",
+                "dependencies": [], "label_dependent": False, "replicate_id": ""}
+
+    def prepared_intents(self, ids):
+        context = {"expert_catalog": {"experts": [{"expert_id": value} for value in ids]}}
+        self.run("core", context, self.resolve({}), lambda: None, lambda _: None)
+        return self.calls[-1][6]["properties"]["intents"]
+
+    def test_catalog_interpretation_requires_an_active_expert(self):
+        schema = self.prepared_intents(["exp-synthetic-one"])["items"]
+        validate_shape(schema, self.catalog_intent())
+        for value in ("", "exp-foreign", None, True):
+            with self.subTest(expert_id=value), self.assertRaises(AnalysisContractError):
+                validate_shape(schema, self.catalog_intent(expert_id=value))
+
+    def test_catalog_other_roles_require_empty_expert(self):
+        schema = self.prepared_intents(["exp-synthetic-one"])["items"]
+        for role in ("statistics", "verification", "critic"):
+            with self.subTest(role=role):
+                validate_shape(schema, self.catalog_intent(role, ""))
+                for value in ("exp-synthetic-one", "exp-foreign"):
+                    with self.subTest(expert_id=value), self.assertRaises(AnalysisContractError):
+                        validate_shape(schema, self.catalog_intent(role, value))
+
+    def test_catalog_mixed_intents_reject_blank_interpretation_atomically(self):
+        schema = self.prepared_intents(["exp-synthetic-one"])
+        bad = [self.catalog_intent(), self.catalog_intent(expert_id=""), self.catalog_intent(expert_id="")]
+        with self.assertRaises(AnalysisContractError):
+            validate_shape(schema, bad)
+        good = [self.catalog_intent(), self.catalog_intent("statistics", ""), self.catalog_intent("critic", "")]
+        validate_shape(schema, good)
+
+    def test_catalog_same_expert_can_answer_distinct_scopes(self):
+        schema = self.prepared_intents(["exp-synthetic-one"])
+        first, second = self.catalog_intent(), self.catalog_intent()
+        second.update(question="Different synthetic question", evidence_ids=["synthetic-e2"])
+        validate_shape(schema, [first, second])
+
+    def test_catalog_clarification_keeps_handler_expert_requirement(self):
+        schema = self.prepared_intents(["exp-synthetic-one"])["items"]
+        validate_shape(schema, self.catalog_intent(kind="clarification"))
+        with self.assertRaises(AnalysisContractError):
+            validate_shape(schema, self.catalog_intent(expert_id="", kind="clarification"))
+
+    def test_empty_catalog_allows_other_roles_without_inventing_an_expert(self):
+        schema = self.prepared_intents([])["items"]
+        validate_shape(schema, self.catalog_intent("verification", ""))
+        for value in ("", "exp-synthetic-one"):
+            with self.subTest(expert_id=value), self.assertRaises(AnalysisContractError):
+                validate_shape(schema, self.catalog_intent(expert_id=value))
+
+    def test_catalog_schema_is_per_request_and_base_schema_stays_unchanged(self):
+        original = json.dumps(CORE_SCHEMA, sort_keys=True)
+        one = self.prepared_intents(["exp-synthetic-one"])
+        two = self.prepared_intents(["exp-synthetic-two"])
+        with self.assertRaises(AnalysisContractError):
+            validate_shape(two["items"], self.catalog_intent())
+        validate_shape(one["items"], self.catalog_intent())
+        self.run("core", {}, self.resolve({}), lambda: None, lambda _: None)
+        baseline = self.calls[-1][6]["properties"]["intents"]
+        self.assertEqual(baseline, CORE_SCHEMA["properties"]["intents"])
+        validate_shape(baseline["items"], self.catalog_intent(expert_id=""))
+        self.assertEqual(original, json.dumps(CORE_SCHEMA, sort_keys=True))
 
     def test_preflight_does_not_call_models_or_store_credentials(self):
         options = self.resolve({"question": "合成会話を調べる"})
