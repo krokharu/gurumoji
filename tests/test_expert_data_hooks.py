@@ -1,16 +1,99 @@
 """Synthetic expert/Handler hook acceptance checks; no model, API or real Vault."""
 import copy
+import hashlib
 import json
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from gurumoji.analysis_core import AnalysisContractError, fingerprint
 from gurumoji.analysis_orchestration import validate_orchestration_payload
 from gurumoji.services.analysis_orchestration_adapters import ADAPTER_VERSION, make_orchestration_adapters
+from gurumoji.services import analysis_orchestration_adapters as adapters
 from gurumoji.services.expert_data_hooks import read_data, VERSION
 import test_expert_agents as expert_fixtures
 import test_analysis_orchestration as fixtures
+
+
+def ordered_wire_hash(value):
+    """Test authority is the original input, including nested JSON key order."""
+    return fingerprint(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+
+
+def decoded_index(packet):
+    index = packet["expert_hooks"]["evidence_index"]
+    if isinstance(index, list):
+        return copy.deepcopy(index)
+    if (not isinstance(index, dict) or set(index) != {"columns", "rows"}
+            or index["columns"] != ["evidence_id"] or not isinstance(index["rows"], list)
+            or any(not isinstance(row, list) or len(row) != 1 or not isinstance(row[0], str) or not row[0] for row in index["rows"])):
+        raise ValueError("invalid independent index table")
+    ids = [row[0] for row in index["rows"]]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate evidence ID")
+    return [{"evidence_id": eid} for eid in ids]
+
+
+def independently_decode_wire(wire, original):
+    """Independent decoder: no production encoder, decoder or hash helper calls."""
+    value = copy.deepcopy(wire)
+    expected = ordered_wire_hash(original)
+    def check(ok):
+        if not ok:
+            raise ValueError("independent wire proof mismatch")
+    if "expert_wire_delivery" in value:
+        marker = value.pop("expert_wire_delivery")
+        check(isinstance(marker, dict) and set(marker) == {"format", "source_hash", "labels_table"})
+        check(marker["format"] == "expert_wire_v1" and marker["source_hash"] == expected
+              and type(marker["labels_table"]) is bool)
+        value["expert_hooks"]["evidence_index"] = decoded_index(value)
+        if marker["labels_table"]:
+            table = value["labels"]
+            check(isinstance(table, dict) and set(table) == {"owners", "columns", "rows", "field_orders", "row_orders"})
+            owners, columns, rows = table["owners"], table["columns"], table["rows"]
+            orders, references = table["field_orders"], table["row_orders"]
+            check(all(isinstance(v, list) for v in (owners, columns, rows, orders, references)))
+            check(all(isinstance(v, str) and v for v in owners) and len(set(owners)) == len(owners))
+            check(all(isinstance(v, str) for v in columns) and len(set(columns)) == len(columns))
+            check(len(owners) == len(rows) == len(references))
+            check(all(isinstance(row, list) and len(row) == len(columns) for row in rows))
+            check(all(isinstance(order, list) and all(type(i) is int and i in range(len(columns)) for i in order)
+                      and len(order) == len(set(order)) for order in orders))
+            check(len({json.dumps(order) for order in orders}) == len(orders))
+            result, columns_seen, orders_seen = {}, [], []
+            for position, owner in enumerate(owners):
+                ref = references[position]
+                check(type(ref) is int and 0 <= ref < len(orders))
+                keys = orders[ref]
+                check(all(rows[position][i] is None for i in range(len(columns)) if i not in keys))
+                result[owner] = dict((columns[i], rows[position][i]) for i in keys)
+                for i in keys:
+                    if i not in columns_seen: columns_seen.append(i)
+                if ref not in orders_seen: orders_seen.append(ref)
+            check(columns_seen == list(range(len(columns))) and orders_seen == list(range(len(orders))))
+            value["labels"] = result
+    check(ordered_wire_hash(value) == expected)
+    return value
+
+
+def synthetic_wire_packet(count=323):
+    labels = {}
+    for i in range(count):
+        fields = {"codes": [], "code": None, "theme": "", "sentiment": False, "dialogue_act": {},
+                  "importance": 0, "review": {"z": [None, False, 0, "", {"last": 1, "first": 2}], "a": {}},
+                  "category": ["synthetic", str(i % 3)]}
+        if i % 7 == 0: fields.pop("theme")
+        if i % 3 == 0: fields = dict(reversed(list(fields.items())))
+        labels[f"u{i:03d}"] = fields
+    return {"task": {"task_id": "synthetic-task", "intent": {"kind": "analysis", "evidence_ids": []},
+                     "dependencies": ["actual-code-task"], "annotation_version": 0, "codebook_version": 1},
+        "data_version": "synthetic-source-v1", "profile_hash": "synthetic-profile", "knowledge_hash": "synthetic-knowledge",
+        "expert_hooks": {"version": VERSION, "evidence_index": [{"evidence_id": f"ev_synthetic_{i:03d}"} for i in range(count)],
+                         "scope": "unchanged permission", "calculation_tables": [], "max_rounds": 2},
+        "labels": labels, "raw_evidence": [{"evidence_id": f"ev_synthetic_{i:03d}", "utterance_id": f"u{i:03d}",
+            "text": f"Public synthetic utterance {i:03d}", "speaker": "A", "text_offset": 0,
+            "total_text_characters": 30, "omitted_text_characters": 0} for i in range(min(count, 12))],
+        "coverage": {"scope": "all_included", "available_count": count, "provided_count": min(count, 12)}}
 
 
 def request(name="read_evidence", ids=(), result_id="", table_id="", offset=0, limit=8):
@@ -80,8 +163,10 @@ class ExpertDataHookTests(unittest.TestCase):
         self.assertEqual(task["status"], "succeeded", task["error"])
         self.assertEqual(len(self.calls[0][0]["raw_evidence"]), 12)
         self.assertEqual(self.calls[0][0]["coverage"]["omitted_count"], 18)
-        self.assertEqual(len(self.calls[0][0]["expert_hooks"]["evidence_index"]), 30)
-        self.assertEqual(set(self.calls[0][0]["expert_hooks"]["evidence_index"][0]), {"evidence_id"})
+        index = decoded_index(self.calls[0][0])
+        self.assertEqual(len(index), 30)
+        self.assertEqual(set(index[0]), {"evidence_id"})
+        self.assertEqual(index, [{"evidence_id": eid} for eid in self.ids])
         self.assertNotIn("evidence_index", self.calls[0][0]["coverage"])
         self.assertNotIn("evidence_index", self.calls[0][0]["expert_request"]["coverage"])
         self.assertEqual(len(self.calls[1][0]["raw_evidence"]), 13)
@@ -558,6 +643,270 @@ class StatisticalHookDeliveryTests(unittest.TestCase):
                 self.assertEqual(reread["raw_hash"], stored["raw_hash"])
         self.service.agent_runner.assert_not_called()
         self.service.method_runner.assert_not_called()
+
+
+WIRE_OBSERVATIONS = []
+
+
+class ExpertWireProjectionTests(unittest.TestCase):
+    def test_323_exact_inverse_preserves_nested_values_presence_and_order(self):
+        original = synthetic_wire_packet()
+        before = json.dumps(original, ensure_ascii=False)
+        wire = adapters._project_expert_wire(original)
+        self.assertTrue(wire["expert_wire_delivery"]["labels_table"])
+        self.assertEqual(wire["expert_hooks"]["evidence_index"]["columns"], ["evidence_id"])
+        self.assertEqual(len(wire["expert_hooks"]["evidence_index"]["rows"]), 323)
+        restored = independently_decode_wire(wire, original)
+        self.assertEqual(json.dumps(restored, ensure_ascii=False), before)
+        self.assertEqual(json.dumps(adapters._restore_expert_wire(wire, expected_hash=ordered_wire_hash(original)),
+                                   ensure_ascii=False), before)
+        self.assertEqual(json.dumps(original, ensure_ascii=False), before)
+        self.assertNotIn("theme", restored["labels"]["u000"])
+        self.assertIsNone(restored["labels"]["u001"]["code"])
+        self.assertIs(restored["labels"]["u001"]["sentiment"], False)
+        self.assertIs(type(restored["labels"]["u001"]["importance"]), int)
+        self.assertEqual(restored["labels"]["u001"]["theme"], "")
+        self.assertEqual(restored["task"]["intent"]["evidence_ids"], [])  # Valid dataset-wide scope.
+        self.assertEqual(restored["raw_evidence"], original["raw_evidence"])
+        self.assertEqual(restored["task"]["dependencies"], original["task"]["dependencies"])
+        self.assertEqual(list(restored["labels"]), list(original["labels"]))
+        for uid in original["labels"]:
+            self.assertEqual(list(restored["labels"][uid]), list(original["labels"][uid]))
+
+    def test_small_packets_fall_back_and_index_only_projection_keeps_optional_labels(self):
+        for count in (0, 1):
+            with self.subTest(count=count):
+                source = synthetic_wire_packet(count)
+                wire = adapters._project_expert_wire(source)
+                self.assertNotIn("expert_wire_delivery", wire)
+                self.assertEqual(json.dumps(wire), json.dumps(source))
+                self.assertEqual(independently_decode_wire(wire, source), source)
+        source = synthetic_wire_packet()
+        del source["labels"]
+        wire = adapters._project_expert_wire(source)
+        self.assertFalse(wire["expert_wire_delivery"]["labels_table"])
+        self.assertEqual(independently_decode_wire(wire, source), source)
+        self.assertNotIn("labels", independently_decode_wire(wire, source))
+
+    def test_malformed_foreign_reordered_and_self_rehashed_wire_is_rejected(self):
+        source = synthetic_wire_packet()
+        wire = adapters._project_expert_wire(source)
+        changes = {
+            "index duplicate column": lambda w: w["expert_hooks"]["evidence_index"]["columns"].append("evidence_id"),
+            "index wrong column": lambda w: w["expert_hooks"]["evidence_index"].update(columns=["utterance_id"]),
+            "index row type": lambda w: w["expert_hooks"]["evidence_index"]["rows"].__setitem__(0, {}),
+            "index row width": lambda w: w["expert_hooks"]["evidence_index"]["rows"][0].append("extra"),
+            "index nonstring ID": lambda w: w["expert_hooks"]["evidence_index"]["rows"][0].__setitem__(0, 0),
+            "index foreign ID": lambda w: w["expert_hooks"]["evidence_index"]["rows"][0].__setitem__(0, "ev_foreign"),
+            "index duplicate ID": lambda w: w["expert_hooks"]["evidence_index"]["rows"].__setitem__(1, copy.deepcopy(w["expert_hooks"]["evidence_index"]["rows"][0])),
+            "index reordered": lambda w: w["expert_hooks"]["evidence_index"]["rows"].reverse(),
+            "label duplicate columns": lambda w: w["labels"]["columns"].__setitem__(1, w["labels"]["columns"][0]),
+            "label column type": lambda w: w["labels"]["columns"].__setitem__(0, 0),
+            "label row width": lambda w: w["labels"]["rows"][0].pop(),
+            "label row type": lambda w: w["labels"]["rows"].__setitem__(0, {}),
+            "label duplicate owner": lambda w: w["labels"]["owners"].__setitem__(1, w["labels"]["owners"][0]),
+            "label foreign owner": lambda w: w["labels"]["owners"].__setitem__(0, "foreign-owner"),
+            "label owner order": lambda w: w["labels"]["owners"].reverse(),
+            "label boolean order": lambda w: w["labels"]["row_orders"].__setitem__(0, False),
+            "label missing order": lambda w: w["labels"]["row_orders"].pop(),
+            "label duplicate present key": lambda w: w["labels"]["field_orders"][0].append(w["labels"]["field_orders"][0][0]),
+            "label missing becomes null": lambda w: w["labels"]["field_orders"][0].append(w["labels"]["columns"].index("theme")),
+            "label key order": lambda w: w["labels"]["field_orders"][0].reverse(),
+            "null becomes zero": lambda w: w["labels"]["rows"][1].__setitem__(w["labels"]["columns"].index("code"), 0),
+            "false becomes zero": lambda w: w["labels"]["rows"][1].__setitem__(w["labels"]["columns"].index("sentiment"), 0),
+            "source version": lambda w: w.update(data_version="foreign-input"),
+            "knowledge hash": lambda w: w.update(knowledge_hash="foreign-knowledge"),
+            "raw fragment": lambda w: w["raw_evidence"][0].update(text_offset=1),
+            "binding hash": lambda w: w["expert_wire_delivery"].update(source_hash="sha256:foreign"),
+        }
+        for name, change in changes.items():
+            with self.subTest(change=name):
+                bad = copy.deepcopy(wire); change(bad)
+                with self.assertRaises(ValueError): independently_decode_wire(bad, source)
+                with self.assertRaises(AnalysisContractError):
+                    adapters._restore_expert_wire(bad, expected_hash=ordered_wire_hash(source))
+        changed = copy.deepcopy(source)
+        changed["expert_hooks"]["evidence_index"][0]["evidence_id"] = "ev_foreign"
+        self_rehashed = adapters._project_expert_wire(changed)
+        with self.assertRaises(ValueError): independently_decode_wire(self_rehashed, source)
+        with self.assertRaises(AnalysisContractError):
+            adapters._restore_expert_wire(self_rehashed, expected_hash=ordered_wire_hash(source))
+
+    def test_invalid_source_ids_and_json_keys_never_get_silently_coerced(self):
+        mutations = (
+            lambda p: p["expert_hooks"]["evidence_index"][0].update(evidence_id=False),
+            lambda p: p["expert_hooks"]["evidence_index"].append(copy.deepcopy(p["expert_hooks"]["evidence_index"][0])),
+            lambda p: p["expert_hooks"]["evidence_index"][0].update(unknown="must not drop"),
+            lambda p: p["labels"].update({0: {"code": None}}),
+            lambda p: p["labels"]["u000"]["review"].update({1: "must not stringify"}),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                source = synthetic_wire_packet(); mutate(source)
+                before = copy.deepcopy(source)
+                with self.assertRaises(AnalysisContractError): adapters._project_expert_wire(source)
+                self.assertEqual(source, before)
+
+    def test_nonexpert_clarification_disabled_and_statistical_routes_do_not_project(self):
+        calls = []
+        response = {}
+        def call(*args):
+            calls.append(args)
+            return wire_response(response) if "expert_response" in args[6]["properties"] else response
+        resolve, runner = make_orchestration_adapters(call_ai_json=call,
+            load_token_config=lambda: SimpleNamespace(lmstudio_base_url="http://127.0.0.1:1"),
+            configured_ai_credentials=lambda *_: ("", "synthetic"))
+        with patch.object(adapters, "_project_expert_wire", side_effect=AssertionError("non-target route")):
+            for role in ("interpretation", "core", "critic", "verification"):
+                context = {"task": {"task_id": "unchanged", "role": role, "dependencies": [], "intent": {"kind": "analysis"}},
+                           "raw_evidence": [], "labels": {}, "results": []}
+                runner(role, context, resolve({"model": "fixture"}), lambda: None, lambda _: None)
+                self.assertNotIn("expert_wire_delivery", json.loads(calls[-1][4]))
+            for statistical, clarification, enabled in ((False, False, False), (False, True, True), (True, False, True)):
+                with self.subTest(statistical=statistical, clarification=clarification, hooks=enabled):
+                    if statistical:
+                        import test_statistical_expert_agents as statistics
+                        helper = statistics.StatisticalExpertTests("runTest"); helper.setUp(); self.addCleanup(helper.doCleanups)
+                        helper.service.find_item = lambda _: {"id": "synthetic", "revision_count": 1, "analysis_revision": 1}
+                        run = helper.start(adapter_version=ADAPTER_VERSION)
+                        expert = "exp-correlation"
+                    else:
+                        helper = expert_fixtures.ExpertAgentTests("runTest"); helper.setUp(); self.addCleanup(helper.doCleanups)
+                        helper.item.update(revision_count=1, analysis_revision=1)
+                        run = helper.start(adapter_version=ADAPTER_VERSION, expert_hooks=enabled)
+                        expert = expert_fixtures.EXPERT
+                    with helper.service._db() as db:
+                        current = helper.service._read_run(db, run["run_id"])
+                        intent = fixtures.intent("interpretation", expert_id=expert)
+                        if clarification:
+                            intent.update(kind="clarification", result_id=run["initial_id"], initial_sections=["segments"])
+                        task = helper.service._register(db, current, intent, phase="specialists")
+                        context = helper.service._context(db, current, task)
+                    if clarification:
+                        self.assertFalse(context["execution_allowed"])
+                        self.assertEqual(context["clarification_target"]["initial_id"], run["initial_id"])
+                    response = helper.expert_report(context) if statistical else helper.report(context)
+                    before = json.dumps(context, ensure_ascii=False)
+                    runner("interpretation", context, {**run["config"], "_expert_data_hook": lambda *_: self.fail("No read needed")},
+                           lambda: None, lambda _: None)
+                    self.assertNotIn("expert_wire_delivery", json.loads(calls[-1][4]))
+                    self.assertEqual(json.dumps(context, ensure_ascii=False), before)
+
+    def test_actual_323_handler_hook_store_and_fresh_preserve_internal_packets(self):
+        import app
+        import test_content_analysis as content
+        import gurumoji.services.expert_data_hooks as hooks
+        from gurumoji.analysis_orchestration import AnalysisOrchestrationService
+        from gurumoji.analysis_store import AnalysisStore
+        from gurumoji.services.analysis_orchestration_publication import build_orchestration_package
+        fixture = content.ContentApiTests("runTest"); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        helper = expert_fixtures.ExpertAgentTests("runTest"); helper.setUp(); self.addCleanup(helper.doCleanups)
+        source_labels = synthetic_wire_packet()["labels"]
+        helper.snap["analysis"]["segments"] = [{"id": uid, "text": f"Public synthetic utterance {i:03d}",
+            "speaker": "A" if i % 2 else "B", "annotation": labels, "excluded": False}
+            for i, (uid, labels) in enumerate(source_labels.items())]
+        service = helper.service
+        service.connect, service.find_item = app.database_connection, app.library_row
+        service.adapter_version = ADAPTER_VERSION
+        item = dict(app.library_row("content"))
+        helper.snap["source_revision"] = item["revision_count"]
+        helper.snap["analysis_revision"] = item["analysis_revision"]
+        original_source = copy.deepcopy(helper.snap)
+        calls, internal, handler_inputs = [], [], []
+        report, ids = {}, []
+        def call(*args):
+            calls.append({"prompt": args[3], "input": args[4], "schema": copy.deepcopy(args[6])})
+            if len(calls) == 1:
+                return wire_response({"hook_requests": [request(ids=[ids[-1]])]})
+            response = copy.deepcopy(report); response["expert_report"]["evidence_ids"] = [ids[-1]]
+            return wire_response(response)
+        _, adapter = make_orchestration_adapters(call_ai_json=call,
+            load_token_config=lambda: SimpleNamespace(lmstudio_base_url="http://127.0.0.1:1"),
+            configured_ai_credentials=lambda *_: ("", "synthetic"))
+        def agent(role, context, *rest):
+            before = copy.deepcopy(context); handler_inputs.append(before)
+            result = adapter(role, context, *rest)
+            self.assertEqual(json.dumps(context), json.dumps(before))
+            return result
+        service.agent_runner = agent
+        original_hooks = hooks.run_with_hooks
+        def observe(context, schema, callback, *rest):
+            def outbound(packet, *args):
+                before = copy.deepcopy(packet); internal.append(before)
+                result = callback(packet, *args)
+                self.assertIsInstance(packet["expert_hooks"]["evidence_index"], list)
+                self.assertEqual(json.dumps(packet), json.dumps(before))
+                return result
+            return original_hooks(context, schema, outbound, *rest)
+        guards = (patch("socket.socket.connect", side_effect=AssertionError("No network")),
+                  patch.object(AnalysisStore, "_publish_generated_vaults", side_effect=AssertionError("No Vault")),
+                  patch.object(AnalysisStore, "_publish_research", side_effect=AssertionError("No Vault")),
+                  patch.object(hooks, "run_with_hooks", side_effect=observe))
+        for guard in guards: guard.start(); self.addCleanup(guard.stop)
+        run = service.start("content", {"model": "fixture", "adapter_version": ADAPTER_VERSION,
+            "expert_ids": [expert_fixtures.EXPERT], "time_limit_seconds": None,
+            "obsidian_management": False, "publication_targets": []})
+        with service._db() as db:
+            current = service._read_run(db, run["run_id"])
+            initial = service._initial(db, current["initial_id"])
+            ids.extend(row["evidence_id"] for row in initial["evidence"])
+            task = service._register(db, current, fixtures.intent("interpretation", expert_id=expert_fixtures.EXPERT,
+                                    evidence_ids=[]), phase="specialists")
+            report.update(helper.report(service._context(db, current, task)))
+        service._execute(run["run_id"], task["task_id"])
+        exported = service.result("content", run["run_id"])
+        saved_task = next(t for t in exported["run"]["tasks"] if t["task_id"] == task["task_id"])
+        self.assertEqual(saved_task["status"], "succeeded", saved_task)
+        self.assertEqual(saved_task["intent"]["evidence_ids"], [])
+        self.assertEqual(saved_task["dependencies"], task["dependencies"])
+        self.assertEqual(len(calls), 2)
+        sizes = []
+        for captured, original in zip(calls, internal):
+            wire = json.loads(captured["input"])
+            self.assertEqual(json.dumps(independently_decode_wire(wire, original)), json.dumps(original))
+            self.assertEqual(decoded_index(wire), [{"evidence_id": eid} for eid in ids])
+            old = {**captured, "input": json.dumps(original, ensure_ascii=False, separators=(",", ":")),
+                   "prompt": captured["prompt"].removesuffix(adapters._EXPERT_WIRE_PROMPT)}
+            old_size = len(json.dumps(old, ensure_ascii=False, separators=(",", ":")).encode())
+            new_size = len(json.dumps(captured, ensure_ascii=False, separators=(",", ":")).encode())
+            self.assertLess(new_size, old_size)
+            sizes.append({"before": old_size, "after": new_size})
+        self.assertEqual(len(internal[0]["raw_evidence"]), 12)
+        self.assertEqual(len(internal[1]["raw_evidence"]), 13)
+        self.assertEqual(internal[1]["raw_evidence"][0]["utterance_id"], "u322")
+        self.assertEqual(helper.snap, original_source)
+        # Keep the pre-existing Handler delivery window exactly; the adapter
+        # does not expand it or remove any label owner within that delivery.
+        delivered_owners = list(source_labels)[:run["config"]["context_evidence_limit"]]
+        self.assertEqual(handler_inputs[0]["labels"], {uid: source_labels[uid] for uid in delivered_owners})
+        self.assertEqual(exported["label_versions"][0]["labels"], source_labels)
+        self.assertEqual(exported["initial"]["snapshot"]["analysis"], original_source["analysis"])
+        snapshot, result, datasets = build_orchestration_package(exported, fingerprint(exported))
+        store = app.analysis_archive_store()
+        saved = store.save(item_id="content", kind="autonomous_analysis", snapshot=snapshot, result=result,
+            datasets=datasets, request_id="expert-wire-cpu", input_fingerprint="v1", source_revision=item["revision_count"],
+            analysis_revision=item["analysis_revision"], publish=False)
+        artifact = next(row for row in store.public(saved)["artifacts"] if row["name"] == "result.json")
+        fresh_store = AnalysisStore(store.database_file, store.connect)
+        fresh = AnalysisOrchestrationService(connect=app.database_connection, find_item=app.library_row,
+            snapshot_builder=lambda *_: self.fail("No source rebuild"), agent_runner=lambda *_: self.fail("No model"),
+            method_runner=lambda *_: self.fail("No code rerun"), schedule=False)
+        before = app.DATABASE_FILE.read_bytes()
+        _, payload = fresh_store.read_artifact(artifact["id"])
+        self.assertEqual(payload, store.read_artifact(artifact["id"])[1])
+        persisted = json.loads(payload)["orchestration"]
+        for key in ("initial", "raw_results", "label_versions", "decisions"):
+            self.assertEqual(persisted[key], exported[key])
+        self.assertEqual(persisted["run"]["tasks"], exported["run"]["tasks"])
+        self.assertEqual(fresh.result("content", run["run_id"]), exported)
+        self.assertEqual(app.DATABASE_FILE.read_bytes(), before)
+        self.assertNotIn("expert_wire_delivery", json.dumps(exported))
+        WIRE_OBSERVATIONS.append({"run_id": run["run_id"], "task_id": task["task_id"], "result_id": saved_task["result_id"],
+            "source_hash": fingerprint(original_source), "packet_hashes": [ordered_wire_hash(p) for p in internal],
+            "all_ids": ids, "count": 323, "scope": [], "call_field_bytes": sizes,
+            "delivered_label_owners": len(internal[0]["labels"]), "saved_label_owners": len(source_labels),
+            "store_package_sha256": hashlib.sha256(payload).hexdigest(),
+            "saved_raw_hash": exported["raw_results"][0]["raw_hash"], "model_execution": "NOTRUN", "tokens": "NOTRUN"})
 
 
 class ReadHookBoundaryTests(unittest.TestCase):
