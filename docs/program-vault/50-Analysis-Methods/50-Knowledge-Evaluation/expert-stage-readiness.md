@@ -16,6 +16,12 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 
 # 17専門家の段階別充足・不足表
 
+### 2026-10-10 — 専門家wireの可逆整理をCPU受入、実容量は別確認
+
+- 公開固定 `1735456008ccef6c9e725b6fcfc02e3afe956388`（親a0a2）のadapterと隣接testの2pathを選別。Linux作者の新6／hooks29と隣接46、別作者Windows focused29（新6を内包）＋独立4＝33unique PASS、16改変拒否を確認した。Windowsの旧legacy hook6methodは未実行であり、初回reviewer harnessの失敗と訂正履歴は保持する。
+- 専門家への送信だけをdeepcopyで可逆整理し、323発話ID・順序・null／0／false／missing・label属性を保持。実service→Handler→SQL→非公開Store→freshの全member bytesと元raw/task/decision/label不変を独立確認した。非対象roleの送信は親版と同一。入力上限拡大・本文切捨て・schema変更はない。
+- 作者の送信bytes縮小は実loaded-tokenizer容量の合格ではない。実Gemma全323件・安定完了・G5方法／意味品質・研究者採否は別受入で未達。原Mslot1容量FAILと使用量不明／HOLDを保持し、CPU成功を実推論成功に置換しない。PNG延期を維持する。
+
 ### 2026-10-10 — G5の合成ケースと実Handler保存来歴をCPU受入
 
 - 公開固定 `795d0757e53e69ba4cca78411f5d61d704a710dc`（親3112）の合成fixtureと隣接testの新2fileを選別した。AI許可9専門家の正常・負例18ケース／順序付き24slot、禁止8専門家の推論なし、sourceとruntimeのhash区別、null／0／false／missing／除外を維持する。全17専門家の方法・意味品質や研究者採否の完了を示すものではない。
