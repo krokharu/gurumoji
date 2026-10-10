@@ -1789,6 +1789,18 @@ class AnalysisOrchestrationService:
         # mutable result/task role labels cannot demote a committed decision.
         result_rows = ((result, None) for result in public["results"])
         if history_scoped:
+            # Discover committed references from the decision's run, not the
+            # result's mutable physical membership. Do not read foreign bodies.
+            references = db.execute(
+                "SELECT r.result_id,r.run_id,r.task_id,t.task_id AS source_task_id,t.run_id AS source_run_id "
+                "FROM orchestration_decisions d LEFT JOIN orchestration_results r ON r.result_id=d.result_id "
+                "LEFT JOIN orchestration_tasks t ON t.task_id=r.task_id WHERE d.run_id=?",
+                (run["run_id"],)).fetchall()
+            for reference in references:
+                if (reference["result_id"] is None or reference["run_id"] != run["run_id"]
+                        or reference["source_task_id"] != reference["task_id"]
+                        or reference["source_run_id"] != run["run_id"]):
+                    raise _error("採択済みCore判断の保存元が一致しません。", "result_integrity_mismatch")
             result_rows = ((json.loads(row["state_json"]), row) for row in db.execute(
                 "SELECT result_id,run_id,task_id,state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid",
                 (run["run_id"],)).fetchall())

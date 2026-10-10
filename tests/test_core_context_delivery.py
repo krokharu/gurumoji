@@ -439,6 +439,115 @@ class CoreRoleAuthorityTests(unittest.TestCase):
             self.assertEqual(self.h.path.read_bytes(), before)
 
 
+class CorePhysicalAuthorityTests(unittest.TestCase):
+    """A current committed decision must not lose its physical result silently."""
+    def fixture(self):
+        case = CoreRoleAuthorityTests(methodName="runTest")
+        case.setUp(); self.addCleanup(case.doCleanups)
+        return case
+
+    def move_physical_result(self, case):
+        case.mutate("orchestration_results", physical={"run_id": "foreign-physical-run"})
+        with case.h.service._db() as db:
+            for table, original in case.originals.items():
+                actual = dict(db.execute(f"SELECT rowid AS saved_rowid,* FROM {table} WHERE rowid=?",
+                    (original["saved_rowid"],)).fetchone())
+                expected = {**original, "run_id": "foreign-physical-run"} if table == "orchestration_results" else original
+                self.assertEqual(actual, expected)
+
+    def test_foreign_physical_run_is_rejected_by_both_readonly_getters(self):
+        for role in ("core", "critic"):
+            with self.subTest(role=role):
+                case = self.fixture()
+                case.consumers = [row for row in case.consumers if row["role"] == role]
+                self.move_physical_result(case)
+                case.reject_readonly()
+
+    def test_foreign_physical_run_is_rejected_before_both_execute_callbacks(self):
+        for role in ("core", "critic"):
+            with self.subTest(role=role):
+                case = self.fixture()
+                self.move_physical_result(case)
+                consumer = next(row for row in case.consumers if row["role"] == role)
+                calls = len(case.h.calls)
+                case.h.response = support.core() if role == "core" else support.critic({})
+                with case.h.service._db() as db:
+                    before = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                        for table in ("orchestration_results", "orchestration_decisions", "orchestration_label_versions")}
+                case.h.service._execute(case.h.run["run_id"], consumer["task_id"])
+                self.assertEqual(len(case.h.calls) - calls, 0)
+                with case.h.service._db() as db:
+                    after = {table: [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid")] for table in before}
+                    self.assertEqual(after, before)
+                    task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?",
+                        (consumer["task_id"],)).fetchone()[0])
+                    source = dict(db.execute("SELECT rowid AS saved_rowid,* FROM orchestration_tasks WHERE task_id=?",
+                        (case.prior["task_id"],)).fetchone())
+                self.assertEqual(source, case.originals["orchestration_tasks"])
+                self.assertEqual((task["status"], task["error"]), ("failed", "result_integrity_mismatch"))
+
+    def test_missing_physical_result_cannot_disappear_from_committed_history(self):
+        case = self.fixture()
+        with case.h.service._db() as db:
+            db.execute("DELETE FROM orchestration_results WHERE result_id=?", (case.prior["result_id"],))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM orchestration_decisions WHERE result_id=?",
+                (case.prior["result_id"],)).fetchone()[0], 1)
+        case.reject_readonly()
+
+    def test_physical_reference_identity_and_source_absence_fail_closed(self):
+        changes = (("orchestration_results", {"result_id": "changed-physical-result"}),
+                   ("orchestration_results", {"task_id": "missing-physical-task"}),
+                   ("orchestration_tasks", {"run_id": "foreign-source-run"}),
+                   ("orchestration_tasks", {"task_id": "changed-physical-task"}),
+                   ("orchestration_decisions", {"result_id": "missing-physical-result"}))
+        for table, physical in changes:
+            with self.subTest(table=table, physical=physical):
+                case = self.fixture()
+                case.mutate(table, physical=physical)
+                case.reject_readonly()
+        case = self.fixture()
+        with case.h.service._db() as db:
+            db.execute("DELETE FROM orchestration_tasks WHERE task_id=?", (case.prior["task_id"],))
+        case.reject_readonly()
+
+    def test_unrelated_foreign_history_stays_excluded_without_raw_body_read(self):
+        import sqlite3
+        case = self.fixture()
+        original_run = case.h.run
+        case.h.run = case.h.start()
+        foreign = case.history.produce_core()
+        case.h.run = original_run
+        # An invalid foreign raw body makes accidental decode observable; trace
+        # also proves only the current result's raw column was selected.
+        with case.h.service._db() as db:
+            db.execute("UPDATE orchestration_results SET raw_json=? WHERE result_id=?",
+                ("FOREIGN RAW MUST NOT BE READ", foreign["result_id"]))
+        separate = self.fixture()
+        self.move_physical_result(separate)
+        separate_before = separate.h.path.read_bytes()
+        before, statements = case.h.path.read_bytes(), []
+        for consumer in case.consumers:
+            with self.subTest(role=consumer["role"]), case.h.service._db() as db:
+                run = case.h.service._read_run(db, original_run["run_id"])
+                db.set_trace_callback(statements.append)
+                context = case.h.service._context(db, run, consumer)
+                self.assertEqual(len(context["results"]), 1)
+                self.assertEqual(context["results"][0], {"result_id": case.prior["result_id"],
+                    "raw_hash": json.loads(case.originals["orchestration_results"]["state_json"])["raw_hash"],
+                    "body_not_delivered": True})
+                self.assertNotIn(foreign["result_id"], canonical(context).decode())
+        raw_reads = [sql for sql in statements if "raw_json" in sql.lower()]
+        self.assertEqual(len(raw_reads), 2)
+        self.assertTrue(all("WHERE result_id='" + case.prior["result_id"] + "'" in sql for sql in raw_reads))
+        self.assertFalse([sql for sql in statements if sql.lstrip().split()[0].upper() in
+                          {"INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP"}])
+        self.assertEqual(case.h.path.read_bytes(), before)
+        self.assertEqual(separate.h.path.read_bytes(), separate_before)
+        with sqlite3.connect(case.h.path) as db:
+            self.assertEqual(db.execute("SELECT raw_json FROM orchestration_results WHERE result_id=?",
+                (foreign["result_id"],)).fetchone()[0], "FOREIGN RAW MUST NOT BE READ")
+
+
 class CoreMetadataServiceTests(unittest.TestCase):
     def run_cycle(self, project):
         import app
