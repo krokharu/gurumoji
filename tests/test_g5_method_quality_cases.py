@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,8 +19,16 @@ from gurumoji.services.expert_agents import ExpertAgentRegistry, NUMERIC_BINDING
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tests/fixtures/g5_method_quality/cases.json"
-PACKET_RAW_SHA256 = "9f9e7deedeec5d892acb28f5d3bb924f45c396687d76687da83e0335084fb5fa"
+PACKET_RAW_SHA256 = "a2069c64927b728d2fc26c7c8e56ddbcda833471e59a0515e48c64f9079bfb25"
 BASE = "a0a2e0dc34c37fa3e1c2bd7cb0142bd37598f95b"
+DRIVER_EDGE = {
+    "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+    "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+    "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+    "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+    "missing_or_mismatched_proof": "NOTRUN",
+    "researcher_adoption": "NOTRUN",
+}
 NUMBERS = (1, 2, 3, 4, 5, 8, 11, 12, 13)
 EXPERTS = tuple("exp-" + name for name in (
     "qualitative-content-analysis", "thematic-analysis", "framework-method", "scat", "m-gta",
@@ -100,6 +109,7 @@ def validate_packet(packet, *, expected_case_hashes):
             require(contract["cell_binding_keys"] == list(NUMERIC_BINDING_FIELDS))
             require(contract["cell_bindings"] is None and contract["binding_status"] == "NOTRUN")
             require(contract["explanation_on_missing_rejected_or_unknown_plan"] == "NOTRUN")
+            require(contract["driver_execution_edge"] == DRIVER_EDGE)
         for phase in phases:
             slots.append({"slot_id": cid + "-" + phase, "case_id": cid, "expert_id": eid, "phase": phase,
                 "source_id": case["source_id"], "inherited_source_hash": inherited,
@@ -251,8 +261,12 @@ class G5PacketTests(unittest.TestCase):
                 bind_quote_span(text, first, last)
 
 
-def explanation_gate(plan_task, plan_result, calculation_result):
-    """Fixture driver guard, not a new production scheduler or semantic judge."""
+def explanation_gate(plan_task, plan_result, calculation_result, *, service=None, item_id=None):
+    """CPU driver preflight against a fresh persisted authority, never adoption.
+
+    Three self-reported dictionaries cannot prove provenance. Without a reader,
+    remain NOTRUN. Existing Handler readers/validators own storage and code checks.
+    """
     if not all(isinstance(value, dict) for value in (plan_task, plan_result, calculation_result)):
         return "NOTRUN"
     if (plan_task.get("status") != "succeeded" or plan_result.get("validation_status") != "valid"
@@ -266,6 +280,69 @@ def explanation_gate(plan_task, plan_result, calculation_result):
             or calculation_result.get("run_id") != plan_task.get("run_id")
             or calculation_result.get("dataset_version") != plan_task.get("dataset_version")
             or fingerprint(calculation_result.get("raw")) != calculation_result.get("raw_hash")):
+        return "NOTRUN"
+    if service is None or not isinstance(item_id, str) or not item_id:
+        return "NOTRUN"
+
+    def require(condition):
+        if not condition:
+            raise ValueError("unverified G5 plan-to-calculation edge")
+
+    try:
+        run_id = plan_task["run_id"]
+        with service._db() as db:
+            run = service._read_run(db, run_id, item_id)
+            require(run["run_id"] == run_id and run["item_id"] == item_id and not run.get("stale"))
+            initial_row = db.execute("SELECT item_id FROM orchestration_initials WHERE initial_id=?",
+                                     (run["initial_id"],)).fetchone()
+            require(initial_row is not None and initial_row["item_id"] == item_id)
+            initial = service._initial(db, run["initial_id"])
+            require(canonical({k: initial[k] for k in ("input_hash", "source_revision", "analysis_revision")}) ==
+                    canonical({k: run[k] for k in ("input_hash", "source_revision", "analysis_revision")}))
+
+            def saved(task_id):
+                require(isinstance(task_id, str) and bool(task_id.strip()))
+                row = db.execute("SELECT * FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                                 (task_id, run_id)).fetchone()
+                require(row is not None)
+                task = json.loads(row["state_json"])
+                require(task["task_id"] == row["task_id"] and task["run_id"] == row["run_id"])
+                result_row = db.execute("SELECT * FROM orchestration_results WHERE result_id=? AND run_id=?",
+                                        (task["result_id"], run_id)).fetchone()
+                require(result_row is not None and result_row["task_id"] == task_id)
+                result = service.result_locked(db, item_id, run_id, result_row["result_id"])
+                require(result["result_id"] == result_row["result_id"] and result["task_id"] == task_id
+                        and result["run_id"] == run_id and result["raw_hash"] == fingerprint(result["raw"]))
+                require(isinstance(task["attempt_id"], str) and bool(task["attempt_id"].strip())
+                        and task["attempt_id"] == result["attempt_id"])
+                require(task["status"] == "succeeded" and task["validation_status"] == "valid"
+                        and result["validation_status"] == "valid" and not task.get("stale") and not result.get("stale"))
+                require(task["dataset_version"] == result["dataset_version"] == run["input_hash"])
+                require(canonical(task["annotation_version"]) == canonical(result["annotation_version"]) ==
+                        canonical(run["annotation_version"]))
+                require(canonical(task["codebook_version"]) == canonical(run["codebook_version"]))
+                return task, result
+
+            actual_plan, actual_plan_result = saved(plan_task["task_id"])
+            actual_code, actual_calculation = saved(calculation_result["task_id"])
+            require(canonical(actual_plan) == canonical(plan_task)
+                    and canonical(actual_plan_result) == canonical(plan_result)
+                    and canonical(actual_calculation) == canonical(calculation_result))
+            require(actual_plan["role"] == actual_plan_result["role"] == "interpretation"
+                    and actual_plan["kind"] == "ai")
+            requests = actual_plan_result["raw"]["analysis_requests"]
+            require(isinstance(requests, list) and len(requests) == 1)
+            original_request = requests[0]
+            require(original_request["dependencies"] == [] and "parent_task_id" not in original_request)
+            execution_intent = copy.deepcopy(original_request)
+            execution_intent.update(dependencies=[actual_plan["task_id"]], parent_task_id=actual_plan["task_id"])
+            require(canonical(actual_code["intent"]) == canonical(execution_intent)
+                    and actual_code["dependencies"] == [actual_plan["task_id"]]
+                    and actual_code["parent_task_id"] == actual_plan["task_id"]
+                    and actual_code["method_id"] == original_request["method_id"]
+                    and actual_code["title"] == original_request["question"].strip())
+            service._statistical_source(db, run, actual_code, actual_calculation, actual_calculation["raw"], initial)
+    except (AnalysisContractError, LookupError, ValueError, KeyError, TypeError, sqlite3.DatabaseError):
         return "NOTRUN"
     return "ready"
 
@@ -337,7 +414,14 @@ class G5StatisticalChainTests(unittest.TestCase):
         requests = plan_result["raw"]["analysis_requests"]
         self.assertEqual(len(requests), 1)
         self.assertEqual(requests[0]["method_id"], case["statistical_contract"]["method_id"])
-        calculation = self.dispatch(helper, run, requests[0])
+        # Preserve the model/CPU-author raw request. The technical driver uses
+        # the existing Handler edge fields only, with the actual saved plan ID.
+        original_plan = canonical(plan_result)
+        execution_intent = copy.deepcopy(requests[0])
+        self.assertEqual(execution_intent["dependencies"], [])
+        self.assertNotIn("parent_task_id", execution_intent)
+        execution_intent.update(dependencies=[plan["task_id"]], parent_task_id=plan["task_id"])
+        calculation = self.dispatch(helper, run, execution_intent)
         self.assertEqual(calculation["status"], "succeeded", calculation)
         raw = helper.service.result("content", run["run_id"], calculation["result_id"])
         fresh = AnalysisOrchestrationService(connect=self.app.database_connection, find_item=self.app.library_row,
@@ -347,10 +431,17 @@ class G5StatisticalChainTests(unittest.TestCase):
         before = self.app.DATABASE_FILE.read_bytes()
         self.assertEqual(fresh.result("content", run["run_id"], calculation["result_id"]), raw)
         self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
-        self.assertEqual(explanation_gate(plan, plan_result, raw), "ready")
+        self.assertEqual(explanation_gate(plan, plan_result, raw, service=fresh, item_id="content"), "ready")
+        self.assertEqual(fresh.result("content", run["run_id"], plan["result_id"]), plan_result)
+        self.assertEqual(canonical(plan_result), original_plan)
+        saved_tasks = {t["task_id"]: t for t in fresh.result("content", run["run_id"])["run"]["tasks"]}
+        self.assertEqual(canonical(saved_tasks[calculation["task_id"]]["intent"]), canonical(execution_intent))
+        self.assertEqual(saved_tasks[calculation["task_id"]]["dependencies"], [plan["task_id"]])
+        self.assertEqual(saved_tasks[calculation["task_id"]]["parent_task_id"], plan["task_id"])
+        self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
         if stop_after_calculation:
             return {"helper": helper, "run": run, "plan": plan, "plan_result": plan_result,
-                    "calculation": calculation, "calculation_result": raw}
+                    "calculation": calculation, "calculation_result": raw, "fresh": fresh}
         explanation = self.dispatch(helper, run, existing.intent("interpretation", expert_id=case["expert_id"],
             question="Explain the actually saved verified calculation", dependencies=[calculation["task_id"]]))
         self.assertEqual(explanation["status"], "succeeded", explanation)
@@ -437,6 +528,12 @@ class G5StatisticalChainTests(unittest.TestCase):
                 for field in ("raw_results", "decisions", "label_versions"):
                     self.assertEqual(persisted[field], exported[field])
                 self.assertEqual(persisted["run"]["tasks"], exported["run"]["tasks"])
+                saved_code = next(t for t in persisted["run"]["tasks"] if t["task_id"] == chain["calculation"]["task_id"])
+                self.assertEqual(saved_code["dependencies"], [chain["plan"]["task_id"]])
+                self.assertEqual(saved_code["parent_task_id"], chain["plan"]["task_id"])
+                self.assertEqual(canonical(saved_code["intent"]), canonical(chain["calculation"]["intent"]))
+                self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"],
+                    service=chain["fresh"], item_id="content"), "ready")
                 self.assertEqual(chain["fresh"].result("content", run["run_id"]), exported)
                 self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
                 self.assertEqual(canonical(case), original)
@@ -445,6 +542,12 @@ class G5StatisticalChainTests(unittest.TestCase):
                     "cpu_input_hash": run["input_hash"], "cpu_annotation_version": chain["plan"]["annotation_version"],
                     "plan": {k: chain["plan_result"][k] for k in ("task_id", "attempt_id", "result_id", "raw_hash")},
                     "calculation": {k: chain["calculation_result"][k] for k in ("task_id", "attempt_id", "result_id", "raw_hash")},
+                    "driver_execution_edge": {"dependencies": saved_code["dependencies"],
+                        "parent_task_id": saved_code["parent_task_id"], "execution_intent": saved_code["intent"],
+                        "original_plan_request": chain["plan_result"]["raw"]["analysis_requests"][0],
+                        "original_plan_request_hash": fingerprint(chain["plan_result"]["raw"]["analysis_requests"][0]),
+                        "plan_result_id": chain["plan_result"]["result_id"], "plan_raw_hash": chain["plan_result"]["raw_hash"],
+                        "fresh_verified": True, "researcher_adoption": "NOTRUN"},
                     "code_method_id": chain["calculation_result"]["raw"]["method_id"],
                     "code_method_version": chain["calculation_result"]["raw"]["method_version"],
                     "explanation": {k: chain["explanation"][k] for k in ("task_id", "attempt_id", "result_id", "dependencies")},
@@ -507,36 +610,149 @@ class G5StatisticalChainTests(unittest.TestCase):
     def test_absent_rejected_needs_input_or_unknown_plan_keeps_explanation_notrun(self):
         chain = self.chain(self.packet["cases"][12], stop_after_calculation=True)
         helper = chain["helper"]
+        reader = {"service": chain["fresh"], "item_id": "content"}
         count = len(helper.calls)
         valid_calculation = chain["calculation_result"]
-        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], valid_calculation), "ready")
-        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], None), "NOTRUN")
-        self.assertEqual(explanation_gate(None, chain["plan_result"], valid_calculation), "NOTRUN")
-        self.assertEqual(explanation_gate(chain["plan"], None, valid_calculation), "NOTRUN")
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], valid_calculation, **reader), "ready")
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], None, **reader), "NOTRUN")
+        self.assertEqual(explanation_gate(None, chain["plan_result"], valid_calculation, **reader), "NOTRUN")
+        self.assertEqual(explanation_gate(chain["plan"], None, valid_calculation, **reader), "NOTRUN")
         for status in ("quarantined", "needs_input", "unknown", "cancelled"):
             with self.subTest(status=status):
                 changed = {**chain["plan"], "status": status}
-                self.assertEqual(explanation_gate(changed, chain["plan_result"], valid_calculation), "NOTRUN")
+                self.assertEqual(explanation_gate(changed, chain["plan_result"], valid_calculation, **reader), "NOTRUN")
         for status in ("needs_input", "unknown", "rejected"):
             with self.subTest(report_status=status):
                 changed = copy.deepcopy(chain["plan_result"])
                 changed["raw"]["expert_report"]["status"] = status
                 changed["raw_hash"] = fingerprint(changed["raw"])
-                self.assertEqual(explanation_gate(chain["plan"], changed, valid_calculation), "NOTRUN")
+                self.assertEqual(explanation_gate(chain["plan"], changed, valid_calculation, **reader), "NOTRUN")
         for name, value in (("validation_status", "invalid"), ("task_id", "foreign"), ("attempt_id", "foreign"),
                             ("run_id", "foreign"), ("dataset_version", "foreign"), ("raw_hash", "sha256:foreign")):
             with self.subTest(plan_field=name):
                 changed = {**chain["plan_result"], name: value}
-                self.assertEqual(explanation_gate(chain["plan"], changed, valid_calculation), "NOTRUN")
+                self.assertEqual(explanation_gate(chain["plan"], changed, valid_calculation, **reader), "NOTRUN")
         for name, value in (("validation_status", "invalid"), ("run_id", "foreign"),
                             ("dataset_version", "foreign"), ("raw_hash", "sha256:foreign")):
             with self.subTest(calculation_field=name):
                 changed = {**valid_calculation, name: value}
-                self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], changed), "NOTRUN")
+                self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], changed, **reader), "NOTRUN")
         self.assertEqual(len(helper.calls), count)
         self.assertFalse(any(ctx["expert_request"]["response_phase"] == "result_explanation" for _, ctx in helper.calls))
         self.assertTrue(all(case["runtime_binding"]["status"] == "NOTRUN" for case in self.packet["cases"]))
         self.assertEqual(self.packet["evaluation_policy"]["semantic_quality"], "NOTRUN")
+
+    def assert_foreign_calculation_identity_notrun(self, field):
+        chain = self.chain(self.packet["cases"][12], stop_after_calculation=True)
+        reader = {"service": chain["fresh"], "item_id": "content"}
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"], **reader), "ready")
+        changed = copy.deepcopy(chain["calculation_result"])
+        changed[field] = "foreign-synthetic-" + field
+        self.assertEqual([key for key in changed if canonical(changed[key]) != canonical(chain["calculation_result"][key])], [field])
+        before = self.app.DATABASE_FILE.read_bytes()
+        calls = len(chain["helper"].calls)
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], changed, **reader), "NOTRUN")
+        self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
+        self.assertEqual(len(chain["helper"].calls), calls)
+
+    def test_calculation_task_id_alone_foreign_is_notrun(self):
+        self.assert_foreign_calculation_identity_notrun("task_id")
+
+    def test_calculation_result_id_alone_foreign_is_notrun(self):
+        self.assert_foreign_calculation_identity_notrun("result_id")
+
+    def test_fresh_driver_edge_preserves_original_plan_without_self_reported_authority(self):
+        chain = self.chain(self.packet["cases"][16], stop_after_calculation=True)
+        raw_request = chain["plan_result"]["raw"]["analysis_requests"][0]
+        self.assertEqual(raw_request["dependencies"], [])
+        self.assertNotIn("parent_task_id", raw_request)
+        actual_intent = copy.deepcopy(chain["calculation"]["intent"])
+        self.assertEqual(actual_intent.pop("parent_task_id"), chain["plan"]["task_id"])
+        self.assertEqual(actual_intent["dependencies"], [chain["plan"]["task_id"]])
+        actual_intent["dependencies"] = []
+        self.assertEqual(canonical(actual_intent), canonical(raw_request))
+        before = self.app.DATABASE_FILE.read_bytes()
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"]), "NOTRUN")
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"],
+            service=chain["fresh"], item_id="content"), "ready")
+        self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
+        self.assertEqual(len(chain["helper"].calls), 1)  # Plan only; no explanation.
+
+    def assert_persisted_mutation_notrun(self, chain, table, key, identity, changes):
+        """Mutate only temporary negative fixtures, then restore actual saved bytes."""
+        service = chain["helper"].service
+        with service._db() as db:
+            original = dict(db.execute(f"SELECT * FROM {table} WHERE {key}=?", (identity,)).fetchone())
+            db.execute(f"UPDATE {table} SET " + ",".join(f"{name}=?" for name in changes) + f" WHERE {key}=?",
+                       (*changes.values(), identity))
+        try:
+            before = self.app.DATABASE_FILE.read_bytes()
+            calls = len(chain["helper"].calls)
+            self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"],
+                service=chain["fresh"], item_id="content"), "NOTRUN")
+            self.assertEqual(self.app.DATABASE_FILE.read_bytes(), before)
+            self.assertEqual(len(chain["helper"].calls), calls)
+        finally:
+            with service._db() as db:
+                db.execute(f"UPDATE {table} SET " + ",".join(f"{name}=?" for name in changes) + f" WHERE {key}=?",
+                           (*(original[name] for name in changes), identity))
+        self.assertEqual(explanation_gate(chain["plan"], chain["plan_result"], chain["calculation_result"],
+            service=chain["fresh"], item_id="content"), "ready")
+
+    def test_persisted_driver_dependency_parent_intent_and_versions_fail_closed(self):
+        chain = self.chain(self.packet["cases"][12], stop_after_calculation=True)
+        mutations = {
+            "missing dependency": lambda t: t.update(dependencies=[]),
+            "foreign dependency": lambda t: t.update(dependencies=["foreign-plan"]),
+            "missing parent": lambda t: t.update(parent_task_id=None),
+            "foreign parent": lambda t: t.update(parent_task_id="foreign-plan"),
+            "raw request changed": lambda t: t["intent"].update(question="Unrequested calculation"),
+            "intent dependency removed": lambda t: t["intent"].update(dependencies=[]),
+            "input version": lambda t: t.update(dataset_version="foreign-input"),
+            "annotation version": lambda t: t.update(annotation_version=False),
+            "codebook version": lambda t: t.update(codebook_version=2),
+            "attempt identity": lambda t: t.update(attempt_id="foreign-attempt"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                task = copy.deepcopy(chain["calculation"]); mutate(task)
+                self.assert_persisted_mutation_notrun(chain, "orchestration_tasks", "task_id", task["task_id"],
+                                                     {"state_json": canonical(task)})
+
+    def test_persisted_plan_physical_identities_and_source_versions_fail_closed(self):
+        chain = self.chain(self.packet["cases"][16], stop_after_calculation=True)
+        plan, calculation = chain["plan"], chain["calculation"]
+        for table, key, identity, changes in (
+            ("orchestration_tasks", "task_id", calculation["task_id"], {"run_id": "foreign-run"}),
+            ("orchestration_results", "result_id", calculation["result_id"], {"run_id": "foreign-run"}),
+            ("orchestration_results", "result_id", calculation["result_id"], {"task_id": "foreign-task"}),
+            ("orchestration_tasks", "task_id", plan["task_id"], {"run_id": "foreign-run"}),
+            ("orchestration_results", "result_id", plan["result_id"], {"task_id": "foreign-plan"}),
+        ):
+            with self.subTest(table=table, changes=changes):
+                self.assert_persisted_mutation_notrun(chain, table, key, identity, changes)
+        for field in ("result_id", "task_id", "dataset_version"):
+            with self.subTest(plan_result_field=field):
+                state = {k: copy.deepcopy(v) for k, v in chain["plan_result"].items() if k != "raw"}
+                state[field] = "foreign-" + field
+                self.assert_persisted_mutation_notrun(chain, "orchestration_results", "result_id", plan["result_id"],
+                                                     {"state_json": canonical(state)})
+        changed_raw = copy.deepcopy(chain["plan_result"]["raw"])
+        changed_raw["analysis_requests"][0]["question"] = "Mutated original plan request"
+        state = {k: v for k, v in chain["plan_result"].items() if k != "raw"}
+        state["raw_hash"] = fingerprint(changed_raw)
+        self.assert_persisted_mutation_notrun(chain, "orchestration_results", "result_id", plan["result_id"],
+                                             {"state_json": canonical(state), "raw_json": canonical(changed_raw)})
+        with chain["helper"].service._db() as db:
+            run = chain["helper"].service._read_run(db, chain["run"]["run_id"])
+            initial = chain["helper"].service._initial(db, run["initial_id"])
+        self.assert_persisted_mutation_notrun(chain, "orchestration_initials", "initial_id", run["initial_id"],
+                                             {"item_id": "foreign-item"})
+        for field, value in (("input_hash", "foreign-input"), ("source_revision", 2), ("analysis_revision", False)):
+            with self.subTest(initial_field=field):
+                changed = {**initial, field: value}
+                self.assert_persisted_mutation_notrun(chain, "orchestration_initials", "initial_id", run["initial_id"],
+                    {"snapshot_json": canonical(changed), "snapshot_hash": fingerprint(changed)})
 
 
 if __name__ == "__main__":

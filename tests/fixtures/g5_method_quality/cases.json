@@ -5092,9 +5092,17 @@
         "target_selector": {
           "scope": "overall",
           "variable": "duration_seconds"
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:d9e5291c5bc2c142ab56ac897be6e0dfea446b1857164fe2b3c5e4e9a512afdc"
+      "canonical_case_hash": "sha256:f1d249199f594f8b9b9c6ac27e4b8d22c9943ba0897d5a0a143757a2b7e3a7bc"
     },
     {
       "case_id": "G5-11-X",
@@ -5389,9 +5397,17 @@
         "target_selector": {
           "scope": "overall",
           "variable": "duration_seconds"
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:2605ceaae7ed0388d42a21189ec14916aae0c6efa9e9175fa3fcb3e6fc77d829"
+      "canonical_case_hash": "sha256:c07f2f15d6b4f258b622016c371c0f1376348d2ae6c45b736cccbf6621c4f95e"
     },
     {
       "case_id": "G5-12-N",
@@ -5680,9 +5696,17 @@
         "target_selector": {
           "row_variable": "speaker",
           "column_variable": "question_candidate"
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:0c56e3b49a4b96b4bee75711e8c159955866ccae8089d7b684f8f71d90a66765"
+      "canonical_case_hash": "sha256:84dad7f38614146c4a309ff9815971e0497b455bc24fbd73b4733f516198fc7b"
     },
     {
       "case_id": "G5-12-X",
@@ -5976,9 +6000,17 @@
         "target_selector": {
           "row_variable": "speaker",
           "column_variable": "question_candidate"
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:fb3cd6bc7fd3c2d8985419fa833bec48cfc930d6934a47f7d627e38fa6e3dd5c"
+      "canonical_case_hash": "sha256:1b406ecf34bf0057bf3a238d453caf4c61476d836482dbef9c355081ff62d928"
     },
     {
       "case_id": "G5-13-N",
@@ -6270,9 +6302,17 @@
             "duration_seconds",
             "characters"
           ]
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:45f35028b0ef2f99f9a2a387d4f4a4950256bde7e5210bd43521af1db0192360"
+      "canonical_case_hash": "sha256:afdeeff51451d8cff87705f70d086ff2521094e4fe652efc5c9a007ae30cfda6"
     },
     {
       "case_id": "G5-13-X",
@@ -6569,9 +6609,17 @@
             "duration_seconds",
             "characters"
           ]
+        },
+        "driver_execution_edge": {
+          "raw_analysis_request": "preserved_exactly_with_original_dependencies",
+          "execution_intent": "exact_request_copy_plus_actual_plan_dependency_and_parent_task_id",
+          "authority": "fresh_persisted_plan_task_result_hash_and_calculation_task_result_hash",
+          "source": "same_run_input_initial_snapshot_and_annotation_codebook_versions",
+          "missing_or_mismatched_proof": "NOTRUN",
+          "researcher_adoption": "NOTRUN"
         }
       },
-      "canonical_case_hash": "sha256:0f0b45fa0bab6ae8c5f9b1d290a5f6fd02ad0788e716d7533bf489c64f2ebd0c"
+      "canonical_case_hash": "sha256:94048eb24d22171bfd481f2bd4a381b14962c6bc76c65bbfa5a8e9abdb587e44"
     }
   ],
   "ordered_call_slots": [
