@@ -16,6 +16,14 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 
 # 17専門家の段階別充足・不足表
 
+### 2026-10-10 — G5の合成ケースと実Handler保存来歴をCPU受入
+
+- 公開固定 `795d0757e53e69ba4cca78411f5d61d704a710dc`（親3112）の合成fixtureと隣接testの新2fileを選別した。AI許可9専門家の正常・負例18ケース／順序付き24slot、禁止8専門家の推論なし、sourceとruntimeのhash区別、null／0／false／missing／除外を維持する。全17専門家の方法・意味品質や研究者採否の完了を示すものではない。
+- Linux作者25PASS、別作者31PASSと、Windows差分8PASS＋別作者13unique PASSを区別する。Windows初回12PASS1harnessERRORは保存し、該当1ケースだけ訂正してPASS。旧3112のforeign calculation task/result IDを許す独立2FAILと初回fixtureエラーも保持し、成功件数へ再加算しない。
+- 原モデルrequestのdependencies=[]を変更せず、別のdriver実行intentに実plan taskの依存・親を設定し、既存Handlerへ保存する。実task/result/run/input版・raw hash・登録intentをfresh readerで照合し、foreign ID・親欠落・整合的な再hash改変を拒否する。6統計ケースと独立PearsonでHandler→計算→fresh→説明→未公開Storeの全member bytes一致を確認した。説明はhuman_pendingであり、研究者確定に昇格しない。
+- 実モデルによるG5全24slot、原token配列・容量実測、方法・意味品質・本人採否は別ゲートで未受入。合成CPU成功で置換しない。既存SQL・backend保存先・profile・予算・schedulerを変更せず、PNG延期を維持する。
+
+
 ### 2026-10-10 — Coreのrole・物理所属境界を固定受入、実モデル評価は別ゲート
 
 - 公開固定 `a0a2e0dc34c37fa3e1c2bd7cb0142bd37598f95b`（親fb997）の既存service・adapter・新testを選別した。Windows109unique PASS（新26＋既存Core24＋選択59、旧14内包）、role3拒否、物理所属1境界のgetter/execute各roleと正当foreign対照6、欠落参照/ID4、独立来歴17、codec80、型境界4と上限拒否2を確認。証拠583fileを照合した。旧role2FAILと物理所属4観測FAIL、reviewer/fixtureの初回失敗・限定訂正は保持し、再実行を成功件数へ加算しない。
