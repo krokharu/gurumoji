@@ -47,9 +47,27 @@ def independently_decode_wire(wire, original):
     if "expert_wire_delivery" in value:
         marker = value.pop("expert_wire_delivery")
         check(isinstance(marker, dict) and set(marker) == {"format", "source_hash", "labels_table"})
-        check(marker["format"] == "expert_wire_v1" and marker["source_hash"] == expected
+        check(marker["format"] in ("expert_wire_v1", "expert_wire_v2") and marker["source_hash"] == expected
               and type(marker["labels_table"]) is bool)
         value["expert_hooks"]["evidence_index"] = decoded_index(value)
+        if marker["format"] == "expert_wire_v2":
+            index_ids = [r["evidence_id"] for r in value["expert_hooks"]["evidence_index"]]
+            references = []
+            if "raw_evidence" in value:
+                references.append(value["raw_evidence"])
+            if "expert_request" in value:
+                check(type(value["expert_request"]) is dict)
+                if "evidence" in value["expert_request"]:
+                    references.append(value["expert_request"]["evidence"])
+            check(bool(references) and all(type(rows) is list for rows in references) and any(references))
+            for records in references:
+                seen = set()
+                for record in records:
+                    check(type(record) is dict and type(record.get("evidence_id")) is int)
+                    position = record["evidence_id"]
+                    check(position in range(len(index_ids)) and position not in seen)
+                    seen.add(position)
+                    record["evidence_id"] = index_ids[position]
         if marker["labels_table"]:
             table = value["labels"]
             check(isinstance(table, dict) and set(table) == {"owners", "columns", "rows", "field_orders", "row_orders"})
@@ -77,6 +95,18 @@ def independently_decode_wire(wire, original):
             value["labels"] = result
     check(ordered_wire_hash(value) == expected)
     return value
+
+
+def version_one_from_original(wire, original):
+    """Build the old v1 delivery from its original fields, not a production codec."""
+    legacy = copy.deepcopy(wire)
+    if legacy.get("expert_wire_delivery", {}).get("format") == "expert_wire_v2":
+        legacy["expert_wire_delivery"]["format"] = "expert_wire_v1"
+        if "raw_evidence" in legacy:
+            legacy["raw_evidence"] = copy.deepcopy(original["raw_evidence"])
+        if "expert_request" in legacy and "evidence" in legacy["expert_request"]:
+            legacy["expert_request"]["evidence"] = copy.deepcopy(original["expert_request"]["evidence"])
+    return legacy
 
 
 def synthetic_wire_packet(count=323):
@@ -868,15 +898,19 @@ class ExpertWireProjectionTests(unittest.TestCase):
             wire = json.loads(captured["input"])
             self.assertEqual(json.dumps(independently_decode_wire(wire, original)), json.dumps(original))
             self.assertEqual(decoded_index(wire), [{"evidence_id": eid} for eid in ids])
+            instruction = adapters._EXPERT_WIRE_PROMPTS[wire["expert_wire_delivery"]["format"]]
             old = {**captured, "input": json.dumps(original, ensure_ascii=False, separators=(",", ":")),
-                   "prompt": captured["prompt"].removesuffix(adapters._EXPERT_WIRE_PROMPT)}
+                   "prompt": captured["prompt"].removesuffix(instruction)}
             old_size = len(json.dumps(old, ensure_ascii=False, separators=(",", ":")).encode())
             new_size = len(json.dumps(captured, ensure_ascii=False, separators=(",", ":")).encode())
             self.assertLess(new_size, old_size)
-            self.assertTrue(captured["prompt"].endswith(adapters._EXPERT_WIRE_PROMPT))
-            self.assertEqual(captured["prompt"].count(adapters._EXPERT_WIRE_PROMPT), 1)
-            parent = {**captured, "prompt": captured["prompt"].removesuffix(adapters._EXPERT_WIRE_PROMPT)
-                      + PARENT_EXPERT_WIRE_PROMPT}
+            self.assertEqual(wire["expert_wire_delivery"]["format"], "expert_wire_v2")
+            self.assertTrue(captured["prompt"].endswith(instruction))
+            self.assertEqual(captured["prompt"].count(instruction), 1)
+            parent_wire = version_one_from_original(wire, original)
+            self.assertEqual(independently_decode_wire(parent_wire, original), original)
+            parent = {**captured, "input": json.dumps(parent_wire, ensure_ascii=False, separators=(",", ":")),
+                      "prompt": captured["prompt"].removesuffix(instruction) + adapters._EXPERT_WIRE_PROMPT}
             parent_size = len(json.dumps(parent, ensure_ascii=False, separators=(",", ":")).encode())
             self.assertLess(new_size, parent_size)
             sizes.append({"before": old_size, "parent_projection": parent_size, "after": new_size})
@@ -933,13 +967,17 @@ class ExpertWireInstructionDeltaTests(unittest.TestCase):
                 if "expert_wire_delivery" not in wire:
                     self.assertEqual(json.dumps(wire, ensure_ascii=False), before)
                     continue
-                self.assertEqual(wire["expert_wire_delivery"]["format"], "expert_wire_v1")
+                legacy = version_one_from_original(wire, source)
+                self.assertEqual(legacy["expert_wire_delivery"]["format"], "expert_wire_v1")
+                self.assertEqual(independently_decode_wire(legacy, source), source)
+                self.assertEqual(adapters._restore_expert_wire(legacy, expected_hash=ordered_wire_hash(source)), source)
                 self.assertEqual(wire["expert_wire_delivery"]["source_hash"], ordered_wire_hash(source))
                 def cost(packet, instruction):
                     return len(json.dumps({"input": json.dumps(packet, ensure_ascii=False, separators=(",", ":")),
                         "prompt": instruction}, ensure_ascii=False, separators=(",", ":")).encode())
-                self.assertLess(cost(wire, adapters._EXPERT_WIRE_PROMPT), cost(source, ""))
-                self.assertLess(cost(wire, adapters._EXPERT_WIRE_PROMPT), cost(wire, PARENT_EXPERT_WIRE_PROMPT))
+                instruction = adapters._EXPERT_WIRE_PROMPTS[wire["expert_wire_delivery"]["format"]]
+                self.assertLess(cost(wire, instruction), cost(source, ""))
+                self.assertLess(cost(wire, instruction), cost(legacy, PARENT_EXPERT_WIRE_PROMPT))
         prompt = adapters._EXPERT_WIRE_PROMPT
         self.assertIn("expert_wire_v1 (ordered, 0-based)", prompt)
         self.assertIn("expert_hooks.evidence_index rows zip columns", prompt)
@@ -961,6 +999,79 @@ class ExpertWireInstructionDeltaTests(unittest.TestCase):
                     self.assertEqual(caught.exception.code, "expert_wire_delivery_mismatch")
             self.assertEqual(independently_decode_wire(wire, source), source)
             self.assertEqual(adapters._restore_expert_wire(wire, expected_hash=ordered_wire_hash(source)), source)
+
+
+class ExpertWireIdReferenceTests(unittest.TestCase):
+    def source(self):
+        source = synthetic_wire_packet()
+        source["expert_request"] = {"evidence": [{"evidence_id": row["evidence_id"],
+            "utterance_id": row["utterance_id"], "unknown": {"empty": [], "null": None, "zero": 0, "false": False}}
+            for row in reversed(source["raw_evidence"])], "unchanged": "not a reference"}
+        return source
+
+    def test_id_references_and_old_v1_inverse_preserve_all_domains_and_order(self):
+        source = self.source(); before = json.dumps(source, ensure_ascii=False)
+        wire = adapters._project_expert_wire(source)
+        self.assertEqual(wire["expert_wire_delivery"]["format"], "expert_wire_v2")
+        self.assertEqual(wire["expert_hooks"]["evidence_index"]["rows"], [[r["evidence_id"]] for r in source["expert_hooks"]["evidence_index"]])
+        self.assertEqual(len(wire["expert_hooks"]["evidence_index"]["rows"]), 323)
+        self.assertEqual([r["evidence_id"] for r in wire["raw_evidence"]], list(range(12)))
+        self.assertEqual([r["evidence_id"] for r in wire["expert_request"]["evidence"]], list(reversed(range(12))))
+        self.assertEqual(wire["labels"]["owners"], list(source["labels"]))
+        self.assertNotEqual(wire["labels"]["owners"][0], wire["expert_hooks"]["evidence_index"]["rows"][0][0])
+        for packet in (wire, version_one_from_original(wire, source)):
+            self.assertEqual(json.dumps(independently_decode_wire(packet, source), ensure_ascii=False), before)
+            self.assertEqual(json.dumps(adapters._restore_expert_wire(packet, expected_hash=ordered_wire_hash(source)), ensure_ascii=False), before)
+        self.assertEqual(json.dumps(source, ensure_ascii=False), before)
+        self.assertIn("evidence_id integers reference expert_hooks.evidence_index.rows[i][0]", adapters._EXPERT_WIRE_ID_PROMPT)
+        self.assertIn("Other fields stay literal", adapters._EXPERT_WIRE_ID_PROMPT)
+
+    def test_reference_tampering_never_gains_original_input_authority(self):
+        source = self.source(); wire = adapters._project_expert_wire(source)
+        mutations = {
+            **{f"raw reference {value!r}": lambda p, value=value: p["raw_evidence"][0].update(evidence_id=value)
+               for value in (None, False, 0.0, "0", -1, 323, {}, [], "ev_foreign")},
+            "duplicate raw ref": lambda p: p["raw_evidence"][1].update(evidence_id=0),
+            "foreign valid position": lambda p: p["raw_evidence"][0].update(evidence_id=322),
+            "raw reordered": lambda p: p["raw_evidence"].reverse(),
+            "expert boolean": lambda p: p["expert_request"]["evidence"][0].update(evidence_id=True),
+            "expert duplicate": lambda p: p["expert_request"]["evidence"][0].update(evidence_id=10),
+            "expert out of range": lambda p: p["expert_request"]["evidence"][0].update(evidence_id=323),
+            "expert reordered": lambda p: p["expert_request"]["evidence"].reverse(),
+            "owner foreign": lambda p: p["labels"]["owners"].__setitem__(0, "foreign-owner"),
+            "utterance confused with evidence": lambda p: p["raw_evidence"][0].update(utterance_id="ev_synthetic_000"),
+            "unknown nested false becomes zero": lambda p: p["expert_request"]["evidence"][0]["unknown"].update(false=0),
+            "source": lambda p: p.update(data_version="foreign"),
+            "marker downgrade": lambda p: p["expert_wire_delivery"].update(format="expert_wire_v1"),
+            "marker type": lambda p: p["expert_wire_delivery"].update(format=[]),
+            "marker hash": lambda p: p["expert_wire_delivery"].update(source_hash="foreign"),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(damage=name):
+                bad = copy.deepcopy(wire); mutation(bad)
+                with self.assertRaises(ValueError): independently_decode_wire(bad, source)
+                with self.assertRaises(AnalysisContractError) as caught:
+                    adapters._restore_expert_wire(bad, expected_hash=ordered_wire_hash(source))
+                self.assertEqual(caught.exception.code, "expert_wire_delivery_mismatch")
+        foreign = copy.deepcopy(source); foreign["raw_evidence"][0]["evidence_id"] = "ev_synthetic_322"
+        rehashed = adapters._project_expert_wire(foreign)
+        with self.assertRaises(ValueError): independently_decode_wire(rehashed, source)
+        with self.assertRaises(AnalysisContractError): adapters._restore_expert_wire(rehashed, expected_hash=ordered_wire_hash(source))
+
+    def test_nonmatching_or_missing_source_ids_are_not_invented_as_index_positions(self):
+        changes = (
+            lambda p: p["raw_evidence"][0].update(evidence_id="unindexed-literal"),
+            lambda p: p["raw_evidence"][0].update(evidence_id=None),
+            lambda p: p["raw_evidence"][0].pop("evidence_id"),
+            lambda p: p["raw_evidence"].append(copy.deepcopy(p["raw_evidence"][0])),
+        )
+        for change in changes:
+            source = self.source(); change(source); before = json.dumps(source)
+            wire = adapters._project_expert_wire(source)
+            self.assertEqual(wire["expert_wire_delivery"]["format"], "expert_wire_v1")
+            self.assertEqual(json.dumps(independently_decode_wire(wire, source)), before)
+            self.assertEqual(json.dumps(adapters._restore_expert_wire(wire, expected_hash=ordered_wire_hash(source))), before)
+            self.assertEqual(json.dumps(source), before)
 
 
 class ReadHookBoundaryTests(unittest.TestCase):
