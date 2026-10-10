@@ -16,6 +16,12 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 
 # 17専門家の段階別充足・不足表
 
+### 2026-10-10 — 可逆参照化を独立受入、保存済み全323入力の容量PASS
+
+- Dot固定 `153efabca7f4521e340725c49b3d3993158c883d`（親8a647）の既存adapter／hook testだけを選別。反復根拠IDを既存索引の位置へ可逆対応し、旧wire復元互換と型・範囲・重複・foreign・source hash・順序・属性presenceを保持。Windows局所17unique（隣接delivery6を含む）＋独立44case PASS、全323 ordered inverse一致、原raw／service／Handler／SQL／Store fresh保護を確認した。
+- 保存済みexpert002の正確入力を同じloaded Gemma32768／parallel1／templateで新候補だけ1回tokenizeし、24186<=24576（余裕390）を実測。前後model instance／config一致、推論・生成・設定変更0。原26049、173545の24733、8a647の24680という容量FAILを保持し、旧配列再tokenize0。別の入力・実生成後の増量を保証する結果ではない。
+- 全323の実読了・安定完了・G5実方法意味品質・研究者採否は別で未完。入力上限拡大／本文切捨て／schema変更なし。過去CPU合格や今回tokenizer成功を実推論成功へ換算せず、PNG延期を維持する。
+
 ### 2026-10-10 — 専門家wireの可逆整理をCPU受入、実容量は別確認
 
 - 公開固定 `1735456008ccef6c9e725b6fcfc02e3afe956388`（親a0a2）のadapterと隣接testの2pathを選別。Linux作者の新6／hooks29と隣接46、別作者Windows focused29（新6を内包）＋独立4＝33unique PASS、16改変拒否を確認した。Windowsの旧legacy hook6methodは未実行であり、初回reviewer harnessの失敗と訂正履歴は保持する。

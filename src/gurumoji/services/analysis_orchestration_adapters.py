@@ -20,7 +20,12 @@ PROVIDERS = {"lmstudio", "openai", "google"}
 _RESULT_METADATA_COLUMNS = ("run_id", "dataset_version", "annotation_version", "validation_status",
                             "content_status", "stale", "error")
 _RESULT_METADATA_PROMPT = "\nresult_metadataは可逆な共通metadata表です。referencesの各[result位置,row位置]について、columnsとrows[row位置]を対応するresults[result位置]へ併合して読みます。位置は0始まりで元の順序を保持します。本文や根拠IDは省略しておらず、参照は読了・採択・欠測0を意味しません。\n"
-_EXPERT_WIRE_PROMPT = "\nexpert_wire_v1: expert_hooks.evidence_indexはcolumns/rowsの全ID索引です。labelsが表ならowners[i]が所有発話ID、rows[i]がcolumnsの値、field_orders[row_orders[i]]が存在する列の元キー順（0始まり）です。その順にだけキーを復元し、他列のnullは欠落用、存在列のnull/0/false/空値は元の値です。ID・本文・ラベルは省略せず、採否・読了・権限は変更しません。\n"
+_EXPERT_WIRE_PROMPT = '\nexpert_wire_v1 (ordered, 0-based): expert_hooks.evidence_index rows zip columns; table labels[owners[i]]={columns[c]:rows[i][c] for c in field_orders[row_orders[i]]}. Other keys absent; values literal. No reading/adoption/permission change.\n'
+
+_EXPERT_WIRE_ID_PROMPT = _EXPERT_WIRE_PROMPT.replace("expert_wire_v1", "expert_wire_v2").rstrip() + (
+    " In raw_evidence and expert_request.evidence only, evidence_id integers reference "
+    "expert_hooks.evidence_index.rows[i][0]. Other fields stay literal.\n")
+_EXPERT_WIRE_PROMPTS = {"expert_wire_v1": _EXPERT_WIRE_PROMPT, "expert_wire_v2": _EXPERT_WIRE_ID_PROMPT}
 
 
 def _expert_wire_hash(packet):
@@ -44,10 +49,11 @@ def _restore_expert_wire(packet, *, expected_hash):
         if not condition:
             raise AnalysisContractError("専門家の配送表を復元できません。", code="expert_wire_delivery_mismatch")
     value = copy.deepcopy(packet)
+    has_marker = "expert_wire_delivery" in value
     marker = value.pop("expert_wire_delivery", None)
-    if marker is not None:
+    if has_marker:
         require(isinstance(marker, dict) and set(marker) == {"format", "source_hash", "labels_table"}
-                and marker["format"] == "expert_wire_v1" and marker["source_hash"] == expected_hash
+                and isinstance(marker["format"], str) and marker["format"] in _EXPERT_WIRE_PROMPTS and marker["source_hash"] == expected_hash
                 and type(marker["labels_table"]) is bool)
         index = value.get("expert_hooks", {}).get("evidence_index")
         require(isinstance(index, dict) and set(index) == {"columns", "rows"}
@@ -56,6 +62,19 @@ def _restore_expert_wire(packet, *, expected_hash):
                     for row in index["rows"]))
         require(len({row[0] for row in index["rows"]}) == len(index["rows"]))
         value["expert_hooks"]["evidence_index"] = [{"evidence_id": row[0]} for row in index["rows"]]
+        if marker["format"] == "expert_wire_v2":
+            groups = [value["raw_evidence"]] if "raw_evidence" in value else []
+            if "expert_request" in value:
+                require(isinstance(value["expert_request"], dict))
+                if "evidence" in value["expert_request"]:
+                    groups.append(value["expert_request"]["evidence"])
+            require(bool(groups) and all(isinstance(rows, list) for rows in groups) and any(groups))
+            for rows in groups:
+                require(all(isinstance(row, dict) and type(row.get("evidence_id")) is int
+                            and 0 <= row["evidence_id"] < len(index["rows"]) for row in rows))
+                require(len({row["evidence_id"] for row in rows}) == len(rows))
+                for row in rows:
+                    row["evidence_id"] = index["rows"][row["evidence_id"]][0]
         if marker["labels_table"]:
             table = value.get("labels")
             require(isinstance(table, dict) and set(table) == {"columns", "rows", "owners", "field_orders", "row_orders"})
@@ -118,14 +137,35 @@ def _project_expert_wire(packet):
         candidate["labels"] = {"columns": columns, "rows": rows, "owners": list(labels), "field_orders": orders, "row_orders": refs}
         candidate["expert_wire_delivery"]["labels_table"] = True
         candidates.append(candidate)
+    # Only identical evidence IDs can reference this ID-only index. Utterance
+    # owners are a different domain and must never be inferred from positions.
+    positions = {row["evidence_id"]: i for i, row in enumerate(index)}
+    groups = [original["raw_evidence"]] if "raw_evidence" in original else []
+    expert = original.get("expert_request", {})
+    if isinstance(expert, dict) and "evidence" in expert:
+        groups.append(expert["evidence"])
+    if (isinstance(expert, dict) and groups and all(isinstance(rows, list) for rows in groups)
+            and any(groups) and all(all(isinstance(row, dict) and isinstance(row.get("evidence_id"), str)
+                and row["evidence_id"] in positions for row in rows)
+                and len({row["evidence_id"] for row in rows}) == len(rows) for rows in groups)):
+        for base in list(candidates):
+            candidate = copy.deepcopy(base)
+            referenced = [candidate["raw_evidence"]] if "raw_evidence" in candidate else []
+            if "evidence" in candidate.get("expert_request", {}):
+                referenced.append(candidate["expert_request"]["evidence"])
+            for rows in referenced:
+                for row in rows:
+                    row["evidence_id"] = positions[row["evidence_id"]]
+            candidate["expert_wire_delivery"]["format"] = "expert_wire_v2"
+            candidates.append(candidate)
     for candidate in candidates:
         _restore_expert_wire(candidate, expected_hash=expected)
     def size(candidate, prompt):
         # Include string escaping, binding metadata and decoder instructions.
         return len(json.dumps({"input": json.dumps(candidate, ensure_ascii=False, separators=(",", ":")),
                                "prompt": prompt}, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    best = min(candidates, key=lambda candidate: size(candidate, _EXPERT_WIRE_PROMPT))
-    return best if size(best, _EXPERT_WIRE_PROMPT) < size(original, "") else original
+    best = min(candidates, key=lambda candidate: size(candidate, _EXPERT_WIRE_PROMPTS[candidate["expert_wire_delivery"]["format"]]))
+    return best if size(best, _EXPERT_WIRE_PROMPTS[best["expert_wire_delivery"]["format"]]) < size(original, "") else original
 
 
 def _restore_core_result_metadata(context, *, expected_hash):
@@ -510,7 +550,7 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         def call(packet, output_schema, round_index=0):
             check_cancelled()
             wire = _project_expert_wire(packet) if use_hooks and project_expert_wire else packet
-            wire_prompt = _EXPERT_WIRE_PROMPT if use_hooks and project_expert_wire and "expert_wire_delivery" in wire else ""
+            wire_prompt = _EXPERT_WIRE_PROMPTS[wire["expert_wire_delivery"]["format"]] if use_hooks and project_expert_wire and "expert_wire_delivery" in wire else ""
             def usage(data):
                 record_usage({**data, "usage_id": context["task"]["task_id"] + f":expert:{round_index}"})
             private = {}
