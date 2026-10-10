@@ -16,6 +16,13 @@ tags: [gurumoji/analysis, gurumoji/evaluation]
 
 # 17専門家の段階別充足・不足表
 
+### 2026-10-10 — Coreのrole・物理所属境界を固定受入、実モデル評価は別ゲート
+
+- 公開固定 `a0a2e0dc34c37fa3e1c2bd7cb0142bd37598f95b`（親fb997）の既存service・adapter・新testを選別した。Windows109unique PASS（新26＋既存Core24＋選択59、旧14内包）、role3拒否、物理所属1境界のgetter/execute各roleと正当foreign対照6、欠落参照/ID4、独立来歴17、codec80、型境界4と上限拒否2を確認。証拠583fileを照合した。旧role2FAILと物理所属4観測FAIL、reviewer/fixtureの初回失敗・限定訂正は保持し、再実行を成功件数へ加算しない。
+- 合成323件・9scope・31wireと原raw/task/decision/labelを保持し、Store7保存後のfresh全member bytes一致と、生成identityを固定した新旧normal31の同等性を確認した。getterはreadonly、無関係foreign本文は配送しない。schema追加/変更・入力切捨て・予算拡大・新schedulerはない。
+- 前固定版の31wire CPU容量は全件24576以内（最大23601、余裕975）、別作者543整合性＋24decoder確認を受入済み。短い合成出力によるCPU計測であり、新sourceでの容量・有限実行票・実Gemma全323本文配送/3安定完了は別受入とする。G0.5実raw比較18件は全品質FAIL、正式比較/cache/currentPack/本人採否の制約を維持する。G5の方法意味品質は型の成功で代替せず、PNG延期も維持する。
+
+
 ### 2026-10-10 08:04 JST — 17専門家CPU境界を固定受入、意味品質と本人採否を分離
 
 - 公開固定 `2b9f07a7ef52ca5aba026fefa1f19cfbe0e491c4`（親4d92）の方法レビュー＋新合成testの2pathを選別。Linux18unique PASS、別作者Windows18＋独立4境界PASS、証拠924file＋固定Git対応894sourceを照合した。反復を成功件数へ加算しない。原410doc行、17定義・入力source hash、AI許可9／禁止8／106段階と既存production／Core testsを保持する。
