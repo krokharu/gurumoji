@@ -20,6 +20,152 @@ PROVIDERS = {"lmstudio", "openai", "google"}
 _RESULT_METADATA_COLUMNS = ("run_id", "dataset_version", "annotation_version", "validation_status",
                             "content_status", "stale", "error")
 _RESULT_METADATA_PROMPT = "\nresult_metadataは可逆な共通metadata表です。referencesの各[result位置,row位置]について、columnsとrows[row位置]を対応するresults[result位置]へ併合して読みます。位置は0始まりで元の順序を保持します。本文や根拠IDは省略しておらず、参照は読了・採択・欠測0を意味しません。\n"
+_EXPERT_WIRE_PROMPT = '\nexpert_wire_v1 (ordered, 0-based): expert_hooks.evidence_index rows zip columns; table labels[owners[i]]={columns[c]:rows[i][c] for c in field_orders[row_orders[i]]}. Other keys absent; values literal. No reading/adoption/permission change.\n'
+
+_EXPERT_WIRE_ID_PROMPT = _EXPERT_WIRE_PROMPT.replace("expert_wire_v1", "expert_wire_v2").rstrip() + (
+    " In raw_evidence and expert_request.evidence only, evidence_id integers reference "
+    "expert_hooks.evidence_index.rows[i][0]. Other fields stay literal.\n")
+_EXPERT_WIRE_PROMPTS = {"expert_wire_v1": _EXPERT_WIRE_PROMPT, "expert_wire_v2": _EXPERT_WIRE_ID_PROMPT}
+
+
+def _expert_wire_hash(packet):
+    # JSON object insertion order is part of this delivery proof, including
+    # nested label values. Canonical object hashing alone would lose that order.
+    pending = [packet]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            if any(not isinstance(key, str) for key in value):
+                raise AnalysisContractError("配送JSONのキーが不正です。", code="expert_wire_delivery_mismatch")
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return fingerprint(json.dumps(packet, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+
+
+def _restore_expert_wire(packet, *, expected_hash):
+    """Verify against the original call input, not a self-rehashed wire packet."""
+    def require(condition):
+        if not condition:
+            raise AnalysisContractError("専門家の配送表を復元できません。", code="expert_wire_delivery_mismatch")
+    value = copy.deepcopy(packet)
+    has_marker = "expert_wire_delivery" in value
+    marker = value.pop("expert_wire_delivery", None)
+    if has_marker:
+        require(isinstance(marker, dict) and set(marker) == {"format", "source_hash", "labels_table"}
+                and isinstance(marker["format"], str) and marker["format"] in _EXPERT_WIRE_PROMPTS and marker["source_hash"] == expected_hash
+                and type(marker["labels_table"]) is bool)
+        index = value.get("expert_hooks", {}).get("evidence_index")
+        require(isinstance(index, dict) and set(index) == {"columns", "rows"}
+                and index["columns"] == ["evidence_id"] and isinstance(index["rows"], list))
+        require(all(isinstance(row, list) and len(row) == 1 and isinstance(row[0], str) and bool(row[0])
+                    for row in index["rows"]))
+        require(len({row[0] for row in index["rows"]}) == len(index["rows"]))
+        value["expert_hooks"]["evidence_index"] = [{"evidence_id": row[0]} for row in index["rows"]]
+        if marker["format"] == "expert_wire_v2":
+            groups = [value["raw_evidence"]] if "raw_evidence" in value else []
+            if "expert_request" in value:
+                require(isinstance(value["expert_request"], dict))
+                if "evidence" in value["expert_request"]:
+                    groups.append(value["expert_request"]["evidence"])
+            require(bool(groups) and all(isinstance(rows, list) for rows in groups) and any(groups))
+            for rows in groups:
+                require(all(isinstance(row, dict) and type(row.get("evidence_id")) is int
+                            and 0 <= row["evidence_id"] < len(index["rows"]) for row in rows))
+                require(len({row["evidence_id"] for row in rows}) == len(rows))
+                for row in rows:
+                    row["evidence_id"] = index["rows"][row["evidence_id"]][0]
+        if marker["labels_table"]:
+            table = value.get("labels")
+            require(isinstance(table, dict) and set(table) == {"columns", "rows", "owners", "field_orders", "row_orders"})
+            columns, rows, owners, orders, refs = (table[key] for key in ("columns", "rows", "owners", "field_orders", "row_orders"))
+            require(all(isinstance(part, list) for part in (columns, rows, owners, orders, refs)))
+            require(all(isinstance(key, str) for key in columns) and len(set(columns)) == len(columns)
+                    and all(isinstance(uid, str) and bool(uid) for uid in owners) and len(set(owners)) == len(owners)
+                    and len(rows) == len(owners) == len(refs))
+            require(all(isinstance(row, list) and len(row) == len(columns) for row in rows))
+            require(all(isinstance(order, list) and all(type(i) is int and 0 <= i < len(columns) for i in order)
+                        and len(set(order)) == len(order) for order in orders))
+            require(len({canonical(order) for order in orders}) == len(orders))
+            require(all(type(ref) is int and 0 <= ref < len(orders) for ref in refs))
+            labels, seen_columns, seen_orders = {}, [], []
+            for owner, row, ref in zip(owners, rows, refs):
+                order = orders[ref]
+                require(all(cell is None for i, cell in enumerate(row) if i not in order))
+                labels[owner] = {columns[i]: copy.deepcopy(row[i]) for i in order}
+                for i in order:
+                    if i not in seen_columns:
+                        seen_columns.append(i)
+                if ref not in seen_orders:
+                    seen_orders.append(ref)
+            require(seen_columns == list(range(len(columns))) and seen_orders == list(range(len(orders))))
+            value["labels"] = labels
+    require(isinstance(expected_hash, str) and _expert_wire_hash(value) == expected_hash)
+    return value
+
+
+def _project_expert_wire(packet):
+    """Only the outbound copy changes; small packets retain their original shape."""
+    original = copy.deepcopy(packet)
+    if "expert_wire_delivery" in original:
+        raise AnalysisContractError("配送表を元入力として使用できません。", code="expert_wire_delivery_mismatch")
+    index = original.get("expert_hooks", {}).get("evidence_index")
+    if (not isinstance(index, list) or any(not isinstance(row, dict) or set(row) != {"evidence_id"}
+            or not isinstance(row["evidence_id"], str) or not row["evidence_id"] for row in index)
+            or len({row["evidence_id"] for row in index}) != len(index)):
+        raise AnalysisContractError("専門家の根拠索引が不正です。", code="expert_wire_delivery_mismatch")
+    expected = _expert_wire_hash(original)
+    value = copy.deepcopy(original)
+    value["expert_hooks"]["evidence_index"] = {"columns": ["evidence_id"], "rows": [[row["evidence_id"]] for row in index]}
+    value["expert_wire_delivery"] = {"format": "expert_wire_v1", "source_hash": expected, "labels_table": False}
+    candidates = [value]
+    labels = original.get("labels")
+    if "labels" in original and (not isinstance(labels, dict) or any(not isinstance(uid, str) or not uid
+            or not isinstance(fields, dict) for uid, fields in labels.items())):
+        raise AnalysisContractError("専門家のラベル所有者が不正です。", code="expert_wire_delivery_mismatch")
+    if isinstance(labels, dict) and all(isinstance(uid, str) and uid and isinstance(fields, dict)
+            and all(isinstance(key, str) for key in fields) for uid, fields in labels.items()):
+        columns = list(dict.fromkeys(key for fields in labels.values() for key in fields))
+        orders, refs, rows = [], [], []
+        for fields in labels.values():
+            order = [columns.index(key) for key in fields]
+            if order not in orders:
+                orders.append(order)
+            refs.append(orders.index(order))
+            rows.append([copy.deepcopy(fields.get(key)) for key in columns])
+        candidate = copy.deepcopy(value)
+        candidate["labels"] = {"columns": columns, "rows": rows, "owners": list(labels), "field_orders": orders, "row_orders": refs}
+        candidate["expert_wire_delivery"]["labels_table"] = True
+        candidates.append(candidate)
+    # Only identical evidence IDs can reference this ID-only index. Utterance
+    # owners are a different domain and must never be inferred from positions.
+    positions = {row["evidence_id"]: i for i, row in enumerate(index)}
+    groups = [original["raw_evidence"]] if "raw_evidence" in original else []
+    expert = original.get("expert_request", {})
+    if isinstance(expert, dict) and "evidence" in expert:
+        groups.append(expert["evidence"])
+    if (isinstance(expert, dict) and groups and all(isinstance(rows, list) for rows in groups)
+            and any(groups) and all(all(isinstance(row, dict) and isinstance(row.get("evidence_id"), str)
+                and row["evidence_id"] in positions for row in rows)
+                and len({row["evidence_id"] for row in rows}) == len(rows) for rows in groups)):
+        for base in list(candidates):
+            candidate = copy.deepcopy(base)
+            referenced = [candidate["raw_evidence"]] if "raw_evidence" in candidate else []
+            if "evidence" in candidate.get("expert_request", {}):
+                referenced.append(candidate["expert_request"]["evidence"])
+            for rows in referenced:
+                for row in rows:
+                    row["evidence_id"] = positions[row["evidence_id"]]
+            candidate["expert_wire_delivery"]["format"] = "expert_wire_v2"
+            candidates.append(candidate)
+    for candidate in candidates:
+        _restore_expert_wire(candidate, expected_hash=expected)
+    def size(candidate, prompt):
+        # Include string escaping, binding metadata and decoder instructions.
+        return len(json.dumps({"input": json.dumps(candidate, ensure_ascii=False, separators=(",", ":")),
+                               "prompt": prompt}, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    best = min(candidates, key=lambda candidate: size(candidate, _EXPERT_WIRE_PROMPTS[candidate["expert_wire_delivery"]["format"]]))
+    return best if size(best, _EXPERT_WIRE_PROMPTS[best["expert_wire_delivery"]["format"]]) < size(original, "") else original
 
 
 def _restore_core_result_metadata(context, *, expected_hash):
@@ -302,6 +448,9 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         if provider != "lmstudio" and not api_key:
             raise AnalysisContractError("選択したAIのAPIキーが未設定です。", code="provider_unavailable")
         schema = copy.deepcopy(CORE_SCHEMA if role == "core" else CRITIC_SCHEMA if role == "critic" else SPECIALIST_SCHEMA)
+        project_expert_wire = (role == "interpretation" and "expert_request" in context
+            and context.get("task", {}).get("intent", {}).get("kind") != "clarification"
+            and "statistical_tools" not in context["expert_request"].get("knowledge", {}))
         expert_prompt = ""
         role_prompt = ROLE_PROMPTS[role]
         if role == "verification":
@@ -400,6 +549,8 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
 
         def call(packet, output_schema, round_index=0):
             check_cancelled()
+            wire = _project_expert_wire(packet) if use_hooks and project_expert_wire else packet
+            wire_prompt = _EXPERT_WIRE_PROMPTS[wire["expert_wire_delivery"]["format"]] if use_hooks and project_expert_wire and "expert_wire_delivery" in wire else ""
             def usage(data):
                 record_usage({**data, "usage_id": context["task"]["task_id"] + f":expert:{round_index}"})
             private = {}
@@ -409,8 +560,8 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
                            "attempt_id": options["_budget_attempt_id"] + f":{round_index}",
                            "raw_usage_callback": options.get("_raw_usage_callback")}
             result = call_ai_json(
-                provider, api_key, model, COMMON_PROMPT + role_prompt + expert_prompt,
-                json.dumps(packet, ensure_ascii=False, separators=(",", ":")),
+                provider, api_key, model, COMMON_PROMPT + role_prompt + expert_prompt + wire_prompt,
+                json.dumps(wire, ensure_ascii=False, separators=(",", ":")),
                 "analysis_orchestration_" + role, output_schema,
                 check_cancelled, usage if use_hooks else record_usage,
                 config.lmstudio_base_url if provider == "lmstudio" else "",
