@@ -142,7 +142,15 @@ class OrchestrationAdapterTests(unittest.TestCase):
         for role in ("core", "verification", "critic"):
             self.run(role, context, self.resolve({}), lambda: None, lambda _: None)
             sent = json.loads(self.calls[-1][4])
-            self.assertEqual(sent["coverage"]["evidence_index"], [{"evidence_id": f"e{i}"} for i in range(323)])
+            index = sent["coverage"]["evidence_index"]
+            if role in {"core", "critic"}:
+                self.assertEqual(index, {"columns": ["evidence_id"], "rows": [[f"e{i}"] for i in range(323)]})
+                self.assertIn("columns_rows_v1", sent["coverage"]["evidence_index_format"])
+                index = [dict(zip(index["columns"], row)) for row in index["rows"]]
+            else:
+                self.assertIsInstance(index, list)
+                self.assertNotIn("columns_rows_v1", sent["coverage"]["evidence_index_format"])
+            self.assertEqual(index, [{"evidence_id": f"e{i}"} for i in range(323)])
             self.assertEqual(sent["raw_evidence"][0]["utterance_id"], "u0")
         self.assertEqual(context["coverage"]["evidence_index"][-1]["utterance_id"], "u322")
 

@@ -5,8 +5,9 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from gurumoji.analysis_core import AnalysisContractError
+from gurumoji.analysis_core import AnalysisContractError, fingerprint
 from gurumoji.analysis_orchestration import AnalysisOrchestrationService
 from gurumoji.method_experts import ExpertCatalog
 from gurumoji.research_analysis import build_research_statistics
@@ -156,13 +157,37 @@ class StatisticalExpertTests(unittest.TestCase):
             self.assertEqual(before, self.analysis)
 
     def test_core_routing_uses_specialist_proposal_and_formal_calculation_tasks(self):
+        import app
+        import test_content_analysis as content_support
+        from gurumoji.analysis_store import AnalysisStore
+        from gurumoji.services.analysis_orchestration_publication import build_orchestration_package
+        fixture = content_support.ContentApiTests(methodName="runTest")
+        fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        for guard in (patch("socket.socket.connect", side_effect=AssertionError("No network")),
+                      patch.object(AnalysisStore, "_publish_generated_vaults", side_effect=AssertionError("No Vault")),
+                      patch.object(AnalysisStore, "_publish_research", side_effect=AssertionError("No Vault"))):
+            guard.start(); self.addCleanup(guard.stop)
+        self.service.connect = app.database_connection
+        self.service.find_item = app.library_row
         eid = "exp-correlation"
+        references = []
         def agent(role, context, *args):
             if role != "core":
                 return self.agent(role, context, *args)
             self.calls.append((role, copy.deepcopy(context)))
-            reports = [r for r in context["results"] if r["role"] == "interpretation"]
-            calculations = [r for r in context["results"] if r["role"] == "statistics"]
+            bodies = []
+            for result in context["results"]:
+                if "content" in result:
+                    bodies.append(result)
+                else:
+                    self.assertEqual(set(result), {"result_id", "raw_hash", "body_not_delivered"})
+                    self.assertIs(result["body_not_delivered"], True)
+                    saved = self.service.result("content", context["task"]["run_id"], result["result_id"])
+                    self.assertEqual(saved["role"], "core")
+                    self.assertEqual(result["raw_hash"], fingerprint(saved["raw"]))
+                    references.append(result)
+            reports = [r for r in bodies if r["role"] == "interpretation"]
+            calculations = [r for r in bodies if r["role"] == "statistics"]
             if not reports:
                 return fixtures.core(intents=[fixtures.intent("interpretation", expert_id=eid)])
             if not calculations:
@@ -172,13 +197,53 @@ class StatisticalExpertTests(unittest.TestCase):
                     question="Explain the verified calculation", dependencies=[calculations[0]["task_id"]])])
             return fixtures.stop()
         self.service.agent_runner = agent
-        run = self.start()
+        run = self.service.start("content", {"model": "fixture", "expert_ids": [eid],
+            "question": "Explore this synthetic dataset", "time_limit_seconds": None, "max_calls": 25,
+            "obsidian_management": False, "publication_targets": []})
         self.service.run(run["run_id"])
-        state = self.service.status("synthetic", run["run_id"])
+        state = self.service.status("content", run["run_id"])
         self.assertEqual(state["status"], "stopped", state.get("error"))
         self.assertEqual(state["stop_reason"], "human_review_required")
         self.assertEqual(len([t for t in state["tasks"] if t["role"] == "statistics"]), 1)
         self.assertEqual(len([r for r, _ in self.calls if r == "interpretation"]), 2)
+        self.assertTrue(references)
+        calculation = next(t for t in state["tasks"] if t["role"] == "statistics")
+        explanation = next(t for t in state["tasks"] if t.get("expert_response_phase") == "result_explanation")
+        self.assertEqual(calculation["status"], "succeeded")
+        self.assertEqual(explanation["status"], "succeeded")
+        self.assertEqual(explanation["dependencies"], [calculation["task_id"]])
+        self.assertEqual(explanation["statistical_review_status"], "human_pending")
+        expert_contexts = [context for role, context in self.calls if role == "interpretation"]
+        self.assertEqual([context["expert_request"]["response_phase"] for context in expert_contexts],
+                         ["analysis_plan", "result_explanation"])
+        self.assertEqual(expert_contexts[0]["expert_request"]["calculations"], [])
+        self.assertEqual([row["result_id"] for row in expert_contexts[1]["expert_request"]["calculations"]],
+                         [calculation["result_id"]])
+        exported = self.service.result("content", run["run_id"])
+        raw = self.service.result("content", run["run_id"], explanation["result_id"])
+        self.assertEqual(raw["raw"]["expert_report"]["calculation_result_ids"], [calculation["result_id"]])
+        self.assertTrue(raw["raw"]["expert_report"]["numeric_bindings"])
+        self.assertFalse(raw["statistical_review"]["eligible_as_confirmed_evidence"])
+        # Save the draft ledger without promoting its stopped/human-pending
+        # run to completed or invoking automatic publication.
+        snapshot, result, datasets = build_orchestration_package(exported, fingerprint(exported))
+        store = app.analysis_archive_store()
+        saved = store.save(item_id="content", kind="autonomous_analysis", snapshot=snapshot,
+            result=result, datasets=datasets, request_id="synthetic-statistical-wire-migration",
+            input_fingerprint=run["input_hash"], source_revision=1, analysis_revision=1, publish=False)
+        artifact = next(row for row in store.public(saved)["artifacts"] if row["name"] == "result.json")
+        fresh = AnalysisStore(store.database_file, store.connect)
+        before = app.DATABASE_FILE.read_bytes()
+        _, saved_bytes = fresh.read_artifact(artifact["id"])
+        self.assertEqual(saved_bytes, store.read_artifact(artifact["id"])[1])
+        persisted = json.loads(saved_bytes)["orchestration"]
+        for field in ("raw_results", "decisions", "label_versions"):
+            self.assertEqual(persisted[field], exported[field])
+        self.assertEqual(persisted["run"]["tasks"], exported["run"]["tasks"])
+        self.assertEqual((persisted["run"]["status"], persisted["run"]["stop_reason"]),
+                         ("stopped", "human_review_required"))
+        self.assertEqual(self.service.result("content", run["run_id"]), exported)
+        self.assertEqual(app.DATABASE_FILE.read_bytes(), before)
 
     def test_draft_without_calculation_and_wrong_domain_tool_are_quarantined(self):
         original = self.expert_report

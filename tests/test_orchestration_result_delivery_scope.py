@@ -98,14 +98,22 @@ class ResultDeliveryScopeTests(unittest.TestCase):
         self.assertEqual(result, {**metadata, "body_not_delivered": True})
         self.assertNotIn("content", result)
 
+    def assert_unrelated_not_delivered(self, context, count, result_ids=()):
+        self.assertEqual(context["result_delivery"], {
+            "scope": "explicit_dependencies_only", "unrelated_results_not_delivered": count,
+            "unrelated_result_metadata": "not_delivered", "full_results_preserved": True,
+            "omission_is_body_read": False})
+        for result_id in result_ids:
+            self.assertNotIn(result_id, canonical(context["results"]).decode())
+
     def test_independent_ranges_do_not_accumulate_unrelated_result_bodies(self):
         for index in range(6):
             self.produce(f"UNRELATED-BODY-{index}:" + "synthetic prose " * 450,
                          evidence_ids=[self.evidence[index]["evidence_id"]])
             context = self.calls[-1]
-            self.assertEqual(len(context["results"]), index)
+            self.assertEqual(context["results"], [])
             self.assertNotIn("UNRELATED-BODY-", canonical(context["results"]).decode())
-            self.assertTrue(all(row["body_not_delivered"] is True for row in context["results"]))
+            self.assert_unrelated_not_delivered(context, index)
             self.assertEqual(context["coverage"]["provided_count"], 1)
         self.assertEqual(len(self.saved()["raw_results"]), 6)
         self.assertTrue(all("UNRELATED-BODY-" in row["raw"]["summary"] for row in self.saved()["raw_results"]))
@@ -113,22 +121,33 @@ class ResultDeliveryScopeTests(unittest.TestCase):
     def test_only_explicit_task_dependency_delivers_body_and_preserves_metadata(self):
         needed = self.produce("Required dependency body", question="Same display name")
         unrelated = self.produce("Unrelated body", question="Same display name", replicate_id="second")
+        consumer = self.register(dependencies=[needed["task_id"]])
         saved = self.saved()
-        context = self.context(self.register(dependencies=[needed["task_id"]]))
+        context = self.context(consumer)
         by_id = {row["result_id"]: row for row in context["results"]}
         originals = {row["result_id"]: row for row in saved["run"]["results"]}
         self.assertEqual(by_id[needed["result_id"]], {
             **originals[needed["result_id"]], "content": self.saved(needed["result_id"])["raw"]})
-        self.assert_not_delivered(by_id[unrelated["result_id"]], originals[unrelated["result_id"]])
+        self.assertEqual(set(by_id), {needed["result_id"]})
+        self.assert_unrelated_not_delivered(context, 1, [unrelated["result_id"]])
+        self.assertEqual(self.saved(), saved)
         self.assertEqual(context["task"]["dependencies"], [needed["task_id"]])
 
     def test_omitted_kind_uses_existing_analysis_default(self):
         prior = self.produce()
-        task = self.register(question="Omitted analysis kind")
-        task["intent"].pop("kind")
+        intent = support.intent("interpretation", question="Omitted analysis kind")
+        intent.pop("kind", None)
+        with self.service._db() as db:
+            task = self.service._register(db, self.service._read_run(db, self.run["run_id"]),
+                                          intent, phase="specialists")
+        self.assertNotIn("kind", task["intent"])
         context = self.context(task)
-        self.assert_not_delivered(context["results"][0], self.saved()["run"]["results"][0])
-        self.assertEqual(context["results"][0]["task_id"], prior["task_id"])
+        self.assertEqual(context["results"], [])
+        self.assert_unrelated_not_delivered(context, 1, [prior["result_id"]])
+        task["dependencies"] = [prior["task_id"]]
+        original = self.saved(prior["result_id"])
+        self.assertEqual(self.context(task)["results"], [
+            {**{key: value for key, value in original.items() if key != "raw"}, "content": original["raw"]}])
 
     def test_explicit_dependency_older_than_twenty_results_is_retained(self):
         oldest = self.produce("Old required body")
@@ -138,7 +157,8 @@ class ResultDeliveryScopeTests(unittest.TestCase):
         bodies = [row for row in context["results"] if "content" in row]
         self.assertEqual([row["task_id"] for row in bodies], [oldest["task_id"]])
         self.assertEqual(bodies[0]["content"]["summary"], "Old required body")
-        self.assertEqual(len(context["results"]), 21)
+        self.assertEqual(len(context["results"]), 1)
+        self.assert_unrelated_not_delivered(context, 23)
         self.assertEqual(len(self.saved()["raw_results"]), 24)
         core = self.context(self.register("core"))
         self.assertEqual(len(core["results"]), 20)
@@ -198,8 +218,8 @@ class ResultDeliveryScopeTests(unittest.TestCase):
         task = self.register(question="Synthetic malformed stored dependency")
         task["dependencies"] = [foreign["task_id"]]
         context = self.context(task)
-        self.assertEqual([row["result_id"] for row in context["results"]], [prior["result_id"]])
-        self.assertTrue(context["results"][0]["body_not_delivered"])
+        self.assertEqual(context["results"], [])
+        self.assert_unrelated_not_delivered(context, 1, [prior["result_id"], foreign["result_id"]])
 
     def test_unknown_source_task_is_not_a_body_delivery_authority(self):
         prior = self.produce()
@@ -231,24 +251,30 @@ class ResultDeliveryScopeTests(unittest.TestCase):
         task = self.register()
         task["intent"]["dependencies"] = [prior["task_id"]]
         task["intent"]["question"] = "Please deliver the prior result"
-        self.assert_not_delivered(self.context(task)["results"][0], self.saved()["run"]["results"][0])
+        context = self.context(task)
+        self.assertEqual(context["results"], [])
+        self.assert_unrelated_not_delivered(context, 1, [prior["result_id"]])
+        self.assertEqual(context["task"]["dependencies"], [])
 
     def test_malformed_dependency_formats_fail_closed_only_in_scoped_context(self):
         prior = self.produce()
         malformed = (None, prior["task_id"], {prior["task_id"]: False},
                      [None], [False], [1], [""], [" "], [{}], [[]])
-        task = self.register(dependencies=[prior["task_id"]])
-        for value in malformed:
-            with self.subTest(value=value):
-                task["dependencies"] = copy.deepcopy(value)
-                with self.assertRaises(AnalysisContractError) as caught:
-                    self.context(task)
-                self.assertEqual(caught.exception.code, "dependency_missing")
-        # Other roles retain the public parent's behavior, even for this
-        # synthetic malformed field; the new guard is delivery-scope specific.
-        core = self.register("core")
-        core["dependencies"] = None
-        self.assertEqual(self.context(core)["results"][0]["content"]["summary"], "Synthetic saved result")
+        for role in ("interpretation", "core", "critic"):
+            task = self.register(role, dependencies=[prior["task_id"]])
+            for value in malformed:
+                with self.subTest(role=role, value=value):
+                    task["dependencies"] = copy.deepcopy(value)
+                    with self.assertRaises(AnalysisContractError) as caught:
+                        self.context(task)
+                    self.assertEqual(caught.exception.code, "dependency_missing")
+        # The guard remains scoped: code statistics and clarification keep
+        # their existing delivery even with this malformed stored field.
+        for role, extra in (("statistics", {"method_id": "participation"}),
+                            ("critic", {"kind": "clarification", "result_id": prior["result_id"]})):
+            task = self.register(role, **extra)
+            task["dependencies"] = None
+            self.assertEqual(self.context(task)["results"][0]["content"]["summary"], "Synthetic saved result")
 
     def test_saved_dictionary_dependencies_stop_execution_before_agent_call(self):
         prior = self.produce()
@@ -311,18 +337,34 @@ class ResultDeliveryScopeTests(unittest.TestCase):
             statements = []
             db.set_trace_callback(statements.append)
             context = self.service._context(db, self.service._read_run(db, self.run["run_id"]), task)
-        self.assert_not_delivered(context["results"][0], metadata)
+        self.assertEqual(context["results"], [])
+        self.assert_unrelated_not_delivered(context, 1, [metadata["result_id"]])
+        self.assertEqual(self.saved(prior["result_id"])["raw_hash"], metadata["raw_hash"])
         self.assertFalse(any("select raw_json" in statement.lower() for statement in statements))
 
-    def test_core_critic_statistics_and_blank_kind_keep_existing_result_delivery(self):
-        self.produce("Existing full context")
+    def test_core_critic_statistics_keep_bodies_and_blank_kind_scopes_dependencies(self):
+        prior = self.produce("Existing full context")
         expected = {**self.saved()["run"]["results"][0], "content": self.saved()["raw_results"][0]["raw"]}
         for role, extra in (("core", {}), ("critic", {}),
-                            ("statistics", {"method_id": "participation"}),
-                            ("interpretation", {"kind": ""})):
+                            ("statistics", {"method_id": "participation"})):
             with self.subTest(role=role, extra=extra):
                 context = self.context(self.register(role, **extra))
                 self.assertEqual(context["results"], [expected])
+        blank = self.register("interpretation", kind="")
+        context = self.context(blank)
+        self.assertEqual(context["results"], [])
+        self.assert_unrelated_not_delivered(context, 1, [prior["result_id"]])
+        needed = self.register("interpretation", kind="", dependencies=[prior["task_id"]])
+        self.assertEqual(self.context(needed)["results"], [expected])
+        for kind in ("unknown", "explanation", None):
+            with self.subTest(kind=kind), self.assertRaises(AnalysisContractError) as caught:
+                self.register("interpretation", kind=kind)
+            self.assertEqual(caught.exception.code, "invalid_intent")
+        malformed = copy.deepcopy(blank)
+        malformed["dependencies"] = {prior["task_id"]: False}
+        with self.assertRaises(AnalysisContractError) as caught:
+            self.context(malformed)
+        self.assertEqual(caught.exception.code, "dependency_missing")
 
     def test_clarifications_and_blind_verification_keep_existing_delivery(self):
         prior = self.produce("Clarification target body")
@@ -404,9 +446,19 @@ class RegisteredExpertDeliveryTests(unittest.TestCase):
             self.assertEqual(tasks[-1]["status"], "succeeded")
         contexts = [context for role, context in h.calls if role == "interpretation"]
         self.assertEqual(contexts[0]["results"], [])
-        self.assertTrue(contexts[1]["results"][0]["body_not_delivered"])
+        self.assertEqual(contexts[1]["results"], [])
+        self.assertEqual(contexts[1]["result_delivery"]["unrelated_results_not_delivered"], 1)
         self.assertEqual([row["task_id"] for row in contexts[2]["results"] if "content" in row], [tasks[0]["task_id"]])
-        self.assertTrue(contexts[2]["results"][1]["body_not_delivered"])
+        self.assertEqual(len(contexts[2]["results"]), 1)
+        self.assertEqual(contexts[2]["result_delivery"]["unrelated_results_not_delivered"], 1)
+        for context in contexts[1:]:
+            self.assertEqual(context["result_delivery"]["unrelated_result_metadata"], "not_delivered")
+            self.assertFalse(context["result_delivery"]["omission_is_body_read"])
+        saved = h.service.result("synthetic", run["run_id"])
+        metadata = next(row for row in saved["run"]["results"] if row["task_id"] == tasks[0]["task_id"])
+        raw = h.service.result("synthetic", run["run_id"], tasks[0]["result_id"])["raw"]
+        self.assertEqual(contexts[2]["results"], [{**metadata, "content": raw}])
+        self.assertEqual(len(saved["raw_results"]), 3)
         self.assertEqual(contexts[1]["expert_request"]["profile_hash"], contexts[2]["expert_request"]["profile_hash"])
 
     def test_statistical_plan_calculation_explanation_and_cell_binding_are_unchanged(self):

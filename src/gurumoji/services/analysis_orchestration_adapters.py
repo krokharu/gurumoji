@@ -10,11 +10,108 @@ import copy
 import json
 from typing import Any, Callable
 
-from ..analysis_core import AnalysisContractError
+from ..analysis_core import AnalysisContractError, canonical, fingerprint
 
 ADAPTER_VERSION = "core-handler-prompts-10-statistical-delivery"
 AI_ROLES = ("core", "interpretation", "verification", "critic")
 PROVIDERS = {"lmstudio", "openai", "google"}
+
+
+_RESULT_METADATA_COLUMNS = ("run_id", "dataset_version", "annotation_version", "validation_status",
+                            "content_status", "stale", "error")
+_RESULT_METADATA_PROMPT = "\nresult_metadataは可逆な共通metadata表です。referencesの各[result位置,row位置]について、columnsとrows[row位置]を対応するresults[result位置]へ併合して読みます。位置は0始まりで元の順序を保持します。本文や根拠IDは省略しておらず、参照は読了・採択・欠測0を意味しません。\n"
+
+
+def _restore_core_result_metadata(context, *, expected_hash):
+    """Invert delivery using the Handler's original hash, never the wire's own authority."""
+    def invalid():
+        raise AnalysisContractError("結果metadataの配送参照が一致しません。", code="result_metadata_delivery_mismatch")
+    value = copy.deepcopy(context)
+    has_table = "result_metadata" in value
+    table = value.pop("result_metadata", None)
+    results = value.get("results")
+    if not isinstance(expected_hash, str) or not isinstance(results, list):
+        invalid()
+    if has_table:
+        if (not isinstance(table, dict) or set(table) != {"format", "columns", "rows", "references", "source_hash"}
+                or table["format"] != "shared_result_metadata_v1"
+                or table["columns"] != list(_RESULT_METADATA_COLUMNS) or table["source_hash"] != expected_hash
+                or not isinstance(table["rows"], list) or not table["rows"]
+                or any(not isinstance(row, list) or len(row) != len(_RESULT_METADATA_COLUMNS) for row in table["rows"])
+                or len({canonical(row) for row in table["rows"]}) != len(table["rows"])
+                or not isinstance(table["references"], list)):
+            invalid()
+        counts, order, previous = [0] * len(table["rows"]), [], -1
+        dependencies = value.get("task", {}).get("dependencies", [])
+        if not isinstance(dependencies, list) or any(not isinstance(key, str) or not key for key in dependencies):
+            invalid()
+        for reference in table["references"]:
+            if (not isinstance(reference, list) or len(reference) != 2
+                    or any(type(index) is not int for index in reference)):
+                invalid()
+            index, row_index = reference
+            if not previous < index < len(results) or not 0 <= row_index < len(table["rows"]):
+                invalid()
+            previous = index
+            result = results[index]
+            if (not isinstance(result, dict) or "content" not in result or result.get("role") == "core"
+                    or result.get("body_not_delivered") or result.get("task_id") in dependencies
+                    or any(key in result for key in _RESULT_METADATA_COLUMNS)):
+                invalid()
+            if not counts[row_index]:
+                order.append(row_index)
+            counts[row_index] += 1
+            result.update(zip(_RESULT_METADATA_COLUMNS, copy.deepcopy(table["rows"][row_index])))
+        if any(count < 2 for count in counts) or order != list(range(len(counts))):
+            invalid()
+    ids = [row.get("result_id") for row in results if isinstance(row, dict)]
+    if (len(ids) != len(results) or any(not isinstance(key, str) or not key for key in ids)
+            or len(set(ids)) != len(ids) or fingerprint(results) != expected_hash):
+        invalid()
+    return value
+
+
+def _project_core_result_metadata(context):
+    """Factor only repeated metadata; IDs, bodies, explicit dependencies stay inline."""
+    value = copy.deepcopy(context)
+    expected = value.pop("_result_metadata_hash", None)
+    if "result_metadata" in value:
+        # A re-delivered projection still needs an independent Handler binding.
+        _restore_core_result_metadata(value, expected_hash=expected)
+        return value
+    if expected is None:
+        return value
+    original = _restore_core_result_metadata(value, expected_hash=expected)
+    groups = {}
+    dependencies = value.get("task", {}).get("dependencies", [])
+    for index, result in enumerate(value["results"]):
+        if ("content" not in result or result.get("role") == "core" or result.get("body_not_delivered")
+                or result.get("task_id") in dependencies
+                or any(key not in result for key in _RESULT_METADATA_COLUMNS)):
+            continue
+        row = [result[key] for key in _RESULT_METADATA_COLUMNS]
+        groups.setdefault(canonical(row), {"row": row, "indices": []})["indices"].append(index)
+    rows, references = [], []
+    for group in groups.values():
+        if len(group["indices"]) < 2:
+            continue
+        row_index = len(rows)
+        rows.append(group["row"])
+        for index in group["indices"]:
+            references.append([index, row_index])
+            for key in _RESULT_METADATA_COLUMNS:
+                del value["results"][index][key]
+    if not rows:
+        return original
+    value["result_metadata"] = {"format": "shared_result_metadata_v1", "columns": list(_RESULT_METADATA_COLUMNS),
+        "rows": rows, "references": sorted(references), "source_hash": expected}
+    if canonical(_restore_core_result_metadata(value, expected_hash=expected)) != canonical(original):
+        raise AnalysisContractError("結果metadataを復元できません。", code="result_metadata_delivery_mismatch")
+    # Include the read-contract prompt and JSON string escaping in the actual
+    # representation cost. This is neither a quota nor a truncation threshold.
+    def wire_size(packet, prompt):
+        return len(canonical({"input": json.dumps(packet, ensure_ascii=False, separators=(",", ":")), "prompt": prompt}))
+    return value if wire_size(value, _RESULT_METADATA_PROMPT) < wire_size(original, "") else original
 
 
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
@@ -238,11 +335,47 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
                 expert_prompt += STATISTICAL_EXPERT_PROMPT
                 role_prompt = ""
             context = render_expert_context(context)
+        normal_core = role in {"core", "critic"} and context.get("task", {}).get("intent", {}).get("kind") != "clarification"
         if "evidence_index" in context.get("coverage", {}):
             context = copy.deepcopy(context)
-            context["coverage"]["evidence_index"] = [{"evidence_id": row["evidence_id"]}
-                                                      for row in context["coverage"]["evidence_index"]]
-            context["coverage"]["evidence_index_format"] = "evidence_id only; utterance_id is supplied with raw_evidence"
+            index = context["coverage"]["evidence_index"]
+            if normal_core:
+                if isinstance(index, list):
+                    index = {"columns": ["evidence_id"], "rows": [[row["evidence_id"]] for row in index]}
+                elif (not isinstance(index, dict) or set(index) != {"columns", "rows"}
+                        or index["columns"] != ["evidence_id"] or not isinstance(index["rows"], list)
+                        or any(not isinstance(row, list) or len(row) != 1 or not isinstance(row[0], str)
+                               for row in index["rows"])):
+                    raise AnalysisContractError("配送済み根拠索引の形式が不正です。", code="evidence_index_invalid")
+                context["coverage"]["evidence_index"] = index
+                context["coverage"]["evidence_index_format"] = "columns_rows_v1; evidence_id only; utterance_id is supplied with raw_evidence"
+            else:
+                context["coverage"]["evidence_index"] = [{"evidence_id": row["evidence_id"]} for row in index]
+                context["coverage"]["evidence_index_format"] = "evidence_id only; utterance_id is supplied with raw_evidence"
+        if normal_core:
+            context = copy.deepcopy(context)
+            if "task" in context:
+                task = context["task"]
+                fields = ("task_id", "role", "attempt_id", "run_id", "dataset_version", "annotation_version",
+                          "codebook_version", "iteration", "phase", "dependencies", "intent", "title")
+                context["task"] = {key: task[key] for key in fields if key in task}
+                question = context.get("question")
+                references = []
+                if isinstance(question, str):
+                    if task.get("title") == question:
+                        context["task"]["title"] = {"ref": "question"}
+                        references.append("task.title")
+                    if task.get("intent", {}).get("question") == question:
+                        context["task"]["intent"]["question"] = {"ref": "question"}
+                        references.append("task.intent.question")
+                context["task_delivery"] = {"format": "identity_intent_v1",
+                    "question_references": references, "reference_target": "question",
+                    "diagnostic_fields_not_delivered": sorted(set(task) - set(fields)),
+                    "full_task_preserved": True}
+            context = _project_core_result_metadata(context)
+            if "result_metadata" in context:
+                role_prompt += _RESULT_METADATA_PROMPT
+            role_prompt += "\n配送形式: coverage.evidence_indexのcolumns/rowsは全IDを元順序で保持する可逆表です。task内の{ref:question}は同じtop-level questionへの参照です。result_id/raw_hash/body_not_deliveredのみのCore履歴は検証済み採択記録への参照で、本文の読了ではありません。非配送の項目は保存履歴に残り、取得済み・成功・欠測0を意味しません。\n"
         if role == "core":
             for field, references, key in (("critique_responses", "issues", "issue_id"),
                                             ("label_decisions", "label_proposals", "proposal_id")):
