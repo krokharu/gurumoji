@@ -2,12 +2,15 @@
 name: gurumoji-obsidian-memory
 description: Gurumojiと確認できるリポジトリで、VaultRegistry・Vault保存契約・検索・同期／移行・AnalysisStore公開を調査または変更するときに使う。Obsidianという語だけでは適用しない。ADC等の別プロジェクト、単発の文章編集、利用者としての研究ノート操作は対象外。
 ---
+<!-- 生成物: .agents/skills/gurumoji-obsidian-memory/SKILL.md から scripts/sync_agent_assets.py で生成。直接編集しない -->
 
 # Gurumoji Obsidian Memory
 
 Gurumoji の人が読む知識は Obsidian Markdown に、機械的な検索・整合性・大きな構造化データは SQLite、JSON、CSV に置く。詳細な開発上の安全策は `docs/program-vault/40-Design/ai-development-rules.md` を参照する。現在のコードと設定で、保存先・正本・IDを確認する。
 
-パスの基準は2つある。`docs/` と `src/` はリポジトリルート基準、`references/` と `scripts/` はこのスキル配下（`.claude/skills/gurumoji-obsidian-memory/`）を指す。
+パスの基準:
+- `docs/` と `src/` はリポジトリルート基準
+- `references/` と `scripts/` は本スキル配下（`.claude/skills/gurumoji-obsidian-memory/`）を指す
 
 ## 適用範囲
 
@@ -21,7 +24,7 @@ ADC／ADC08 など別プロジェクトにはそのプロジェクトのルー�
 2. Vault の配置、正本、ID、同期境界を変えるときは [Vault contract](references/vault-contract.md) を読む。検索・要約・AI入力・ノート書き込みを変えるときは [Retrieval and write protocol](references/retrieval-and-write.md) を読む。
 3. 正本・保存先・IDを変える変更には、互換性、移行／ロールバック、対象の回帰テストを含める。通常の保存内容の変更に、この一式を機械的に要求しない。
 
-## 候補抽出
+## 候補抽出（スクリプト実行）
 
 入口ノートで対象を絞れないときだけ、リポジトリルートから次を実行する。`--vault` は必須で、Vault のルートを1つだけ指す（Software Vault は `docs/program-vault`）。
 

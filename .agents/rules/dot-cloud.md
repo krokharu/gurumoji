@@ -10,7 +10,7 @@
 
 ## 実行環境と配置
 
-確認済みの配置は `/workspace/scratch/be1eb353f7eb/projects/gurumoji/app`。以下で `<project>` はその親、`<app>` はチェックアウトを指す。絶対パスは配置の記録であり、ソースへ固定する値ではない。移入元は app commit `4b311df51c7fe2938f1761cb1efbb4cc4906fd10`、準備ブランチは `dot/cloud-cpu-setup`。作業の都度、実際の HEAD と差分を確認する。
+確認済みの配置は `/workspace/scratch/be1eb353f7eb/projects/gurumoji/app`。以下で `<project>` はその親、`<app>` はチェックアウトを指す。絶対パスは配置の記録であり、ソースへ固定する値ではない。準備ブランチは `dot/cloud-cpu-setup`。移入元 commit など検証時点の値は[運用引継ぎ](../../docs/program-vault/60-Operations/dot-cloud-development-handoff.md)に記録する。作業の都度、実際の HEAD と差分を確認する。
 
 | 領域 | 場所・設定 | 境界 |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ bash scripts/run_cloud.sh
 
 5 Vault の確認済みルートは `<project>/vaults/vaults/{ResearchVault,InputVault,VisualizationVault,OrchestratorVault,PersonaVault}`。Software Vault は `<app>/docs/program-vault` に別途存在する。PersonaVault をアプリの新しい生成 Vault と見なさず、4+1 の保存契約へ勝手に追加しない。
 
-移入 repo の基点は `045d51340b989d934b730b639d45312556596e84`、タグは `gurumoji-vault-base-v1`、クラウド作業ブランチは `cloud/work`。最初の移入は 1,398 ファイルの hash で検証済み。外部 remote は未設定。実行時の `<data>/obsidian/...` とは切り離し、アプリの監視・同期先に接続しない。ノートだけの snapshot であり、DB・メディア・analysis_store を復元したものではない。
+移入 repo の共通基点はタグ `gurumoji-vault-base-v1`、クラウド作業ブランチは `cloud/work`。基点の commit と移入時の hash 検証結果は[運用引継ぎ](../../docs/program-vault/60-Operations/dot-cloud-development-handoff.md)を参照する。外部 remote は未設定。実行時の `<data>/obsidian/...` とは切り離し、アプリの監視・同期先に接続しない。ノートだけの snapshot であり、DB・メディア・analysis_store を復元したものではない。
 
 ```bash
 # snapshot の manifest と実ファイルを照合する（read-only）

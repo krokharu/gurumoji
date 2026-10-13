@@ -1,3 +1,4 @@
+<!-- 生成物: .agents/skills/gurumoji-obsidian-memory/references/vault-contract.md から scripts/sync_agent_assets.py で生成。直接編集しない -->
 # Four-vault contract
 
 ## Current state
