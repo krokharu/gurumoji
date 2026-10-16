@@ -171,11 +171,13 @@ def make_transcription_start(
             )
             ai_efforts = normalize_efforts({
                 key: form.get("ai_effort_" + key, "auto")
-                for key in ("outline", "cleanup", "name_extract", "name_verify")
+                for key in ("outline", "cleanup", "name_extract", "name_verify", "notation")
+                if key != "notation" or "ai_effort_notation" in form
             })
             recommended_cleanup = False
             jev_compare = parse_bool("jev_compare", form=form)
             if transcript_finishing_mode == "off":
+                ai_efforts["notation"] = "off"
                 clean_transcript = False
                 detect_names = False
                 create_outline = False
@@ -194,6 +196,7 @@ def make_transcription_start(
                 if provider == "none":
                     raise ValueError("高度モードでは使用するAIを選択してください。")
             if provider == "none":
+                ai_efforts["notation"] = "off"
                 clean_transcript = False
                 detect_names = False
                 create_outline = False
@@ -220,7 +223,7 @@ def make_transcription_start(
             ai_api_key = ""
             ai_model = ""
             ai_base_url = ""
-            if clean_transcript or recommended_cleanup or detect_names or create_outline:
+            if clean_transcript or recommended_cleanup or detect_names or create_outline or (ai_efforts["notation"] != "off" and not finish_in_obsidian):
                 ai_api_key, ai_model = configured_ai_credentials(token_config, provider)
                 if provider == "lmstudio":
                     ai_base_url = lmstudio_base_url(token_config.lmstudio_base_url)

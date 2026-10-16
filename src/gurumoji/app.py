@@ -24,7 +24,7 @@ import urllib.request
 import uuid
 import warnings
 import webbrowser
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -35,7 +35,8 @@ from werkzeug.exceptions import RequestEntityTooLarge
 # app.py is the composition root. Besides what it wires together, it
 # re-exports names that tests, scripts and the Colab notebook reach as
 # app.<name>; pyflakes reports those as unused imports.
-from .research_analysis import build_research_analysis
+from .research_analysis import build_research_analysis as _build_research_analysis
+from .services import conversation_projection, media_assets
 from .analysis_insights import search_kwic
 from .transformer_analysis import (
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
@@ -617,9 +618,10 @@ def persist_speaker_registry_record(
     record: dict[str, Any],
     previous: dict[str, Any] | None,
     now: str,
+    *, origin: str = "researcher", process: str = "speaker_registry_save",
 ) -> None:
     speaker_registry_store.persist_speaker_registry_record(
-        connection, record, previous, now
+        connection, record, previous, now, origin=origin, process=process
     )
 
 
@@ -719,6 +721,13 @@ def promote_staged_files(staging_dir: Path, output_dir: Path, staged_files: list
 
 # Group analysis composition boundary: the module computes, this layer supplies
 # the library row accessors and the database connection.
+def build_research_analysis(analysis):
+    from .research_analysis import derived_storage
+    from .services.derived_analysis_store import DATABASE
+    with derived_storage(DATABASE_FILE.parent / DATABASE):
+        return _build_research_analysis(analysis)
+
+
 def group_analysis_for_row(
     row: sqlite3.Row,
     *,
@@ -726,18 +735,21 @@ def group_analysis_for_row(
     execute: bool = True,
     defer_research: bool = False,
 ) -> dict[str, Any]:
-    return group_analysis.group_analysis_for_row(
-        row,
-        include_research_rows=include_research_rows,
-        execute=execute,
-        defer_research=defer_research,
-        connect=database_connection,
-        row_segments=row_segments,
-        row_original_segments=row_original_segments,
-        row_speaker_profiles=row_speaker_profiles,
-        row_session_profile=row_session_profile,
-        list_speaker_registry=list_speaker_registry,
-    )
+    from .research_analysis import derived_storage
+    from .services.derived_analysis_store import DATABASE
+    with derived_storage(DATABASE_FILE.parent / DATABASE):
+        return group_analysis.group_analysis_for_row(
+            row,
+            include_research_rows=include_research_rows,
+            execute=execute,
+            defer_research=defer_research,
+            connect=database_connection,
+            row_segments=row_segments,
+            row_original_segments=row_original_segments,
+            row_speaker_profiles=row_speaker_profiles,
+            row_session_profile=row_session_profile,
+            list_speaker_registry=list_speaker_registry,
+        )
 
 
 summarize_codebook_change, _save_group_analysis_locked = make_analysis_annotation_save(
@@ -772,9 +784,10 @@ def save_group_analysis(item_id: str, payload: Any) -> dict[str, Any]:
 )
 
 
-load_custom_vocabulary, save_custom_vocabulary = make_custom_vocabulary_store(
+load_custom_vocabulary, save_custom_vocabulary, reconcile_custom_vocabulary = make_custom_vocabulary_store(
     custom_vocabulary_file=lambda: CUSTOM_VOCABULARY_FILE,
     custom_vocabulary_lock=custom_vocabulary_lock,
+    database_connection=lambda: database_connection(),
 )
 
 
@@ -1068,6 +1081,7 @@ def update_job(job: JobRecord, **changes: Any) -> None:
 
 def run_transcription_job(job: JobRecord, options: JobOptions) -> None:
     dependencies = {
+        "unify_notation": unify_notation,
         "CONVERSATION_MODES": CONVERSATION_MODES,
         "DIARIZATION_MODEL": DIARIZATION_MODEL,
         "MAX_LOG_LINES": MAX_LOG_LINES,
@@ -1384,6 +1398,16 @@ def build_interview_comparison(
 
 def interview_comparison_request(payload: Any) -> tuple[list[sqlite3.Row], bool]:
     """Validate a 2-8 interview selection and read the rows in the selected order."""
+    if isinstance(payload, dict) and payload.get('data_group_id'):
+        from .services import data_catalog
+        with database_connection() as connection:
+            try:
+                ids = data_catalog.members(connection, payload['data_group_id'])
+            except LookupError as exc:
+                raise ComparisonRequestError(str(exc), 404) from exc
+        if payload.get('item_ids') and sorted(set(payload['item_ids'])) != ids:
+            raise ComparisonRequestError("グループの対象集合が変わっています。再集計してください。", 409)
+        payload = {**payload, 'item_ids': ids}
     if not isinstance(payload, dict) or not isinstance(payload.get("item_ids"), list):
         raise ComparisonRequestError("比較するインタビューを指定してください。")
     item_ids: list[str] = []
@@ -1433,6 +1457,22 @@ def obsidian_workbench() -> ObsidianWorkbench:
     return ObsidianWorkbench(DATABASE_FILE)
 
 
+def notation_workflows():
+    from .services.notation_workflows import NotationWorkflows
+    return NotationWorkflows(SimpleNamespace(
+        database_connection=database_connection, library_row=library_row,
+        row_segments=row_segments, load_token_config=load_token_config,
+        configured_ai_credentials=configured_ai_credentials, call_ai_json=call_ai_json,
+        merge_ai_usage=merge_ai_usage, library_write_lock=library_write_lock,
+        update_library_item_locked=_update_library_from_payload_locked,
+        archive_ai_finishing=archive_ai_finishing,
+        save_custom_vocabulary=save_custom_vocabulary, load_custom_vocabulary=load_custom_vocabulary))
+
+
+def unify_notation(*args, **kwargs):
+    return notation_workflows().finish(*args, **kwargs)
+
+
 def obsidian_workflows() -> ObsidianWorkflowService:
     """Build explicit dependencies for researcher-owned workbench operations."""
     return ObsidianWorkflowService(SimpleNamespace(
@@ -1456,6 +1496,7 @@ def obsidian_workflows() -> ObsidianWorkflowService:
         configured_ai_credentials=configured_ai_credentials,
         create_outline_with_ai=create_outline_with_ai,
         clean_segments_with_ai=clean_segments_with_ai,
+        unify_notation=unify_notation,
         review_segments_with_jev=review_segments_with_jev,
         attach_jev_comparison=attach_jev_comparison,
         detect_speaker_names_with_ai=detect_speaker_names_with_ai,
@@ -1484,10 +1525,29 @@ def _spawn_obsidian_watcher() -> tuple[threading.Event, threading.Thread]:
     return ObsidianWatcher(
         workbench=obsidian_workbench,
         engine=run_obsidian_finishing,
-        migrate=migrate,
+        migrate=lambda database: migrate(database, backup_root=BACKUP_DIRECTORY),
         log_exception=app.logger.exception,
         status=obsidian_watcher_status,
     ).start()
+
+
+media_metadata_backfill = media_assets.Backfill(lambda: database_connection(), library_write_lock)
+
+
+def library_storage_diagnostics() -> dict[str, Any]:
+    """Explicit diagnostic read; never creates a DB, repairs rows or launches a probe."""
+    if not DATABASE_FILE.is_file():
+        return {"status": "not_initialized"}
+    try:
+        with closing(sqlite3.connect(DATABASE_FILE.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            from .services import data_catalog
+            result = conversation_projection.check(connection)
+            result['attributes'] = data_catalog.check(connection)
+            result['ok'] = result['ok'] and result['attributes']['ok']
+            return result
+    except sqlite3.Error:
+        return {"status": "unavailable", "ok": False}
 
 
 _application_lifecycle: ApplicationLifecycle | None = None
@@ -1500,6 +1560,10 @@ def application_lifecycle() -> ApplicationLifecycle:
             # Called only after the application instance lock is acquired.
             # Routine schema checks and read requests never interrupt live work.
             initialize_library(repair_provenance=False)
+            try:
+                reconcile_custom_vocabulary()
+            except (OSError, ValueError):
+                app.logger.warning("登録語の写しを照合できませんでした。DBと既存ファイルを保持しています。")
             with database_connection() as connection:
                 recover_orchestration_runs(connection)
                 recover_orchestration_publications(connection)
@@ -1525,6 +1589,7 @@ def application_lifecycle() -> ApplicationLifecycle:
                 f"Delete recovery warning: {warning}", file=sys.stderr
             ),
             spawn_watcher=lambda: _spawn_obsidian_watcher(),
+            spawn_media_worker=lambda: media_metadata_backfill.start(),
         )
     return _application_lifecycle
 
@@ -1581,6 +1646,10 @@ build_analysis_pipeline_snapshot, advise_analysis_plan = make_analysis_pipeline_
 )
 
 
+def build_analysis_orchestration_snapshot(row):
+    return build_analysis_pipeline_snapshot(row, schema_version=1)
+
+
 def analysis_pipeline_service() -> AnalysisPipelineService:
     store = analysis_archive_store()
 
@@ -1608,6 +1677,7 @@ def analysis_pipeline_service() -> AnalysisPipelineService:
 def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
     check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
+    max_output_tokens=None, data_messages=None,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1629,6 +1699,8 @@ def call_orchestration_ai_json(
         extract_lmstudio=extract_lmstudio_text,
         providers=AI_MODEL_PROVIDERS, check_cancelled=check_cancelled,
         usage_callback=usage_callback, base_url=base_url,
+        max_output_tokens=max_output_tokens,
+        data_messages=data_messages,
     )
 
 
@@ -1662,13 +1734,15 @@ def analysis_orchestration_service() -> AnalysisOrchestrationService:
                 connect=lambda: database_connection(),
                 find_item=lambda item_id: library_row(item_id),
                 source_fingerprint=lambda row: archive_source_stamp(row),
-                snapshot_builder=lambda row: build_analysis_pipeline_snapshot(row),
+                snapshot_builder=lambda row: build_analysis_orchestration_snapshot(row),
                 initial_builder=make_staged_initial_builder(
+                    derived_database=lambda: DATABASE_FILE.parent / "analysis-derived.sqlite3",
                     archive_snapshot=lambda *args, **kwargs: archive_snapshot(*args, **kwargs),
                     archive_source_stamp=lambda *args, **kwargs: archive_source_stamp(*args, **kwargs),
                     group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
                 ),
                 agent_runner=lambda *args: run_orchestration_agent(*args),
+                outline_builder=lambda *args: run_orchestration_agent.prepare_outline(*args),
                 method_runner=lambda *args: run_orchestration_method(*args),
                 write_lock=library_write_lock,
                 adapter_version=ORCHESTRATION_ADAPTER_VERSION,
@@ -1725,6 +1799,13 @@ def mark_analysis_run_stale(run_id: str) -> None:
         connection.execute("UPDATE analysis_runs SET stale=1 WHERE id=?", (run_id,))
 
 
+def freeze_comparison_selection(items, payload):
+    from .services import data_catalog
+    with database_connection() as connection:
+        return data_catalog.freeze(connection, [str(item['id']) for item in items],
+            group_ids=[payload['data_group_id']] if payload.get('data_group_id') else [], group_by=payload.get('group_by'))
+
+
 def analysis_commands() -> AnalysisCommands:
     """Build save dependencies at request time so patched settings stay effective."""
     return AnalysisCommands(
@@ -1740,6 +1821,7 @@ def analysis_commands() -> AnalysisCommands:
         load_comparison_items=interview_comparison_request,
         build_comparison=build_interview_comparison,
         archive_comparison=archive_interview_comparison,
+        freeze_comparison=freeze_comparison_selection,
         database_connection=database_connection,
         save_preparation_state=preparation.save,
         segments_for_item=row_segments,
@@ -1914,6 +1996,9 @@ def create_app() -> Flask:
     flask_app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     flask_app.config["MAX_CONTENT_LENGTH"] = MAX_MEDIA_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES
 
+    from .web.notation_routes import register_notation_routes
+    register_notation_routes(flask_app, service=notation_workflows)
+
     register_request_security(
         flask_app,
         remote_access_enabled=lambda: REMOTE_ACCESS_ENABLED,
@@ -1951,6 +2036,8 @@ def create_app() -> Flask:
         available_ai_models=lambda provider, config: available_ai_models(provider, config),
         update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
         system_activity_snapshot=lambda: system_activity_snapshot(),
+        library_diagnostics=library_storage_diagnostics,
+        media_metadata_status=lambda: media_metadata_backfill.snapshot(),
         obsidian_watcher_status=lambda: {**obsidian_watcher_status.snapshot(), "warnings": _vault_nesting_warnings()},
         create_backup=lambda include_media: create_data_backup(include_media),
     )
@@ -2061,6 +2148,13 @@ def create_app() -> Flask:
         restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
         purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
     )
+    from .web.research_workspace_routes import register_research_workspace_routes
+    register_research_workspace_routes(flask_app,
+        store=lambda: analysis_archive_store(), connect=lambda: database_connection(),
+        find_item=lambda item_id: library_row(item_id), write_lock=library_write_lock,
+        backup=lambda: create_data_backup(False), local_allowed=local_path_access_allowed,
+        row_segments=lambda row: row_segments(row),
+        row_profiles=lambda *args: row_speaker_profiles(*args), row_session=lambda row: row_session_profile(row))
     return flask_app
 
 

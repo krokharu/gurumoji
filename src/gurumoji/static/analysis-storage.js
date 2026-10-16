@@ -5,19 +5,24 @@ let analysisLinkedEvidenceApplied = false;
 
 function analysisStorageState() {
   const key = analysisState.itemId;
-  if (!analysisStorageStates.has(key)) analysisStorageStates.set(key, {runs: [], busy: false, error: '', sequence: 0, pending: null});
+  if (!analysisStorageStates.has(key)) analysisStorageStates.set(key, {runs: [], busy: false, error: '', sequence: 0, pending: null, pagination: null});
   return analysisStorageStates.get(key);
 }
 
-function buildAnalysisStorage() {
+function buildAnalysisStorage({readOnly = false} = {}) {
   const panel = analysisCardPanel('分析を保存して読み返す', 'automatic', '', true);
   panel.panel.classList.add('analysis-storage');
   panel.body.append(analysisElement('p', 'analysis-caption',
-    '見解・原文へのリンクを分析用Vaultに、全件データと条件をCSV／JSONに保存します。過去の結果も読み返せます。'));
+    readOnly ? '保存済みの結果は、現在の会話を再分析せずに読み返せます。'
+      : '見解・原文へのリンクを分析用Vaultに、全件データと条件をCSV／JSONに保存します。過去の結果も読み返せます。'));
   const button = contentButton('分析結果をObsidianに保存', () => saveAnalysisPackage(), 'primary-button small');
   button.dataset.archiveSave = 'true';
   const reload = contentButton('保存履歴を更新', () => loadAnalysisStorage());
-  const bar = analysisElement('div', 'content-ai-toolbar'); bar.append(button, reload);
+  const more = contentButton('さらに前の履歴を表示', () => loadAnalysisStorage(true));
+  more.dataset.archiveMore = 'true'; more.hidden = true;
+  const bar = analysisElement('div', 'content-ai-toolbar');
+  if (!readOnly) bar.append(button);
+  bar.append(reload, more);
   const status = analysisElement('p', 'content-ai-status'); status.dataset.archiveStatus = 'true'; status.setAttribute('role', 'status');
   const history = analysisElement('div'); history.dataset.archiveHistory = 'true';
   const lookup = analysisElement('form', 'analysis-fixed-lookup');
@@ -55,6 +60,10 @@ function savedAnalysisArtifactUrl(id) {
 function refreshAnalysisStorage() {
   if (!analysisState.data) return;
   const state = analysisStorageState();
+  document.querySelectorAll('[data-archive-more]').forEach(button => {
+    button.hidden = !state.pagination?.has_more;
+    button.disabled = state.busy;
+  });
   document.querySelectorAll('[data-archive-save], [data-archive-kwic]').forEach(button => {
     button.disabled = Boolean(state.busy || analysisState.dirty || analysisSaveInProgress);
   });
@@ -93,6 +102,11 @@ function refreshAnalysisStorage() {
         bundle.href = `/api/analysis/runs/${encodeURIComponent(run.id)}/export.zip`;
         bundle.download = '';
         files.append(bundle);
+        for (const format of ['xlsx', 'sav']) {
+          const link = analysisElement('a', 'analysis-export-link', format === 'sav' ? 'SAV＋型付きJSON（ZIP）' : 'Excel');
+          link.href = `/api/analysis/runs/${encodeURIComponent(run.id)}/export.${format}`;
+          link.download = ''; files.append(link);
+        }
       }
       (run.artifacts || []).forEach(artifact => {
         const url = savedAnalysisArtifactUrl(artifact.id);
@@ -106,18 +120,21 @@ function refreshAnalysisStorage() {
   });
 }
 
-async function loadAnalysisStorage() {
+async function loadAnalysisStorage(append = false) {
   if (!analysisState.data) return;
   const itemId = analysisState.itemId;
   const state = analysisStorageState(); const sequence = ++state.sequence;
   const context = captureAnalysisContext();
   try {
-    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/runs`, {cache: 'no-store'});
+    const offset = append ? state.runs.length : 0;
+    const response = await apiFetch(`/api/library/${encodeURIComponent(itemId)}/analysis/runs?limit=100&offset=${offset}`, {cache: 'no-store'});
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || '保存履歴を取得できませんでした。');
     if (sequence !== state.sequence) return;
     state.error = '';
-    state.runs = data.runs || [];
+    const rows = data.runs || [];
+    state.runs = append ? [...new Map([...state.runs, ...rows].map(run => [run.id, run])).values()] : rows;
+    state.pagination = data.pagination || null;
   } catch (error) { if (sequence === state.sequence) state.error = error.message; }
   if (isAnalysisContextCurrent(context)) refreshAnalysisStorage();
 }
@@ -320,9 +337,10 @@ async function openFixedAnalysisRun(itemId, runId) {
     const data = await readJsonResponse(response);
     if (!current()) return;
     if (!response.ok) throw new Error(data.error || '保存済み結果を読み取れません。');
-    if (data.run?.id !== runId || data.run?.item_id !== itemId || data.integrity !== 'verified') throw new Error('保存結果の対象または完全性を確認できません。');
-    elements.status.textContent = '保存済みの結果を開きました。再計算は行っていません。';
-    renderFixedAnalysisRun(elements.body, data, {itemId, runId, current});
+    if (data.run?.id !== runId || data.run?.item_id !== itemId || !['verified','missing_reference'].includes(data.integrity)) throw new Error('保存結果の対象または完全性を確認できません。');
+    elements.status.textContent = data.integrity === 'verified' ? '保存済みの結果を開きました。'
+      : '保存した参照先を確認しています。';
+    renderFixedAnalysisRun(elements.body, data, {itemId, runId, current, status:elements.status});
   } catch (error) {
     if (current()) { elements.status.textContent = error.message; elements.body.replaceChildren(); }
   }
@@ -330,6 +348,23 @@ async function openFixedAnalysisRun(itemId, runId) {
 
 function renderFixedAnalysisRun(host, data, owner) {
   const run = data.run, unknown = value => value === null || value === undefined || value === '' ? '不明' : String(value);
+  if (data.integrity === 'missing_reference') {
+    host.append(analysisElement('p', 'content-inline-notice', data.recovery_status === 'rebuilding'
+      ? '参照先の行を作り直しています…' : data.error || '参照先の行がありません（作り直しても一致しません）。'));
+    if (data.recovery_status === 'rebuilding') setTimeout(async () => {
+      if (!owner.current()) return;
+      try {
+        const response = await apiFetch(`/api/library/${encodeURIComponent(owner.itemId)}/analysis/runs/${encodeURIComponent(owner.runId)}`, {cache:'no-store'});
+        const next = await readJsonResponse(response);
+        if (!owner.current()) return;
+        if (!response.ok || next.run?.id !== owner.runId || next.run?.item_id !== owner.itemId
+          || !['verified','missing_reference'].includes(next.integrity)) throw new Error('復旧した参照の対象が一致しません。');
+        if (owner.status && next.integrity === 'verified') owner.status.textContent = '参照先を復旧し、保存したhashとの一致を確認しました。';
+        host.replaceChildren(); renderFixedAnalysisRun(host, next, owner);
+      } catch (_) { if (owner.current()) host.append(analysisElement('p', 'content-inline-notice', '復旧状態を取得できません。')); }
+    }, 1000);
+    return;
+  }
   host.append(analysisElement('p', '', `保存日時 ${unknown(run.created_at)} / 元データ ${unknown(run.source_revision)}版 / 分析 ${unknown(run.analysis_revision)}版`));
   host.append(analysisElement('p', 'analysis-caption', typeof data.current_input?.stale !== 'boolean'
     ? '取得時点の入力比較が不明なため、現在入力との一致は確認できません。' : data.current_input?.stale
@@ -345,6 +380,7 @@ function renderFixedAnalysisRun(host, data, owner) {
   for (const [label,value] of fields) provenance.append(analysisElement('p','analysis-caption',`${label}: ${unknown(value)}`));
   provenance.append(analysisElement('p','analysis-caption','保存時の定義版・条件はparameters.json、本文・話者などの来歴はinput.json、測定結果はresult.jsonまたは保存表で確認できます。未記録の値は不明です。'));
   host.append(provenance);
+  host.append(buildFixedStatisticsTools(owner, run));
   const download = analysisElement('a', 'analysis-export-link', 'このrunの全ファイルをZIPでダウンロード');
   download.href = `/api/analysis/runs/${encodeURIComponent(owner.runId)}/export.zip`; download.download = '';
   host.append(download, analysisElement('p', 'analysis-caption', 'ダウンロードは保存済み全件です。previewの範囲や現在のfilterでは縮めません。'));
@@ -376,8 +412,19 @@ function renderFixedAnalysisRun(host, data, owner) {
       const row = analysisElement('div', 'analysis-fixed-file');
       row.append(contentButton(`${artifact.name} を読む`, () => showPreview(artifact)));
       const link = analysisElement('a', 'analysis-export-link', '全件ダウンロード');
-      link.href = `/api/analysis/artifacts/${encodeURIComponent(artifact.id)}`; link.download = '';
-      row.append(link, analysisElement('p', 'analysis-caption', `${artifact.bytes} bytes / 全件数 ${unknown(artifact.rows)} / ID ${artifact.id} / sha256 ${unknown(artifact.sha256)}`));
+      const table = /^tables\/([a-z_]+)\.csv$/.exec(artifact.name);
+      const generated = table && artifact.id === `${owner.runId}.${table[1]}`;
+      if (table) {
+        for (const format of ['svg', 'png']) {
+          const image = analysisElement('a', 'analysis-export-link', format.toUpperCase());
+          image.href = `/api/analysis/runs/${encodeURIComponent(owner.runId)}/export.${format}?dataset=${encodeURIComponent(table[1])}`;
+          image.download = ''; row.append(image);
+        }
+      }
+      link.href = generated
+        ? `/api/analysis/runs/${encodeURIComponent(owner.runId)}/tables/${table[1]}.csv`
+        : `/api/analysis/artifacts/${encodeURIComponent(artifact.id)}`; link.download = '';
+      row.append(link, analysisElement('p', 'analysis-caption', `${generated ? '取得時に生成' : unknown(artifact.bytes) + ' bytes'} / 全件数 ${unknown(artifact.rows)} / ID ${artifact.id} / ${generated ? '行hash' : 'sha256'} ${unknown(artifact.sha256)}`));
       files.append(row);
     }
     const previous = contentButton('前のファイル', () => { if (!owner.current()) return; --page; showFiles(); files.querySelector('h3')?.focus(); }); previous.disabled = page === 0;
@@ -389,6 +436,110 @@ function renderFixedAnalysisRun(host, data, owner) {
   const initial = artifacts.find(artifact => artifact.name === 'tables/measurements.csv')
     || artifacts.find(artifact => artifact.media_type === 'text/csv' || artifact.name.endsWith('.csv'));
   if (initial) showPreview(initial);
+}
+
+function buildFixedStatisticsTools(owner, run) {
+  const panel = analysisElement('details');
+  panel.append(analysisElement('summary', '', '保存した表から統計を実行する'));
+  const form = analysisElement('form', 'analysis-config-grid');
+  const controls = {};
+  const field = (key, label, element) => {
+    const host = analysisElement('label', 'field'); host.append(analysisElement('span', '', label), element);
+    controls[key] = element; form.append(host); return element;
+  };
+  const select = (key, label, values) => {
+    const control = analysisElement('select');
+    for (const [value, title] of values) {
+      const option = analysisElement('option', '', title); option.value = value; control.append(option);
+    }
+    return field(key, label, control);
+  };
+  const names = [...new Set((run.artifacts || []).map(a => /^tables\/([a-z_]+)\.csv$/.exec(a.name)?.[1]).filter(Boolean))];
+  const dataset = select('dataset', '固定データ表', names.map(name => [name, name]));
+  select('outcome', '目的変数', []);
+  select('predictor', '説明変数（相関・回帰）', [['', '指定なし']]);
+  select('group', '群・条件', [['', '指定なし']]);
+  select('unit_column', '話者・参加者を識別する列', [['', '指定なし']]);
+  select('pair', '対応ID', [['', '指定なし']]);
+  select('method', '手法', [['auto','尺度とデザインから選択'],['descriptive','記述統計'],['welch','Welchのt検定'],
+    ['mann_whitney','Mann–Whitney'],['welch_anova','Welchの分散分析'],['kruskal','Kruskal–Wallis'],
+    ['paired_t','対応t検定'],['wilcoxon','Wilcoxon'],['repeated_anova','反復測定（GG補正）'],['friedman','Friedman'],
+    ['chi_square','カイ二乗・Fisher'],['pearson','Pearson相関'],['spearman','Spearman相関'],['kendall','Kendall相関'],
+    ['linear','線形回帰（HC3）'],['logistic','二値ロジスティック回帰'],['gee_binary','二値GEE'],['gee_count','計数GEE'],['mixed_linear','線形混合モデル']]);
+  select('cluster', 'クラスターID', [['','指定なし']]);
+  select('analysis_unit', '分析単位', [['speaker','話者'],['participant','参加者'],['conversation','会話'],['row','独立した行'],['utterance','発話（対応手法のみ）']]);
+  select('correction', '多重比較補正', [['holm','Holm'],['fdr_bh','Benjamini–Hochberg'],['none','補正なし（探索）']]);
+  const confirm = field('confirmed', '尺度・分析単位・変数の出所を確認しました', analysisElement('input'));
+  confirm.type = 'checkbox'; confirm.required = true;
+  const variableFields = analysisElement('div'); form.append(variableFields);
+  let definitions = new Map(), generation = 0, columnTypes = new Map();
+  const selectedColumns = () => [...new Set(['outcome','predictor','group','unit_column','pair','cluster'].map(key=>controls[key].value).filter(Boolean))];
+  const drawDefinitions = () => {
+    variableFields.replaceChildren(); confirm.checked = false;
+    for (const column of selectedColumns()) {
+      const definition = definitions.get(column) || {column,measurement_level:'nominal',source:'',validation_status:'unvalidated',definition_version:1};
+      definitions.set(column,definition);
+      const group = analysisElement('fieldset'); group.append(analysisElement('legend','',`変数：${column}`));
+      for (const [key,label,choices] of [
+        ['measurement_level','尺度',[['nominal','名義'],['ordinal','順序'],['interval','間隔'],['ratio','比率']]],
+        ['source','値の出所',[['','選択してください'],['researcher','研究者の記録'],['rule','規則・集計'],['ai','AI生成']]],
+        ['validation_status','検証状態',[['unvalidated','未検証'],['reviewed','研究者が内容確認'],['validated','妥当性検証済み']]]]) {
+        const labelNode=analysisElement('label','field'); labelNode.append(analysisElement('span','',label));
+        const control=analysisElement('select'); control.required=true;
+        for(const [value,title] of choices) {const option=analysisElement('option','',title); option.value=value; control.append(option);}
+        control.value=definition[key]; control.addEventListener('change',()=>{definition[key]=control.value;confirm.checked=false;});
+        labelNode.append(control);group.append(labelNode);
+      }
+      const orderLabel=analysisElement('label','field'); orderLabel.append(analysisElement('span','','順序尺度の値（小さい順に1行ずつ）'));
+      const order=analysisElement('textarea'); order.rows=2; order.value=(definition.levels||[]).join('\n');
+      order.addEventListener('input',()=>{const types=columnTypes.get(column)||[];const numeric=types.some(type=>['integer','number'].includes(type)) && !types.includes('string');definition.levels=order.value.split('\n').map(value=>value.trim()).filter(Boolean).map(value=>numeric ? Number(value) : value);confirm.checked=false;});
+      orderLabel.append(order);group.append(orderLabel);variableFields.append(group);
+    }
+  };
+  for(const key of ['outcome','predictor','group','unit_column','pair','cluster']) controls[key].addEventListener('change',drawDefinitions);
+  const message = analysisElement('p', 'content-ai-status'); message.setAttribute('role','status');
+  const button = analysisElement('button', 'primary-button small', '統計を実行して別の固定結果に保存'); button.type = 'submit';
+  form.append(analysisElement('p','analysis-caption','探索的分析です。数値は分析単位ごとに平均し、欠測行を除外します。発話を独立標本として検定しません。'),button,message);
+  const load = async () => {
+    const sequence=++generation, datasetName=dataset.value; button.disabled=true;
+    try {
+      const response = await apiFetch(`/api/library/${encodeURIComponent(owner.itemId)}/analysis/runs/${encodeURIComponent(owner.runId)}/tables/${encodeURIComponent(datasetName)}/schema`);
+      const data = await readJsonResponse(response);
+      if (!owner.current() || sequence!==generation || dataset.value!==datasetName) return;
+      if (!response.ok) throw new Error(data.error || '列を取得できません。');
+      for (const key of ['outcome','predictor','group','unit_column','pair','cluster']) {
+        controls[key].replaceChildren();
+        for (const value of key === 'outcome' ? data.fields : ['',...data.fields]) {
+          const option=analysisElement('option','',value || '指定なし'); option.value=value; controls[key].append(option);
+        }
+      }
+      message.textContent=`全${data.row_count}行。列の意味と尺度を確認してください。`;
+      columnTypes=new Map((data.columns||[]).map(column=>[column.name,column.observed_types]));
+      definitions=new Map(); drawDefinitions(); button.disabled=false;
+    } catch(error) {if(owner.current() && sequence===generation) message.textContent=error.message;}
+  };
+  dataset.addEventListener('change',load); if(names.length) load(); else button.disabled=true;
+  form.addEventListener('submit',async event => {
+    event.preventDefault(); if(!owner.current() || button.disabled || !confirm.checked) return;
+    const plan={method:controls.method.value,outcome:controls.outcome.value,analysis_unit:controls.analysis_unit.value,
+      correction:controls.correction.value,mode:'exploratory',min_n:5,predictors:controls.predictor.value ? [controls.predictor.value] : []};
+    for(const key of ['group','unit_column','pair','cluster']) if(controls[key].value) plan[key]=controls[key].value;
+    const columns=[...new Set([plan.outcome,...plan.predictors,...['group','unit_column','pair','cluster'].map(k=>plan[k]).filter(Boolean)])];
+    const variables=columns.map(column=>({...definitions.get(column),unit:plan.analysis_unit}));
+    const sequence=++generation, datasetName=dataset.value;
+    button.disabled=true;
+    try {
+      const response=await apiFetch(`/api/library/${encodeURIComponent(owner.itemId)}/analysis/runs/${encodeURIComponent(owner.runId)}/statistics`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:datasetName,variables,plan})});
+      const data=await readJsonResponse(response); if(!owner.current() || sequence!==generation || dataset.value!==datasetName) return;
+      if(!response.ok) throw new Error(data.error || '統計を実行できません。');
+      message.textContent=data.statistics.results[0].report;
+      panel.append(contentButton('保存した統計結果を開く',()=>openFixedAnalysisRun(owner.itemId,data.run.id)));
+      loadAnalysisStorage();
+    } catch(error) {if(owner.current() && sequence===generation) message.textContent=error.message;}
+    finally {if(owner.current() && sequence===generation) button.disabled=false;}
+  });
+  panel.append(form); return panel;
 }
 
 function buildFixedAnalysisSummary(summary) {

@@ -22,3 +22,9 @@ Thumbs.db
 *.lnk
 .idea/
 .vscode/
+
+# Development assets are kept on archive/development-assets-20261016
+output/
+scratch/
+devtools/
+tests/

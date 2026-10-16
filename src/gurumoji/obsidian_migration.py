@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -36,10 +37,12 @@ def rewrite_links(text: str, mapping: dict[str, str]) -> str:
     return ''.join(result)
 
 
-def migrate(database_file: Path) -> dict:
+def migrate(database_file: Path, *, backup_root: Path | None = None) -> dict:
     database_file = Path(database_file).resolve()
     layout = ObsidianLayout(database_file)
     control = layout.data / 'obsidian_layout'
+    backup_root = Path(backup_root if backup_root is not None else os.environ.get(
+        'MOJIOKOSI_BACKUP_DIR', str(Path(__file__).resolve().parents[2] / 'runtime' / 'backups'))).resolve()
     done = control / 'migration-v1.json'
     pending = control / 'migration-pending.json'
     if done.exists():
@@ -54,7 +57,7 @@ def migrate(database_file: Path) -> dict:
     if pending.exists():
         plan = json.loads(pending.read_text(encoding='utf-8'))
     else:
-        backup = control / ('backup-' + uuid.uuid4().hex)
+        backup = backup_root / ('backup-' + uuid.uuid4().hex)
         backup.mkdir(parents=True)
         if layout.vault.exists(): shutil.copytree(layout.vault, backup / 'vault')
         for name in ('obsidian_workbench', 'analysis_store'):
@@ -117,7 +120,11 @@ def migrate(database_file: Path) -> dict:
         plan = {'backup': str(backup), 'mapping': mapping, 'ownership': ownership}
         write_atomic(pending, json.dumps(plan, ensure_ascii=False, indent=2).encode())
     backup = Path(plan['backup'])
-    if not backup.resolve().is_relative_to(control.resolve()): raise ValueError('バックアップの場所が不正です。')
+    resolved_backup = backup.resolve()
+    # Existing pending plans keep their original inline backup; never relocate them.
+    if (resolved_backup.parent not in (control.resolve(), backup_root)
+            or not resolved_backup.name.startswith('backup-') or backup.is_symlink()):
+        raise ValueError('バックアップの場所が不正です。')
     mapping = plan['mapping']
     hashes = {}
     # Always derive the migration from the immutable backup, including after a crash.

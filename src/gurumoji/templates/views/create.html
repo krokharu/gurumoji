@@ -441,6 +441,9 @@
                   <div class="effort-intro"><p>カードを開いて4つの設定を個別に選べます。文章の調整と、AIの検討の詳しさは別の設定です。高い設定ほど時間や使用量が増える場合があります。開閉や表示の切替では処理を実行しません。</p></div>
                   <div class="effort-toolbar"><button type="button" id="effort-detail-toggle" aria-pressed="false" aria-controls="ai-effort-settings">詳細表示</button><button type="button" id="effort-capability-retry" hidden>モデルの対応設定を再確認</button></div>
                   <div id="ai-effort-settings"></div>
+                  <label for="ai-effort-notation">表記ゆれの統一</label>
+                  <select id="ai-effort-notation" name="ai_effort_notation"><option value="off">しない（OFF）</option><option value="medium">仕上げの最後に統一する</option></select>
+                  <p>辞書・登録語・話者管理・確定履歴を優先します。未確定の群だけ、表記と短い前後文を選択したAIへ送ります。AIが選んだ表記は要確認です。</p>
                 </section>
               </div>
             </details>

@@ -1,72 +1,31 @@
 # フォルダー構成
 
-最上位は日常的に使う入口だけにしています。
+mainは利用・引渡しに必要なファイルへ絞っています。
 
 ```text
-mojiokosi/
-├─ README.md                 使い方
-├─ run.bat                   アプリ起動
-├─ setup_gui.bat             初回セットアップ
-├─ config/                   設定と依存関係
-├─ src/gurumoji/             アプリ本体・画面素材
-├─ scripts/                  補助・保守スクリプト
-├─ runtime/                  実行データ（Git管理外）
-│  ├─ data/                  SQLite、メディア、分析・Obsidian Vault
-│  ├─ logs/                  起動・実行ログ
-│  ├─ models/                ダウンロード済みモデル
-│  ├─ output/                文字起こしの出力
-│  └─ uploads/               実行中の一時ファイル
-├─ notebooks/                Colab ノートブック
-├─ docs/                     設計資料
-└─ tests/                    自動テスト
+Gurumoji/
+├─ README.md             利用の入口
+├─ run.bat               Windows起動
+├─ setup_gui.bat         初回セットアップ
+├─ config/               設定・依存関係
+├─ src/gurumoji/         アプリ本体・画面素材
+├─ scripts/              起動・導入・診断・バックアップ等
+├─ notebooks/            Colab
+├─ docs/                 利用・運用手順
+│  └─ program-vault/     実行時の専門家・文献・スライド定義
+└─ runtime/              利用者データ（Git管理外）
 ```
 
-`runtime/` は利用者データです。バックアップは、画面の「接続と処理装置」にある「バックアップを作成」か、アプリ停止中に `python scripts/backup_data.py create` で作成します（保存先 `runtime/backups`）。DB・分析結果・Vault・台帳・作業台・単語登録を同じ時点で写し、全ファイルのSHA-256を `manifest.json` に記録します。元の音声・動画は既定で含めません（画面のチェックまたは `--include-media`）。出力ファイルとサムネイルは再生成されるため含めません。確認は `verify <フォルダー>`、復元は `restore <フォルダー>` で、空のデータフォルダーにだけ戻します。`config/tokens.json` には秘密情報が含まれるため、必要に応じて別途安全に保管してください。
+`runtime/data` にSQLite・メディア・分析結果・Obsidian Vault・台帳を保存します。`runtime/output` は文字起こし出力、`runtime/models` はモデル、`runtime/logs` はログ、`runtime/uploads` は一時アップロード、`runtime/backups` はバックアップです。
 
-開発時のテストは、プロジェクト直下で次を実行します。
+保存先は既存の `MOJIOKOSI_DATA_DIR`、`MOJIOKOSI_OUTPUT_DIR`、`MOJIOKOSI_BACKUP_DIR` で指定できます。個人のパスや資格情報をソースへ固定しません。
 
-```powershell
-$env:PYTHONPATH = (Join-Path (Get-Location) 'src')
-python -m unittest discover -s tests -p 'test_*.py'
-```
+バックアップは画面か、アプリ停止中の `python scripts/backup_data.py create` で作成します。DB・分析結果・Vault・台帳・作業台・登録語を同じ時点で保存し、manifestでSHA-256を検証します。元メディアは既定で含めず、必要な場合だけ `--include-media` を指定します。秘密情報は別途保管してください。
 
-## dot の Linux CPU 配置
+## Linux配置
 
-クラウドではプロジェクト単位で `app/`（この Git リポジトリ）、`runtime/`、
-`vaults/`（移入ノートの独立した Git）、`artifacts/` に分けます。
-`scripts/run_cloud.sh` は既存の `MOJIOKOSI_DATA_DIR`、`MOJIOKOSI_OUTPUT_DIR`、
-`MOJIOKOSI_BACKUP_DIR` を `app/` の隣の `runtime/` 配下へ設定します。
-一時アップロードだけは既存実装どおり `app/runtime/uploads` に置きます。
-パス安全検査を保つため、`app/runtime` は symlink にしません。
+アプリのチェックアウト、実行データ、移入Vault、検証出力を分けます。`scripts/run_cloud.sh` はデータ・出力・バックアップの環境変数を、アプリの隣のruntimeへ設定します。一時アップロード用のアプリ内runtimeをsymlinkに置き換えないでください。
 
-Python 3.12 の仮想環境を `app/.venv` に作り、まず公式 CPU wheel を入れます。
-その後、検証時の全依存をロックファイルで再現します。
+Python環境は配置先で作り、Windowsの `.venv` をコピーしません。CPU再現用の依存関係は `config/requirements-cloud-cpu.lock.txt` を参照し、起動は `bash scripts/run_cloud.sh` です。待受は既定で `127.0.0.1:7860`。認証の解除や公開bindを疎通確認の代わりに使いません。
 
-```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install torch==2.8.0+cpu torchaudio==2.8.0+cpu torchvision==0.23.0+cpu --index-url https://download.pytorch.org/whl/cpu
-.venv/bin/python -m pip install -r config/requirements-cloud-cpu.lock.txt
-.venv/bin/python -m pip check
-bash scripts/run_cloud.sh
-```
-
-元の要件範囲で更新する場合は `config/requirements.txt` に
-`-c config/constraints-cloud-cpu.txt` を併用し、検証後にロックを更新します。
-`config/requirements-cloud-core.txt` は UI だけの軽量構成です。
-
-起動先は `127.0.0.1:7860` のみです。公開 URL や常時稼働サービスではなく、
-実行環境のセッション寿命・到達性に従います。サーバーと同じセッション内の
-HTTP 応答、別セッションからの到達、ブラウザー表示は別々に検証してください。
-認証を外す・公開 bind を使う・トンネルを作ることを標準の解決策にしません。
-
-`runtime/models/whisper/tiny.pt` を保存済みなら、
-`.venv/bin/python scripts/smoke_cloud_cpu.py` でローカル合成音声による CPU 推論を
-確認できます。このスクリプトはモデルをダウンロードせず、アプリの DB や
-移入 Vault を更新しません。FFmpeg の `flite` フィルターが必要です。
-
-元 UI の WhisperX ジョブには Hugging Face token と gated pyannote 話者分離モデルが
-必要です。CPU Whisper 単体の成功を、UI 全工程・話者分離の成功とは扱いません。
-モデル、資格情報、外部 AI、GPU、ローカル LLM は別途の確認・認可対象です。
-ランチャーは HF/Transformers のオンライン取得とライブラリ telemetry を無効に
-しますが、OpenAI Whisper 独自のモデル取得機構にはそのオフライン設定が効きません。
-移入 Vault のスナップショットは空のアプリ runtime と切り離して保持します。
+試験・開発資料の配置と実行方法は [DEVELOPMENT.md](DEVELOPMENT.md) にまとめています。

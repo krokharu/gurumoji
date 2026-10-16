@@ -212,12 +212,22 @@ def register_request_security(
         if request.path == "/" or request.path.startswith(("/static/", "/api/")):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         if remote_access_enabled() and not remote_local_paths_enabled() and response.is_json:
+            # send_file uses direct passthrough. Consume its JSON before applying
+            # the same privacy boundary as ordinary API JSON, including downloads.
+            if response.status_code == 206:
+                response.close()
+                response.status_code = 416
+                response.headers.pop("Content-Range", None)
+                response.set_data(json.dumps({"error": "JSONの部分取得には対応していません。"}))
+            response.direct_passthrough = False
             payload = response.get_json(silent=True)
             if payload is not None:
                 sanitized = sanitize_remote_json_payload(payload)
                 if sanitized != payload:
                     response.set_data(json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")))
                     response.headers["Content-Type"] = "application/json"
+                    response.headers.pop("ETag", None)
+                    response.headers.pop("Last-Modified", None)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")

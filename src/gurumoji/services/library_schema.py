@@ -16,6 +16,9 @@ from ..analysis_orchestration import initialize_orchestration_store
 from .analysis_orchestration_publication import initialize_orchestration_publication_store
 from ..analysis_store import initialize_store
 from ..text_utils import json_load
+from . import conversation_projection, media_assets, vocabulary_store, segment_embeddings, data_catalog, research_notes, cross_search
+from .sqlite_policy import configure_journal
+from .ai.settings import is_colab_runtime
 
 
 def make_library_schema(
@@ -95,6 +98,7 @@ def make_library_schema(
         thumbnail_directory().mkdir(parents=True, exist_ok=True)
         training_audio_directory().mkdir(parents=True, exist_ok=True)
         with database_connection() as connection:
+            configure_journal(connection, data_directory(), colab=is_colab_runtime())
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS library_items (
@@ -390,6 +394,13 @@ def make_library_schema(
             initialize_orchestration_store(connection)
             initialize_orchestration_publication_store(connection)
             preparation.initialize(connection)
+            vocabulary_store.initialize(connection)
+            conversation_projection.initialize(connection)
+            data_catalog.initialize(connection)
+            media_assets.initialize(connection)
+            segment_embeddings.initialize(connection)
+            research_notes.initialize(connection)
+            cross_search.initialize(connection)
             if repair_provenance:
                 repair_output_import_provenance(connection)
             for row in connection.execute("SELECT id, source_name FROM library_items").fetchall():

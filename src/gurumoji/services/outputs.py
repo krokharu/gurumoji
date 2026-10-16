@@ -199,6 +199,36 @@ MEDIA_SESSION_DATE_TAGS = (
 )
 
 
+def probe_media_payload(
+    source_path: Path, check_cancelled: Callable[[], None] | None = None,
+    *, run_subprocess: Callable[..., Any], entries: str | None = None,
+    video_only: bool = False,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Shared bounded ffprobe reader for recording dates, dimensions and assets."""
+    if shutil.which("ffprobe") is None:
+        return None, "ffprobe_unavailable"
+    command = ["ffprobe", "-v", "error"]
+    if video_only:
+        command.extend(["-select_streams", "v:0"])
+    if entries is not None:
+        command.extend(["-show_entries", entries])
+    else:
+        command.extend(["-show_format", "-show_streams", "-show_program_version"])
+    command.extend(["-of", "json", str(source_path.resolve())])
+    try:
+        completed = run_subprocess(command, timeout=30, check_cancelled=check_cancelled)
+        if completed.returncode != 0:
+            return None, "ffprobe_failed"
+        payload = json.loads(completed.stdout)
+        if not isinstance(payload, dict):
+            return None, "invalid_probe_json"
+        return payload, None
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return None, "ffprobe_failed"
+
+
 def media_metadata_session_date(
     source_path: Path,
     check_cancelled: Callable[[], None] | None = None,
@@ -210,17 +240,10 @@ def media_metadata_session_date(
     if not is_video_path(source_path) or shutil.which("ffprobe") is None:
         return ""
     try:
-        completed = run_subprocess(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "format_tags:stream_tags",
-                "-of", "json", str(source_path.resolve()),
-            ],
-            timeout=30,
-            check_cancelled=check_cancelled,
+        payload, _reason = probe_media_payload(
+            source_path, check_cancelled, run_subprocess=run_subprocess,
+            entries="format_tags:stream_tags",
         )
-        if completed.returncode != 0:
-            return ""
-        payload = json.loads(completed.stdout)
         if not isinstance(payload, dict):
             return ""
         tag_sets: list[dict[str, Any]] = []
@@ -286,16 +309,10 @@ def probe_video_dimensions(
     if shutil.which("ffprobe") is None:
         return 1920, 1080
     try:
-        completed = run_subprocess(
-            [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=width,height:stream_tags=rotate:stream_side_data=rotation",
-                "-of", "json", str(source_path.resolve()),
-            ],
-            timeout=30,
-            check_cancelled=check_cancelled,
+        payload, _reason = probe_media_payload(
+            source_path, check_cancelled, run_subprocess=run_subprocess, video_only=True,
+            entries="stream=width,height:stream_tags=rotate:stream_side_data=rotation",
         )
-        payload = json.loads(completed.stdout) if completed.returncode == 0 else {}
         streams = payload.get("streams") if isinstance(payload, dict) else None
         stream = streams[0] if isinstance(streams, list) and streams else {}
         width = int(stream.get("width") or 0)

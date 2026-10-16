@@ -589,9 +589,10 @@ function analysisExecutionLogFromEvents(events) {
     milestone_started: '段階を開始', milestone_committed: '段階を確定',
     milestone_waiting: '段階を停止', cancel_requested: '取消を要求しました。',
     pipeline_cancelled: '分析を中止しました。', retry_accepted: '失敗した処理の再試行を受け付けました。',
+    process_restart: 'アプリの再起動により中断しました。', resume_accepted: '固定入力からの再開を受け付けました。',
     pipeline_completed: '全成果物と公開状態を確定しました。', pipeline_failed: 'pipelineが停止しました。'
   };
-  return (events || []).map(event => {
+  return (events || []).filter(event => event.type !== 'state_transition').map(event => {
     const time = new Date(event.created_at).toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
     const milestone = event.payload?.milestone ? ` ${event.payload.milestone}` : '';
     return `${time}  ${labels[event.type] || event.type}${milestone}`;
@@ -603,7 +604,7 @@ function analysisExecutionApplyResponse(response) {
   analysisExecutionState.generation = response.generation ?? analysisExecutionState.generation;
   analysisExecutionState.status = response.status;
   analysisExecutionState.active = ['accepted', 'running', 'waiting', 'cancelling'].includes(response.status)
-    && response.allowed_actions?.includes('cancel');
+    && Boolean(response.allowed_actions?.length);
   analysisExecutionState.currentIndex = Math.max(0, analysisExecutionStageDefinitions.findIndex(
     value => value.id === response.current_milestone
   ));
@@ -631,7 +632,7 @@ function analysisExecutionApplyResponse(response) {
 function analysisExecutionStatusLabel(status) {
   return {
     idle: '開始準備', accepted: '受付済み', running: '実行中', cancelling: '中止待ち', completed: '処理完了', pending: '待機', active: '実行中', waiting: '入力・回復待ち', committed: '完了',
-    failed: '失敗', cancelled: '取消', not_applicable: '対象外'
+    failed: '失敗', cancelled: '取消', not_applicable: '対象外', reused: '再利用'
   }[status] || `不明な状態 (${status || '未取得'})`;
 }
 
@@ -704,7 +705,7 @@ function analysisExecutionPublicationEvidence() {
 function analysisExecutionRetryAction() {
   const settings = analysisExecutionState.settings || {};
   if (settings.recovery?.mode === 'blocked' || analysisExecutionPublicationEvidence().blocked) return '';
-  return ['retry_publication', 'retry_failed'].find(action => settings.allowedActions?.includes(action)) || '';
+  return ['resume', 'retry_publication', 'retry_failed'].find(action => settings.allowedActions?.includes(action)) || '';
 }
 function analysisExecutionHeadline() {
   return {idle: '分析の開始準備', accepted: '分析を受け付けました', running: '分析を実行しています',
@@ -742,8 +743,8 @@ function renderAnalysisPublicationEvidence() {
   const recovery = analysisExecutionState.settings?.recovery;
   if (recovery?.mode === 'blocked' || recovery?.pending) {
     const note = document.createElement('p');note.textContent = recovery.mode === 'blocked'
-      ? `自動回復は停止しています（${recovery.reason_code || '理由未取得'}）。利用可能な手動再開操作はありません。`
-      : '再起動後の自動回復を待っています。確定済みの成果物を保持します。';host.append(note);
+      ? `再開できません（${recovery.reason_code || '理由未取得'}）。確定済みの成果物を保持しています。新しい分析を開始してください。`
+      : 'アプリの再起動により中断しました。「固定入力から分析を再開」で続けられます。確定済みの成果物を保持しています。';host.append(note);
   }
 }
 
@@ -761,7 +762,15 @@ function renderAnalysisExecution() {
       item.dataset.executionStage = stage.id;
       const strong = document.createElement('strong'); strong.textContent = `${stage.id} ${stage.title}`;
       const small = document.createElement('small'); small.textContent = analysisExecutionStatusLabel(stage.status);
-      item.append(strong, small); stagesHost.append(item);
+      item.append(strong, small);
+      (stage.steps || []).filter(step => step.status === 'reused').forEach(step => {
+        const reused = document.createElement('small');
+        reused.dataset.reusedStep = step.step_id;
+        const sourceTime = step.reused_at && new Date(step.reused_at);
+        reused.textContent = `${analysisProcessMethodLabel(step.step_id)}：再利用（元の実行 ${sourceTime && Number.isFinite(sourceTime.getTime()) ? sourceTime.toLocaleString('ja-JP') : '日時不明'}）`;
+        item.append(reused);
+      });
+      stagesHost.append(item);
     });
   }
   const percent = analysisExecutionPercent();
@@ -810,8 +819,11 @@ function renderAnalysisExecution() {
   const cancel = document.querySelector('#analysis-execution-cancel');
   const results = document.querySelector('#analysis-execution-results');
   const review = document.querySelector('#analysis-execution-review');
+  const background = document.querySelector('#analysis-execution-background');
+  if (background) background.textContent = analysisExecutionState.settings?.recovery?.pending
+    ? '分析の画面に戻る' : 'バックグラウンドで続ける';
   if (cancel) {
-    cancel.hidden = !analysisExecutionState.active;
+    cancel.hidden = !analysisExecutionState.settings?.allowedActions?.includes('cancel');
     cancel.disabled = analysisExecutionState.cancelRequested;
     cancel.textContent = analysisExecutionState.cancelRequested ? '中止を待っています…' : '分析を中止';
   }
@@ -821,7 +833,8 @@ function renderAnalysisExecution() {
     const action = analysisExecutionRetryAction();
     review.hidden = !action;
     review.disabled = analysisRunOperations.has('retry');
-    review.textContent = action === 'retry_publication' ? '保存済みpackageから4保存先への公開だけ再試行' : '失敗した処理を再試行';
+    review.textContent = action === 'resume' ? '固定入力から分析を再開'
+      : action === 'retry_publication' ? '保存済みpackageから4保存先への公開だけ再試行' : '失敗した処理を再試行';
   }
   if (analysisRunButton) analysisRunButton.textContent = analysisExecutionState.active ? '実行状況を見る' : '分析を実行';
   if (analysisExecutionChip) {
@@ -983,7 +996,8 @@ async function analysisExecutionReviewPlan() {
   if (!retry || analysisRunOperations.has('retry')) return;
   const request = captureAnalysisRun('retry');
   try {
-    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(request.itemId)}/analysis/pipelines/${encodeURIComponent(request.id)}/retry`, {
+    renderAnalysisExecution();
+    const response = await analysisExecutionRequestJson(`/api/library/${encodeURIComponent(request.itemId)}/analysis/pipelines/${encodeURIComponent(request.id)}/${retry === 'resume' ? 'resume' : 'retry'}`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
     });
     if (!request.current()) return;
@@ -992,9 +1006,13 @@ async function analysisExecutionReviewPlan() {
     analysisExecutionPoll();
   } catch (error) {
     if (!request.current()) return;
-    analysisExecutionState.logs.push(`再試行失敗：${error.message}`);
+    analysisExecutionState.logs.push(`${retry === 'resume' ? '再開' : '再試行'}失敗：${error.message}`);
     renderAnalysisExecution();
-  } finally { request.release(); }
+  } finally {
+    const current = request.current();
+    request.release();
+    if (current) renderAnalysisExecution();
+  }
 }
 
 async function analysisExecutionOpenResults() {

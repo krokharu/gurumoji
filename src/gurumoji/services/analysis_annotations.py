@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .. import transcript_preparation as preparation
 from ..text_utils import utc_now_iso
+from . import change_log
 from .group_analysis import (
     normalize_analysis_annotations,
     normalize_analysis_config,
@@ -133,29 +134,31 @@ def make_analysis_annotation_save(
         stored_annotations = {**orphaned_annotations, **annotations}
         now = utc_now_iso()
         with database_connection() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE library_items SET
-                    analysis_config_json = ?, analysis_annotations_json = ?,
-                    analysis_revision = analysis_revision + 1, analysis_updated_at = ?
-                WHERE id = ? AND revision_count = ? AND analysis_revision = ?
-                """,
-                (
-                    json.dumps(config, ensure_ascii=False),
-                    json.dumps(stored_annotations, ensure_ascii=False),
-                    now,
-                    item_id,
-                    source_revision,
-                    analysis_revision,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise AnalysisConflictError(
-                    "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
+            connection.execute("BEGIN IMMEDIATE")
+            with change_log.tracking(connection, [("analysis_config", item_id), ("analysis_annotations", item_id)], process="analysis_annotation_save"):
+                cursor = connection.execute(
+                    """
+                    UPDATE library_items SET
+                        analysis_config_json = ?, analysis_annotations_json = ?,
+                        analysis_revision = analysis_revision + 1, analysis_updated_at = ?
+                    WHERE id = ? AND revision_count = ? AND analysis_revision = ?
+                    """,
+                    (
+                        json.dumps(config, ensure_ascii=False),
+                        json.dumps(stored_annotations, ensure_ascii=False),
+                        now,
+                        item_id,
+                        source_revision,
+                        analysis_revision,
+                    ),
                 )
-            if stored_annotations and not current_annotations and not orphaned_annotations:
-                preparation.capture(connection, row, "analysis_baseline")
-                preparation.bind_analysis(connection, row)
+                if cursor.rowcount != 1:
+                    raise AnalysisConflictError(
+                        "元データまたは分析が別の画面で更新されました。再読み込みして確認してください。"
+                    )
+                if stored_annotations and not current_annotations and not orphaned_annotations:
+                    preparation.capture(connection, row, "analysis_baseline")
+                    preparation.bind_analysis(connection, row)
         updated = library_row(item_id)
         if updated is None:
             raise LookupError("処理済みデータが見つかりません。")

@@ -665,7 +665,7 @@ class VaultRegistry:
             chart, x, y, alt = chart_spec(name, fields, int(artifact["rows"]))
             body += (f"### {markdown(name)}\n\n| 項目 | 値 |\n| --- | --- |\n| 推奨表示 | {chart} |\n"
                      f"| 横軸・分類 | {code(x) if x else '研究者が選ぶ'} |\n| 値 | {code(y) if y else '研究者が選ぶ'} |\n"
-                     f"| データ | `tables/{name}.csv` / artifact {code(artifact['id'])} / {int(artifact['rows'])}行 |\n"
+                     f"| データ | " + (f"[CSV書出し]({run['app_url']}{artifact['url']})" if artifact.get('generated') else f"`tables/{name}.csv`") + f" / artifact {code(artifact['id'])} / {int(artifact['rows'])}行 |\n"
                      f"| sha256 | {code(artifact['sha256'])} |\n"
                      f"| 列 | {cell(', '.join(fields[:24]) or '列情報なし', 600)} |\n\n"
                      f"代替テキスト：{markdown(alt)}\n\n")
@@ -740,7 +740,8 @@ class VaultRegistry:
         body += f"| パラメーター項目 | {cell('、'.join(sorted(map(str, parameters))) or 'なし', 400)} |\n"
         body += "\n## 成果物\n\n| ファイル | artifact_id | 行数 | bytes | sha256 |\n| --- | --- | ---: | ---: | --- |\n"
         body += "".join(f"| {code(artifact['name'])} | {code(artifact['id'])} | {artifact.get('rows') if artifact.get('rows') is not None else '-'} | "
-                        f"{int(artifact['bytes'])} | {code(artifact['sha256'][:16])} |\n" for artifact in artifacts)
+                        f"{int(artifact['bytes']) if artifact['bytes'] is not None else '取得時に生成'} | "
+                        f"{code(artifact['sha256'][:16])}{'（行hash）' if artifact.get('generated') else ''} |\n" for artifact in artifacts)
         summary = "、".join(f"{label}{count}" for label, count in counts.items()) or "手法なし"
         source_ids = [str(member.get("conversation_id")) for member in members] or [str(run["item_id"])]
         properties = {

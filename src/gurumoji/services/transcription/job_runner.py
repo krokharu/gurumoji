@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ...ai_effort import cleanup_enabled
+from ...ai_finishing import FINISHING_VERSION, RECOMMENDED_FINISHING_VERSION
 from ..ai.transcript_finishing import run_full_cleanup
+from ..notation import NOTATION_VERSION
 
 def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any]) -> None:
     TranscriptionReporter = dependencies["TranscriptionReporter"]
@@ -618,7 +620,8 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             {"base_url": options.ai_base_url}
             if options.ai_provider == "lmstudio" else {}
         )
-        if any(level != "auto" for level in options.ai_efforts.values()):
+        if any(level != "auto" for key, level in options.ai_efforts.items()
+               if key != "notation" or level != "off"):
             ai_base_kwargs["ai_efforts"] = options.ai_efforts
         context_outline: dict[str, Any] | None = None
         if (options.recommended_cleanup and not options.finish_in_obsidian
@@ -668,7 +671,8 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     "おすすめのJev判定・発話単位LLM整形を省略しました。元の文字起こしを保存します: "
                     + details
                 )
-        if ((options.clean_transcript or options.jev_compare)
+        full_cleanup = None
+        if ((options.clean_transcript or options.jev_compare or options.ai_efforts.get("notation", "off") != "off")
                 and not options.finish_in_obsidian):
             # The same order and stage record as the Obsidian workbench (ARCH-07).
             def create_context_outline(source: list[dict[str, Any]]) -> dict[str, Any]:
@@ -712,6 +716,8 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                     record_warning("再校正用の全体アウトラインを作成できませんでした: " + str(exc))
                 elif stage == "cleanup":
                     record_warning("AI文字整形を省略しました。元の文字起こしを保存します: " + details)
+                elif stage == "notation":
+                    record_warning("表記ゆれの統一に失敗しました。統一前の本文を保存します: " + details)
                 else:
                     record_warning("Jevによる修正要否の比較を省略しました: " + details)
 
@@ -725,11 +731,30 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 review_with_jev=review_original_with_jev if options.jev_compare else None,
                 attach_jev=attach_jev_comparison,
                 on_failure=warn_full_cleanup,
+                ai_efforts=options.ai_efforts,
+                unify_notation=lambda source: dependencies["unify_notation"](
+                    source, options.ai_provider, options.ai_api_key, options.ai_model,
+                    check_cancelled, record_ai_usage, **ai_base_kwargs),
             )
             segments = full_cleanup["segments"]
             finishing_stages.update(full_cleanup["stages"])
             if full_cleanup["stages"].get("jev_comparison") == "completed":
                 jev_usage = full_cleanup["jev_usage"]
+        finishing_history = [{
+            "segments": json.loads(json.dumps(full_cleanup["before_notation"] if full_cleanup else segments, ensure_ascii=False)), "speaker_names": {},
+            "origin": "ai" if any(finishing_stages.get(s) == "completed" for s in (
+                "cleanup", "recommended_cleanup", "jev_comparison")) else "rule",
+            "process": "ai_finishing" if any(finishing_stages.get(s) == "completed" for s in (
+                "cleanup", "recommended_cleanup", "jev_comparison")) else "import_processing",
+            "process_version": FINISHING_VERSION,
+            "metadata": {"run_id": job.id, "provider": options.ai_provider, "model": options.ai_model,
+                         "stages": dict(finishing_stages), "recommended_version": RECOMMENDED_FINISHING_VERSION},
+        }]
+        if full_cleanup and full_cleanup["notation"] is not None:
+            finishing_history.append({"segments": json.loads(json.dumps(segments, ensure_ascii=False)),
+                "speaker_names": {}, "origin": "ai", "process": "notation", "process_version": NOTATION_VERSION,
+                "metadata": {"run_id": job.id, "provider": options.ai_provider, "model": options.ai_model,
+                             "notation": full_cleanup["notation"]}})
         set_stage("finishing", "文字起こしの仕上げ", 100)
         progress(88)
         emotion_analysis: dict[str, Any] | None = None
@@ -763,6 +788,8 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 )
             set_stage("emotion", "音声感情の分析", 100)
         progress(90)
+        finishing_history.append({"segments": json.loads(json.dumps(segments, ensure_ascii=False)),
+                                  "speaker_names": {}, "origin": "rule", "process": "emotion_projection"})
         speaker_names: dict[str, str] = {}
         speaker_identity_diagnostics: dict[str, Any] = {}
         speaker_repair_summary = {
@@ -817,6 +844,12 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
                 record_warning("AI話者名推定を省略しました。話者ラベルで保存します: " + details)
                 finishing_stages["speaker_identity"] = "failed"
             set_stage("speaker_names", "話者名の確認", 100)
+        if finishing_stages["speaker_identity"] == "completed":
+            finishing_history.append({"segments": json.loads(json.dumps(segments, ensure_ascii=False)),
+                "speaker_names": dict(speaker_names), "origin": "ai", "process": "ai_finishing",
+                "process_version": FINISHING_VERSION,
+                "metadata": {"run_id": job.id, "provider": options.ai_provider, "model": options.ai_model,
+                             "stages": {"speaker_identity": "completed"}}})
         segments, formatting_result = transcript_formatting_result(
             imported_transcript,
             segments,
@@ -1002,6 +1035,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             source_name=options.source_name,
             output_dir=options.output_dir,
             media_path=saved_media_path,
+            original_media_path=options.input_path,
             language=language_code,
             segments=segments,
             speaker_names=speaker_names,
@@ -1010,6 +1044,7 @@ def run_transcription_job(job: Any, options: Any, dependencies: Mapping[str, Any
             files=files,
             write_srt=options.write_srt,
             original_segments=imported_transcript,
+            finishing_history=finishing_history,
             write_json=True,
             burn_subtitled_video=options.burn_subtitled_video,
             session_profile=session_profile,

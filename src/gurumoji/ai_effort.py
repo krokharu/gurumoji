@@ -1,5 +1,5 @@
 """Per-operation reasoning settings, kept explicit and isolated between jobs."""
-STAGES = ("outline", "cleanup", "name_extract", "name_verify")
+STAGES = ("outline", "cleanup", "name_extract", "name_verify", "notation")
 # ``auto`` remains valid for records created before the explicit thinking-mode UI.
 # New jobs use either ``off`` or a concrete effort level.
 LEVELS = ("auto", "off", "low", "medium", "high", "ultra")
@@ -9,16 +9,17 @@ SCHEMA_STAGES = {"meeting_outline": "outline", "transcript_outline_context": "ou
                  # generation tokens for the JSON findings.
                  "conversation_insights": "outline",
                  "transcript_cleanup": "cleanup", "transcript_recommended_cleanup": "cleanup",
+                 "transcript_notation": "notation",
                  "speaker_identity_extraction": "name_extract",
                  "speaker_identity_link_verification": "name_verify"}
 
 
 def normalize_efforts(value=None):
     if value is None:
-        return dict.fromkeys(STAGES, "auto")
+        return {stage: "off" if stage == "notation" else "auto" for stage in STAGES}
     if not isinstance(value, dict) or set(value) - set(STAGES):
         raise ValueError("AIエフォートの設定形式が不正です。")
-    result = {stage: value.get(stage, "auto") for stage in STAGES}
+    result = {stage: value.get(stage, "off" if stage == "notation" else "auto") for stage in STAGES}
     if any(level not in LEVELS for level in result.values()):
         raise ValueError("AIエフォートは auto / off / low / medium / high / ultra を指定してください。")
     return result

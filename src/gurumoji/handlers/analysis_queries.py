@@ -10,6 +10,8 @@ import math
 import sys
 from pathlib import Path
 import zipfile
+import hashlib
+from ..services.analysis_package import MissingReference
 from typing import Any, Callable
 
 from ..analysis_method_registry import METHODS, REGISTRY_VERSION
@@ -153,13 +155,13 @@ class AnalysisQueries:
             ],
         }
 
-    def runs(self, item_id: str) -> dict[str, Any]:
+    def runs(self, item_id: str, *, limit: int = 100, offset: int = 0) -> dict[str, Any]:
         item = self._find_item(item_id)
         if item is None:
             raise AnalysisQueryNotFound("対象の会話が見つかりません。")
         fingerprint = self._source_fingerprint(item)
         runs = []
-        for stored in self._store.list(item_id):
+        for stored in self._store.list(item_id, limit=limit, offset=offset):
             run = dict(stored)
             run["stale"] = bool(
                 run["stale"] or run["input_fingerprint"] != fingerprint
@@ -169,6 +171,8 @@ class AnalysisQueries:
             )
         return {
             "runs": runs,
+            "pagination": {"offset": offset, "limit": limit, "total": self._store.run_count(item_id),
+                           "has_more": offset + len(runs) < self._store.run_count(item_id)},
             "storage": {
                 "database": "SQLite",
                 "artifacts": "CSV / JSON",
@@ -181,7 +185,7 @@ class AnalysisQueries:
         item = self._find_item(item_id)
         if not run or run["item_id"] != item_id or item is None:
             raise AnalysisQueryNotFound("指定した会話の保存結果が見つかりません。")
-        snapshot, result, manifest, content = self._store.verified_package(run_id)
+        snapshot, result, manifest, content = self._store.readable_package(run_id)
         # All saved tables must be readable, even if only one preview is requested.
         # This validates stored rows; it does not calculate scientific results.
         for artifact in self._store.artifacts(run_id):
@@ -199,13 +203,18 @@ class AnalysisQueries:
                     raise ValueError("保存表の件数が一致しません。")
             elif artifact["media_type"] == "application/json":
                 read_saved_json(content[artifact["name"]])
-        return run, item, manifest, content
+        return run, item, manifest, content, result
 
     def run(self, item_id: str, run_id: str) -> dict[str, Any]:
         """Direct fixed-run lookup, independent of the newest-100 history window."""
-        run, item, manifest, content = self._fixed_package(item_id, run_id)
+        try:
+            run, item, manifest, content, saved_result = self._fixed_package(item_id, run_id)
+        except MissingReference as exc:
+            run = self._store.get(run_id)
+            return {'run': self._store.public(run, local=False), 'integrity': 'missing_reference',
+                'recovery_status': getattr(exc, 'recovery_status', 'missing_reference'),
+                'error': str(exc), 'saved_summary': {}, 'provenance': {}, 'current_input': {'stale': None}}
         public = self._store.public(run, local=False)
-        saved_result = read_saved_json(content["result.json"])
         public["saved_publication_targets"] = saved_result.get("parameters", {}).get("publication_targets")
         return {
             "run": public,
@@ -222,11 +231,11 @@ class AnalysisQueries:
         }
 
     def run_preview(self, item_id: str, run_id: str, artifact_id: str) -> dict[str, Any]:
-        run, _item, _manifest, content = self._fixed_package(item_id, run_id)
-        artifact = next((a for a in self._store.artifacts(run_id) if a["id"] == artifact_id), None)
+        run, _item, _manifest, content, _result = self._fixed_package(item_id, run_id)
+        artifact = next((a for a in self._store.export_artifacts(run_id) if a["id"] == artifact_id), None)
         if artifact is None:
             raise AnalysisQueryNotFound("指定した保存結果のファイルが見つかりません。")
-        data = content[artifact["name"]]
+        data = self._store.table_csv(run_id, artifact['name'][7:-4]) if artifact.get('generated') else content[artifact["name"]]
         preview = {"artifact_id": artifact_id, "run_id": run["id"], "bytes": len(data),
                    "format": "text", "truncated": False}
         if artifact["media_type"] == "text/csv":
@@ -281,11 +290,42 @@ class AnalysisQueries:
             download_name=Path(metadata["name"]).name,
         )
 
+    def table_schema(self, item_id: str, run_id: str, name: str) -> dict:
+        self._fixed_package(item_id, run_id)
+        table = self._store.read_table(run_id, name)
+        return {'run_id': run_id, 'dataset': name, 'fields': table['fields'], 'columns':table.get('columns',[]), 'row_count': len(table['rows'])}
+
+    def run_export(self, run_id: str, format: str, dataset: str | None = None) -> AnalysisArtifact:
+        from ..services.fixed_exports import export_fixed
+        run = self._store.get(run_id)
+        if not run or run.get('status') != 'completed' or self._find_item(run['item_id']) is None:
+            raise AnalysisQueryNotFound('保存結果が見つかりません。')
+        self._fixed_package(run['item_id'], run_id)
+        data, media_type, extension = export_fixed(self._store, run_id, format, dataset)
+        return AnalysisArtifact(data=data, media_type=media_type, download_name=f'analysis-{run_id}.{extension}')
+
     def run_bundle(self, run_id: str) -> AnalysisArtifact:
         run = self._store.get(run_id)
         if not run or run.get("status") != "completed" or self._find_item(run["item_id"]) is None:
             raise AnalysisQueryNotFound("保存結果が見つかりません。")
-        _run, _item, _manifest, content = self._fixed_package(run["item_id"], run_id)
+        _run, _item, manifest, content, _result = self._fixed_package(run["item_id"], run_id)
+        if manifest.get('schema_version') == 2:
+            from ..analysis_store import canonical, csv_bytes
+            content = dict(content)
+            mapping = {}
+            for name in manifest['typed_tables']:
+                table = self._store.read_table(run_id, name)
+                content[f'tables/{name}.json'] = canonical(table)
+                content[f'tables/{name}.csv'] = csv_bytes(table['fields'], [r['values'] for r in table['rows']])
+                mapping[name] = {**manifest['typed_tables'][name], 'data': f'tables/{name}.json'}
+                mapping[name].pop('reference', None)
+            compact = read_saved_json(content['result.json'])
+            compact['tables'] = mapping
+            content['result.json'] = canonical(compact)
+            exported = {**manifest, 'typed_tables': mapping, 'references': {}, 'export': 'self_contained',
+                'artifacts': [{'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                              for name, data in content.items() if name != 'manifest.json']}
+            content['manifest.json'] = canonical(exported)
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in content.items():
@@ -294,6 +334,12 @@ class AnalysisQueries:
             data=stream.getvalue(), media_type="application/zip",
             download_name=f"analysis-{run_id}.zip",
         )
+
+    def table_csv(self, run_id: str, name: str) -> AnalysisArtifact:
+        run = self._store.get(run_id)
+        if not run or self._find_item(run['item_id']) is None:
+            raise AnalysisQueryNotFound('保存結果が見つかりません。')
+        return AnalysisArtifact(data=self._store.table_csv(run_id, name), media_type='text/csv', download_name=name + '.csv')
 
     def insights(self, item_id: str) -> dict[str, Any]:
         """Read the latest request and saved insight from one SQLite snapshot."""

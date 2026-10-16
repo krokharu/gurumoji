@@ -32,6 +32,7 @@ from ..transformer_analysis import (
     transformer_source_provenance,
 )
 from .ai.settings import local_llm_model_required_message
+from . import segment_embeddings
 
 
 class InsightCancelled(RuntimeError):
@@ -368,6 +369,7 @@ def make_transformer_jobs(
                 actual = transformer_input_fingerprint(current, model=model, parameters=result.get("parameters"))
                 if expected != actual:
                     raise AnalysisConflictError("分析中に元データが更新されました。再実行してください。")
+                embedding_rows = segment_embeddings.prepare_rows(analysis, result)
                 full_analysis = group_analysis_for_row(latest, include_research_rows=True)
                 full_analysis["transformer"] = {"result": result, "stale": False}
                 progress(95, "分析結果を保存しています。")
@@ -385,6 +387,7 @@ def make_transformer_jobs(
                           analysis["item"]["revision_count"], analysis["item"]["analysis_revision"]))
                     if cursor.rowcount != 1:
                         raise AnalysisConflictError("保存直前にデータが更新されました。再実行してください。")
+                    segment_embeddings.write_rows(connection, embedding_rows)
                     connection.execute("""
                         UPDATE transformer_analysis_requests SET status='completed', progress=100,
                             message='Transformerテーマ分析を保存しました。', updated_at=? WHERE request_id=?

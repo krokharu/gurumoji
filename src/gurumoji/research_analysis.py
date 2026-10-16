@@ -11,12 +11,16 @@ import io
 import json
 import math
 import re
+import sqlite3
 import threading
 from collections import Counter, OrderedDict, defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from importlib import metadata
 from itertools import combinations
 from statistics import mean, median, stdev
 from typing import Any, Callable
+from .services.derived_analysis_store import DerivedAnalysisError
 from . import transcript_preparation as preparation
 from .analysis_insights import (
     INSIGHT_CSV_FIELDS, build_content_analysis, input_fingerprint, insight_csv_rows, normalized_term,
@@ -149,6 +153,59 @@ _SUDACHI_LOAD_ATTEMPTED = False
 _SUDACHI_ERROR = ""
 _RESEARCH_CACHE: "OrderedDict[tuple[Any, ...], dict[str, Any]]" = OrderedDict()
 _RESEARCH_CACHE_SIZE = 4
+_DERIVED_DATABASE = ContextVar("research_derived_database", default=None)
+
+
+@contextmanager
+def derived_storage(database):
+    """Supply the application's resolved data path without a process-global setting."""
+    token = _DERIVED_DATABASE.set(database)
+    try:
+        yield
+    finally:
+        _DERIVED_DATABASE.reset(token)
+
+
+def _cached_segment_parse(segments, analyzer, config, parse):
+    database = _DERIVED_DATABASE.get()
+    if database is None:
+        return parse(segments)
+    from .services.derived_analysis_store import DerivedAnalysisStore
+    store = DerivedAnalysisStore(database)
+    morphology, dependencies, sentences = [], [], 0
+    for segment in segments:
+        text = str(segment.get("text") or "")
+        try:
+            result = store.read(text, analyzer, config)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            raise DerivedAnalysisError("派生解析行を読み出せません。") from error
+        if result is None:
+            # Do not store conversation identity/role in the shared lexical rows.
+            result = parse([{"text": text}])
+            neutral = tuple([
+                {key: value for key, value in row.items() if key not in _row_common({})}
+                for row in rows
+            ] for rows in result[:2]) + (result[2],)
+            try:
+                store.save(text, analyzer, config, neutral)
+            except (OSError, ValueError, sqlite3.Error) as error:
+                raise DerivedAnalysisError("派生解析行を保存できません。") from error
+            result = neutral
+        common = _row_common(segment)
+        # Preserve the existing parsers' whitespace-only sentence accounting.
+        if text and not result[0] and morphology and analyzer["engine"] in {"sudachi", "fallback"}:
+            sentences -= 1
+        morphology.extend({**row, **common} for row in result[0])
+        dependencies.extend({**row, **common} for row in result[1])
+        sentences += result[2]
+    return morphology, dependencies, sentences
+
+
+def _parser_identity(engine, model=None):
+    return {"engine": engine, "algorithm": RESEARCH_ALGORITHM_VERSION,
+            "packages": {name: _package_version(name) for name in
+                         ("ginza", "ja-ginza", "spacy", "SudachiPy", "SudachiDict-core")},
+            "model": getattr(model, "meta", {}) if model is not None else {}}
 
 
 def _package_version(name: str) -> str:
@@ -481,8 +538,9 @@ def _linguistic_analysis(
     dependencies: list[dict[str, Any]] = []
     if ginza is not None:
         try:
-            morphemes, dependencies, sentence_count = _analyze_with_ginza(
-                segments, ginza, stop_words
+            morphemes, dependencies, sentence_count = _cached_segment_parse(
+                segments, _parser_identity("ginza", ginza), {"stop_words": sorted(stop_words)},
+                lambda rows: _analyze_with_ginza(rows, ginza, stop_words)
             )
             engine = {
                 "morphology": "GiNZA / SudachiPy",
@@ -492,6 +550,8 @@ def _linguistic_analysis(
                 "split_mode": "GiNZAモデル設定",
                 "message": "形態素情報と係り受けをGiNZAで解析しました。",
             }
+        except DerivedAnalysisError:
+            raise
         except Exception as error:
             ginza_error = _safe_error(error)
             ginza = None
@@ -499,8 +559,11 @@ def _linguistic_analysis(
         dictionary, sudachi_error = _load_sudachi()
         if dictionary is not None:
             try:
-                morphemes, sentence_count = _analyze_with_sudachi(
-                    segments, dictionary, split_mode, stop_words
+                morphemes, dependencies, sentence_count = _cached_segment_parse(
+                    segments, _parser_identity("sudachi"),
+                    {"split_mode": split_mode, "stop_words": sorted(stop_words)},
+                    lambda rows: (lambda parsed: (parsed[0], [], parsed[1]))(
+                        _analyze_with_sudachi(rows, dictionary, split_mode, stop_words))
                 )
                 engine = {
                     "morphology": "SudachiPy",
@@ -514,11 +577,16 @@ def _linguistic_analysis(
                     ),
                     "diagnostic": ginza_error,
                 }
+            except DerivedAnalysisError:
+                raise
             except Exception as error:
                 sudachi_error = _safe_error(error)
                 dictionary = None
         if dictionary is None:
-            morphemes, sentence_count = _analyze_with_fallback(segments, stop_words)
+            morphemes, dependencies, sentence_count = _cached_segment_parse(
+                segments, _parser_identity("fallback"), {"stop_words": sorted(stop_words)},
+                lambda rows: (lambda parsed: (parsed[0], [], parsed[1]))(
+                    _analyze_with_fallback(rows, stop_words)))
             engine = {
                 "morphology": "簡易文字種分割（代替表示）",
                 "syntax": "利用不可",
@@ -1431,6 +1499,8 @@ def _cache_key(analysis: dict[str, Any]) -> tuple[Any, ...]:
     item = analysis.get("item") if isinstance(analysis.get("item"), dict) else {}
     config = analysis.get("config") if isinstance(analysis.get("config"), dict) else {}
     return (
+        str(_DERIVED_DATABASE.get() or ""),
+        json.dumps(_parser_identity("available"), sort_keys=True),
         RESEARCH_ALGORITHM_VERSION,
         input_fingerprint(analysis),
         item.get("id"),
@@ -1495,7 +1565,8 @@ def build_research_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     key = _cache_key(analysis)
     with _ENGINE_LOCK:
         cached = _RESEARCH_CACHE.get(key)
-        if cached is not None:
+        database = _DERIVED_DATABASE.get()
+        if cached is not None and (database is None or database.is_file()):
             _RESEARCH_CACHE.move_to_end(key)
             return cached
     linguistics = build_research_linguistics(analysis)
@@ -1520,6 +1591,8 @@ def enrich_research_analysis(
 ) -> dict[str, Any]:
     research = research_result if research_result is not None else build_research_analysis(analysis)
     linguistics = research["linguistics"]
+    from .services.analysis_networks import cooccurrence_network
+    analysis.setdefault("local_methods", {})["cooccurrence_network"] = cooccurrence_network(analysis, linguistics)
     public_linguistics = {
         "engine": linguistics["engine"],
         "coverage": linguistics["coverage"],
@@ -1697,6 +1770,14 @@ EXCEL_SHEETS = [
     ("important_quotes", "重要引用"),
     ("context", "確認状況"),
     ("analysis_methods", "分析手法"),
+    ("response_nodes", "応答関係・話者指標"),
+    ("response_edges", "応答関係・辺"),
+    ("response_summary", "応答関係・対象と分母"),
+    ("cooccurrence_nodes", "共起構造・中心語"),
+    ("cooccurrence_edges", "共起構造・辺"),
+    ("cooccurrence_communities", "共起構造・語のまとまり"),
+    ("consistency_codes", "コードのまとまり"),
+    ("coding_consistency", "コード要確認発話"),
 ]
 
 

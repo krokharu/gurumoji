@@ -6,6 +6,8 @@
   if (!card) return;
 
   const baseSelect = document.querySelector('#interview-comparison-base');
+  const dataGroupSelect = document.querySelector('#interview-comparison-data-group');
+  let dataGroups = [];
   const allowDifferent = document.querySelector('#interview-comparison-allow-different');
   const targets = document.querySelector('#interview-comparison-targets');
   const targetStatus = document.querySelector('#interview-comparison-target-status');
@@ -66,10 +68,11 @@
     selectionStatus.textContent = `${selected.length}件選択（2〜8件）`;
     runButton.disabled = running || catalogLoading || selected.length < 2 || selected.length > 8;
     baseSelect.disabled = running || catalogLoading || !catalog.length;
+    dataGroupSelect.disabled = running || catalogLoading;
     allowDifferent.disabled = running || catalogLoading;
     refreshButton.disabled = running || catalogLoading;
     targets.querySelectorAll('[data-comparison-target]').forEach(input => {
-      input.disabled = running || catalogLoading || input.dataset.comparisonTarget === baseId;
+      input.disabled = running || catalogLoading || Boolean(dataGroupSelect.value) || input.dataset.comparisonTarget === baseId;
     });
   }
 
@@ -83,9 +86,12 @@
     }
     selectedIds = new Set([...selectedIds].filter(id => id === baseId || itemFor(id)));
     selectedIds.add(baseId);
-    const candidates = catalog.filter(item => item.id !== base.id && (allowDifferent.checked || sameContent(base, item)));
+    const group = dataGroups.find(g => g.group_id === dataGroupSelect.value);
+    const candidates = catalog.filter(item => item.id !== base.id && (group ? group.item_ids.includes(item.id) : allowDifferent.checked || sameContent(base, item)));
     const groupLabel = base.comparison_label || '未設定';
-    if (allowDifferent.checked) {
+    if (group) {
+      targetStatus.textContent = `「${group.name}」の${group.item_count}件を対象に固定します（版${group.version}）。異なる内容を含む場合は下のチェックで比較を許可してください。`;
+    } else if (allowDifferent.checked) {
       targetStatus.textContent = `全${catalog.length - 1}件から選択できます。異なる内容の回には「異なる内容」と表示されます。`;
     } else if (!base.comparison_key) {
       targetStatus.textContent = '比較グループまたは質問ガイドが未設定のため、同内容の候補を表示できません。会話プロファイルで比較グループを設定してください。';
@@ -383,6 +389,9 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'インタビュー一覧を取得できませんでした。');
       catalog = Array.isArray(data.items) ? data.items : [];
+      dataGroups = data.data_groups || [];
+      dataGroupSelect.replaceChildren(new Option('会話を個別に選択', ''));
+      dataGroups.forEach(group => dataGroupSelect.add(new Option(`${group.name}（${group.item_count}件）`, group.group_id)));
       const preferred = baseId || (document.querySelector('#analysis-item-select') || {}).value;
       baseId = catalog.some(item => item.id === preferred) ? preferred : (catalog[0] || {}).id || '';
       selectedIds = new Set(baseId ? [baseId] : []);
@@ -410,6 +419,7 @@
     const itemIds = selectedInOrder();
     if (itemIds.length < 2 || itemIds.length > 8) return;
     const submitted = {item_ids: itemIds, allow_different_content: allowDifferent.checked};
+    if (dataGroupSelect.value) submitted.data_group_id = dataGroupSelect.value;
     running = true;
     lastRequest = null;
     setMessage('');
@@ -424,7 +434,8 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'インタビュー比較を生成できませんでした。');
-      lastRequest = {...submitted, input_fingerprints: data.input_fingerprints, request_id: requestId()};
+      lastRequest = {...submitted, input_fingerprints: data.input_fingerprints,
+        target_snapshot_hash: data.target_snapshot?.hash, request_id: requestId()};
       renderResult(data);
     } catch (error) {
       setMessage(error.message, true);
@@ -438,15 +449,24 @@
   baseSelect.addEventListener('change', () => {
     if (running || catalogLoading) return;
     baseId = baseSelect.value;
+    dataGroupSelect.value = '';
     selectedIds = new Set(baseId ? [baseId] : []);
     result.hidden = true;
     setMessage('');
     renderTargets();
   });
+  dataGroupSelect.addEventListener('change', () => {
+    if (running || catalogLoading) return;
+    const group = dataGroups.find(g => g.group_id === dataGroupSelect.value);
+    selectedIds = new Set(group?.item_ids || (baseId ? [baseId] : []));
+    if (group) baseId = group.item_ids[0] || '';
+    baseSelect.value = baseId;
+    result.hidden = true; lastRequest = null; setMessage(''); renderTargets();
+  });
   allowDifferent.addEventListener('change', () => {
     if (running || catalogLoading) return;
     const base = itemFor(baseId);
-    if (!allowDifferent.checked && base) {
+    if (!allowDifferent.checked && base && !dataGroupSelect.value) {
       selectedIds = new Set([...selectedIds].filter(id => id === baseId || sameContent(base, itemFor(id))));
     }
     result.hidden = true;

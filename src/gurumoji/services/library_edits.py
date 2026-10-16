@@ -158,6 +158,7 @@ def make_library_update(
         record_training: bool = True,
         outline_override: dict[str, Any] | None = None,
         check_cancelled: Callable[[], None] | None = None,
+        finishing_history: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         row = library_row(item_id)
         if row is None:
@@ -472,6 +473,7 @@ def make_library_update(
                             ),
                             meeting_minutes=meeting_minutes,
                             formatting_result=formatting_result,
+                            finishing_history=finishing_history,
                         )
                         insert_training_events(connection, training_events)
                         if training_events:

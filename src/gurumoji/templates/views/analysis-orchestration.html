@@ -12,7 +12,7 @@
         <label class="field"><span>AIの実行先（共通）</span><select id="orchestration-provider"><option value="lmstudio">LM Studio（ローカル）</option><option value="openai">OpenAI（クラウド）</option><option value="google">Google Gemini（クラウド）</option></select></label>
         <label class="field"><span>モデルID</span><input id="orchestration-model" maxlength="200" placeholder="空欄なら設定済みモデル"></label>
       </div>
-      <p class="field-note">Core・会話解釈・独立検証・批判者に適用。Handlerはアプリの処理、数量・統計はPython集計です。</p>
+      <p class="field-note">Core・会話解釈・独立検証・批判者・専門オーケストレータに適用。Handlerはアプリの処理、数量・統計はPython集計です。全担当がローカルなら、必要な原文とObsidian知識を段階取得し、モデルの入力上限を確認します。</p>
       <details class="orchestration-role-settings"><summary>担当ごとにモデルを変える</summary><div id="orchestration-role-overrides"></div></details>
       <div id="orchestration-cloud-disclosure" class="orchestration-consent" hidden>
         <strong>会話原文がクラウドへ送信されます</strong>
@@ -25,11 +25,11 @@
           <label><input name="orchestration_stop" type="radio" value="time"><span>時間</span></label>
           <label><input name="orchestration_stop" type="radio" value="iterations"><span>繰り返し回数</span></label>
           <label><input name="orchestration_stop" type="radio" value="importance"><span>重要度</span></label>
-          <label><input name="orchestration_stop" type="radio" value="auto" checked><span>AIお任せ（最低3回）</span></label>
+          <label><input name="orchestration_stop" type="radio" value="auto" checked><span>AIお任せ</span></label>
         </div>
         <div class="orchestration-form-grid">
           <label class="field" id="orchestration-time-field"><span>時間上限（分）</span><input id="orchestration-time" type="number" min="1" max="1440"><small>空欄なら時間の上限なし</small></label>
-          <label class="field" id="orchestration-iterations-field"><span>繰り返し上限（巡）</span><input id="orchestration-iterations" type="number" min="1" max="1000"><small>空欄なら回数の上限なし。AIお任せは最低3回後に終了を判断</small></label>
+          <label class="field" id="orchestration-iterations-field"><span>繰り返し上限（巡）</span><input id="orchestration-iterations" type="number" min="1" max="1000"><small>空欄なら回数の上限なし。専門側の追加分析後にCoreが統合・終了を判断</small></label>
           <label class="field" id="orchestration-importance-field"><span>追加分析の重要度</span><select id="orchestration-importance"><option value="high">高以上</option><option value="medium" selected>中以上</option><option value="low">低以上</option></select></label>
         </div>
         <p id="orchestration-stop-explanation" class="field-note"></p>
@@ -37,8 +37,8 @@
       <fieldset class="orchestration-budget-settings">
         <legend>すべてのモードに適用する安全上限</legend>
         <div class="orchestration-form-grid">
-          <label class="field"><span>AI呼出し上限</span><input id="orchestration-max-calls" type="number" min="1" max="1000" value="24" required></label>
-          <label class="field"><span>登録タスク上限</span><input id="orchestration-max-tasks" type="number" min="1" max="2000" value="48" required></label>
+          <label class="field"><span>AI呼出し上限</span><input id="orchestration-max-calls" type="number" min="1" max="1000" value="160" required><small>原文の分割分析・尺度設計・検証を含む上限。必要に応じて減らせます</small></label>
+          <label class="field"><span>登録タスク上限</span><input id="orchestration-max-tasks" type="number" min="1" max="2000" value="400" required></label>
           <label class="field"><span>同時実行上限</span><input id="orchestration-concurrency" type="number" min="1" max="4" value="1" required></label>
         </div>
         <p class="field-note">無上限にできるのは時間と回数だけです。上限・利用者停止は批判レビューより優先。停止不能な呼出しの完了待ちや費用が残る場合があります。</p>

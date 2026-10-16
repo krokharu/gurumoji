@@ -146,7 +146,7 @@ def build_orchestration_package(exported, sealed_hash):
                          "text": f"{claim.get('kind', 'AI下書き')}：{claim.get('text', '')}",
                          "segment_ids": list(dict.fromkeys(by_id[eid]["utterance_id"] for eid in ids))})
     limitations = ["探索的なAI下書きです。研究者が確定した解釈や因果関係・人物属性の証明ではありません。",
-                   "全原結果・初期分析・判断履歴・批判・ラベル版はresult.jsonのorchestrationに保存されています。"]
+                   "全原結果・初期分析・判断履歴・批判・ラベル版は保存パッケージのorchestration文書に保存されています。"]
     if run.get("review_status") != "reviewed":
         limitations.append("終了時の独立批判レビューは完了していません。")
     unresolved = run.get("unresolved_issues", [])

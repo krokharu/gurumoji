@@ -25,7 +25,7 @@ from ..services.meeting_minutes import (
     meeting_tasks_csv_text,
 )
 from ..services.outputs import safe_output_stem
-from ..services.speaker_registry import speaker_registry_csv_bytes
+from ..services.speaker_registry import speaker_registry_csv_bytes, speaker_attribute_csv_headers
 from ..services.transcription.segments import segment_bounds
 from ..text_utils import json_load
 
@@ -60,12 +60,7 @@ def register_export_routes(
             value = preparation.view(connection, row, row_segments(row))
             value["original_segments"] = json_load(row["original_segments_json"], [])
             value["original_status"] = row["original_segments_status"]
-            value["versions"] = [
-                {**dict(v), "source": json.loads(v["source_json"])} for v in connection.execute(
-                    "SELECT version, source_hash, source_json, origin, created_at FROM transcript_versions WHERE item_id=? ORDER BY version", (item_id,))
-            ]
-            for version in value["versions"]:
-                version.pop("source_json")
+            value["versions"] = preparation.read_versions(connection, item_id, include_source=True)
             value["review_history"] = [
                 {"revision": v["revision"], "created_at": v["created_at"], "state": json.loads(v["state_json"])}
                 for v in connection.execute("SELECT * FROM transcript_preparation_events WHERE item_id=? ORDER BY revision", (item_id,))
@@ -240,6 +235,8 @@ def register_export_routes(
             "話者登録状態", "テーマカラー", "会話役割", "組織", "部署", "役職", "参加状態",
             "会話固有条件", "メモ", "発話数", "発話秒数", "文字数",
         ]
+        attribute_headers = speaker_attribute_csv_headers(custom_headers, fixed_headers)
+        custom_headers = list(attribute_headers.values())
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(stream, fieldnames=fixed_headers + custom_headers)
         writer.writerow({header: analysis_csv_safe(header) for header in fixed_headers + custom_headers})
@@ -273,7 +270,8 @@ def register_export_routes(
                 "発話数": metric["count"],
                 "発話秒数": round(float(metric["seconds"]), 3),
                 "文字数": metric["characters"],
-                **(global_record.get("attributes", {}) or {}),
+                **{attribute_headers[key]: value
+                   for key, value in (global_record.get("attributes", {}) or {}).items()},
             }
             writer.writerow({key: analysis_csv_safe(value) for key, value in export_row.items()})
         content = ("\ufeff" + stream.getvalue()).encode("utf-8")

@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from ..analysis_core import AnalysisContractError, fingerprint
-from ..analysis_orchestration import LABEL_FIELDS
+from ..analysis_orchestration import AI_ROLES, LABEL_FIELDS, ROLES, TERMINAL
 
 MAX_PAGE = 100
 MAX_REFS = 100
@@ -165,6 +165,43 @@ class AnalysisHistoryService:
             rows = db.execute("SELECT run_id FROM orchestration_runs WHERE item_id=? ORDER BY rowid DESC LIMIT ? OFFSET ?",
                               (item_id, limit, offset)).fetchall()
             return {"runs": [self._public_run(db, self._run(db, item_id, row[0])) for row in rows], "pagination": _page(offset, limit, total)}
+
+    def agents(self, item_id, run_id):
+        """Project saved role/task state without constructing an executor."""
+        with self._read(item_id) as db:
+            run = self._run(db, item_id, run_id)
+            tasks = []
+            for row in db.execute("SELECT task_id,state_json FROM orchestration_tasks WHERE run_id=? ORDER BY rowid", (run_id,)):
+                task = json.loads(row["state_json"])
+                if task.get("run_id") != run_id or task.get("task_id") != row["task_id"] or task.get("role") not in ROLES:
+                    raise AnalysisContractError("保存された担当タスクの所属情報が一致しません。", code="history_integrity_mismatch")
+                tasks.append(task)
+            roles = []
+            for role, label in ROLES.items():
+                assigned = [task for task in tasks if task["role"] == role]
+                counts = {}
+                for task in assigned:
+                    status = task.get("status") or "unknown"
+                    counts[status] = counts.get(status, 0) + 1
+                state = "idle"
+                for status in ("uncertain", "cancel_requested", "running", "queued", "received"):
+                    if counts.get(status):
+                        state = status
+                        break
+                else:
+                    state = run.get("status") if run.get("status") in TERMINAL | {"recovery_required"} else "idle"
+                options = run.get("config", {}).get("roles", {}).get(role, {})
+                roles.append({"id": role, "label": label, "kind": "ai" if role in AI_ROLES else "code",
+                    "provider": _text(options.get("provider"), 100) if role in AI_ROLES else "python",
+                    "model": _text(options.get("model"), 200) if role in AI_ROLES else "deterministic",
+                    "status": state, "assigned": len(assigned), "status_counts": counts,
+                    "active_tasks": [{"task_id": task["task_id"], "status": task.get("status"),
+                                      "method_id": _text(task.get("method_id"), 100)}
+                                     for task in assigned if task.get("status") in {"running", "cancel_requested", "uncertain", "received"}]})
+            return {"run_id": run_id, "item_id": item_id, "input_hash": _text(run.get("input_hash"), 100),
+                    "status": _text(run.get("status"), 100), "phase": _text(run.get("phase"), 100),
+                    "updated_at": _text(run.get("updated_at"), 100), "stop_reason": _text(run.get("stop_reason"), 100),
+                    "roles": roles, "observation": "saved_ledger_only"}
 
     def _versions(self, db, run, selected):
         selected = _integer(selected, run.get("annotation_version", 0), field="annotation_version")

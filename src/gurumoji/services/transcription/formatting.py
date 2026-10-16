@@ -159,6 +159,7 @@ def transcript_formatting_result(
         {"id": "recommended_cleanup", "label": "おすすめ：Jev判定＋発話単位LLM整形", "status": stages.get("recommended_cleanup", "not_requested")},
         {"id": "context_cleanup", "label": "LLM文脈再校正", "status": stages.get("cleanup", "not_requested")},
         {"id": "jev", "label": "Jev比較", "status": stages.get("jev_comparison", "not_requested")},
+        {"id": "notation", "label": "表記ゆれの統一", "status": stages.get("notation", "off")},
         {"id": "transformer", "label": "ローカルTransformer（分析画面）", "status": "available_after_transcription"},
     ]
     introductions = [

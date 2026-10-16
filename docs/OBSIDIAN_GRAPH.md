@@ -83,4 +83,4 @@ Graph view・Bookmarks・Workspaces・Bases・Backlinks・Properties・Canvasと
 
 Obsidian 1.13.7で全体グラフ3ノード、インタビュー別グラフ5・4・4ノード、Basesの3件表示、未解決リンク0件を確認しました。追加のAI通信は行っていません。CLIを有効にした環境では `python scripts/check_obsidian_graph.py` で実機の表示対象を再確認できます。
 
-公式資料：[Graph view](https://help.obsidian.md/plugins/graph)、[Bookmarks](https://help.obsidian.md/plugins/bookmarks)、[Workspaces](https://help.obsidian.md/plugins/workspaces)、[Bases](https://help.obsidian.md/bases)。設計の背景は[再設計の計画書](program-vault/40-Design/obsidian-graph-plan.md)にあります。
+公式資料：[Graph view](https://help.obsidian.md/plugins/graph)、[Bookmarks](https://help.obsidian.md/plugins/bookmarks)、[Workspaces](https://help.obsidian.md/plugins/workspaces)、[Bases](https://help.obsidian.md/bases)。設計の背景は[開発資料ブランチの再設計計画](https://github.com/krokharu/gurumoji/blob/archive/development-assets-20261016/docs/program-vault/40-Design/obsidian-graph-plan.md)にあります。

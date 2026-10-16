@@ -24,6 +24,7 @@ class ApplicationLifecycle:
         report_edit_warning: Callable[[str], None],
         report_delete_warning: Callable[[str], None],
         spawn_watcher: Callable[[], tuple[threading.Event, threading.Thread]],
+        spawn_media_worker: Callable[[], tuple[threading.Event, threading.Thread]] | None = None,
     ) -> None:
         self._acquire_instance_lock = acquire_instance_lock
         self._release_instance_lock = release_instance_lock
@@ -37,6 +38,8 @@ class ApplicationLifecycle:
         self._report_edit_warning = report_edit_warning
         self._report_delete_warning = report_delete_warning
         self._spawn_watcher = spawn_watcher
+        self._spawn_media_worker = spawn_media_worker
+        self._media_worker: tuple[threading.Event, threading.Thread] | None = None
         self._worker_lock = threading.Lock()
         self._watcher: tuple[threading.Event, threading.Thread] | None = None
 
@@ -61,6 +64,8 @@ class ApplicationLifecycle:
 
     def start_watcher(self) -> tuple[threading.Event, threading.Thread]:
         with self._worker_lock:
+            if self._spawn_media_worker is not None and self._media_worker is None:
+                self._media_worker = self._spawn_media_worker()
             if self._watcher is not None and self._watcher[1].is_alive():
                 return self._watcher
             self._watcher = self._spawn_watcher()
@@ -70,11 +75,12 @@ class ApplicationLifecycle:
         with self._worker_lock:
             watcher = self._watcher
             self._watcher = None
-        if watcher is None:
-            return
-        stop, worker = watcher
-        stop.set()
-        worker.join(timeout=timeout)
+            media_worker = self._media_worker
+        workers = [value for value in (watcher, media_worker) if value is not None]
+        for stop, _worker in workers:
+            stop.set()
+        for _stop, worker in workers:
+            worker.join(timeout=timeout)
 
     def shutdown(self) -> None:
         self.stop_watcher()

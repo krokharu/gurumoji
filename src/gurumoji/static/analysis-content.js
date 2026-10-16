@@ -229,6 +229,7 @@ function buildContentExplorer() {
   query.type = 'search'; query.maxLength = 200; query.value = state.query;
   query.placeholder = '例：改善、使いにくい'; query.dataset.kwicQuery = 'true';
   query.addEventListener('input', () => {
+    const state = contentAnalysisState();
     state.query = query.value;
     document.querySelectorAll('[data-kwic-query]').forEach(peer => { peer.value = query.value; });
   });
@@ -241,6 +242,7 @@ function buildContentExplorer() {
     .forEach(([value, label]) => matchMode.add(new Option(label, value)));
   matchMode.value = state.mode;
   matchMode.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.mode = matchMode.value;
     document.querySelectorAll('[data-kwic-mode]').forEach(peer => { peer.value = state.mode; });
   });
@@ -253,6 +255,7 @@ function buildContentExplorer() {
   speakers.forEach((name, id) => speaker.add(new Option(name, id)));
   speaker.value = state.speaker;
   speaker.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.speaker = speaker.value;
     document.querySelectorAll('[data-kwic-speaker]').forEach(peer => { peer.value = speaker.value; });
   });
@@ -260,7 +263,7 @@ function buildContentExplorer() {
   const submit = analysisElement('button', 'primary-button small', '文脈を検索');
   submit.type = 'submit';
   form.append(queryLabel, modeLabel, speakerLabel, submit);
-  form.addEventListener('submit', event => { event.preventDefault(); state.offset = 0; searchContentKwic(); });
+  form.addEventListener('submit', event => { event.preventDefault(); contentAnalysisState().offset = 0; searchContentKwic(); });
   const results = analysisElement('div', 'content-kwic-results');
   results.dataset.kwicResults = 'true';
   panel.body.append(form, results);
@@ -374,6 +377,8 @@ function buildTransformerCandidateList(result, state) {
       row.silhouette_cosine == null ? '—' : Number(row.silhouette_cosine).toFixed(3));
     const pickCell = analysisElement('td');
     const pick = contentButton('選ぶ', () => {
+      if (analysisState.data?.transformer?.result !== result) return;
+      const state = contentAnalysisState();
       state.topicCount = count;
       document.querySelectorAll('[data-transformer-topic-count]').forEach(peer => { peer.value = String(count); });
       document.querySelectorAll('[data-transformer-candidate]').forEach(peer => {
@@ -508,6 +513,7 @@ function buildTransformerAnalysisPanel() {
   modeSelect.value = transformerModeValue(state);
   modeSelect.dataset.transformerMode = 'true';
   modeSelect.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.transformerMode = modeSelect.value;
     if (state.transformerMode === 'candidate' && !state.topicCount) {
       state.topicCount = suggestedCandidateCount(result) || 4;
@@ -528,6 +534,7 @@ function buildTransformerAnalysisPanel() {
   if (transformerModeValue(state) === 'candidate') state.topicCount = Number(countSelect.value);
   countSelect.dataset.transformerTopicCount = 'true';
   countSelect.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.topicCount = Number(countSelect.value);
     document.querySelectorAll('[data-transformer-topic-count]').forEach(peer => { peer.value = countSelect.value; });
     document.querySelectorAll('[data-transformer-candidate]').forEach(row => {
@@ -543,6 +550,7 @@ function buildTransformerAnalysisPanel() {
   maxSelect.value = String(state.maxTopics);
   maxSelect.dataset.transformerMaxTopics = 'true';
   maxSelect.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.maxTopics = Number(maxSelect.value);
     document.querySelectorAll('[data-transformer-max-topics]').forEach(peer => { peer.value = maxSelect.value; });
   });
@@ -554,6 +562,7 @@ function buildTransformerAnalysisPanel() {
   minSelect.value = String(state.minTopicSize);
   minSelect.dataset.transformerMinTopicSize = 'true';
   minSelect.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.minTopicSize = Number(minSelect.value);
     document.querySelectorAll('[data-transformer-min-topic-size]').forEach(peer => { peer.value = minSelect.value; });
   });
@@ -566,6 +575,7 @@ function buildTransformerAnalysisPanel() {
   similaritySelect.value = String(state.manualMinSimilarity);
   similaritySelect.dataset.transformerMinSimilarity = 'true';
   similaritySelect.addEventListener('change', () => {
+    const state = contentAnalysisState();
     state.manualMinSimilarity = Number(similaritySelect.value);
     document.querySelectorAll('[data-transformer-min-similarity]').forEach(peer => {
       peer.value = similaritySelect.value;
@@ -828,6 +838,7 @@ function buildTransformerAnalysisPanel() {
     query.type = 'search'; query.maxLength = 500; query.value = state.semanticQuery;
     query.placeholder = '例：価格への不満、導入をためらう理由'; query.dataset.semanticQuery = 'true';
     query.addEventListener('input', () => {
+      const state = contentAnalysisState();
       state.semanticQuery = query.value;
       document.querySelectorAll('[data-semantic-query]').forEach(peer => { peer.value = query.value; });
     });
@@ -1106,9 +1117,15 @@ function renderKwicResults() {
       host.append(article);
     });
     const pager = analysisElement('div', 'content-kwic-pager');
-    const previous = contentButton('前の50件', () => { state.offset = Math.max(0, result.offset - 50); searchContentKwic(true); });
+    const turnPage = offset => {
+      const current = contentAnalysisState();
+      if (current.result !== result) return;
+      current.offset = offset;
+      searchContentKwic(true);
+    };
+    const previous = contentButton('前の50件', () => turnPage(Math.max(0, result.offset - 50)));
     previous.disabled = state.loading || result.offset === 0;
-    const next = contentButton('次の50件', () => { state.offset = result.offset + 50; searchContentKwic(true); });
+    const next = contentButton('次の50件', () => turnPage(result.offset + 50));
     next.disabled = state.loading || result.offset + result.hits.length >= result.total;
     pager.append(previous, next); host.append(pager);
   });
@@ -1327,8 +1344,8 @@ async function pollContentInsights() {
 function onContentAnalysisLoaded() {
   ++contentAnalysisPollSequence; ++transformerAnalysisPollSequence;
   clearTimeout(contentAnalysisPollTimer); clearTimeout(transformerAnalysisPollTimer);
-  if (analysisState.data?.executed === false) return;
   loadAnalysisStorage();
+  if (analysisState.data?.executed === false) return;
   openLinkedAnalysisEvidence();
   const state = contentAnalysisState();
   if (!state.pending) {

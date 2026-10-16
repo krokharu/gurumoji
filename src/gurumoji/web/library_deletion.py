@@ -204,8 +204,10 @@ def make_library_deletion(
                     "DELETE FROM output_import_provenance WHERE item_id = ?",
                     (item_id,),
                 )
-                for table in ("transcript_versions", "transcript_preparations", "transcript_preparation_events"):
+                for table in ("transcript_versions", "transcript_preparations", "transcript_preparation_events",
+                              "transcript_changes", "transcript_change_bases"):
                     connection.execute(f"DELETE FROM {table} WHERE item_id=?", (item_id,))
+                library_trash.delete_disposable_rows(connection, item_id)
                 connection.execute("DELETE FROM library_items WHERE id = ?", (item_id,))
                 # Written before the commit so a crash after it still reaches the trash.
                 trash_entry = library_trash.begin(
@@ -215,7 +217,7 @@ def make_library_deletion(
                     assets=[("media" if quarantined.parent.parent.resolve() == media_root else "thumbnail",
                              quarantined, original) for quarantined, original in moved],
                 )
-        except (sqlite3.Error, OSError) as exc:
+        except (sqlite3.Error, OSError, ValueError) as exc:
             if trash_entry is not None:
                 library_trash.discard(trash_entry)
             restore_errors = restore_assets()

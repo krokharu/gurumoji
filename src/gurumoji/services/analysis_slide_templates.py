@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..analysis_core import AnalysisContractError
 
-DESIGN_PATH = "docs/program-vault/40-Design/slide-generation-design-and-prompts.md"
+DESIGN_PATH = "docs/program-vault/40-Design/60-Output/slide-generation-design-and-prompts/00-Index.md"
 CATALOG_PATH = "config/analysis_slide_templates.json"
 
 
@@ -30,6 +30,12 @@ def load_slide_templates(project_root: Path) -> dict:
         digest = hashlib.sha256((Path(project_root) / DESIGN_PATH).read_bytes()).hexdigest()
         if document["sha256"] != digest or not isinstance(catalog["templates"], dict):
             raise ValueError
+        parts=document.get('parts',{})
+        if not isinstance(parts,dict) or set(parts)!={f'{index:02d}-section.md' for index in range(1,6)}: raise ValueError
+        for name,expected_hash in parts.items():
+            if name not in {f'{index:02d}-section.md' for index in range(1,6)}: raise ValueError
+            if hashlib.sha256((Path(project_root)/DESIGN_PATH).with_name(name).read_bytes()).hexdigest()!=expected_hash:
+                raise ValueError
         return catalog["templates"]
     except (KeyError, TypeError, ValueError, OSError) as exc:
         raise AnalysisContractError(
