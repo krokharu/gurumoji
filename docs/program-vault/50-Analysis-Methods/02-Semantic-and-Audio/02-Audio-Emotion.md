@@ -32,7 +32,7 @@ tags: [gurumoji/analysis, gurumoji/audio, gurumoji/orchestrator]
 - [Hsu et al. (2021)](https://doi.org/10.1109/TASLP.2021.3122291) はHuBERTの隠れ音声単位を用いる自己教師あり表現を示す。
 - [Kosaka et al. (2023)](https://doi.org/10.1587/transinf.2023HCP0010) はJTESを用いた日本語感情音声認識を報告する。
 
-モデル配布とセットアップは[[../../../EMOTION_ANALYSIS|音声感情分析の設定]]を参照。
+モデル配布とセットアップは[音声感情分析の設定](../../../EMOTION_ANALYSIS.md)（Vault外の `docs/EMOTION_ANALYSIS.md`）を参照。
 
 ## 担当専門家
 

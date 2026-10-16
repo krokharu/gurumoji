@@ -3,7 +3,7 @@
   "status": "proposed",
   "runtime_implemented": false,
   "format": "JSON",
-  "scope": "設計用JSON Schemaと状態遷移表。examplesをSchema検証する。実行エンジンとguard評価器は未実装。",
+  "scope": "設計全体は未実装。state_machinesはanalysis_core.pyを唯一の正本とし、Runtimeのpipeline・step・publication更新はguard付き比較更新を通る。milestoneは表示用導出値。判断のコア移管（A-P2）は未実装。",
   "authority": {
     "main": "要求・表示・利用者入力の伝達",
     "analysis_core": "可否/回復判断・指示・検証・集約・応答",
@@ -176,7 +176,13 @@
     "USER_CANCELLED",
     "PRECISION_UNASSESSED",
     "PROTOCOL_MISMATCH",
-    "PLAN_SCOPE_EXCEEDED"
+    "PLAN_SCOPE_EXCEEDED",
+    "REUSED_COMMITTED_STEP",
+    "PARENT_INCOMPLETE",
+    "NOT_SELECTED",
+    "UNKNOWN_EXECUTION_FAILURE",
+    "PROCESS_RESTART",
+    "RETRY_UNAVAILABLE"
   ],
   "retry_policy_fields": [
     "max_attempts",
@@ -1039,15 +1045,15 @@
         "running",
         "validating",
         "persisting",
+        "retry_wait",
+        "awaiting_input",
+        "blocked",
+        "cancelling",
+        "interrupted",
         "committed",
         "reused",
-        "awaiting_input",
-        "retry_wait",
-        "blocked",
         "failed",
-        "cancelling",
         "cancelled",
-        "interrupted",
         "not_applicable"
       ],
       "initial": "planned",
@@ -1062,240 +1068,147 @@
       "transitions": [
         {
           "from": "planned",
+          "to": "cancelled",
+          "guard": "cancel.settled"
+        },
+        {
+          "from": "planned",
           "to": "checking",
-          "guard": "current_stage_parents_committed"
+          "guard": "attempt.current"
         },
         {
           "from": "checking",
-          "to": "ready",
-          "guard": "eligibility_allowed"
+          "to": "cancelled",
+          "guard": "cancel.settled"
         },
         {
           "from": "checking",
-          "to": "awaiting_input",
-          "guard": "missing_required_input"
+          "to": "failed",
+          "guard": "execution.failed"
         },
         {
           "from": "checking",
-          "to": "blocked",
-          "guard": "hard_condition_failed_or_unknown"
-        },
-        {
-          "from": "checking",
-          "to": "reused",
-          "guard": "compatible_committed_artifacts"
+          "to": "interrupted",
+          "guard": "process.restarted"
         },
         {
           "from": "checking",
           "to": "not_applicable",
-          "guard": "plan_allows_na_and_record_committed"
+          "guard": "eligibility.not_applicable"
+        },
+        {
+          "from": "checking",
+          "to": "ready",
+          "guard": "eligibility.allowed"
+        },
+        {
+          "from": "checking",
+          "to": "reused",
+          "guard": "step.reuse_verified"
         },
         {
           "from": "ready",
-          "to": "waiting_resource",
-          "guard": "resource_unavailable_within_budget"
+          "to": "cancelled",
+          "guard": "cancel.settled"
         },
         {
-          "from": "waiting_resource",
-          "to": "ready",
-          "guard": "resource_available_and_context_valid"
+          "from": "ready",
+          "to": "failed",
+          "guard": "execution.failed"
+        },
+        {
+          "from": "ready",
+          "to": "interrupted",
+          "guard": "process.restarted"
         },
         {
           "from": "ready",
           "to": "running",
-          "guard": "lease_generation_and_budget_valid"
+          "guard": "execution.ready"
         },
         {
           "from": "running",
-          "to": "validating",
-          "guard": "matching_success_report"
-        },
-        {
-          "from": "validating",
-          "to": "persisting",
-          "guard": "all_output_semantics_valid"
-        },
-        {
-          "from": "persisting",
-          "to": "committed",
-          "guard": "artifacts_and_state_committed"
-        },
-        {
-          "from": "persisting",
-          "to": "blocked",
-          "guard": "persistence_error"
-        },
-        {
-          "from": "blocked",
-          "to": "persisting",
-          "guard": "same_verified_package_retry_authorized"
-        },
-        {
-          "from": "awaiting_input",
-          "to": "checking",
-          "guard": "same_plan_input_resolved_without_mutation"
-        },
-        {
-          "from": "blocked",
-          "to": "checking",
-          "guard": "external_condition_resolved"
+          "to": "cancelling",
+          "guard": "cancel.requested"
         },
         {
           "from": "running",
-          "to": "retry_wait",
-          "guard": "retryable_known_failure_within_budget"
-        },
-        {
-          "from": "validating",
-          "to": "retry_wait",
-          "guard": "repair_allowed_within_budget"
-        },
-        {
-          "from": "checking",
-          "to": "retry_wait",
-          "guard": "retryable_known_failure_within_budget"
-        },
-        {
-          "from": "retry_wait",
-          "to": "checking",
-          "guard": "new_attempt_created_after_backoff"
-        },
-        {
-          "from": "running",
-          "to": "blocked",
-          "guard": "remote_outcome_unknown"
+          "to": "failed",
+          "guard": "execution.failed"
         },
         {
           "from": "running",
           "to": "interrupted",
-          "guard": "lease_lost"
-        },
-        {
-          "from": "interrupted",
-          "to": "checking",
-          "guard": "reconciled_new_attempt_safe"
-        },
-        {
-          "from": "interrupted",
-          "to": "blocked",
-          "guard": "outcome_unknown"
-        },
-        {
-          "from": "planned",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "planned",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "checking",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "checking",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "ready",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "ready",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "waiting_resource",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "waiting_resource",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "guard": "process.restarted"
         },
         {
           "from": "running",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "running",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "to": "validating",
+          "guard": "report.received"
         },
         {
           "from": "validating",
           "to": "cancelling",
-          "guard": "cancel_requested"
+          "guard": "cancel.requested"
         },
         {
           "from": "validating",
           "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "guard": "execution.failed"
+        },
+        {
+          "from": "validating",
+          "to": "interrupted",
+          "guard": "process.restarted"
+        },
+        {
+          "from": "validating",
+          "to": "persisting",
+          "guard": "artifact.valid"
         },
         {
           "from": "persisting",
           "to": "cancelling",
-          "guard": "cancel_requested"
+          "guard": "cancel.requested"
+        },
+        {
+          "from": "persisting",
+          "to": "committed",
+          "guard": "artifact.persisted"
         },
         {
           "from": "persisting",
           "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "guard": "execution.failed"
         },
         {
-          "from": "awaiting_input",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "awaiting_input",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "retry_wait",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "retry_wait",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "blocked",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "blocked",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "interrupted",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "interrupted",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "from": "persisting",
+          "to": "interrupted",
+          "guard": "process.restarted"
         },
         {
           "from": "cancelling",
           "to": "cancelled",
-          "guard": "cancel_fenced_and_workers_reconciled"
+          "guard": "cancel.settled"
+        },
+        {
+          "from": "cancelling",
+          "to": "failed",
+          "guard": "execution.failed"
+        },
+        {
+          "from": "cancelling",
+          "to": "interrupted",
+          "guard": "process.restarted"
         }
-      ]
+      ],
+      "reserved": [
+        "awaiting_input",
+        "blocked",
+        "retry_wait",
+        "waiting_resource"
+      ],
+      "rule_version": "analysis-transitions-3-1"
     },
     "pipeline": {
       "states": [
@@ -1317,65 +1230,72 @@
       "transitions": [
         {
           "from": "accepted",
+          "to": "cancelling",
+          "guard": "cancel.requested"
+        },
+        {
+          "from": "accepted",
+          "to": "failed",
+          "guard": "execution.failed"
+        },
+        {
+          "from": "accepted",
           "to": "running",
-          "guard": "M0_ready"
+          "guard": "execution.accepted"
+        },
+        {
+          "from": "accepted",
+          "to": "waiting",
+          "guard": "process.restarted"
+        },
+        {
+          "from": "running",
+          "to": "cancelling",
+          "guard": "cancel.requested"
+        },
+        {
+          "from": "running",
+          "to": "completed",
+          "guard": "pipeline.complete"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "guard": "execution.failed"
         },
         {
           "from": "running",
           "to": "waiting",
-          "guard": "no_runnable_work_in_current_stage"
+          "guard": "execution.wait"
         },
         {
           "from": "waiting",
-          "to": "running",
-          "guard": "same_plan_unblocked"
-        },
-        {
-          "from": "running",
-          "to": "completed",
-          "guard": "all_stages_and_selected_publications_committed"
-        },
-        {
-          "from": "waiting",
-          "to": "completed",
-          "guard": "all_stages_and_selected_publications_committed"
-        },
-        {
-          "from": "accepted",
-          "to": "cancelling",
-          "guard": "cancel_requested"
-        },
-        {
-          "from": "running",
-          "to": "cancelling",
-          "guard": "cancel_requested"
+          "to": "accepted",
+          "guard": "recovery.valid"
         },
         {
           "from": "waiting",
           "to": "cancelling",
-          "guard": "cancel_requested"
+          "guard": "cancel.requested"
+        },
+        {
+          "from": "waiting",
+          "to": "failed",
+          "guard": "execution.failed"
         },
         {
           "from": "cancelling",
           "to": "cancelled",
-          "guard": "cancel_fenced_and_workers_reconciled"
+          "guard": "cancel.settled"
         },
         {
-          "from": "accepted",
+          "from": "cancelling",
           "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "running",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
-        },
-        {
-          "from": "waiting",
-          "to": "failed",
-          "guard": "nonrecoverable_or_budget_exhausted"
+          "guard": "execution.failed"
         }
-      ]
+      ],
+      "reserved": [],
+      "rule_version": "analysis-transitions-3-1"
     },
     "milestone": {
       "states": [
@@ -1397,64 +1317,61 @@
         {
           "from": "pending",
           "to": "active",
-          "guard": "prior_stage_committed_or_M0"
-        },
-        {
-          "from": "active",
-          "to": "waiting",
-          "guard": "no_runnable_work_in_current_stage"
-        },
-        {
-          "from": "waiting",
-          "to": "active",
-          "guard": "same_plan_unblocked"
-        },
-        {
-          "from": "active",
-          "to": "committed",
-          "guard": "all_selected_steps_and_artifacts_committed"
-        },
-        {
-          "from": "waiting",
-          "to": "committed",
-          "guard": "all_selected_steps_and_artifacts_committed"
+          "guard": "parents.committed"
         },
         {
           "from": "pending",
           "to": "cancelled",
-          "guard": "pipeline_cancelled"
+          "guard": "cancel.settled"
         },
         {
           "from": "active",
           "to": "cancelled",
-          "guard": "pipeline_cancelled"
+          "guard": "cancel.settled"
         },
         {
-          "from": "waiting",
-          "to": "cancelled",
-          "guard": "pipeline_cancelled"
+          "from": "active",
+          "to": "committed",
+          "guard": "steps.committed"
         },
         {
           "from": "active",
           "to": "failed",
-          "guard": "required_step_failed"
+          "guard": "execution.failed"
+        },
+        {
+          "from": "active",
+          "to": "waiting",
+          "guard": "execution.wait"
+        },
+        {
+          "from": "waiting",
+          "to": "active",
+          "guard": "parents.committed"
+        },
+        {
+          "from": "waiting",
+          "to": "cancelled",
+          "guard": "cancel.settled"
         },
         {
           "from": "waiting",
           "to": "failed",
-          "guard": "required_step_failed"
+          "guard": "execution.failed"
         }
-      ]
+      ],
+      "reserved": [],
+      "rule_version": "analysis-transitions-3-1"
     },
     "publication": {
       "states": [
-        "not_selected",
         "pending",
         "publishing",
-        "published",
         "failed",
         "conflict",
-        "unknown"
+        "unknown",
+        "published",
+        "not_selected"
       ],
       "initial": "pending",
       "terminal": [
@@ -1465,50 +1382,57 @@
       "transitions": [
         {
           "from": "pending",
+          "to": "not_selected",
+          "guard": "publication.unselected"
+        },
+        {
+          "from": "pending",
           "to": "publishing",
-          "guard": "result_run_committed_and_target_selected"
-        },
-        {
-          "from": "publishing",
-          "to": "published",
-          "guard": "target_artifacts_and_hashes_verified"
-        },
-        {
-          "from": "publishing",
-          "to": "failed",
-          "guard": "publication_io_failure"
+          "guard": "publication.retry"
         },
         {
           "from": "publishing",
           "to": "conflict",
-          "guard": "ownership_conflict"
+          "guard": "publication.conflict"
+        },
+        {
+          "from": "publishing",
+          "to": "failed",
+          "guard": "publication.failed"
+        },
+        {
+          "from": "publishing",
+          "to": "published",
+          "guard": "publication.confirmed"
         },
         {
           "from": "publishing",
           "to": "unknown",
-          "guard": "publication_interrupted"
+          "guard": "publication.unknown"
         },
         {
           "from": "failed",
-          "to": "pending",
-          "guard": "publication_only_retry_authorized"
+          "to": "publishing",
+          "guard": "publication.retry"
         },
         {
           "from": "conflict",
-          "to": "pending",
-          "guard": "user_conflict_resolution_verified"
+          "to": "publishing",
+          "guard": "publication.retry"
         },
         {
           "from": "unknown",
-          "to": "published",
-          "guard": "reconciliation_proves_publication"
+          "to": "publishing",
+          "guard": "publication.retry"
         },
         {
-          "from": "unknown",
-          "to": "pending",
-          "guard": "reconciliation_allows_safe_publication_retry"
+          "from": "published",
+          "to": "publishing",
+          "guard": "publication.retry"
         }
-      ]
+      ],
+      "reserved": [],
+      "rule_version": "analysis-transitions-3-1"
     }
   },
   "fixture_note": "ID/hash/時刻/手法は架空。構造確認用であり登録済み手法・実データを表さない。",
@@ -1523,9 +1447,32 @@
     "結果件数の合計・選択公開先の網羅・package hash",
     "固定計画を変更する場合は新pipeline"
   ],
-  "retry_semantics": "retry_wait→checkingは同じstep内で新attemptを作る。旧attemptを再開しない。取消世代を更新し旧報告を除外する。",
+  "retry_semantics": "waiting→accepted→runningで新世代を受付。再起動後はGETで再実行せずresumeを使う。新attemptはplanned→checkingで再検査し旧attemptを再開しない。failed/cancelled pipelineのretry/resumeは禁止し新request_idを使う。reserved状態に遷移を持たせない。",
   "publication_semantics": "result_run completed→選択先公開→M7 committed→pipeline completed。新pipelineは保存と公開を分離するadapterの能力を開始前確認。",
   "guard_notes": {
+    "attempt.current": "現世代・最新attempt・許可状態・取消なしをRuntimeが同じtransactionで確認。",
+    "eligibility.allowed": "固定計画の適用性確認後にreadyへ進める。",
+    "execution.ready": "適用性確認済みのreadyから実行する。",
+    "report.received": "実行結果を受け取り、旧世代・取消の検査後に検証へ進む。",
+    "artifact.valid": "JSON/NaN検査を通った成果物だけ永続化へ進む。",
+    "artifact.persisted": "成果物・報告と状態を同じtransactionで確定。",
+    "eligibility.not_applicable": "計画が適用外を許可し、判定artifactを同時保存。",
+    "execution.accepted": "受付済みpipelineをstatus/generation比較更新で一つのworkerだけが実行。",
+    "execution.wait": "実行失敗または起動中断を記録して明示操作を待つ。",
+    "execution.failed": "エラー処理で現在の状態・世代を確認して停止。",
+    "recovery.valid": "固定入力・計画・定義・送信方針と残りattempt上限を確認。再起動後はresumeのみ。",
+    "process.restarted": "起動時回復で現世代の未確定実行を中断する。",
+    "cancel.requested": "取消意図を記録し新たなdispatchを止める。",
+    "cancel.settled": "worker終了後または起動時に未確定状態を整理し、既に確定した成果物を保持。",
+    "pipeline.complete": "必須stepと選択した全4公開先の状態が確定。",
+    "publication.retry": "固定packageと公開範囲を保持して初回公開または再公開を開始。",
+    "publication.unselected": "固定計画がVault公開を選択しない。",
+    "publication.confirmed": "writerの読取結果がpublished。",
+    "publication.failed": "writerの読取結果がfailed。",
+    "publication.conflict": "writerの読取結果がconflict。",
+    "publication.unknown": "公開結果の読取が不明、または起動・取消時に未確定。",
+    "parents.committed": "milestone表示用の前段確定条件。永続化は未実装。",
+    "steps.committed": "milestone表示用のstep確定条件。永続化は未実装。",
     "current_stage_parents_committed": "前段階commit済み、現在段階内の依存成果と入力版が一致。",
     "eligibility_allowed": "固定MethodCardと計画に基づく全必須hard検査がpass、warningは保持。",
     "plan_allows_na_and_record_committed": "required=false、allow_not_applicable=true、許可規則一致、判定artifact保存済み。",
@@ -1537,7 +1484,8 @@
     "nonrecoverable_or_budget_exhausted": "回復不能または上限到達。新規指示停止・実行中attemptの世代無効化・部分成果と未確定外部状態を記録。",
     "cancel_fenced_and_workers_reconciled": "旧世代の結果採用を禁止。所有するworker終了/取消を確認し外部完了不明は記録。",
     "result_run_committed_and_target_selected": "analysis_runsのパッケージ確定と対象選択を検証。pipeline completedを要求しない。",
-    "target_artifacts_and_hashes_verified": "指定公開先のノート・画像・manifestの対応を検証しOutcomeを永続化。"
+    "target_artifacts_and_hashes_verified": "指定公開先のノート・画像・manifestの対応を検証しOutcomeを永続化。",
+    "step.reuse_verified": "再利用キーとcommitted成果hashを照合した計算stepだけを新試行へコピーする。"
   },
   "gate_guard_policy": "guard_notesは重要条件の補足。各transitionのguardは実装時に純粋規則へ対応させ、未対応guardでは遷移を拒否する。"
 }

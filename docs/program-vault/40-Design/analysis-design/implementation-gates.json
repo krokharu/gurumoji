@@ -1,37 +1,73 @@
 {
   "schema_version": "implementation-gates-1",
-  "status": "accepted_initial_scope",
+  "status": "accepted_implemented_scope_with_research_gates_open",
   "runtime_implemented": true,
-  "delegation_performed": false,
-  "implementation_scope": "initial_vertical_slice: participation + conversation_dynamics + manual_measurement; M0-M7; JSON/CSV/ZIP; optional three-target publication; local_only",
-  "delegation_note": "The primary agent implemented and verified this scope; no Terra/Luna execution is claimed.",
+  "delegation_performed": true,
+  "implementation_scope": "2026-10-16 implemented scope in analysis-immediate-changes-plan: 26-item completion matrix; local Windows; research adoption remains open",
+  "delegation_note": "Primary agent implementation; existing independent_review agent performed read-only boundary reviews. No Terra/Luna model execution is claimed.",
   "verification": {
-    "scope_id": "analysis-pipeline-initial-v1",
-    "verified_at": "2026-09-21T23:04:38+09:00",
-    "code_fingerprint": "f9f6e541a4888d487cbf4c73d357e4d3eebb2137106e7bdc67c18ba8ec480d94",
-    "test_fingerprint": "0a79f2e27db245d06b5eb4c63f01a902b808f74612c8e5399895ca6488dd054a",
-    "environment_ref": "Windows, Python 3.12 virtualenv, temporary SQLite/data/Vault roots, mocked external services, Chromium browser tests",
+    "scope_id": "analysis-remaining-implemented-20261016",
+    "verified_at": "2026-10-16",
+    "base_commit": "47ecd0ae5b0ad2c6dd3b8387f9918c58791eb468",
+    "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+    "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+    "fingerprint_manifest_ref": "output/validation/final-current-2/summary.json",
+    "environment_ref": "Windows; Python virtualenv; isolated synthetic SQLite/data/Vault; Node 22.22.2; sandboxed installed Chromium; no real Vault tests",
     "commands": [
-      "$env:PYTHONPATH='src;tests'; .venv\\Scripts\\python.exe -m unittest discover -s tests",
-      "node --check src/gurumoji/static/analysis-execution.js",
-      ".venv\\Scripts\\python.exe -m compileall -q src/gurumoji",
-      ".venv\\Scripts\\python.exe -m json.tool docs/program-vault/40-Design/analysis-design/implementation-gates.json",
-      "git diff --check"
+      [
+        "scripts/run_tests.py",
+        "--baseline",
+        "output/validation/baseline-47ecd0a/source/output/validation/final-baseline/summary.json",
+        "--output",
+        "output/validation/final-current-2"
+      ],
+      [
+        "scripts/run_tests.py",
+        "test_research_workspace_browser",
+        "test_content_browser",
+        "test_browser_e2e",
+        "test_analysis_method_view",
+        "--output",
+        "output/validation/final-browser-confirmed",
+        "--jobs",
+        "2"
+      ],
+      "node-v22.22.2.exe --test tests/dom/*.test.cjs"
     ],
-    "required_cases": 550,
-    "executed_cases": 550,
-    "post_full_suite_impacted_cases": 26,
+    "required_cases": 1781,
+    "executed_cases": 1781,
+    "passed_cases": 1748,
+    "expected_opt_in_skips": 32,
+    "optional_dependency_skips": {
+      "Google OAuth client is not installed": 1
+    },
     "failures": [],
+    "collection_failures": [],
+    "runtime_changes": [],
+    "source_changes": [],
     "unexpected_skips": 0,
-    "exit_codes": [0],
-    "log_refs": ["unittest full-suite output in implementation session"],
-    "reviewer": "primary agent",
-    "decision": "accepted"
+    "exit_codes": [
+      0
+    ],
+    "log_refs": [
+      "output/validation/final-current-2/summary.json",
+      "output/validation/final-browser-confirmed/summary.json",
+      "output/validation/dom-final-clean-2.log"
+    ],
+    "reviewer": "primary agent with independent boundary review",
+    "decision": "accepted_for_implemented_scope",
+    "not_approved": [
+      "scientific role-model quality",
+      "A5 human 108-trial evaluation",
+      "JEV8/stance pipeline",
+      "advanced conversation PoC adoption",
+      "production approved knowledge-pack distribution"
+    ]
   },
   "models": {
-    "implementation": "gpt-5.6-terra",
-    "tests": "gpt-5.6-luna",
-    "availability": "Confirm at implementation time; never claim execution by an unavailable model.",
+    "implementation": "primary agent",
+    "tests": "Python/Node/Chromium automated fixtures",
+    "runtime_probe": "LM Studio installed Qwen3-8B; five synthetic contract probes only",
     "pricing_claim": "none"
   },
   "runtime_vs_development": "M0-M7: runtime analysis barriers; D0-D7: implementation/test gates.",
@@ -41,9 +77,9 @@
       "title": "基準と契約",
       "status": "accepted",
       "depends_on": [],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_analysis_queries.py",
         "tests/test_analysis_storage.py"
@@ -55,9 +91,40 @@
         "required cases collected"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 41, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D0",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 41,
+        "required_cases": 41,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_analysis_queries",
+          "test_analysis_storage"
+        ]
+      },
       "entry_rule": "Fix scope, baseline and required cases before implementation.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 41,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D1",
@@ -66,9 +133,9 @@
       "depends_on": [
         "D0"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_analysis_queries.py"
       ],
@@ -84,9 +151,42 @@
         "manual definition without LLM"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 27, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D1",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 36,
+        "required_cases": 36,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_analysis_queries",
+          "test_analysis_core_contracts",
+          "test_analysis_plan_binding",
+          "test_analysis_eligibility"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 27,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D2",
@@ -95,9 +195,9 @@
       "depends_on": [
         "D1"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_analysis_storage.py"
       ],
@@ -112,9 +212,40 @@
         "orphan recovery"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 21, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D2",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 25,
+        "required_cases": 25,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_analysis_storage",
+          "test_analysis_snapshot_commit"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 21,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D3",
@@ -123,9 +254,9 @@
       "depends_on": [
         "D2"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_pipeline_regressions.py"
       ],
@@ -141,9 +272,41 @@
         "restart and unknown remote outcome"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 9, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D3",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 57,
+        "required_cases": 57,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_pipeline_regressions",
+          "test_analysis_milestones",
+          "test_analysis_recovery"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 9,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D4",
@@ -152,9 +315,9 @@
       "depends_on": [
         "D3"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_research_analysis.py",
         "tests/test_content_analysis.py"
@@ -170,9 +333,41 @@
         "complete analysis history"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 26, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D4",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 34,
+        "required_cases": 34,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_research_analysis",
+          "test_content_analysis",
+          "test_analysis_research_protocol"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 26,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D5",
@@ -181,9 +376,9 @@
       "depends_on": [
         "D4"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_ai_http_worker.py",
         "tests/test_ai_model_settings.py",
@@ -200,9 +395,42 @@
         "manual path remains usable"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 44, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D5",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 48,
+        "required_cases": 48,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_ai_http_worker",
+          "test_ai_model_settings",
+          "test_method_experts",
+          "test_analysis_llm_contracts"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 44,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D6",
@@ -211,9 +439,9 @@
       "depends_on": [
         "D5"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_analysis_storage.py",
         "tests/test_four_vaults.py",
@@ -232,9 +460,44 @@
         "publication retry zero AI calls"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 47, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D6",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 65,
+        "required_cases": 65,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-current-2/summary.json"
+        ],
+        "modules": [
+          "test_analysis_storage",
+          "test_four_vaults",
+          "test_obsidian_layout",
+          "test_vault_coverage",
+          "test_analysis_exports",
+          "test_analysis_publication"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 47,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     },
     {
       "id": "D7",
@@ -243,15 +506,17 @@
       "depends_on": [
         "D6"
       ],
-      "implementation_owner": "gpt-5.6-terra",
-      "test_runner": "gpt-5.6-luna",
-      "acceptance_owner": "Terra or primary agent",
+      "implementation_owner": "primary agent",
+      "test_runner": "isolated automated test processes",
+      "acceptance_owner": "primary agent with independent boundary review",
       "existing_tests": [
         "tests/test_content_browser.py",
         "tests/test_browser_e2e.py",
         "tests/test_analysis_method_view.py"
       ],
-      "proposed_tests": [],
+      "proposed_tests": [
+        "tests/test_research_workspace_browser.py"
+      ],
       "required_checks": [
         "manual definition to export",
         "partial results and required input",
@@ -260,9 +525,42 @@
         "selected-scope final regression"
       ],
       "execution": "passed",
-      "evidence": {"executed_cases": 32, "failures": 0, "unexpected_skips": 0, "exit_codes": [0], "reviewer": "primary agent", "decision": "accepted"},
+      "evidence": {
+        "gate_id": "D7",
+        "scope_id": "analysis-remaining-implemented-20261016",
+        "code_fingerprint": "6a74631d3a91ce6b19dfd2ab9cc057ee98d5f596c6e7de026168c03a3f9046db",
+        "test_fingerprint": "098d57dfbb6fbfef0a583d75137acba7612ddebb4d5c8b340d41ec4f327e6881",
+        "executed_cases": 19,
+        "required_cases": 19,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent with independent boundary review",
+        "decision": "accepted_for_implemented_scope",
+        "log_refs": [
+          "output/validation/final-browser-confirmed/summary.json"
+        ],
+        "modules": [
+          "test_content_browser",
+          "test_browser_e2e",
+          "test_analysis_method_view",
+          "test_research_workspace_browser"
+        ]
+      },
       "entry_rule": "Previous gate accepted for the same scope and current fingerprints.",
-      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed."
+      "exit_rule": "All required tests pass, no unexpected skips or zero-case suites, evidence matches current files, acceptance reviewed.",
+      "historical_evidence": {
+        "executed_cases": 32,
+        "failures": 0,
+        "unexpected_skips": 0,
+        "exit_codes": [
+          0
+        ],
+        "reviewer": "primary agent",
+        "decision": "accepted"
+      }
     }
   ],
   "extra_gates": [
@@ -326,7 +624,7 @@
     "log_refs",
     "next_owner"
   ],
-  "test_command_template": ".\\.venv\\Scripts\\python.exe -m unittest discover -s tests -p <test_file.py>",
+  "test_command_template": ".venv/Scripts/python.exe scripts/run_tests.py <module> --output output/validation/<run>",
   "environment": "Use existing README setup: PYTHONPATH points to src; temporary DB/Vault and mocked external services.",
   "token_rules": [
     "Use bounded TaskPacket instead of full conversation or full design.",
@@ -337,5 +635,34 @@
     "Parallel tests only with isolated storage/ports.",
     "Do not hide failures or skip required coverage to save tokens."
   ],
-  "current_limit": "D0-D7 are accepted only for the recorded initial vertical slice. EVAL and all unavailable catalog capabilities remain planned."
+  "current_limit": "D0-D7 accepted for the recorded implemented scope only. EVAL remains planned/not_run. Contract pass does not approve scientific quality, JEV8, advanced models, or production packs.",
+  "historical_verifications": [
+    {
+      "scope_id": "analysis-pipeline-initial-v1",
+      "verified_at": "2026-09-21T23:04:38+09:00",
+      "code_fingerprint": "f9f6e541a4888d487cbf4c73d357e4d3eebb2137106e7bdc67c18ba8ec480d94",
+      "test_fingerprint": "0a79f2e27db245d06b5eb4c63f01a902b808f74612c8e5399895ca6488dd054a",
+      "environment_ref": "Windows, Python 3.12 virtualenv, temporary SQLite/data/Vault roots, mocked external services, Chromium browser tests",
+      "commands": [
+        "$env:PYTHONPATH='src;tests'; .venv\\Scripts\\python.exe -m unittest discover -s tests",
+        "node --check src/gurumoji/static/analysis-execution.js",
+        ".venv\\Scripts\\python.exe -m compileall -q src/gurumoji",
+        ".venv\\Scripts\\python.exe -m json.tool docs/program-vault/40-Design/analysis-design/implementation-gates.json",
+        "git diff --check"
+      ],
+      "required_cases": 550,
+      "executed_cases": 550,
+      "post_full_suite_impacted_cases": 26,
+      "failures": [],
+      "unexpected_skips": 0,
+      "exit_codes": [
+        0
+      ],
+      "log_refs": [
+        "unittest full-suite output in implementation session"
+      ],
+      "reviewer": "primary agent",
+      "decision": "accepted"
+    }
+  ]
 }

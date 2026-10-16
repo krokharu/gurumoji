@@ -1,47 +1,27 @@
 ---
-note_id: design-ai-development-rules
-note_type: documentation-rules
-title: AI・人の開発ルール（必要な情報だけで安全に変更する）
-summary: 対象を限定した探索、既存責務の再利用、Obsidian書き込みの安全性を定める詳細ルール。
-status: current
-feature: development-workflow
-updated: 2026-09-16
+note_id: design-ai-development-rules-legacy-path
+note_type: path-redirect
+title: AI・人の開発ルール（必要な情報だけで安全に変更する）（移動先案内）
+summary: 本文と同じnote_idは移動先に保持。通常検索は移動先を使用する。
+status: deprecated
+updated: '2026-10-11'
+redirect_to: 40-Design/50-Governance/ai-development-rules.md
 tags:
-  - gurumoji/program
-  - gurumoji/rules
+- gurumoji/redirect
 ---
 
 # AI・人の開発ルール（必要な情報だけで安全に変更する）
 
-Codex・Claude などのAIや人がこのリポジトリを変更するときの詳細ルール。日常作業の入口はリポジトリ直下の `AGENTS.md` であり、ここは設計・保存・Obsidian変更が関係するときに読む。資料の登録規約は [[40-Design/program-vault-rules]] を、判断の背景は [[40-Design/decisions]] の ADR-106 を参照する。
-
-指示の優先順は、システム・安全上の制約、今回のユーザー要求、`AGENTS.md`、該当するSKILL、関連する設計ノート、一般的な既定とする。ノートは現在のコード・設定より優先しない。差異を見つけた場合は、現行実装を基準に影響のある差異だけを報告する。
-
-`AGENTS.md` には日常作業に必要な短い原則だけを置き、このノートの全文を複製しない。
+本文：[[40-Design/50-Governance/ai-development-rules|AI・人の開発ルール（必要な情報だけで安全に変更する）]]。旧パスの互換案内。
 
 ## 変更の進め方
 
-1. **対象を絞って調べる。** まず依頼と関係するコード、設定、テストを検索する。新しい責務・保存先・API・UI導線を足す場合だけ、対応するモジュール資料や [[20-Modules/feature-inventory]] を追加で確認する。リポジトリ全体、Vault全体、既知課題一覧を毎回読む必要はない。
-2. **既存の責務を優先する。** 同じ目的の実装がある場合は、次の順で判断する。
-   1. 既存機能を拡張する
-   2. 既存機能に統合する
-   3. 小規模に新しく実装する
-   4. 新しいシステムを作る
-
-3. **置換の責任を明確にする。** 既存方式を置き換える場合は、利用箇所を移し、互換性または廃止の扱いを同じ変更で決める。新しいファイル・クラス・画面を作るだけでは、ADRや変更ノートを自動的に要求しない。設計判断や公開契約が変わる場合にだけ [[40-Design/decisions]] へ記録する。
-4. **仕様に影響するときだけ資料を更新する。** 保存契約、API、分析方法、利用者の操作、起動・設定などの説明が変わる場合は、[[40-Design/program-vault-rules]] の対応先を更新する。内部実装だけの変更で無関係なノートを量産しない。
-5. **確認は変更に比例させる。** 局所修正は関連テスト、中規模の境界変更は関連モジュールと統合テスト、横断的または高リスクな変更は必要に応じて全体テストを行う。失敗・未実行・既知のテスト問題は明記する。
+[[40-Design/50-Governance/ai-development-rules#変更の進め方|移動した本文を読む]]
 
 ## Obsidianを変更するとき
 
-対象の書き込み主体と既存の競合処理を [[20-Modules/obsidian-integration]] で確認する。`VaultRegistry` と既存のノート種別の書き込み経路を再利用し、個人のVaultパスを推測・ハードコードしない。
-
-- 人が所有するノート（全文・操作・研究メモ・仕上げ結果・テーマ）の本文、未知のプロパティ、コメント、Wikilink、callout、ブロックIDを全体再生成で置き換えない。アプリが生成するノートは `vault_note_policy.write_generated_note` を通す。研究者が生成ノートを編集していた場合は、編集版を履歴に写してから最新版で上書きする（利用者の決定、2026-09-25）。新しい書き込み経路を作らない。
-- 実 Vault ではなく一時Vaultでテストし、ログに本文・資格情報・個人情報を残さない。
-- 保存先不明、`note_id`／revision の競合、読めない frontmatter、または安全に解決できない同名衝突では書き込みを止め、理由を示す。
-- 移動・改名・一括変換・移行のような不可逆性の高い操作では、対象を特定してバックアップ、dry run、再開／ロールバック手段を用意する。通常の局所更新にはこれらを強制しない。
+[[40-Design/50-Governance/ai-development-rules#Obsidianを変更するとき|移動した本文を読む]]
 
 ## 完了報告に含めること
 
-- 変更の要点、実行した検証、利用者データに触れたかどうかを記す。
-- 設計判断・問題ID・資料を更新した場合だけ、その対象と理由を追加する。無関係な件数やノート一覧を求めない。
+[[40-Design/50-Governance/ai-development-rules#完了報告に含めること|移動した本文を読む]]

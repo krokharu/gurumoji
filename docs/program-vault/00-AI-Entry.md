@@ -1,33 +1,28 @@
 ---
 note_id: program-ai-entry
-note_type: ai-entry
+note_type: retrieval-index
 title: AI向けタスク別入口
-summary: AIが変更対象に応じて必要最小限のSoftware Vaultノートとコードへ進むための入口。
+summary: 最初はこの入口だけ。該当する責務の索引 → summary → 必要な本文の順で取得する。
 status: current
-updated: 2026-10-05
-feature: development-workflow
+updated: '2026-10-11'
 tags:
-  - gurumoji/program
-  - gurumoji/ai
+- gurumoji/program
+- gurumoji/retrieval
 ---
 
 # AI向けタスク別入口
 
-これは探索の入口であり、実装の正本ではない。まず依頼を分類し、この表の最も近い入口ノートと対象コードだけを読む。`00-Home`、`00-Index`、Vault全体、リポジトリ全体を初手で通読しない。
+必要な項目だけを選び、本文は選んだノートで読む。
 
-| 依頼の種類 | 最初に読むノート | 次に読むもの |
-| --- | --- | --- |
-| Vault構造、同期、移行、ノート所有権、生成物の保存 | [[20-Modules/obsidian-integration]] | [[30-Data/four-vaults-v1]]、対象モジュール、適用時は `gurumoji-obsidian-memory` の参照資料 |
-| 分析手法、専門家定義、AIプロンプトの制約 | [[50-Analysis-Methods/00-Index]] | [[40-Design/method-rules]]、対象の手法ノートと実装 |
-| モデル別入力予算、ルールとスキルの段階取得、作業記録の分担 | [[40-Design/model-context-and-work-memory-plan]] | 提案と現行実装を区別し、対象のAI設定・adapter・分析Handler・保存契約だけを読む |
-| 構成、設定、起動経路、保存先 | [[10-Architecture/system-map]] | 対象モジュールと設定 |
-| Web UIの設計・改善・評価 | [[40-Design/ui-design-knowledge]] | [[40-Design/ui-design-contract]]の対象節、[[20-Modules/ui-screens]]、対象コード。受入は[[50-Tests/ui-design-scenarios]]と[[50-Tests/ui-design-acceptance]]から選ぶ |
-| 個別モジュール、API、UI | [[20-Modules/module-map]] | 対象コードと隣接テスト。画面導線は [[20-Modules/ui-screens]] |
-| 現在の課題、優先度、予定作業 | [[40-Design/known-issues]] | [[40-Design/convergence-plan]]、対象コード |
-| 文書だけの修正 | [[00-Index]] | 対象ノートだけ |
-| 「Obsidianを更新」（Software Vaultの更新を取り込む） | `docs/OBSIDIAN_VAULTS.md` の「プログラム資料Vaultの更新」 | `scripts/update_program_vault.py` の `check` → `apply`。競合は報告して利用者の判断を待つ |
-| `app.py` から移った関数の場所 | [[70-Changes/app-py-phase5]] | 同じフォルダーの `app-py-phase5.data.json`（旧シンボル→新モジュール） |
+- [[10-Architecture/00-Index|構成・起動]] — 対象の境界とコードへ
+- [[20-Modules/00-Index|個別機能・不具合]] — 責務と隣接テストへ
+- [[30-Data/00-Index|保存形式・revision]] — 対象の保存契約へ
+- [[40-Design/40-Storage/00-Index|Vault・同期・移行]] — 所有権と現行実装を照合
+- [[40-Design/10-Analysis/00-Index|分析コア・LLM実行]] — 現行と提案を区別
+- [[40-Design/30-Interface/00-Index|UI設計・改善]] — 設計契約と必要な受入へ
+- [[50-Analysis-Methods/00-Index|手法・専門家・文献]] — 選んだ手法と根拠だけ取得
+- [[50-Tests/00-Index|検証]] — 必要な層と未実行範囲を確認
+- [[60-Operations/00-Index|運用・引継ぎ]] — 対象の手順・日付だけ読む
 
-入口で対象を絞れない場合にだけ `.agents/skills/gurumoji-obsidian-memory/scripts/retrieve_memory.py` を使い、返された候補のfrontmatterと必要な抜粋だけを読む。テンプレート、アーカイブ、実行時Vaultは依頼に必要な場合だけ扱う。
 
-変更が保存形式、競合処理、同期または移行に及ぶときは、[[40-Design/ai-development-rules]] と該当する契約資料を追加で読む。現行コードと設定を最終的な正本とし、ノートとの食い違いは上位の指示に従って明示する。
+「Obsidianを更新」は[既存のGit更新手順](../OBSIDIAN_VAULTS.md#プログラム資料vaultの更新)のcheck → 対象提示 → applyを使う。競合は上書きせず判断を待つ。

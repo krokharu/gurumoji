@@ -5,8 +5,8 @@ title: 分析オーケストレーター共通契約
 status: proposed
 updated: 2026-09-20
 tags:
-  - gurumoji/analysis
-  - gurumoji/orchestrator
+- gurumoji/analysis
+- gurumoji/orchestrator
 ---
 
 # 分析オーケストレーター共通契約
@@ -27,7 +27,7 @@ tags:
 
 `not_run`、`completed`、`empty`、`unavailable`、`fallback`、`partial`、`stale` を区別する。`fallback` はGiNZA不在時の簡易形態素解析、`stale` は入力・設定・モデルが変わり結果が現行でない状態であり、どちらも通常の完了結果と混ぜない。
 
-これは分析結果の表現であり、ジョブ・段階の実行、保存の完了、Vault公開、妥当性の確認を統合するenumではない。追加分析の試行状態・中断・再開は[[40-Design/core-handler-routing-reorganization-plan]]の「段階実行の状態と再開」に従う。
+これは分析結果の表現であり、ジョブ・段階の実行、保存の完了、Vault公開、妥当性の確認を統合するenumではない。追加分析の試行状態・中断・再開は[[40-Design/10-Analysis/core-handler-routing-reorganization-plan/00-Index|core-handler-routing-reorganization-plan]]の「段階実行の状態と再開」に従う。
 
 ## 必須のゲート
 
@@ -43,13 +43,13 @@ tags:
 
 ## 手法の専門家（2026-09-16）
 
-設計妥当性と解釈のゲートは、選んだ手法の専門家定義（[[10-Experts/00-Index]]）の適用条件・手順・禁止事項で具体化する。現行実装は `src/gurumoji/method_experts.py`。現状は専門家どうしの合議や独立したレビューを行わず、前提が食い違う場合は統合せずに並べて示す。
+設計妥当性と解釈のゲートは、選んだ手法の専門家定義（[[50-Analysis-Methods/10-Experts/00-Index]]）の適用条件・手順・禁止事項で具体化する。現行実装は `src/gurumoji/method_experts.py`。現状は専門家どうしの合議や独立したレビューを行わず、前提が食い違う場合は統合せずに並べて示す。
 
 現行の`ai_context`は、評価時の定義版・knowledge hashと指示を組み立てる時点の値を照合し、変更があればAI呼び出し前に再確認を求める。実際のbrief・許可段階・禁止事項・根拠IDを版付きpacketとして固定保存する拡張はAI-2で導入する。hashだけでは当時の指示本文を復元できないため、旧runの未記録情報を現行定義から補わない。
 
 ## LLM分析専用オーケストレーターと相談の拡張（2026-09-20、未実装）
 
-利用者の追加要求に基づき、[[40-Design/core-handler-routing-reorganization-plan]]の図6とADR-117で、LLM分析専用オーケストレーターが手法・型・後続分析の担当と相談する設計を追加した。上記の現行機能と区別し、次の契約を満たす段階で導入する。
+利用者の追加要求に基づき、[[40-Design/10-Analysis/core-handler-routing-reorganization-plan/00-Index|core-handler-routing-reorganization-plan]]の図6とADR-117で、LLM分析専用オーケストレーターが手法・型・後続分析の担当と相談する設計を追加した。上記の現行機能と区別し、次の契約を満たす段階で導入する。
 
 - 先に固定するのは分析手順と結果の項目・意味・型・接続条件であり、結論や値ではない。
 - 疑似人格は役割別のLLM呼び出し。同じローカルLLMを使える。Jevは定義済み選択肢の判定を担当し、相談や自由形式の型生成には使わない。
@@ -60,4 +60,4 @@ tags:
 - 計画の`input_refs`／`scope_ref`を検証済みの`input_bindings`／`scope_id`・hashへ解決する。計画内の参照から導いた依存と`depends_on`が食い違う場合は拒否する。具体例と保存対応は再編計画を正本とする。
 - 同じ要求の再送・保存再試行、既存結果の明示利用、新要求での再分析を区別する。同じ入力条件でも明示再分析は別runにし、旧runへのfingerprint再利用を暗黙に適用しない。
 
-関連: [[40-Design/method-rules|分析手法ごとのObsidian登録規約]]、[[30-Data/analysis-storage-v1|文章分析の保存仕様]]
+関連: [[40-Design/50-Governance/method-rules/00-Index|分析手法ごとのObsidian登録規約]]、[[30-Data/20-Analysis/analysis-storage-v1/00-Index|文章分析の保存仕様]]

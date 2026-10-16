@@ -1780,7 +1780,13 @@
                 "USER_CANCELLED",
                 "PRECISION_UNASSESSED",
                 "PROTOCOL_MISMATCH",
-                "PLAN_SCOPE_EXCEEDED"
+                "PLAN_SCOPE_EXCEEDED",
+                "REUSED_COMMITTED_STEP",
+                "PARENT_INCOMPLETE",
+                "NOT_SELECTED",
+                "UNKNOWN_EXECUTION_FAILURE",
+                "PROCESS_RESTART",
+                "RETRY_UNAVAILABLE"
               ]
             },
             {
@@ -1800,7 +1806,8 @@
             "fail",
             "cancel",
             "commit",
-            "release_gate"
+            "release_gate",
+            "reuse"
           ]
         },
         "affected_steps": {

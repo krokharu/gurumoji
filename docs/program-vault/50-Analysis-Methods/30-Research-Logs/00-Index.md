@@ -5,13 +5,13 @@ title: 分析手法の調査記録
 status: current
 updated: 2026-09-15
 tags:
-  - gurumoji/analysis
-  - gurumoji/research-log
+- gurumoji/analysis
+- gurumoji/research-log
 ---
 
 # 分析手法の調査記録
 
-文献調査の経路・確認範囲・取得できなかった資料を記録する。書式は [[90-Templates/research-log]]。
+文献調査の経路・確認範囲・取得できなかった資料を記録する。書式は [[90-Templates/20-Research/research-log|research-log]]。
 
 | 日付 | 記録 | 対象 |
 | --- | --- | --- |

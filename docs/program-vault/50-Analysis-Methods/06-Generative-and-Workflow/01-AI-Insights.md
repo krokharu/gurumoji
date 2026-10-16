@@ -7,7 +7,10 @@ algorithm_version: content-insights-3
 execution_kind: builtin
 title: AI見解・下書き
 status: current
-tags: [gurumoji/analysis, gurumoji/generative-ai, gurumoji/orchestrator]
+tags:
+- gurumoji/analysis
+- gurumoji/generative-ai
+- gurumoji/orchestrator
 ---
 
 # AI見解・下書き（`ai_insights`）
@@ -20,7 +23,7 @@ tags: [gurumoji/analysis, gurumoji/generative-ai, gurumoji/orchestrator]
 
 検証に失敗した場合は、項目位置・具体的なエラーと不正項目の短い抜粋を渡して1回だけ再試行し、進捗にも表示する。再試行後も不正なら全体を失敗として扱い、前回の保存済み結果を保持する。入力と統合対象は各6,000文字を目安に分割するが、モデル別のトークン上限を保証する値ではない。LM Studioの`finish_reason=length`は、JSON構文エラーとは別の上限エラーとして通知する。
 
-実装参照：`src/gurumoji/analysis_insights.py`の`ai_schema`・`create_ai_insights`・`validate_findings`、`src/gurumoji/app.py`の`call_ai_json`。今回の変更は未テスト。[[../../50-Tests/ai-insights-reference-checklist|後日実施するテストチェックリスト]]を参照。
+実装参照：`src/gurumoji/analysis_insights.py`の`ai_schema`・`create_ai_insights`・`validate_findings`、`src/gurumoji/app.py`の`call_ai_json`。今回の変更は未テスト。[[50-Tests/20-Analysis/ai-insights-reference-checklist|後日実施するテストチェックリスト]]を参照。
 
 ## オーケストレーターの判断
 

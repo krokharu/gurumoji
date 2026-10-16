@@ -7,7 +7,10 @@ algorithm_version: content-insights-2
 execution_kind: builtin
 title: ローカル見解
 status: current
-tags: [gurumoji/analysis, gurumoji/text, gurumoji/orchestrator]
+tags:
+- gurumoji/analysis
+- gurumoji/text
+- gurumoji/orchestrator
 ---
 
 # ローカル見解（`local_insights`）
@@ -28,7 +31,7 @@ tags: [gurumoji/analysis, gurumoji/text, gurumoji/orchestrator]
 
 ## 査読文献との関係
 
-この機能そのものに対応する査読済みの標準分析法はない。頻度・比較の部品は[[05-Lexical-Frequency|語彙頻度]]と[[02-Speaker-Characteristics|話者別特徴語]]を参照し、質的な解釈は[[../05-Qualitative/01-Qualitative-Coding|手動コード・重要引用]]に従う。[Braun & Clarke (2006)](https://doi.org/10.1191/1478088706qp063oa)が示すように、テーマ・解釈は反復的な研究者の仕事である。したがって論文では「自動見解」として研究結果に引用せず、探索・監査用の補助として記述する。
+この機能そのものに対応する査読済みの標準分析法はない。頻度・比較の部品は[[50-Analysis-Methods/01-Text-and-Context/05-Lexical-Frequency|語彙頻度]]と[[50-Analysis-Methods/01-Text-and-Context/02-Speaker-Characteristics|話者別特徴語]]を参照し、質的な解釈は[[50-Analysis-Methods/05-Qualitative/01-Qualitative-Coding|手動コード・重要引用]]に従う。[Braun & Clarke (2006)](https://doi.org/10.1191/1478088706qp063oa)が示すように、テーマ・解釈は反復的な研究者の仕事である。したがって論文では「自動見解」として研究結果に引用せず、探索・監査用の補助として記述する。
 
 ## 専門家定義との関係
 

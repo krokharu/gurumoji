@@ -1,3 +1,13 @@
+---
+note_id: design-analysis-ui-image-prompt
+note_type: design-evidence
+title: UI画像生成プロンプト
+summary: 分析マイルストーン可視化のUIコンセプト画像（ui-concept-v2.png）の生成・編集プロンプト原文。データは架空で、設計書・JSONの定義を優先する。
+status: current
+updated: 2026-10-01
+tags: [gurumoji/design, gurumoji/ui]
+---
+
 # UI画像生成プロンプト
 
 生成方式：組み込み image_gen。新規画像、参照画像なし。画面内の数値・発話は架空。
