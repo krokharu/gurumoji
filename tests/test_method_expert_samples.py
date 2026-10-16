@@ -149,8 +149,7 @@ class ExpertSampleTests(unittest.TestCase):
 
     def result(self, run_id):
         store = app.analysis_archive_store()
-        artifact = next(a["id"] for a in store.artifacts(run_id) if a["name"] == "result.json")
-        return json.loads(store.read_artifact(artifact)[1])
+        return store.readable_package(run_id)[1]
 
     def saved(self, item_id, request_id):
         row = app.library_row(item_id)
@@ -274,7 +273,7 @@ class ExpertSampleTests(unittest.TestCase):
         self.assertEqual(methods["transformer_topics"]["status"], "not_run")
         self.assertNotIn("expert_review", methods["transformer_topics"])
         store = app.analysis_archive_store()
-        artifacts = store.artifacts(run["id"])
+        artifacts = store.export_artifacts(run["id"])
         for dataset in ("transitions", "gaps", "overlaps", "timeline"):
             with self.subTest(dataset=dataset):
                 self.assertEqual(app.analysis_csv_rows(result["analysis"], dataset)[1], [])
@@ -325,7 +324,8 @@ class ExpertSampleTests(unittest.TestCase):
             self.configure("fit", "thematic", QUESTION + "（ノート更新の確認）")
             drafted = self.draft("fit", "sample-note-update-draft", "ta-p3", "LIT-oka-2022-reflexive-ta-ja").get_json()
             first, _, _ = self.saved("fit", "sample-note-update-run-1")
-            again, _, _ = self.saved("fit", "sample-note-update-run-2")
+            # v2 retries the same save request; separate inference requests stay independent.
+            again, _, _ = self.saved("fit", "sample-note-update-run-1")
             note.write_text(note.read_text(encoding="utf-8") + "\n確認の観点を追記。\n", encoding="utf-8")
             insights = self.client.get("/api/library/fit/analysis/insights").get_json()["insights"]
             changed, _, _ = self.saved("fit", "sample-note-update-run-3")

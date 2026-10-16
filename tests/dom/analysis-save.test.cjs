@@ -8,7 +8,11 @@ function data(id, revision = 1, question = '') {
   return {executed: false, item: {id, source_name: `Synthetic ${id}`, revision_count: revision, analysis_revision: revision}, segments: [], config: {research_question: question}, annotations: {}};
 }
 async function setup(t) {
-  const h = await createHarness(); t.after(() => h.close());
+  const h = await createHarness(); t.after(async () => {
+    for (const request of h.requests.filter(r => !r.settled && /\/analysis\/runs\?limit=100&offset=0$/.test(r.url)))
+      h.reply(request, {runs: [], pagination: {has_more: false}});
+    await h.flush(); h.close();
+  });
   h.fixture({itemId: 'A', data: data('A'), config: {research_question: 'Synthetic draft'}, annotations: {}, mode: 'manual', dirty: true});
   h.evaluate('Object.assign(analysisState,window.fixture);renderAnalysisWorkspace();analysisCard.hidden=false;document.body.dataset.view="analysis";analysisItemSelect.replaceChildren(new Option("Synthetic A","A"),new Option("Synthetic B","B"));analysisItemSelect.value="A"');
   return h;

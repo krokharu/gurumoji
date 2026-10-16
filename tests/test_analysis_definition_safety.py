@@ -310,6 +310,8 @@ class DefinitionSafetyTests(unittest.TestCase):
     def test_unsupported_legacy_definition_can_be_read_and_explicitly_repaired(self):
         self.save()
         with self.connect() as connection:
+            # This fixture represents a definition saved before I3b history existed.
+            connection.execute("DELETE FROM change_log WHERE entity='analysis_definitions' AND entity_id='synthetic'")
             connection.execute("UPDATE analysis_definitions SET payload_json=?", (json.dumps(definition(version=1, source_columns=["text", "duration"])),))
         current = self.service.get_definition("synthetic", "text_size")
         self.assertEqual(current["validation_error"]["reason_code"], "source_columns_unsupported")

@@ -14,6 +14,7 @@ from flask import Blueprint, Flask, jsonify, request, send_file
 
 from .. import transcript_preparation as preparation
 from ..analysis_store import StoreConflict
+from ..services.analysis_package import MissingReference
 from ..analysis_core import AnalysisContractError
 from ..handlers.analysis_commands import (
     AnalysisCommandRequestError,
@@ -40,9 +41,15 @@ def register_analysis_routes(
     @blueprint.get("/api/library/<item_id>/analysis/runs")
     def get_analysis_runs(item_id: str):
         try:
-            return jsonify(queries().runs(item_id))
+            limit = int(request.args.get("limit", 100))
+            offset = int(request.args.get("offset", 0))
+            if not 1 <= limit <= 100 or not 0 <= offset <= 2**63 - 1:
+                raise ValueError()
+            return jsonify(queries().runs(item_id, limit=limit, offset=offset))
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
+        except (ValueError, OverflowError):
+            return jsonify(error="履歴のページ指定が正しくありません。"), 400
 
     @blueprint.get("/api/library/<item_id>/analysis/runs/<run_id>")
     def get_analysis_run(item_id: str, run_id: str):
@@ -59,6 +66,9 @@ def register_analysis_routes(
             return jsonify(queries().run_preview(item_id, run_id, artifact_id))
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
+        except MissingReference as exc:
+            return jsonify({'error': str(exc), 'reason_code': exc.code,
+                            'recovery_status': getattr(exc, 'recovery_status', 'missing_reference')}), 409
         except (OSError, ValueError, TypeError, KeyError, LookupError, csv.Error):
             return jsonify({"error": "固定成果物を読み取れません。再計算せず停止しました。"}), 409
 
@@ -74,8 +84,25 @@ def register_analysis_routes(
             )
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
+        except MissingReference as exc:
+            return jsonify({'error': str(exc), 'reason_code': exc.code,
+                            'recovery_status': getattr(exc, 'recovery_status', 'missing_reference')}), 409
         except (OSError, ValueError):
             return jsonify({"error": "保存ファイルが移動または変更されています。"}), 409
+
+    @blueprint.get('/api/analysis/runs/<run_id>/tables/<name>.csv')
+    def get_analysis_table_csv(run_id: str, name: str):
+        try:
+            artifact = queries().table_csv(run_id, name)
+            return send_file(io.BytesIO(artifact.data), mimetype=artifact.media_type,
+                             as_attachment=True, download_name=artifact.download_name)
+        except AnalysisQueryNotFound as exc:
+            return jsonify({'error': str(exc)}), 404
+        except MissingReference as exc:
+            return jsonify({'error': str(exc), 'reason_code': exc.code,
+                            'recovery_status': getattr(exc, 'recovery_status', 'missing_reference')}), 409
+        except (OSError, ValueError, KeyError, LookupError) as exc:
+            return jsonify({'error': str(exc)}), 409
 
     @blueprint.get("/api/analysis/runs/<run_id>/export.zip")
     def get_analysis_run_bundle(run_id: str):
@@ -87,8 +114,46 @@ def register_analysis_routes(
             )
         except AnalysisQueryNotFound as exc:
             return jsonify({"error": str(exc)}), 404
+        except MissingReference as exc:
+            return jsonify({'error': str(exc), 'reason_code': exc.code,
+                            'recovery_status': getattr(exc, 'recovery_status', 'missing_reference')}), 409
         except (OSError, ValueError, TypeError, KeyError, LookupError, csv.Error, zipfile.BadZipFile):
             return jsonify({"error": "固定成果物のZIPを作成できませんでした。"}), 409
+
+    @blueprint.get('/api/library/<item_id>/analysis/runs/<run_id>/tables/<name>/schema')
+    def get_fixed_table_schema(item_id: str, run_id: str, name: str):
+        try:
+            return jsonify(queries().table_schema(item_id, run_id, name))
+        except AnalysisQueryNotFound as exc:
+            return jsonify(error=str(exc)), 404
+        except (ValueError, KeyError, LookupError, OSError) as exc:
+            return jsonify(error=str(exc)), 409
+
+    @blueprint.post('/api/library/<item_id>/analysis/runs/<run_id>/statistics')
+    def run_fixed_statistics(item_id: str, run_id: str):
+        try:
+            return jsonify(commands().run_statistics(item_id, run_id, request.get_json(silent=True), request.url_root))
+        except AnalysisCommandNotFound as exc:
+            return jsonify(error=str(exc)), 404
+        except (ValueError, TypeError, KeyError, LookupError) as exc:
+            return jsonify(error=str(exc)), 400
+        except ImportError:
+            return jsonify(error='統計用の依存が未導入です。セットアップを実行してください。'), 503
+
+    @blueprint.get('/api/analysis/runs/<run_id>/export.<format>')
+    def get_analysis_run_export(run_id: str, format: str):
+        if format not in {'xlsx', 'sav', 'svg', 'png'}:
+            return jsonify(error='未対応の出力形式です。'), 404
+        try:
+            artifact = queries().run_export(run_id, format, request.args.get('dataset'))
+            return send_file(io.BytesIO(artifact.data), mimetype=artifact.media_type,
+                             as_attachment=True, download_name=artifact.download_name)
+        except AnalysisQueryNotFound as exc:
+            return jsonify(error=str(exc)), 404
+        except ImportError:
+            return jsonify(error='この出力に必要な依存が未導入です。セットアップを実行してください。'), 503
+        except (ValueError, OSError, KeyError, LookupError) as exc:
+            return jsonify(error=str(exc)), 409
 
     def pipeline_error(exc: AnalysisContractError):
         status = 409 if exc.code in {
@@ -98,6 +163,7 @@ def register_analysis_routes(
             "retry_limit_reached", "trial_conflict", "binding_conflict",
             "definition_snapshot_missing", "definition_version_invalid",
             "retry_in_progress", "publication_scope_conflict",
+            "pipeline_terminal", "resume_required", "nothing_to_resume",
         } else 400
         return jsonify({"error": str(exc), "reason_code": exc.code, "field": exc.field}), status
 
@@ -224,6 +290,20 @@ def register_analysis_routes(
             return pipeline_error(exc)
         except (OSError, sqlite3.Error):
             return jsonify({"error": "分析pipelineを再試行できませんでした。"}), 500
+
+    @blueprint.post("/api/library/<item_id>/analysis/pipelines/<pipeline_id>/resume")
+    def resume_analysis_pipeline(item_id: str, pipeline_id: str):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "再開条件はJSONオブジェクトで送信してください。"}), 400
+        try:
+            return jsonify(commands().resume_pipeline(item_id, pipeline_id, payload, app_url=request.url_root))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except AnalysisContractError as exc:
+            return pipeline_error(exc)
+        except (OSError, sqlite3.Error):
+            return jsonify({"error": "分析pipelineを再開できませんでした。"}), 500
 
     @blueprint.get("/api/library/<item_id>/analysis/insights")
     def get_analysis_insights(item_id: str):

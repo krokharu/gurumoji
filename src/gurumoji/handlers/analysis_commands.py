@@ -64,6 +64,7 @@ class AnalysisCommands:
         write_lock: Any,
         expose_local_paths: bool,
         pipeline_service: Any | None = None,
+        freeze_comparison: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self._store = store
         self._find_item = find_item
@@ -89,6 +90,7 @@ class AnalysisCommands:
         self._pipeline = pipeline_service
         self._write_lock = write_lock
         self._expose_local_paths = expose_local_paths
+        self._freeze_comparison = freeze_comparison
 
     def save(
         self,
@@ -133,6 +135,39 @@ class AnalysisCommands:
                 store=self._store,
             )
         return self._store.public(run, local=self._expose_local_paths)
+
+    def run_statistics(self, item_id: str, run_id: str, payload: dict, app_url: str) -> dict:
+        import uuid
+        from ..services.statistical_tests import run_statistics, VERSION
+        from ..analysis_core import fingerprint
+        source = self._store.get(run_id)
+        item = self._find_item(item_id)
+        if not item or not source or source['item_id'] != item_id or source['status'] != 'completed':
+            raise AnalysisCommandNotFound('対象の固定分析が見つかりません。')
+        if not isinstance(payload, dict):
+            raise ValueError('統計計画を指定してください。')
+        dataset = payload.get('dataset')
+        table = self._store.read_table(run_id, dataset)
+        result = run_statistics(table, payload.get('variables'), payload.get('plan'))
+        result['parameters'] = {'source_run_id': run_id, 'source_dataset': dataset,
+            'source_table_hash': fingerprint(table), 'plan': result['plan'], 'variables': result['variable_catalog']}
+        result['algorithms'] = {'planned_statistics': VERSION}
+        result['methods'] = [{'method_id': 'planned_statistics', 'title': '固定表の統計分析',
+            'status': result['results'][0]['status'], 'limitations': result['results'][0]['warnings'],
+            'datasets': ['statistical_results', 'variable_catalog', 'statistical_input', 'statistical_omissions']}]
+        snapshot = self._store.readable_package(run_id)[0]
+        datasets = {
+            'statistical_results': (list(result['results'][0]), result['results']),
+            'variable_catalog': (list(result['variable_catalog'][0]), result['variable_catalog']),
+            'statistical_input': (list(result['analysis_rows'][0]) if result['analysis_rows'] else table['fields'], result['analysis_rows']),
+            'statistical_omissions': (['row_id','reason'], result['omissions']),
+        }
+        with self._write_lock:
+            saved = self._store.save(item_id=item_id, kind='planned_statistics', snapshot=snapshot,
+                result=result, datasets=datasets, request_id=payload.get('request_id') or uuid.uuid4().hex,
+                input_fingerprint=source['input_fingerprint'], source_revision=source['source_revision'],
+                analysis_revision=source['analysis_revision'], app_url=app_url, publish=False)
+        return {'run': self._store.public(saved, local=self._expose_local_paths), 'statistics': result}
 
     def retry_vault(self, run_id: str) -> dict[str, Any]:
         run = self._store.get(run_id)
@@ -260,6 +295,13 @@ class AnalysisCommands:
             raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
         return self._pipeline.retry(item_id, pipeline_id, payload, app_url=app_url)
 
+    def resume_pipeline(
+        self, item_id: str, pipeline_id: str, payload: dict[str, Any], *, app_url: str
+    ) -> dict[str, Any]:
+        if self._pipeline is None:
+            raise AnalysisCommandRequestError("分析pipelineを利用できません。", 503)
+        return self._pipeline.resume(item_id, pipeline_id, payload, app_url=app_url)
+
     def save_comparison(
         self,
         payload: dict[str, Any],
@@ -271,6 +313,9 @@ class AnalysisCommands:
         """Recompute and save a comparison only for the displayed input versions."""
         with self._write_lock:
             items, allow_different = self._load_comparison_items(payload)
+            selection = self._freeze_comparison(items, payload) if self._freeze_comparison else None
+            if payload.get('target_snapshot_hash') and (selection is None or payload['target_snapshot_hash'] != selection['hash']):
+                raise StoreConflict("属性・タグ・グループが更新されています。比較を再集計してください。")
             current = {
                 str(item["id"]): self._source_fingerprint(item) for item in items
             }
@@ -281,6 +326,8 @@ class AnalysisCommands:
             comparison = self._build_comparison(
                 items, allow_different_content=allow_different
             )
+            if selection is not None:
+                comparison['target_snapshot'] = selection
             run = self._archive_comparison(
                 items,
                 comparison,

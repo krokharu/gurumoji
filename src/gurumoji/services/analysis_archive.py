@@ -37,6 +37,7 @@ from .group_analysis import (
 )
 from .library_rows import row_meeting_minutes
 from .meeting_minutes import MEETING_MINUTES_VERSION
+from .analysis_package import graph_datasets
 
 
 def make_analysis_archive(
@@ -78,6 +79,20 @@ def make_analysis_archive(
                                check_cancelled: Callable[[], None] = lambda: None,
                                store: AnalysisStore | None = None) -> dict:
         datasets = {name: analysis_csv_rows(analysis, name) for name in ANALYSIS_CSV_FIELDS}
+        if kwic is None:
+            datasets = graph_datasets(datasets, analysis)
+            emotion_rows = []
+            for segment in row_segments(row):
+                raw_emotions = segment.get('emotions')
+                for model_key, value in (raw_emotions.items() if isinstance(raw_emotions, dict) else []):
+                    if isinstance(value, dict):
+                        emotion_rows.append({'segment_id': segment['id'], 'text': segment.get('text', ''),
+                            'label': value.get('label'), 'score': value.get('score', value.get('confidence')),
+                            'model_name': value.get('model_name', model_key),
+                            'model_revision': value.get('model_revision', 'unknown'), 'origin': 'ai_draft',
+                            'audio_hash': value.get('audio_hash'), 'result': value})
+            if emotion_rows:
+                datasets['segment_emotions'] = (list(emotion_rows[0]), emotion_rows)
         if kwic is not None:
             datasets = {"kwic": (KWIC_FIELDS, kwic["hits"])}
         outline = json_load(row["outline_json"], None)
@@ -178,18 +193,41 @@ def make_analysis_archive(
             "reviewed_segment_count": len(jev_rows),
             "agreement_counts": dict(agreement_counts),
         } if jev_rows else {})
+        with database_connection() as connection:
+            input_version = preparation.current_version(connection, row)
+            if input_version is None and preparation._base(connection, str(row["id"])) is not None:
+                raise ValueError("現在の文字起こしが差分履歴と一致しません。AI変更記録を保存できません。")
+            changes = preparation.ai_change_rows(connection, str(row["id"]),
+                                                  run_id=request_id, version=input_version if request_id is None else None)
+        history_source = "transcript_changes"
+        if changes is None:
+            # Read-only compatibility for histories predating I2.
+            changes = finishing_changes(original_segments, segments)
+            history_source = "legacy_comparison_unknown_origin"
         details = {"prompt_version": FINISHING_VERSION, "provider": provider, "model": model,
                    "usage": usage, "stages": stages, "original_segments": original_segments,
-                   "changes": finishing_changes(original_segments, segments),
+                   "changes": changes, "change_source": history_source, "input_version": input_version,
                    "context_outline": context_outline, "jev_comparison": jev_details}
         datasets = {"ai_changes": (["segment_id", "start", "end", "before_text", "after_text",
-                                     "before_speaker", "after_speaker", "noise_candidate", "review_reason"], details["changes"])}
+                                     "before_speaker", "after_speaker", "noise_candidate", "review_reason",
+                                     "change_seq", "input_version", "process", "process_version",
+                                     "base_hash", "after_hash", "change_type", "metadata"], details["changes"])}
         if jev_rows:
             datasets["ai_jev_comparison"] = ([
                 "segment_id", "start", "end", "speaker", "original_text", "current_text",
                 "current_ai_flagged", "jev_flagged", "agreement", "jev_decision",
                 "correction_needed_probability", "jev_confidence", "jev_model",
             ], jev_rows)
+        for name, (fields, changes_rows) in list(datasets.items()):
+            updated = []
+            for change in changes_rows:
+                before = change.get('before_text', change.get('original_text'))
+                after = change.get('after_text', change.get('current_text'))
+                updated.append({**change,
+                    'before_text_hash': hashlib.sha256(before.encode('utf-8')).hexdigest() if isinstance(before, str) else None,
+                    'after_text_hash': hashlib.sha256(after.encode('utf-8')).hexdigest() if isinstance(after, str) else None,
+                    'change_type': change.get('change_type') or ('jev_comparison' if name == 'ai_jev_comparison' else 'unknown')})
+            datasets[name] = (list(dict.fromkeys([*fields, 'before_text_hash', 'after_text_hash', 'change_type'])), updated)
         cautions = ["AI仕上げは自動処理です。修正前の原文と比較して確認してください。"]
         if jev_rows:
             cautions.append(
@@ -202,6 +240,9 @@ def make_analysis_archive(
         methods = [m for m in method_results(analysis, datasets, outline=outline, finishing=details)
                    if m["method_id"] in {"ai_finishing", "outline"}]
         algorithms = {"finishing": FINISHING_VERSION}
+        if stages.get("notation") == "completed":
+            from .notation import NOTATION_VERSION
+            algorithms["notation"] = NOTATION_VERSION
         if jev_rows:
             algorithms["jev_review"] = JEV_REVIEW_VERSION
         result = {"schema_version": 1, "methods": methods, "parameters": {"stages": stages},
@@ -291,7 +332,8 @@ def make_analysis_archive(
                     "allow_different_content": allow_different,
                     "comparison_key": comparison.get("comparison_key", ""), "segments": []}
         result = {"schema_version": 1, "methods": methods,
-                  "parameters": {"item_ids": item_ids, "allow_different_content": allow_different},
+                  "parameters": {"item_ids": item_ids, "allow_different_content": allow_different,
+                                 "target_snapshot": comparison.get('target_snapshot', {})},
                   "algorithms": {"interview_comparison": comparison.get("schema_version", 1), "experts": expert_hashes},
                   "comparison": comparison}
         return (store or analysis_archive_store()).save(item_id=group_id, kind="interview_comparison", snapshot=snapshot,

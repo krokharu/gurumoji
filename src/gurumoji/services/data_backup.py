@@ -34,6 +34,7 @@ ALWAYS = ("analysis_store", "obsidian", "obsidian_layout", "obsidian_workbench",
 MEDIA = ("media", "kushinada_training/audio")
 EXCLUDED_NOTE = [
     "thumbnails（再生成される）",
+    "analysis-derived.sqlite3（派生解析行。失われたら再計算）",
     "kushinada_training の書き出し（DBから再生成される）",
     "trash・アップロードの一時領域・移行時の backup-*",
     "runtime/output（次の編集保存でDBから書き直される）",

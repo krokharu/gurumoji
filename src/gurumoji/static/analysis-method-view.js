@@ -99,6 +99,79 @@ function methodResultPanels(methodId, compact) {
   }
 }
 
+function localMethodPanels(method) {
+  const result = method.details || {};
+  const panel = analysisCardPanel(method.title, 'automatic', method.method_id, true, method.method_id);
+  (method.summaries || []).forEach(row => panel.body.append(
+    analysisElement('p', 'analysis-caption', `${row.title}：${row.text}`)));
+  (method.limitations || []).forEach(text => panel.body.append(analysisElement('p', 'content-inline-notice', text)));
+  panel.body.append(analysisElement('p', 'analysis-caption', `手法版：${method.method_version || '不明'}`));
+  const labels = {
+    speaker_name: '話者', incoming: '受取回数', outgoing: '受渡回数', reciprocity: '相互性',
+    outgoing_bias: '受渡先の偏り', strength_centrality: '重み付き中心性',
+    from_speaker: '渡した話者', to_speaker: '受けた話者', weight: '回数',
+    speaker_count: '話者数', transition_count: '交替回数', missing_time_count: '時刻不明の発話数',
+    unknown_speaker_count: '話者未確認の発話数', term: '語', term_a: '語A', term_b: '語B',
+    community: 'まとまり', degree: '接続語数', strength: '共起回数の合計', terms: '語の一覧', term_count: '語数',
+    label: 'コード・確認候補', segment_count: '発話数', mean_similarity: '平均類似度', unscorable_count: '算出不能数',
+    segment_id: '発話ID', code_ids: '現在のコード', nearest_other_code: '近い別コード',
+    own_similarity: '自コード類似度', other_similarity: '別コード類似度', max_similarity: '最大類似度', text: '本文'
+  };
+  const names = {response_nodes: '話者ごとの指標', response_edges: '発話の受け渡し', response_summary: '対象と分母',
+    cooccurrence_nodes: '中心語', cooccurrence_edges: '語の共起', cooccurrence_communities: '語のまとまり',
+    consistency_codes: 'コードごとのまとまり', coding_consistency: '要確認の発話'};
+  const flags = {closer_other_code: '別コードにより近い', far_from_all_codes: 'すべてのコードから遠い'};
+  for (const [name, rows] of Object.entries(result.tables || {})) {
+    const section = analysisElement('section', 'analysis-panel');
+    section.append(analysisElement('h3', '', `${names[name] || name}（${rows.length}件）`));
+    if (!rows.length) section.append(analysisElement('p', 'analysis-no-data',
+      result.status === 'completed' ? '該当する行はありません。' : '適用条件を満たす結果はありません。'));
+    if (rows.length) {
+      const fields = (result.card?.output_fields?.[name] || Object.keys(rows[0])).filter(key => key in labels);
+      const box = analysisElement('div', 'analysis-table-scroll');
+      const table = analysisElement('table', 'analysis-table');
+      const head = analysisElement('tr');
+      [...fields.map(key => labels[key]), '原文'].forEach(label => head.append(analysisElement('th', '', label)));
+      const thead = analysisElement('thead');
+      thead.append(head);
+      const body = analysisElement('tbody');
+      let count = 0;
+      const more = contentButton('さらに10件を表示', appendNext);
+      function appendNext() {
+        rows.slice(count, count + 10).forEach(row => {
+          const tr = analysisElement('tr');
+          fields.forEach(key => {
+            let value = row[key];
+            if (key === 'label') value = String(value || '').split(';').map(v => flags[v] || v).join('・');
+            if (Array.isArray(value)) value = value.join('、');
+            if (typeof value === 'number' && !Number.isInteger(value)) value = value.toFixed(4);
+            tr.append(analysisElement('td', '', value == null ? '算出不能' : String(value)));
+          });
+          const evidence = analysisElement('td');
+          const ids = row.segment_ids || row.evidence_segment_ids || [];
+          if (ids.length) evidence.append(evidenceDetails(ids));
+          tr.append(evidence);
+          body.append(tr);
+        });
+        count += 10;
+        more.hidden = count >= rows.length;
+      }
+      table.append(thead, body);
+      box.append(table);
+      section.append(box, more);
+      appendNext();
+    }
+    panel.body.append(section);
+  }
+  if (result.engine?.parser?.status === 'fallback') panel.body.append(analysisElement('p', 'content-inline-notice',
+    '簡易解析による語の分割を使用しています。正式解析の結果とは分けて確認してください。'));
+  if (result.coverage?.cooccurrence_truncated) panel.body.append(analysisElement('p', 'content-inline-notice',
+    `共起表は上位${result.coverage.cooccurrence_returned_rows}辺に限定されています（候補${result.coverage.cooccurrence_total_rows}辺）。`));
+  if (result.coverage?.unscorable_segment_count) panel.body.append(analysisElement('p', 'content-inline-notice',
+    `重心がゼロで比較できない発話：${result.coverage.unscorable_segment_count}件。確認候補なしとは扱いません。`));
+  return [panel.panel];
+}
+
 function buildMethodDetail(method, overview, compact) {
   const nodes = [];
   const header = analysisElement('div', `analysis-method-header ${method.verdict}`);
@@ -130,7 +203,8 @@ function buildMethodDetail(method, overview, compact) {
     nodes.push(analysisElement('p', 'analysis-section-help', METHOD_EXTERNAL_NOTES[method.method_id]));
   }
 
-  const panels = methodResultPanels(method.method_id, compact);
+  const panels = ['response_network', 'cooccurrence_network', 'coding_consistency'].includes(method.method_id)
+    ? localMethodPanels(method) : methodResultPanels(method.method_id, compact);
   if (panels.length) nodes.push(...panels);
   else if (method.produced) nodes.push(analysisElement('p', 'analysis-no-data', 'この手法の結果は保存記録とCSVで確認します。'));
   else nodes.push(analysisElement('p', 'analysis-no-data', 'まだ結果がありません。上の条件を確認してから実行してください。'));

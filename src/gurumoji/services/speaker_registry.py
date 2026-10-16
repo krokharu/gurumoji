@@ -160,43 +160,48 @@ def persist_speaker_registry_record(
     record: dict[str, Any],
     previous: dict[str, Any] | None,
     now: str,
+    *, origin: str = "researcher", process: str = "speaker_registry_save",
 ) -> None:
     """Insert one normalized registry record without changing the revision."""
-    connection.execute(
-        """
-        INSERT INTO speaker_registry (
-            id, participant_code, display_name, pseudonym, default_role,
-            organization, department, job_title, consent_status,
-            recording_consent, confidentiality_status, tags_json,
-            attributes_json, notes, active, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            participant_code=excluded.participant_code,
-            display_name=excluded.display_name,
-            pseudonym=excluded.pseudonym,
-            default_role=excluded.default_role,
-            organization=excluded.organization,
-            department=excluded.department,
-            job_title=excluded.job_title,
-            consent_status=excluded.consent_status,
-            recording_consent=excluded.recording_consent,
-            confidentiality_status=excluded.confidentiality_status,
-            tags_json=excluded.tags_json,
-            attributes_json=excluded.attributes_json,
-            notes=excluded.notes,
-            active=excluded.active,
-            updated_at=excluded.updated_at
-        """,
-        (
-            record["id"], record["participant_code"], record["display_name"],
-            record["pseudonym"], record["default_role"], record["organization"],
-            record["department"], record["job_title"], record["consent_status"],
-            record["recording_consent"], record["confidentiality_status"],
-            json.dumps(record["tags"], ensure_ascii=False),
-            json.dumps(record["attributes"], ensure_ascii=False), record["notes"],
-            int(record["active"]), previous["created_at"] if previous else now, now,
-        ),
-    )
+    from . import change_log
+    with change_log.tracking(connection, [("speaker_registry", record["id"])], origin=origin, process=process), \
+            change_log.tracking(connection, [("attribute_definitions", "global")],
+                origin="rule", process="speaker_attribute_discovery"):
+        connection.execute(
+            """
+            INSERT INTO speaker_registry (
+                id, participant_code, display_name, pseudonym, default_role,
+                organization, department, job_title, consent_status,
+                recording_consent, confidentiality_status, tags_json,
+                attributes_json, notes, active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                participant_code=excluded.participant_code,
+                display_name=excluded.display_name,
+                pseudonym=excluded.pseudonym,
+                default_role=excluded.default_role,
+                organization=excluded.organization,
+                department=excluded.department,
+                job_title=excluded.job_title,
+                consent_status=excluded.consent_status,
+                recording_consent=excluded.recording_consent,
+                confidentiality_status=excluded.confidentiality_status,
+                tags_json=excluded.tags_json,
+                attributes_json=excluded.attributes_json,
+                notes=excluded.notes,
+                active=excluded.active,
+                updated_at=excluded.updated_at
+            """,
+            (
+                record["id"], record["participant_code"], record["display_name"],
+                record["pseudonym"], record["default_role"], record["organization"],
+                record["department"], record["job_title"], record["consent_status"],
+                record["recording_consent"], record["confidentiality_status"],
+                json.dumps(record["tags"], ensure_ascii=False),
+                json.dumps(record["attributes"], ensure_ascii=False), record["notes"],
+                int(record["active"]), previous["created_at"] if previous else now, now,
+            ),
+        )
 
 
 def prepare_speaker_registry_records(raw_records: Any, existing_records: dict[str, Any], *, merge_by_participant_code: bool = False) -> list[dict[str, Any]]:
@@ -273,11 +278,13 @@ def _save_speaker_registry_records_locked(raw_records: Any, *, delete_ids: Any =
             previous = existing_records.get(record["id"])
             persist_speaker_registry_record(connection, record, previous, now)
         if requested_delete_ids:
+            from . import change_log
             placeholders = ",".join("?" for _ in requested_delete_ids)
-            connection.execute(
-                f"DELETE FROM speaker_registry WHERE id IN ({placeholders})",
-                tuple(sorted(requested_delete_ids)),
-            )
+            with change_log.tracking(connection, [("speaker_registry", identity) for identity in sorted(requested_delete_ids)], process="speaker_registry_delete"):
+                connection.execute(
+                    f"DELETE FROM speaker_registry WHERE id IN ({placeholders})",
+                    tuple(sorted(requested_delete_ids)),
+                )
         new_revision = current_revision + 1
         connection.execute(
             "UPDATE application_metadata SET value = ? WHERE key = ?",
@@ -382,6 +389,8 @@ def normalize_csv_consent(value: Any) -> str:
 
 
 def speaker_csv_field_for_header(header: str) -> str | None:
+    if header.startswith("属性:"):
+        return None
     normalized = normalized_csv_header(header)
     exact = SPEAKER_CSV_FIELD_ALIASES.get(normalized)
     if exact is not None:
@@ -395,6 +404,14 @@ def speaker_csv_field_for_header(header: str) -> str | None:
     if "参加者" in normalized and ("コード" in normalized or "id" in normalized):
         return "participant_code"
     return None
+
+
+def speaker_attribute_csv_headers(keys, fixed_headers) -> dict[str, str]:
+    """Escape reserved names reversibly without changing researcher attributes."""
+    fixed = set(fixed_headers)
+    return {key: "属性:" + key if (key in fixed or key.startswith("属性:")
+            or speaker_csv_field_for_header(key) is not None) else key
+            for key in sorted(keys)}
 
 
 def preview_speaker_registry_records(raw_records: Any, *, expected_revision: int,
@@ -448,16 +465,21 @@ def import_speaker_registry_csv(
             raise ValueError("一度に取り込める話者は10000件までです。")
         fixed: dict[str, Any] = {"attributes": {}}
         for raw_header, raw_value in row.items():
-            header = clean_single_line(raw_header, 120)
+            escaped_attribute = isinstance(raw_header, str) and raw_header.startswith("属性:")
+            header = clean_single_line(raw_header[3:] if escaped_attribute else raw_header, 120)
             value = clean_multiline(raw_value, 10000)
-            if not header or not value:
+            if not header:
                 continue
-            field_name = speaker_csv_field_for_header(header)
+            field_name = None if escaped_attribute else speaker_csv_field_for_header(header)
             if field_name == "":
                 continue
             if field_name:
+                if not value:
+                    continue
                 fixed[field_name] = value
             else:
+                if header in fixed["attributes"]:
+                    raise ValueError("CSVの追加属性の列名が重複しています。")
                 fixed["attributes"][header] = value
         if not any(fixed.get(key) for key in ("participant_code", "display_name", "pseudonym")):
             continue
@@ -491,6 +513,8 @@ def speaker_registry_csv_bytes(records: list[dict[str, Any]]) -> bytes:
         "参加者コード", "氏名", "仮名", "役割", "組織", "部署", "役職",
         "守秘同意", "タグ", "備考", "有効",
     ]
+    attribute_headers = speaker_attribute_csv_headers(custom_headers, fixed_headers)
+    custom_headers = list(attribute_headers.values())
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, fieldnames=fixed_headers + custom_headers)
     writer.writerow({header: analysis_csv_safe(header) for header in fixed_headers + custom_headers})
@@ -507,7 +531,7 @@ def speaker_registry_csv_bytes(records: list[dict[str, Any]]) -> bytes:
             "タグ": ",".join(record["tags"]),
             "備考": record["notes"],
             "有効": "1" if record["active"] else "0",
-            **record["attributes"],
+            **{attribute_headers[key]: value for key, value in record["attributes"].items()},
         }
         writer.writerow({key: analysis_csv_safe(value) for key, value in row.items()})
     return ("\ufeff" + stream.getvalue()).encode("utf-8")

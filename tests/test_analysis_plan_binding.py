@@ -61,6 +61,22 @@ class AnalysisPlanBindingTests(unittest.TestCase):
     def test_confirmatory_label_requires_predefinition(self):
         with self.assertRaisesRegex(AnalysisContractError, "事前固定"):
             self.plan(research_protocol={"classification": "confirmatory"})
+        for value in (False, None, "no", "yes", 1):
+            with self.subTest(preregistered=value), self.assertRaises(AnalysisContractError):
+                self.plan(research_protocol={"classification": "confirmatory", "preregistered": value})
+        self.assertEqual(self.plan(research_protocol={"classification": "confirmatory", "preregistered": True})
+                         ["research_protocol"]["classification"], "confirmatory")
+
+    def test_binding_uses_normalized_definition_id_for_revision(self):
+        first = {**validate_definition(definition()), "definition_id": " text_length ", "revision": 7}
+        second = {**validate_definition(definition(definition_id="other_length", output_column="other_length")),
+                  "definition_id": "\tother_length\n", "revision": 3}
+        values = [first, second]
+        binding = build_execution_binding(self.plan(values), list(reversed(values)))
+        self.assertEqual([(value["definition_id"], value["definition_revision"])
+                          for value in binding["resolved"]], [("text_length", 7), ("other_length", 3)])
+        self.assertEqual(binding["definition_snapshots"]["text_length"]["revision"], 7)
+        self.assertEqual(first["definition_id"], " text_length ")
 
 
 if __name__ == "__main__":

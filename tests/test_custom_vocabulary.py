@@ -25,7 +25,9 @@ class CustomVocabularyTests(unittest.TestCase):
     def test_vocabulary_api_persists_terms_locally(self):
         with tempfile.TemporaryDirectory(prefix="gurumoji-vocabulary-") as temporary:
             target = Path(temporary) / "custom_vocabulary.json"
-            with patch.object(app, "CUSTOM_VOCABULARY_FILE", target):
+            with patch.object(app, "CUSTOM_VOCABULARY_FILE", target), patch.object(app, "DATABASE_FILE", Path(temporary) / "library.sqlite3"):
+                app.initialize_library()
+                app.reconcile_custom_vocabulary()
                 client = app.app.test_client()
                 saved = client.put(
                     "/api/custom-vocabulary",

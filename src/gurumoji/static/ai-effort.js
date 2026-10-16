@@ -90,11 +90,11 @@ function setAiEffortChoice(key, value, notify = true) {
   if (notify) (choice || mode)?.dispatchEvent(new Event('change', {bubbles: true}));
 }
 function readAiEfforts() {
-  return Object.fromEntries(effortStages.map(([key]) => {
+  return {notation: document.querySelector('[name="ai_effort_notation"]')?.value || 'off', ...Object.fromEntries(effortStages.map(([key]) => {
     const mode = document.querySelector(`input[name="ai_thinking_mode_${key}"]:checked`)?.value || 'on';
     const effort = document.querySelector(`input[name="ai_effort_choice_${key}"]:checked`)?.value || 'medium';
     return [key, mode === 'off' ? 'off' : effort];
-  }));
+  }))};
 }
 function localEffortSupport(value) {
   const allowed = localEffortCapability?.allowed_options;
@@ -157,6 +157,8 @@ function syncAiEffortSettings() {
   const provider = document.querySelector('#ai-provider');
   const local = provider?.value === 'lmstudio';
   const plan = aiEffortStagePlan();
+  const notationChoice = document.querySelector('[name="ai_effort_notation"]');
+  if (notationChoice) notationChoice.disabled = Boolean(provider?.disabled || provider?.value === 'none' || plan.mode === 'off');
   syncAiEffortMandatedControls(provider, plan);
   const model = typeof tokenConfigSnapshot === 'undefined' ? '' : tokenConfigSnapshot.lmstudio_model || '';
   if (!local && localEffortModel !== null) {

@@ -1,6 +1,7 @@
 """Responsibility boundaries and restart of delegated specialist review."""
 import copy
 import json
+from gurumoji.services.model_context import restored_reference_context
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -32,7 +33,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         self.service = self.make_service(adapter_version=ADAPTER_VERSION)
 
     def transport(self, provider, key, model, system, prompt, name, schema, check, usage, *a, **kw):
-        context = json.loads(prompt)
+        context = restored_reference_context(prompt)
         role = name.removeprefix("analysis_orchestration_")
         self.sent.append((role, copy.deepcopy(context)))
         if role == "orchestrator":
@@ -124,7 +125,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         actual = self.transport
         remembered = []
         def memory(*args, **kwargs):
-            raw = actual(*args, **kwargs); c = json.loads(args[4])
+            raw = actual(*args, **kwargs); c = restored_reference_context(args[4])
             if args[5].endswith("_orchestrator"):
                 prior = [claim for r in c["prior_domain_reports"] for claim in r["claims"]]
                 if prior:
@@ -185,7 +186,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         actual = self.transport
         def followup(*args, **kwargs):
             raw = actual(*args, **kwargs)
-            c = json.loads(args[4])
+            c = restored_reference_context(args[4])
             if args[5].endswith("_orchestrator") and c["review_domain"] == "interpretation":
                 question = "Inspect the specific counterexample" if not any(x.get("task", {}).get("phase") == "specialist_followup" for _, x in self.sent) else "test"
                 raw["intents"] = [{"role": "interpretation", "kind": "analysis", "question": question,
@@ -211,7 +212,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         actual = self.transport
         def invalid(*args, **kwargs):
             raw = actual(*args, **kwargs)
-            context = json.loads(args[4])
+            context = restored_reference_context(args[4])
             if args[5].endswith("_core") and context["task"]["phase"] == "core":
                 rid = context["domain_reports"][0]["source_result_ids"][0]
                 raw["result_assessments"] = [{"result_id": rid, "disposition": "adopt", "reason": "Forbidden", "impact": "Forbidden"}]
@@ -244,7 +245,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
     def test_measurement_critique_keeps_its_own_target_version_after_core_changes(self):
         actual = self.transport
         def critique(*args, **kwargs):
-            raw = actual(*args, **kwargs); c = json.loads(args[4])
+            raw = actual(*args, **kwargs); c = restored_reference_context(args[4])
             if c.get("task", {}).get("phase") == "label_review":
                 target = c["review_target"]
                 raw.update(review_status="issues", issues=[{"issue_key": "measurement-validity",
@@ -264,7 +265,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
     def test_failed_domain_followup_prevents_silent_success(self):
         actual = self.transport
         def failure(*args, **kwargs):
-            c = json.loads(args[4])
+            c = restored_reference_context(args[4])
             if c.get("task", {}).get("phase") == "specialist_followup":
                 raise f.AnalysisContractError("Synthetic scoped analysis failure", code="context_budget_exceeded")
             raw = actual(*args, **kwargs)
@@ -285,7 +286,7 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         actual = self.transport
         original = "Analyze the reasons, evaluations and concerns in this synthetic conversation using source IDs and retain alternative explanations."
         def repeated(*args, **kwargs):
-            c = json.loads(args[4]); raw = actual(*args, **kwargs)
+            c = restored_reference_context(args[4]); raw = actual(*args, **kwargs)
             if args[5].endswith("_orchestrator"):
                 if c["review_domain"] == "interpretation":
                     raw["intents"] = [{"role": "interpretation", "question": original.replace("this synthetic", "the synthetic"),

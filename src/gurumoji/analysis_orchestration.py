@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 from difflib import SequenceMatcher
 import json
+import hashlib
 import math
 import sqlite3
 import threading
@@ -24,6 +25,7 @@ from typing import Any, Callable
 
 from .analysis_core import (AnalysisContractError, canonical, fingerprint,
                             validate_publication_targets, validate_label_definitions, EFFECTIVE_PUBLICATION_WRITERS)
+from .services import artifact_review
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
     read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
 
@@ -53,6 +55,11 @@ def _json(value: Any) -> str:
 
 def _error(message: str, code: str = "invalid_request", field: str = "") -> AnalysisContractError:
     return AnalysisContractError(message, code=code, field=field)
+
+
+def _scope(intent):
+    value = intent.get("scope")
+    return value if isinstance(value, dict) else {}
 
 
 def initialize_orchestration_store(connection: sqlite3.Connection) -> None:
@@ -169,8 +176,20 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "context_index_limit": payload.get("context_index_limit", 0),
               "context_evidence_limit": payload.get("context_evidence_limit", 120),
               "context_text_limit": payload.get("context_text_limit", 60000)}
+    config["analysis_interval_version"] = payload.get("analysis_interval_version", 0)
+    config["artifact_review_version"] = payload.get("artifact_review_version", 0)
+    if config["artifact_review_version"] and not (config["analysis_interval_version"] == 1
+            and config["specialist_orchestration_version"] == 1):
+        raise _error("先行所見の点検には固定区間と専門側の判断が必要です。", "artifact_input_invalid")
+    if config["artifact_review_version"]:
+        from .method_experts import counterexample_review_procedure
+        procedure = counterexample_review_procedure()
+        config["artifact_procedure"] = {k: procedure[k] for k in ("procedure_id", "version", "sha256")}
+    config["analysis_interval_seconds"] = payload.get("analysis_interval_seconds", 300)
     for key, low, high in (("max_calls", 1, 10000), ("max_tasks", 1, 20000), ("concurrency", 1, 4),
                            ("core_progress_version", 0, 1),
+                           ("analysis_interval_version", 0, 1), ("analysis_interval_seconds", 1, 86400),
+                           ("artifact_review_version", 0, 1),
                            ("initial_label_definitions_version", 0, 1),
                             ("initial_specialist_analysis_version", 0, 1),
                             ("model_context_version", 0, 1),
@@ -240,7 +259,8 @@ class AnalysisOrchestrationService:
                  agent_runner: Callable[..., Any], method_runner: Callable[..., Any],
                  source_fingerprint: Callable[[Any], str] | None = None,
                  write_lock: Any = None, schedule: bool = True, adapter_version: str = "core-handler-prompts-1",
-                 initial_builder: Any = None, on_complete: Callable[[str, str], Any] | None = None):
+                 initial_builder: Any = None, on_complete: Callable[[str, str], Any] | None = None,
+                 outline_builder: Callable[..., Any] | None = None):
         self.connect = connect or database_connection
         if self.connect is None:
             raise TypeError("connect is required")
@@ -249,6 +269,7 @@ class AnalysisOrchestrationService:
         self.source_fingerprint, self.schedule = source_fingerprint, schedule
         self.adapter_version = adapter_version
         self.initial_builder, self.on_complete = initial_builder, on_complete
+        self.outline_builder = outline_builder
         if initial_builder is not None and source_fingerprint is None:
             raise TypeError("staged initial analysis requires source_fingerprint")
         self._driving: set[str] = set()
@@ -275,10 +296,18 @@ class AnalysisOrchestrationService:
                     connection.close()
 
     def _check_version(self, run):
+        if run.get("analysis_partition"):
+            from .services.analysis_intervals import check_partition
+            check_partition(run["analysis_partition"], run["config"], run["input_hash"])
         if run.get("schema_version") != SCHEMA_VERSION:
             raise _error("保存されたrunの形式版が異なります。元の版で復旧してください。", "schema_version_conflict")
         if run["config"].get("adapter_version") != self.adapter_version:
             raise _error("モデル指示の版が変わりました。新しいrunを開始してください。", "adapter_version_conflict")
+        if run["config"].get("artifact_review_version"):
+            from .method_experts import counterexample_review_procedure
+            procedure = counterexample_review_procedure()
+            if run["config"].get("artifact_procedure") != {k: procedure[k] for k in ("procedure_id", "version", "sha256")}:
+                raise _error("反例点検の手順版が変わりました。", "artifact_input_invalid")
 
     def _read_run(self, db, run_id: str, item_id: str | None = None) -> dict:
         row = db.execute("SELECT * FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
@@ -648,6 +677,9 @@ class AnalysisOrchestrationService:
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
         result["tasks"] = tasks
+        if run.get("analysis_partition"):
+            from .services.analysis_intervals import progress
+            result["interval_progress"] = progress(run["analysis_partition"], tasks)
         result["completed_core_iterations"] = self._completed_core_iterations(db, run)
         if run["config"].get("initial_label_definitions_version"):
             try:
@@ -787,6 +819,8 @@ class AnalysisOrchestrationService:
                 raise _error("終了済みrunは再実行しません。新しいrunを開始してください。", "run_terminal")
             uncertain = []
             for task in self._tasks(db, run_id):
+                if task.get("input_artifacts"):
+                    self._recheck_review_binding(db, run, task)
                 if task["status"] in {"running", "uncertain", "cancel_requested"}:
                     row = db.execute("SELECT state_json FROM orchestration_results WHERE task_id=?", (task["task_id"],)).fetchone()
                     if row:
@@ -869,6 +903,13 @@ class AnalysisOrchestrationService:
                 "alternatives": decision.get("alternatives", []), "unresolved": decision.get("unresolved", []),
                 "dispositions": {value: sum(a["disposition"] == value for a in decision["result_assessments"]) for value in ("adopt", "reject", "defer")},
                 "annotation_version": decision["annotation_version"], "status": "ai_draft", "read_scope": "specialist_result_review"})
+            if decision.get("topic_sources"):
+                reports[-1]["topic_sources"] = copy.deepcopy(decision["topic_sources"])
+            if run["config"].get("artifact_review_version"):
+                reports[-1]["artifact_decisions"] = copy.deepcopy(decision.get("artifact_decisions", []))
+                reports[-1]["review_results"] = copy.deepcopy(decision.get("review_results", []))
+                reports[-1]["independent_support_count"] = None
+                reports[-1]["review_limit"] = "派生レビューは先行所見と独立した裏付けではない。範囲内未検出は真実性の確認ではない。"
             reports[-1]["deferred_followup_count"] = sum(e["type"] == "intent_deferred" and e.get("review_result_id") == meta["result_id"] for e in events)
             statuses = [t["status"] for t in followups if t.get("parent_task_id") == task["task_id"]]
             reports[-1]["followup_status_counts"] = {status: statuses.count(status) for status in sorted(set(statuses))}
@@ -905,6 +946,8 @@ class AnalysisOrchestrationService:
                 raise _error("専門家結果のhashが一致しません。", "result_integrity_mismatch")
             task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
                                         (metadata["task_id"], run["run_id"])).fetchone()[0])
+            if task.get("input_artifacts"):
+                return None
             return fingerprint({"role": metadata["role"], "raw_hash": metadata["raw_hash"],
                 "data_version": metadata["dataset_version"], "annotation_version": metadata["annotation_version"],
                 "scope": task["intent"].get("scope"), "target_version": task["intent"].get("target_version"),
@@ -913,8 +956,26 @@ class AnalysisOrchestrationService:
         fresh = []
         for result_id in assessments:
             key = basis(result_id)
-            if key not in seen:
+            if key is not None and key not in seen:
                 fresh.append(result_id)
+                seen.add(key)
+        return fresh
+
+    def _new_review_checks(self, db, run, previous_ids, assessed_ids):
+        def signature(rid):
+            row = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=? AND run_id=?", (rid, run["run_id"])).fetchone()
+            raw, meta = json.loads(row[0]), json.loads(row[1])
+            if not meta.get("derived_from"):
+                return None
+            if fingerprint(raw) != meta["raw_hash"]:
+                artifact_review.reject("派生レビューの保存hashが一致しません。")
+            return artifact_review.review_progress(raw)
+        seen = {signature(rid) for rid in previous_ids}
+        fresh = []
+        for rid in assessed_ids:
+            key = signature(rid)
+            if key is not None and key not in seen:
+                fresh.append(rid)
                 seen.add(key)
         return fresh
 
@@ -935,7 +996,144 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
         return True
 
+    def _source_review_binding(self, db, run, result_id, scope=None):
+        from .method_experts import counterexample_review_procedure
+        row = db.execute("SELECT raw_json,state_json,task_id FROM orchestration_results WHERE result_id=? AND run_id=?",
+                         (result_id, run["run_id"])).fetchone()
+        if row is None:
+            artifact_review.reject("同じrunの先行所見が見つかりません。")
+        raw, meta = json.loads(row[0]), json.loads(row[1])
+        source = db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
+                            (row[2], run["run_id"])).fetchone()
+        if source is None:
+            artifact_review.reject("先行所見の生成タスクが見つかりません。")
+        task = json.loads(source[0])
+        scope = copy.deepcopy(scope if scope is not None else _scope(task["intent"]))
+        from .services.analysis_intervals import interval_scope
+        intervals = run.get("analysis_partition", {}).get("intervals", []) + run.get("interval_refinements", [])
+        interval = next((i for i in intervals if i["interval_id"] == scope.get("interval_id")), None)
+        if interval is None or interval_scope(interval) != scope:
+            artifact_review.reject("先行所見の固定区間が不正です。")
+        self._check_input_manifest(run, task, meta)
+        binding = artifact_review.validate_source(run, task, meta, raw, scope, counterexample_review_procedure())
+        return binding, raw, meta
+
+    def _artifact_history(self, db, run, domain):
+        return [{**entry, "decision_id": d["decision_id"]}
+                for (encoded,) in db.execute("SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run["run_id"],))
+                if (d := json.loads(encoded)).get("role") == "orchestrator" and d.get("domain") == domain
+                for entry in d.get("artifact_decisions", [])]
+
+    def _artifact_candidates(self, db, run, domain):
+        history = self._artifact_history(db, run, domain)
+        latest = {r["result_id"]: r for r in history}
+        candidates = []
+        # Stable insertion order and complete index units. No result body here.
+        information = fingerprint({"annotation_version": run["annotation_version"],
+            "results": [m["raw_hash"] for (s,) in db.execute("SELECT state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],))
+                        if (m := json.loads(s)).get("role") not in {"core", "orchestrator"}
+                        and m.get("validation_status") == "valid"]})
+        for (rid,) in db.execute("SELECT result_id FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],)).fetchall():
+            old = latest.get(rid)
+            if old and old["disposition"] != "defer":
+                continue
+            try:
+                binding, _, meta = self._source_review_binding(db, run, rid)
+            except AnalysisContractError:
+                continue
+            candidates.append({"result_id": rid, "raw_hash": binding["raw_hash"], "run_id": run["run_id"],
+                "task_id": binding["task_id"], "created_by": "interpretation", "interval_id": binding["interval"]["interval_id"],
+                "dataset_version": binding["dataset_version"], "schema_version": binding["schema_version"],
+                "codebook_version": binding["codebook_version"], "annotation_version": binding["annotation_version"],
+                "scope": binding["interval"], "provided_evidence_ids": binding["source_provided_evidence_ids"],
+                "claim_count": len(binding["claim_ids"]), "content_status": meta.get("content_status", "unreviewed"),
+                "coverage": next(t["context_manifest"]["coverage"] for t in self._tasks(db, run["run_id"]) if t["task_id"] == binding["task_id"]),
+                "information_hash": fingerprint([binding, information]),
+                "previous_decision_id": old.get("decision_id", "") if old else ""})
+        return candidates[:6], len(candidates) - min(6, len(candidates))
+
+    def resolve_review_input(self, db, run, intent):
+        if (run["config"].get("artifact_review_version") != 1 or intent.get("role") != "interpretation"
+                or intent.get("artifact_purpose") != artifact_review.PURPOSE or intent.get("label_dependent")
+                or intent.get("result_id") or intent.get("initial_sections") or intent.get("method_id")):
+            artifact_review.reject("専用の解釈役レビュー依頼だけが先行所見を利用できます。")
+        row = db.execute("SELECT payload_json FROM orchestration_decisions WHERE decision_id=? AND run_id=?",
+                         (intent.get("artifact_decision_id"), run["run_id"])).fetchone()
+        decision = json.loads(row[0]) if row else {}
+        rid = intent.get("review_target_result_id")
+        choice = next((r for r in decision.get("artifact_decisions", []) if r["result_id"] == rid and r["disposition"] == "use"), None)
+        if decision.get("role") != "orchestrator" or choice is None or intent.get("interval_ids") != [choice["interval_id"]]:
+            artifact_review.reject("提示候補のuse判断に結び付いた依頼が必要です。")
+        binding, _, _ = self._source_review_binding(db, run, rid)
+        if choice.get("raw_hash") != binding["raw_hash"]:
+            artifact_review.reject("提示した先行所見の版が変わりました。")
+        return binding
+
+    def _recheck_review_binding(self, db, run, task):
+        if task.get("role") != "interpretation" or task.get("intent", {}).get("kind") != "finding_review":
+            artifact_review.reject("この役割へ先行所見を配送できません。")
+        bindings = task.get("input_artifacts", [])
+        if not isinstance(bindings, list) or len(bindings) != 1:
+            artifact_review.reject("先行所見の束縛は1件です。")
+        current, raw, _ = self._source_review_binding(db, run, bindings[0]["result_id"], _scope(task["intent"]))
+        if current != bindings[0] or self.resolve_review_input(db, run, task["intent"]) != current:
+            artifact_review.reject("固定した先行所見の入力版・hash・手順が変わりました。")
+        return current, raw
+
     def _register(self, db, run, intent: dict, *, phase: str, automatic=False) -> dict | None:
+        binding = None
+        if intent.get("input_artifacts"):
+            artifact_review.reject("入力束縛はHandlerだけが作成します。")
+        if intent.get("kind") == "finding_review":
+            binding = self.resolve_review_input(db, run, intent)
+            if any(d != binding["task_id"] for d in intent.get("dependencies", [])):
+                artifact_review.reject("初期レビューの依存は生成済みの先行所見1件だけです。")
+            intent = {**copy.deepcopy(intent), "scope": copy.deepcopy(binding["interval"]),
+                      "dependencies": [binding["task_id"]]}
+        elif intent.get("review_target_result_id") or intent.get("artifact_purpose"):
+            artifact_review.reject("先行所見の指定は専用レビュー依頼だけに許可されます。")
+        if run["config"].get("analysis_interval_version") and _scope(intent).get("interval_id"):
+            from .services.analysis_intervals import interval_scope
+            supplied = intent["scope"]
+            known_intervals = run["analysis_partition"]["intervals"] + run.get("interval_refinements", [])
+            interval = next((i for i in known_intervals if i["interval_id"] == supplied["interval_id"]), None)
+            canonical_scope = interval_scope(interval, blind=intent["role"] == "verification") if interval else None
+            if supplied != canonical_scope:
+                raise _error("タスクの区間と固定所属が一致しません。", "interval_scope_invalid")
+            intent = copy.deepcopy(intent)
+            intent["evidence_ids"] = supplied["owned_evidence_ids"] + supplied["boundary_evidence_ids"]
+        if (run["config"].get("analysis_interval_version") and intent.get("role") in {"interpretation", "verification", "critic"}
+                and intent.get("kind", "analysis") != "clarification"
+                and phase not in {"initial_labels", "label_review", "stop_review"}
+                and not _scope(intent).get("interval_id")):
+            from .services.analysis_intervals import check_partition, interval_scope
+            partition = run.get("analysis_partition")
+            if not partition:
+                raise _error("原文の区間が確定していません。", "interval_missing")
+            check_partition(partition, run["config"], run["input_hash"])
+            selected = set(intent.get("evidence_ids", []))
+            requested = intent.get("interval_ids", _scope(intent).get("interval_ids", []))
+            available = {i["interval_id"] for i in partition["intervals"]}
+            if not isinstance(requested, list) or any(i not in available for i in requested):
+                raise _error("存在する区間IDを指定してください。", "interval_missing")
+            # A cited row selects its owning interval, never just the citation.
+            intervals = [i for i in partition["intervals"] if (not requested or i["interval_id"] in requested)
+                         and (not selected or selected.intersection(i["owned_evidence_ids"]))]
+            if not intervals:
+                raise _error("対象区間がありません。", "interval_missing")
+            first_task = None
+            for interval in intervals:
+                if interval["status"] != "ready":
+                    self._stop(db, run, "interval_unprocessable")
+                    return first_task
+                child = copy.deepcopy(intent)
+                scope = interval_scope(interval, blind=intent["role"] == "verification")
+                child.update(scope=scope, evidence_ids=scope["owned_evidence_ids"] + scope["boundary_evidence_ids"])
+                task = self._register(db, run, child, phase=phase, automatic=automatic)
+                first_task = first_task or task
+                if run["status"] in TERMINAL:
+                    break
+            return first_task
         role = intent.get("role")
         if role not in AI_ROLES | {"statistics"}:
             raise _error("未対応の専門家です。", "invalid_intent")
@@ -956,7 +1154,7 @@ class AnalysisOrchestrationService:
             raise _error("タスクの問いがありません。", "invalid_intent")
         if not automatic and (not intent.get("why_now") or not intent.get("success_criteria")):
             raise _error("追加タスクには理由と採用基準が必要です。", "invalid_intent")
-        if intent.get("kind", "analysis") not in {"analysis", "clarification", ""}:
+        if intent.get("kind", "analysis") not in {"analysis", "clarification", "finding_review", ""}:
             raise _error("未対応のタスク種別です。", "invalid_intent")
         if intent.get("kind") == "clarification":
             target = db.execute("SELECT state_json FROM orchestration_results WHERE result_id=? AND run_id=?",
@@ -983,6 +1181,9 @@ class AnalysisOrchestrationService:
                     "round": run["iteration"] if role == "core" else None, "options": run["config"]["roles"].get(role), "kind": intent.get("kind", "analysis"), "result_id": intent.get("result_id"), "initial_sections": intent.get("initial_sections", []),
                     "dependencies": sorted(dependencies)}
         key = fingerprint(identity)
+        if binding:
+            identity["input_artifacts"] = [binding]
+            key = fingerprint(identity)
         existing = db.execute("SELECT state_json FROM orchestration_tasks WHERE run_id=? AND idempotency_key=?", (run["run_id"], key)).fetchone()
         if existing:
             task = json.loads(existing[0])
@@ -1010,6 +1211,8 @@ class AnalysisOrchestrationService:
                 "codebook_version": run["codebook_version"], "label_dependent": label_dependent,
                 "dependencies": dependencies, "status": "queued", "validation_status": "pending", "stale": False,
                 "created_at": _now(), "started_at": None, "ended_at": None, "error": ""}
+        if binding:
+            task["input_artifacts"] = [copy.deepcopy(binding)]
         db.execute("INSERT INTO orchestration_tasks VALUES (?,?,?,?)", (task["task_id"], run["run_id"], key, _json(task)))
         self._event(db, run["run_id"], "task_registered", task["title"], target=role, task_id=task["task_id"])
         return task
@@ -1050,7 +1253,51 @@ class AnalysisOrchestrationService:
         result = clean(value)
         return None if result is omitted else result
 
+    def build_review_resources(self, db, run, task, context):
+        from .method_experts import counterexample_review_procedure
+        binding, raw = self._recheck_review_binding(db, run, task)
+        delivered = [r["evidence_id"] for r in context["raw_evidence"]]
+        expected = binding["interval"]["owned_evidence_ids"] + binding["interval"]["boundary_evidence_ids"]
+        if set(delivered) != set(expected):
+            artifact_review.reject("原文の担当区間と文脈を完全に配送する必要があります。")
+        packet = {"result_id": binding["result_id"], "raw_hash": binding["raw_hash"],
+            "claims": copy.deepcopy(raw["claims"]), "summary": raw.get("summary", ""),
+            "coverage": copy.deepcopy(next(t["context_manifest"]["coverage"] for t in self._tasks(db, run["run_id"])
+                                         if t["task_id"] == binding["task_id"])),
+            "limitations": raw.get("limitations", ""), "unresolved": raw.get("unresolved", []),
+            "content_status": self._source_review_binding(db, run, binding["result_id"])[2].get("content_status", "unreviewed")}
+        if binding["annotation_version"] is not None:
+            definitions = self._initial_label_catalog(db, run)
+            if not definitions:
+                artifact_review.reject("先行所見に必要な定義がありません。")
+            packet["definitions"] = definitions
+            packet["labels"] = copy.deepcopy(context.get("labels", {}))
+        return {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task), "question": task["title"],
+            "data_version": run["input_hash"], "annotation_version": task["annotation_version"],
+            "raw_evidence": context["raw_evidence"], "coverage": context["coverage"],
+            "input_artifacts": [binding], "finding_resource": packet,
+            "review_procedure": counterexample_review_procedure(), "research_mode": "exploratory",
+            "execution_allowed": False, "blind_first": False,
+            "resources_origin": {"run_id": run["run_id"], "initial_id": run["initial_id"]}}
+
     def _context(self, db, run, task):
+        if task.get("input_artifacts") or task["intent"].get("kind") == "finding_review":
+            self._recheck_review_binding(db, run, task)
+        context = self._base_context(db, run, task)
+        if task["intent"].get("kind") == "finding_review":
+            context = self.build_review_resources(db, run, task, context)
+        if run["config"].get("artifact_review_version"):
+            context["artifact_review_version"] = artifact_review.VERSION
+            if task["role"] == "orchestrator":
+                domain = task["intent"]["scope"]["domain"]
+                candidates, omitted = self._artifact_candidates(db, run, domain)
+                context["artifact_candidates"] = candidates
+                context["artifact_candidate_scope"] = {"omitted_count": omitted, "ordering": "result_insertion"}
+                latest = {r["result_id"]: r for r in self._artifact_history(db, run, domain)}
+                context["unresolved_artifact_decisions"] = [r for r in latest.values() if r["disposition"] == "defer"]
+        return context
+
+    def _base_context(self, db, run, task):
         initial = self._initial(db, run["initial_id"])
         raw = [e for e in initial["evidence"] if not e["excluded"]]
         selected = task["intent"].get("evidence_ids", [])
@@ -1061,16 +1308,15 @@ class AnalysisOrchestrationService:
         available_count = len(raw)
         bounded, size = [], 0
         for evidence in raw:
-            page = run["config"].get("model_context_version") and task["phase"] == "initial_analysis" and task["kind"] == "ai"
+            page = task["kind"] == "ai" and (run["config"].get("model_context_version") and task["phase"] == "initial_analysis"
+                    or _scope(task["intent"]).get("interval_id"))
             if not page and (len(bounded) >= run["config"]["context_evidence_limit"] or size + len(evidence["text"]) > run["config"]["context_text_limit"]):
                 break
             bounded.append(evidence); size += len(evidence["text"])
         raw = bounded
-        if run["config"].get("initial_label_definitions_version"):
-            # The immutable full snapshot keeps per-row hashes and versions.
-            # AI needs the root dataset version, source text and stable IDs only.
-            raw = [{key: entry[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
-                   for entry in raw]
+        # The immutable snapshot retains per-row hashes and versions.
+        raw = [{key: entry[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
+               for entry in raw]
         evidence_index = [{"evidence_id": e["evidence_id"], "utterance_id": e["utterance_id"]}
                           for e in initial["evidence"] if not e["excluded"]]
         index_count = len(evidence_index)
@@ -1082,7 +1328,7 @@ class AnalysisOrchestrationService:
                     "evidence_index": evidence_index, "index_available_count": index_count,
                     "index_provided_count": len(evidence_index), "index_omitted_count": index_count - len(evidence_index)}
         initial_report = copy.deepcopy(run.get("initial_analysis_report"))
-        scope = task["intent"].get("scope") or {}
+        scope = _scope(task["intent"])
         if run["config"].get("model_context_version") and initial_report and "requirement_keys" in scope:
             initial_report["full_report_hash"] = fingerprint(initial_report)
             initial_report["label_requirements"] = [entry for entry in initial_report["label_requirements"] if fingerprint(entry) in scope["requirement_keys"]]
@@ -1091,6 +1337,10 @@ class AnalysisOrchestrationService:
             initial_report["requirement_scope"] = "selected; remaining requirements have separate Handler tasks"
         if isinstance(task["intent"].get("scope"), dict) and task["intent"]["scope"].get("owned_evidence_ids"):
             coverage["page"] = copy.deepcopy(task["intent"]["scope"])
+            if task["role"] == "verification":
+                coverage["page"].pop("title", None)
+            coverage["owned_count"] = len(coverage["page"]["owned_evidence_ids"])
+            coverage["boundary_count"] = len(coverage["page"].get("boundary_evidence_ids", []))
         if task["role"] == "interpretation" and task["phase"] == "initial_labels" and task["method_id"] == "label-design-v1":
             return {"schema_version": SCHEMA_VERSION, "task": copy.deepcopy(task),
                     "question": run["config"]["question"], "data_version": run["input_hash"],
@@ -1132,7 +1382,9 @@ class AnalysisOrchestrationService:
                 provided.append(evidence); size += len(evidence["text"])
             return {"schema_version": SCHEMA_VERSION, "task": {"task_id": task["task_id"], "role": "verification"},
                     "question": task["title"], "data_version": metadata["dataset_version"],
-                    "annotation_version": metadata["annotation_version"], "raw_evidence": copy.deepcopy(provided),
+                    "annotation_version": metadata["annotation_version"], "raw_evidence": [
+                        {key: row[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
+                        for row in provided],
                     "coverage": {"available_count": len(relevant), "provided_count": len(provided),
                                  "omitted_count": len(relevant) - len(provided), "complete": len(relevant) == len(provided),
                                  "scope": "saved_verification_result"},
@@ -1164,7 +1416,7 @@ class AnalysisOrchestrationService:
                 if result["result_id"] in run.get("initial_label_result_ids", [run.get("initial_label_result_id")]):
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", []),
                                "label_definitions_ref": "initial_label_catalog"}
-                elif len(row[0]) > 16000:
+                elif len(row[0]) > 16000 and not result.get("derived_from"):
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", [])[:24], "omitted_full_result": True}
                 accepted.append({**result, "content": content})
         pending_results = self._review_pending(db, run, task) if run["config"].get("core_progress_version") else []
@@ -1190,6 +1442,9 @@ class AnalysisOrchestrationService:
                               "min_iterations": run["config"].get("min_iterations", 0),
                               "completed_core_iterations": self._completed_core_iterations(db, run),
                               "deadline": run["deadline"]}, "stop_proposal": run["pending_stop"]}
+        if run.get("analysis_partition") and task["role"] in {"core", "orchestrator"}:
+            context["analysis_interval_index"] = [{k: i[k] for k in ("interval_id", "parent_topic_id", "start", "end")}
+                for i in run["analysis_partition"]["intervals"]]
         if run["config"].get("initial_label_definitions_version"):
             context["initial_label_catalog"] = self._initial_label_catalog(db, run)
             if task["role"] == "core" and task["phase"] != "initial_routing" and not context["initial_label_catalog"]:
@@ -1304,9 +1559,34 @@ class AnalysisOrchestrationService:
                 run = self._read_run(db, run_id)
                 task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=? AND run_id=?",
                                              (task_id, run_id)).fetchone()[0])
-                if manifest.get("version") != 1 or manifest.get("dataset_version") != run["input_hash"]:
+                if manifest.get("version") != (artifact_review.MANIFEST_VERSION if run["config"].get("artifact_review_version") else 1) or manifest.get("dataset_version") != run["input_hash"]:
                     raise _error("入力パケットの版が一致しません。", "context_manifest_invalid")
+                scope = _scope(task["intent"])
+                if scope.get("interval_id") and (manifest.get("analysis_interval") != scope or
+                        set(scope["owned_evidence_ids"] + scope["boundary_evidence_ids"]) != set(manifest.get("provided_evidence_ids", []))):
+                    raise _error("担当原文または文脈原文が入力から欠落しています。", "context_manifest_invalid")
+                if manifest.get("evidence_transport_version") == 1:
+                    from .services.model_context import digest
+                    mapping = manifest.get("reference_map")
+                    if not isinstance(mapping, dict) or digest(mapping) != manifest.get("reference_map_sha256"):
+                        raise _error("根拠対応表のhashが一致しません。", "context_manifest_invalid")
                 pending = self._review_pending(db, run, task)
+                if task.get("input_artifacts"):
+                    binding, _ = self._recheck_review_binding(db, run, task)
+                    from .services.model_context import digest, transform_references
+                    packet = self.build_review_resources(db, run, task, self._base_context(db, run, task))["finding_resource"]
+                    mapping = manifest.get("reference_map")
+                    packet_hash = digest(transform_references(packet, mapping)) if mapping is not None else digest(packet)
+                    if (manifest.get("input_artifacts") != [binding]
+                            or manifest.get("finding_packet_sha256") != packet_hash or manifest.get("review_procedure") != binding["procedure"]):
+                        artifact_review.reject("資料packetと入力manifestの束縛が不正です。", "context_manifest_invalid")
+                if run["config"].get("artifact_review_version") and task["role"] == "orchestrator":
+                    candidates, omitted = self._artifact_candidates(db, run, task["intent"]["scope"]["domain"])
+                    presented = manifest.get("artifact_candidates", [])
+                    expected_omitted = omitted + len(candidates) - len(presented)
+                    if (presented != candidates[:len(presented)] or candidates and not presented
+                            or manifest.get("artifact_candidate_scope", {}).get("omitted_count") != expected_omitted):
+                        artifact_review.reject("候補の提示範囲と未提示件数が不正です。", "context_manifest_invalid")
                 requested = manifest.get("requested_result_ids", [])
                 if task["role"] in {"core", "orchestrator"} and task["phase"] != "initial_routing" and (requested != pending[:len(requested)] or pending and not requested):
                     raise _error("未評価結果の先頭から順に処理してください。", "context_manifest_invalid")
@@ -1339,6 +1619,16 @@ class AnalysisOrchestrationService:
             if task["status"] != "queued" or run["status"] in TERMINAL:
                 return
             self._check_version(run)
+            if task.get("input_artifacts"):
+                try:
+                    self._recheck_review_binding(db, run, task)
+                except AnalysisContractError as exc:
+                    task.update(status="failed", validation_status="rejected", error=exc.code, ended_at=_now())
+                    self._write_task(db, task)
+                    self._event(db, run_id, "preflight_rejected", exc.code, task_id=task_id)
+                    run["error"] = exc.code
+                    self._stop(db, run, "execution_failure")
+                    return
             limit = self._limit(db, run)
             if limit:
                 self._stop(db, run, limit)
@@ -1349,7 +1639,8 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
             self._event(db, run_id, "task_started", task["title"], target=task["role"], task_id=task_id)
             context = self._context(db, run, task)
-            experts = self._initial(db, run["initial_id"])["analysis"].get("experts") if run["config"].get("model_context_version") and task["role"] == "interpretation" else None
+            ai_snapshot = self._initial(db, run["initial_id"]) if task["kind"] == "ai" else None
+            experts = ai_snapshot["analysis"].get("experts") if ai_snapshot and run["config"].get("model_context_version") and task["role"] == "interpretation" else None
             snapshot = self._initial(db, run["initial_id"]) if task["kind"] == "code" else None
             if snapshot is not None:
                 snapshot["orchestration_task"] = copy.deepcopy(task)
@@ -1374,7 +1665,7 @@ class AnalysisOrchestrationService:
             else:
                 references = run["config"].get("context_reference_version") == 1
                 brief = None
-                if run["config"].get("model_context_version") and task["role"] == "interpretation" and (references or task["phase"] != "initial_labels"):
+                if run["config"].get("model_context_version") and task["role"] == "interpretation" and not task.get("input_artifacts") and (references or task["phase"] != "initial_labels"):
                     from . import method_experts
                     if method_experts.ai_block_reason(experts):
                         raise _error("選択した専門家のAI補助条件が未成立です。", "expert_knowledge_unavailable")
@@ -1384,7 +1675,7 @@ class AnalysisOrchestrationService:
                         raise _error("専門家の定義・知識・許可手順を再確認してください。", "expert_knowledge_unavailable") from None
                     context["expert_knowledge"] = {"version": 1, "stage": task["phase"],
                         "status": "method_brief" if brief else "generic", "brief": brief}
-                if references:
+                if references and not task.get("input_artifacts"):
                     from . import method_experts
                     try:
                         context["expert_knowledge"] = method_experts.orchestration_context(stage=task["phase"], brief=brief)
@@ -1393,12 +1684,19 @@ class AnalysisOrchestrationService:
                     context["resources_origin"] = {"initial_id": run["initial_id"], "run_id": run["run_id"]}
                 options = {**copy.deepcopy(run["config"]), **run["config"]["roles"][task["role"]], "timeout_seconds": run["config"]["call_timeout_seconds"],
                            "deadline": run["deadline"], "research_mode": "exploratory", "provider_policy": run["config"]["provider_policy"]}
-                if run["config"].get("model_context_version") and task["role"] in {"core", "orchestrator"} and task["phase"] != "initial_routing":
-                    with self._db() as db:
-                        options["_source_evidence"] = [{key: row[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
-                            for row in self._initial(db, run["initial_id"])["evidence"] if not row["excluded"]]
-                raw = self.agent_runner(task["role"], context, options, check,
-                                        lambda usage=None, **kw: self._record_usage(run_id, task_id, usage, **kw))
+                options["_reference_evidence"] = [
+                    {key: row[key] for key in ("evidence_id", "utterance_id")}
+                    for row in ai_snapshot["evidence"] if not row["excluded"]]
+                if (run["config"].get("model_context_version") or run["config"].get("analysis_interval_version")) and task["role"] in {"core", "orchestrator"} and task["phase"] != "initial_routing":
+                    options["_source_evidence"] = [{key: row[key] for key in ("evidence_id", "utterance_id", "text", "speaker", "start", "end")}
+                        for row in ai_snapshot["evidence"] if not row["excluded"]]
+                from .services.model_context import ReferenceResponseError
+                reference_error = ""
+                try:
+                    raw = self.agent_runner(task["role"], context, options, check,
+                                            lambda usage=None, **kw: self._record_usage(run_id, task_id, usage, **kw))
+                except ReferenceResponseError as exc:
+                    raw, reference_error = exc.response, exc.code
             # Raw response commits before semantic validation, including a late response.
             raw_json = _json(raw)
             with self._db() as db:
@@ -1416,7 +1714,16 @@ class AnalysisOrchestrationService:
                             "dataset_version": task["dataset_version"], "annotation_version": task["annotation_version"],
                             "validation_status": "quarantined" if late else "received", "content_status": "unreviewed",
                             "error": "late_response_after_stop" if late else "", "stale": False}
-                if latest["config"].get("model_context_version") and task["kind"] == "ai":
+                scope = _scope(task["intent"])
+                if scope.get("interval_id"):
+                    metadata["interval_lineage"] = {k: scope.get(k) for k in
+                        ("interval_id", "parent_interval_id", "parent_topic_id", "dataset_version", "ownership_sha256")}
+                if task["kind"] == "ai" and reference_error:
+                    metadata["reference_error"] = reference_error
+                if task.get("input_artifacts"):
+                    metadata["derived_from"] = copy.deepcopy(task["input_artifacts"])
+                    metadata["independent_verification"] = False
+                if (latest["config"].get("model_context_version") or latest["config"].get("analysis_interval_version")) and task["kind"] == "ai":
                     stored_task = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                     metadata["context_manifest_hash"] = stored_task.get("context_manifest_hash")
                 db.execute("INSERT OR IGNORE INTO orchestration_results VALUES (?,?,?,?,?)", (metadata["result_id"], run_id, task_id, raw_json, _json(metadata)))
@@ -1437,12 +1744,12 @@ class AnalysisOrchestrationService:
             with self._db() as db:
                 current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                 # Transport errors may have consumed external work. Never retry blind.
-                before_dispatch = getattr(exc, "code", "") in {"context_budget_exceeded", "context_budget_unavailable", "context_manifest_invalid", "expert_knowledge_unavailable"}
+                before_dispatch = getattr(exc, "code", "") in {"context_budget_exceeded", "context_budget_unavailable", "context_manifest_invalid", "expert_knowledge_unavailable", "artifact_input_invalid", "result_integrity_mismatch", "provider_unavailable"}
                 owned = current["intent"].get("scope", {}).get("owned_evidence_ids", []) if isinstance(current["intent"].get("scope"), dict) else []
                 latest = self._read_run(db, run_id)
                 if (getattr(exc, "code", "") == "context_budget_exceeded" and current["phase"] in {"initial_routing", "initial_labels"}
                         and latest["config"].get("model_context_version") and latest["status"] not in TERMINAL):
-                    selected_keys = (current["intent"].get("scope") or {}).get("requirement_keys")
+                    selected_keys = _scope(current["intent"]).get("requirement_keys")
                     if selected_keys is None:
                         selected_keys = [fingerprint(entry) for entry in latest["initial_analysis_report"]["label_requirements"]]
                     if len(selected_keys) > 1:
@@ -1460,9 +1767,11 @@ class AnalysisOrchestrationService:
                         self._write_run(db, latest)
                         self._event(db, run_id, "context_requirement_split", "必須要件を保持したまま、Coreへの報告を分割して保存しました。", task_id=task_id)
                         return
-                if (getattr(exc, "code", "") == "context_budget_exceeded" and current["phase"] == "initial_analysis"
+                if (getattr(exc, "code", "") == "context_budget_exceeded" and not current.get("input_artifacts") and (current["phase"] == "initial_analysis" or
+                        _scope(current["intent"]).get("interval_id"))
                         and len(owned) > 1 and latest["status"] not in TERMINAL):
-                    current.update(status="blocked", phase="initial_analysis_split", ended_at=_now(), error="context_page_split")
+                    child_phase = current["phase"]
+                    current.update(status="blocked", phase=child_phase + "_split", ended_at=_now(), error="context_page_split")
                     self._write_task(db, current)
                     rows = [e["evidence_id"] for e in self._initial(db, latest["initial_id"])["evidence"] if not e["excluded"]]
                     latest["calls_started"] -= 1  # This attempt never reached inference.
@@ -1473,7 +1782,20 @@ class AnalysisOrchestrationService:
                         intent.update(evidence_ids=visible, parent_task_id=task_id,
                             scope={"owned_evidence_ids": part, "boundary_evidence_ids": [ref for ref in visible if ref not in part],
                                    "split_from_task_id": task_id})
-                        self._register(db, latest, intent, phase="initial_analysis", automatic=True)
+                        if latest["config"].get("analysis_interval_version"):
+                            from .services.analysis_intervals import make_interval, interval_scope
+                            pool = [e for e in self._initial(db, latest["initial_id"])["evidence"] if not e["excluded"]]
+                            parent = current["intent"]["scope"]
+                            source_interval = next(i for i in latest["analysis_partition"]["intervals"] + latest.get("interval_refinements", [])
+                                                   if i["interval_id"] == parent["interval_id"])
+                            interval = make_interval(pool, first, last, dataset_version=latest["input_hash"],
+                                parent_topic_id=parent["parent_topic_id"], title=source_interval.get("title", ""),
+                                method="budget_split", parent_interval_id=parent["interval_id"])
+                            refinements = latest.setdefault("interval_refinements", [])
+                            if not any(i["interval_id"] == interval["interval_id"] for i in refinements):
+                                refinements.append(interval)
+                            intent["scope"] = interval_scope(interval, blind=current["role"] == "verification")
+                        self._register(db, latest, intent, phase=child_phase, automatic=True)
                     self._write_run(db, latest)
                     self._event(db, run_id, "context_page_split", "未送信の範囲を分割し、次の専門家タスクとして保存しました。", task_id=task_id)
                     return
@@ -1511,6 +1833,8 @@ class AnalysisOrchestrationService:
                 return
             try:
                 self._check_input_manifest(run, task, meta)
+                if meta.get("reference_error"):
+                    raise _error("対応表にない根拠参照です。", "evidence_missing")
                 if len(row["raw_json"].encode("utf-8")) > run["config"]["max_result_bytes"]:
                     raise _error("結果が保存上限を超えています。", "result_size_limit")
                 if run["status"] in TERMINAL:
@@ -1518,6 +1842,13 @@ class AnalysisOrchestrationService:
                 self._validate_result(db, run, task, raw)
                 meta.update(validation_status="valid", error="")
                 task.update(status="succeeded", validation_status="valid", error="")
+                if task.get("input_artifacts"):
+                    scope = task["input_artifacts"][0]["interval"]
+                    meta["review_status"] = "insufficient" if any(r["verdict"] == "insufficient" for r in raw["claim_verdicts"]) else "checked_in_scope"
+                    meta["claim_evidence_scope"] = [{"claim_id": r["claim_id"],
+                        "owned_evidence_ids": [e for e in r["evidence_ids"] if e in scope["owned_evidence_ids"]],
+                        "boundary_evidence_ids": [e for e in r["evidence_ids"] if e in scope["boundary_evidence_ids"]]}
+                        for r in raw["claim_verdicts"]]
                 if task["role"] == "critic":
                     self._save_issues(db, run, task, raw, meta)
                 for patch in raw.get("label_patches", []):
@@ -1539,7 +1870,7 @@ class AnalysisOrchestrationService:
             self._write_task(db, task)
 
     def _label_design_evidence_ids(self, db, run, task=None):
-        if task and run["config"].get("model_context_version"):
+        if task and (run["config"].get("model_context_version") or run["config"].get("analysis_interval_version")):
             manifest = task.get("context_manifest")
             if manifest:
                 if fingerprint(manifest) != task.get("context_manifest_hash"):
@@ -1562,7 +1893,7 @@ class AnalysisOrchestrationService:
         tasks = [task for task in self._tasks(db, run["run_id"]) if task["phase"] == "initial_analysis"]
         expected = {("interpretation", "agent-v1"), ("verification", "agent-v1"), ("critic", "agent-v1"),
                     *(("statistics", method) for method in METHODS)}
-        paged = run["config"].get("model_context_version")
+        paged = run["config"].get("model_context_version") or run["config"].get("analysis_interval_version")
         if {(task["role"], task["method_id"]) for task in tasks} != expected or not paged and len(tasks) != len(expected):
             raise _error("初回分析の担当が揃っていません。", "initial_analysis_incomplete")
         if paged:
@@ -1588,6 +1919,10 @@ class AnalysisOrchestrationService:
             self._check_input_manifest(run, task, meta)
             source = {"role": task["role"], "method_id": task["method_id"], "task_id": task["task_id"],
                       "result_id": meta["result_id"], "raw_hash": meta["raw_hash"]}
+            if _scope(task["intent"]).get("interval_id"):
+                source.update(interval_id=task["intent"]["scope"]["interval_id"],
+                              parent_topic_id=task["intent"]["scope"]["parent_topic_id"],
+                              ownership_sha256=task["intent"]["scope"]["ownership_sha256"])
             reports.append({**source, "summary": raw.get("summary", ""),
                             "requirement_count": len(raw["label_requirements"])})
             for entry in raw["label_requirements"]:
@@ -1613,7 +1948,7 @@ class AnalysisOrchestrationService:
                    (decision["decision_id"], run["run_id"], meta["result_id"], _json(decision)))
         instruction = copy.deepcopy(raw["intents"][0])
         if run["config"].get("model_context_version"):
-            scope = task["intent"].get("scope") or {}
+            scope = _scope(task["intent"])
             instruction["scope"] = {"requirement_keys": scope.get("requirement_keys",
                 [fingerprint(entry) for entry in run["initial_analysis_report"]["label_requirements"]])}
             requirements = [entry for entry in run["initial_analysis_report"]["label_requirements"] if fingerprint(entry) in instruction["scope"]["requirement_keys"]]
@@ -1670,18 +2005,30 @@ class AnalysisOrchestrationService:
                 "base_codebook_version": task["codebook_version"], "definitions": copy.deepcopy(raw["label_definitions"])}
 
     def _check_input_manifest(self, run, task, metadata=None):
-        if not run["config"].get("model_context_version") or task["kind"] != "ai":
+        if not (run["config"].get("model_context_version") or run["config"].get("analysis_interval_version")) or task["kind"] != "ai":
             return
         manifest = task.get("context_manifest") or {}
-        if (manifest.get("version") != 1 or manifest.get("dataset_version") != run["input_hash"]
+        if (manifest.get("version") != (artifact_review.MANIFEST_VERSION if run["config"].get("artifact_review_version") else 1) or manifest.get("dataset_version") != run["input_hash"]
                 or fingerprint(manifest) != task.get("context_manifest_hash")
                 or metadata is not None and metadata.get("context_manifest_hash") != task.get("context_manifest_hash")):
             raise _error("保存結果と入力パケットの来歴が一致しません。", "context_manifest_invalid")
+        scope = _scope(task["intent"])
+        if scope.get("interval_id") and (manifest.get("analysis_interval") != scope or
+                not set(scope["owned_evidence_ids"] + scope["boundary_evidence_ids"]).issubset(manifest.get("provided_evidence_ids", []))):
+            raise _error("区間の実配送記録が所属と一致しません。", "context_manifest_invalid")
 
     def _validate_result(self, db, run, task, raw):
         self._check_input_manifest(run, task)
         if not isinstance(raw, dict):
             raise _error("結果はJSONオブジェクトで返してください。", "invalid_result")
+        if task.get("input_artifacts"):
+            binding, _ = self._recheck_review_binding(db, run, task)
+            manifest = task.get("context_manifest", {})
+            if manifest.get("input_artifacts") != [binding] or manifest.get("review_procedure") != binding["procedure"]:
+                artifact_review.reject("点検の入力manifestが束縛と一致しません。", "context_manifest_invalid")
+            artifact_review.validate_review_output(raw, binding, manifest)
+        elif raw.get("claim_verdicts"):
+            artifact_review.reject("主張別の反例判定は専用レビューだけが返せます。", "artifact_output_invalid")
         if raw.get("research_mode", "exploratory") != "exploratory":
             raise _error("確認的主張には未対応です。", "confirmatory_unavailable")
         if raw.get("dataset_version", run["input_hash"]) != run["input_hash"]:
@@ -1726,11 +2073,16 @@ class AnalysisOrchestrationService:
             refs = value.get("evidence_ids", [])
             if not isinstance(refs, list) or any(ref not in evidence for ref in refs):
                 raise _error("根拠発話が存在しません。", "evidence_missing")
-            if run["config"].get("model_context_version") and task["kind"] == "ai":
+            if (run["config"].get("model_context_version") or task.get("input_artifacts")) and task["kind"] == "ai":
                 manifest = task.get("context_manifest", {})
                 if fingerprint(manifest) != task.get("context_manifest_hash") or any(ref not in manifest.get("citation_ids", []) for ref in refs):
                     raise _error("読んでいない発話は根拠として採用できません。", "evidence_not_provided")
         if task["role"] in {"core", "orchestrator"}:
+            if run["config"].get("artifact_review_version") and task["role"] == "orchestrator":
+                artifact_review.validate_decisions(raw, task["context_manifest"].get("artifact_candidates", []),
+                    prior=self._artifact_history(db, run, task["intent"]["scope"]["domain"]))
+            elif raw.get("artifact_decisions") or any(i.get("kind") == "finding_review" for i in raw.get("intents", [])):
+                artifact_review.reject("先行所見の利用は専門側の専用判断で指示してください。")
             if task["role"] == "orchestrator" and (raw.get("stop") is not None or raw.get("label_patches") or raw.get("label_decisions") and task["intent"]["scope"]["domain"] != "labels"):
                 raise _error("専門側は終了判断や担当外ラベルの採否を決めません。", "orchestrator_authority_invalid")
             if task["role"] == "core" and run["config"].get("specialist_orchestration_version") and any(raw.get(k) for k in ("result_assessments", "critique_responses", "label_decisions")):
@@ -1812,6 +2164,11 @@ class AnalysisOrchestrationService:
                 if not issue.get("evidence_ids") and not issue.get("missing_evidence"):
                     raise _error("批判には根拠または不足している証拠の特定が必要です。", "evidence_missing")
         for patch in raw.get("label_patches", []):
+            scope = _scope(task["intent"])
+            if scope.get("interval_id"):
+                owned = {evidence[e]["utterance_id"] for e in scope["owned_evidence_ids"]}
+                if str(patch.get("utterance_id")) not in owned:
+                    raise _error("文脈用発話へラベルを付与できません。", "invalid_label_patch")
             if (str(patch.get("utterance_id")) not in {e["utterance_id"] for e in evidence.values()}
                     or patch.get("field") not in LABEL_FIELDS or not patch.get("reason") or not patch.get("evidence_ids")
                     or "old_value" not in patch or "new_value" not in patch
@@ -1965,13 +2322,56 @@ class AnalysisOrchestrationService:
             "phase": "specialist_review", "domain": task["intent"]["scope"]["domain"],
             "result_id": meta["result_id"], "task_id": task["task_id"], "iteration": run["iteration"],
             "annotation_version": task["annotation_version"], "created_at": _now()}
+        if run["config"].get("artifact_review_version"):
+            candidates = task["context_manifest"].get("artifact_candidates", [])
+            index = {c["result_id"]: c for c in candidates}
+            decision["presented_artifact_candidates"] = copy.deepcopy(candidates)
+            decision["unpresented_artifact_count"] = task["context_manifest"].get("artifact_candidate_scope", {}).get("omitted_count", 0)
+            history = {r["result_id"]: r for r in self._artifact_history(db, run, decision["domain"])}
+            decision["artifact_decisions"] = [{**copy.deepcopy(r), "raw_hash": index[r["result_id"]]["raw_hash"],
+                "information_hash": index[r["result_id"]]["information_hash"], "receiving_domain": decision["domain"],
+                "previous_decision_id": history.get(r["result_id"], {}).get("decision_id", ""),
+                "issuance": "not_requested" if r["disposition"] != "use" else "pending", "issued_task_id": ""}
+                for r in raw.get("artifact_decisions", [])]
+        if run["config"].get("analysis_interval_version"):
+            groups = {}
+            for assessment in raw["result_assessments"]:
+                source = db.execute("SELECT state_json FROM orchestration_results WHERE result_id=? AND run_id=?",
+                                    (assessment["result_id"], run["run_id"])).fetchone()
+                lineage = json.loads(source[0]).get("interval_lineage") if source else None
+                if lineage:
+                    groups.setdefault(lineage["parent_topic_id"], []).append({**lineage,
+                        "source_result_id": assessment["result_id"], "disposition": assessment["disposition"]})
+            decision["topic_sources"] = groups
+        if run["config"].get("artifact_review_version"):
+            decision["review_results"] = []
+            for assessment in raw["result_assessments"]:
+                source = db.execute("SELECT raw_json,state_json FROM orchestration_results WHERE result_id=? AND run_id=?",
+                                    (assessment["result_id"], run["run_id"])).fetchone()
+                source_raw, source_meta = json.loads(source[0]), json.loads(source[1])
+                if source_meta.get("derived_from"):
+                    decision["review_results"].append({"result_id": source_meta["result_id"], "raw_hash": source_meta["raw_hash"],
+                        "derived_from": source_meta["derived_from"], "input_manifest_hash": source_meta.get("context_manifest_hash"),
+                        "interval_lineage": source_meta.get("interval_lineage"), "claim_verdicts": source_raw["claim_verdicts"],
+                        "claim_evidence_scope": source_meta.get("claim_evidence_scope", []), "review_status": source_meta.get("review_status"),
+                        "missing_inputs": source_raw["missing_inputs"], "limitations": source_raw["limitations"],
+                        "disposition": assessment["disposition"], "independent_verification": False})
         self._commit_labels(db, run, raw.get("label_decisions", []), task=task, result_id=meta["result_id"], decision_id=decision["decision_id"])
         self._record_critique_responses(db, run, raw, decision["decision_id"])
         db.execute("INSERT INTO orchestration_decisions VALUES (?,?,?,?)", (decision["decision_id"], run["run_id"], meta["result_id"], _json(decision)))
         self._event(db, run["run_id"], "specialist_review_committed", raw["summary"], source="orchestrator", target="handler",
                     task_id=task["task_id"], domain=decision["domain"], assessed_result_ids=[a["result_id"] for a in raw["result_assessments"]])
         for intent in raw.get("intents", []):
+            artifact_choice = next((r for r in decision.get("artifact_decisions", []) if r["disposition"] == "use"), None)
+            def record_issuance(reason, issued_task=None):
+                if artifact_choice is not None:
+                    artifact_choice.update(issuance="issued" if issued_task else "not_issued",
+                        not_issued_reason="" if issued_task else reason,
+                        issued_task_id=issued_task["task_id"] if issued_task else "")
+                    db.execute("UPDATE orchestration_decisions SET payload_json=? WHERE decision_id=?",
+                               (_json(decision), decision["decision_id"]))
             if run["status"] in TERMINAL:
+                record_issuance(run["stop_reason"])
                 return
             domain = task["intent"]["scope"]["domain"]
             pending = self._review_pending(db, run, task)
@@ -1979,21 +2379,27 @@ class AnalysisOrchestrationService:
                        if t["role"] == "orchestrator" and t["intent"]["scope"]["domain"] == domain and t["iteration"] == task["iteration"]}
             issued = any(t["phase"] == "specialist_followup" and t.get("parent_task_id") in parents for t in self._tasks(db, run["run_id"]))
             if pending or issued:
+                record_issuance("pending_results" if pending else "followup_already_issued")
                 self._event(db, run["run_id"], "intent_deferred", "分野内の保存結果を先に読むため、またはこの段階の追加依頼を既に発注したため保留しました。",
                             intent=intent, review_result_id=meta["result_id"], remaining_result_count=len(pending))
                 continue
             if run["config"]["stop_mode"] == "importance" and IMPORTANCE.get(intent.get("importance"), 0) < IMPORTANCE[run["config"]["importance_threshold"]]:
+                record_issuance("importance_threshold")
                 self._event(db, run["run_id"], "intent_deferred", "重要度の閾値未満の専門側の依頼を保存しました。", intent=intent, review_result_id=meta["result_id"])
                 continue
             question = " ".join(unicodedata.normalize("NFKC", intent["question"]).casefold().split())
             original = " ".join(unicodedata.normalize("NFKC", run["config"]["question"]).casefold().split())
             similar = question == original or len(original) >= 30 and SequenceMatcher(None, question, original, autojunk=False).ratio() >= .85
             if intent.get("kind", "analysis") == "analysis" and not intent.get("label_dependent") and similar:
+                record_issuance("same_question")
                 self._event(db, run["run_id"], "intent_deferred", "元の問いと同一または文字列が近い再発注案を保留しました。具体的な不足を調べる問いが必要です。", intent=intent, review_result_id=meta["result_id"])
                 continue
             if intent["role"] == "critic":
                 intent = {**intent, "target_id": "view:" + run["run_id"], "target_version": run["view_version"]}
-            self._register(db, run, {**intent, "parent_task_id": task["task_id"]}, phase="specialist_followup")
+            if intent.get("kind") == "finding_review":
+                intent = {**intent, "artifact_decision_id": decision["decision_id"]}
+            issued_task = self._register(db, run, {**intent, "parent_task_id": task["task_id"]}, phase="specialist_followup")
+            record_issuance(run.get("stop_reason") or "duplicate_suppressed", issued_task)
         run["phase"] = "specialists"
         self._write_run(db, run)
 
@@ -2048,7 +2454,11 @@ class AnalysisOrchestrationService:
                                 for report in domain_reports if report["result_id"] in previous_domain_ids]
             fresh_basis.extend(self._new_result_basis(db, run, previous_sources,
                 [rid for report in domain_reports if report["result_id"] not in previous_domain_ids for rid in report["source_result_ids"]]))
-            if repeated and not (fresh_basis or new_responses or new_labels):
+            prior_results = [entry["result_id"] for d in history for entry in d.get("result_assessments", [])]
+            prior_results += [entry["result_id"] for d in previous_sources for entry in d["result_assessments"]]
+            current_results = assessments + [rid for report in domain_reports if report["result_id"] not in previous_domain_ids for rid in report["source_result_ids"]]
+            new_review_checks = self._new_review_checks(db, run, prior_results, current_results) if run["config"].get("artifact_review_version") else []
+            if repeated and not (fresh_basis or new_responses or new_labels or new_review_checks):
                 meta.update(content_status="no_progress", repeated_decision_id=repeated["decision_id"])
                 db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
                 self._event(db, run["run_id"], "core_no_progress",
@@ -2059,6 +2469,7 @@ class AnalysisOrchestrationService:
                 return
             progress = {"signature": signature, "assessed_result_ids": assessments,
                         "new_result_basis_ids": fresh_basis,
+                        "new_review_check_ids": new_review_checks,
                         "responded_issue_ids": new_responses, "decided_proposal_ids": new_labels}
         decision = {**copy.deepcopy(raw), "decision_id": _id("decision"), "result_id": meta["result_id"],
                     "iteration": run["iteration"], "created_at": _now(),
@@ -2232,10 +2643,127 @@ class AnalysisOrchestrationService:
             with self._worker_lock:
                 self._driving.discard(run_id)
 
+    def _prepare_intervals(self, run_id):
+        """Freeze run-owned AI drafts and ownership without altering the input."""
+        from .services import analysis_intervals as intervals
+        from .services.model_context import digest
+        with self._db() as db:
+            run = self._read_run(db, run_id)
+            if not run["config"].get("analysis_interval_version"):
+                return
+            if run.get("analysis_partition"):
+                intervals.check_partition(run["analysis_partition"], run["config"], run["input_hash"])
+                return
+            if run.get("interval_preparation", {}).get("status") == "running":
+                raise _error("議題生成の実行結果を照合してください。自動再生成しません。", "interval_recovery_required")
+            initial = self._initial(db, run["initial_id"])
+            rows = [e for e in initial["evidence"] if not e["excluded"]]
+            source_outline = initial.get("source_outline")
+            original = initial.get("archive_snapshot", {}).get("original_source", {}).get("segments")
+            matched = isinstance(source_outline, dict) and (source_outline.get("dataset_version") == run["input_hash"]
+                or original is not None and source_outline.get("provenance", {}).get("input_sha256") == hashlib.sha256(
+                    json.dumps(original, ensure_ascii=False, sort_keys=True).encode()).hexdigest())
+            outline = copy.deepcopy(source_outline) if matched else {"sections": []}
+            spans = intervals.candidate_spans(rows, outline)
+            config, generation = copy.deepcopy(run["config"]), run["generation"]
+            run["interval_preparation"] = {"status": "running", "source_outline_sha256": digest(source_outline),
+                                            "source_outline_matched": matched, "drafts": []}
+            self._write_run(db, run)
+
+        check = lambda: self._check(run_id, generation)
+
+        def before_call():
+            check()
+            with self._db() as db:
+                current = self._read_run(db, run_id)
+                if current["calls_started"] >= config["max_calls"]:
+                    raise _error("議題生成の呼出し予算が不足しています。", "context_budget_unavailable")
+                current["calls_started"] += 1
+                self._write_run(db, current)
+
+        # Reuse valid explicit boundaries. Refine coarse topics; gaps and legacy
+        # citation-only outlines are separate generation jobs on the same source.
+        jobs, cursor = [], 0
+        for first, last, topic, title in spans:
+            if cursor < first:
+                jobs.append((cursor, first, None, "generated"))
+            if last - first > config["context_evidence_limit"] - 2 or sum(len(r["text"]) for r in rows[first:last]) > config["context_text_limit"]:
+                jobs.append((first, last, topic, "refined"))
+            cursor = last
+        if cursor < len(rows):
+            jobs.append((cursor, len(rows), None, "generated"))
+        drafts = []
+        for first, last, parent, method in jobs:
+            check()
+            if parent:
+                replaced = {r["utterance_id"] for r in rows[first:last]}
+                outline["sections"] = [s for s in outline["sections"] if s.get("start_segment_id") not in replaced]
+            draft = {"generation_run_id": _id("outline"), "owner_run_id": run_id, "method": method,
+                     "dataset_version": run["input_hash"], "owned_utterance_ids": [r["utterance_id"] for r in rows[first:last]],
+                     "status": "unavailable", "reason": "outline_builder_unavailable"}
+            if self.outline_builder is not None:
+                segments = [{"id": r["utterance_id"], "text": r["text"], "speaker": r["speaker"],
+                             "start": r["start"], "end": r["end"]} for r in rows[first:last]]
+                try:
+                    generated = self.outline_builder(segments, outline if matched else None, config, check, before_call,
+                                                     lambda usage: None)
+                    check()
+                    if (not isinstance(generated, dict) or not generated.get("sections")
+                            or len(intervals.candidate_spans(rows[first:last], generated)) != len(generated["sections"])):
+                        raise _error("議題境界が対象発話と一致しません。", "outline_invalid")
+                    generated = copy.deepcopy(generated)
+                    for section in generated["sections"]:
+                        section["partition_method"] = method
+                    if parent:
+                        for section in generated["sections"]:
+                            section["parent_topic_id"] = parent
+                        replaced = {r["utterance_id"] for r in rows[first:last]}
+                        outline["sections"] = [s for s in outline["sections"] if s.get("start_segment_id") not in replaced]
+                    outline["sections"].extend(generated["sections"])
+                    draft.update(status="ai_draft", reason="", outline=generated, sha256=digest(generated))
+                except ExecutionStopped:
+                    raise
+                except Exception as exc:
+                    # Failed/unavailable candidates fall back to time; do not
+                    # expose provider exception text or retry cancelled work.
+                    check()
+                    draft.update(status="failed", reason=getattr(exc, "code", type(exc).__name__))
+            if parent and draft["status"] != "ai_draft":
+                outline["sections"].append({"title": "", "parent_topic_id": parent, "partition_method": "time",
+                    "start_segment_id": rows[first]["utterance_id"], "end_segment_id": rows[last - 1]["utterance_id"]})
+            drafts.append(draft)
+            with self._db() as db:
+                current = self._read_run(db, run_id)
+                current["interval_preparation"]["drafts"] = copy.deepcopy(drafts)
+                self._write_run(db, current)
+        check()
+        partition = intervals.build_partition(rows, outline, dataset_version=run["input_hash"],
+            time_width=config["analysis_interval_seconds"], row_limit=config["context_evidence_limit"],
+            text_limit=config["context_text_limit"], outline_method="existing" if matched else "generated",
+            provenance={"source_outline_sha256": digest(source_outline), "source_outline_matched": matched,
+                        "drafts": [{k: v for k, v in d.items() if k != "outline"} for d in drafts]})
+        partition["excluded_utterance_ids"] = [e["utterance_id"] for e in initial["evidence"] if e["excluded"]]
+        partition["sha256"] = digest({k: v for k, v in partition.items() if k != "sha256"})
+        with self._db() as db:
+            current = self._read_run(db, run_id)
+            if current["status"] in TERMINAL or current["generation"] != generation:
+                raise ExecutionStopped()
+            current.update(analysis_partition=partition)
+            current["interval_preparation"]["status"] = "ready"
+            self._write_run(db, current)
+            self._event(db, run_id, "analysis_intervals_frozen", "分析区間と全発話の所属を固定しました。", partition_sha256=partition["sha256"])
+            if any(i["status"] != "ready" for i in partition["intervals"]):
+                current.update(status="recovery_required", error="時刻不正または1発話の入力上限超過があります。固定入力を確認して新規実行してください。")
+                self._write_run(db, current)
+
     def _initial_specialist_intents(self, db, run):
         rows = [e for e in self._initial(db, run["initial_id"])["evidence"] if not e["excluded"]]
         pages = []
-        if run["config"].get("model_context_version"):
+        if run["config"].get("analysis_interval_version"):
+            from .services.analysis_intervals import interval_scope
+            pages = [{"evidence_ids": i["owned_evidence_ids"] + i["boundary_evidence_ids"], "scope": interval_scope(i)}
+                     for i in run["analysis_partition"]["intervals"]]
+        elif run["config"].get("model_context_version"):
             start = 0
             while start < len(rows):
                 end, size = start, 0
@@ -2255,6 +2783,9 @@ class AnalysisOrchestrationService:
         intents = []
         for role in ("interpretation", "verification", "critic"):
             for page in pages:
+                page = copy.deepcopy(page)
+                if role == "verification" and "scope" in page:
+                    page["scope"].pop("title", None)
                 intents.append({"role": role, "question": "初回の専門分析: " + run["config"]["question"],
                     **copy.deepcopy(page),
                     **({"target_id": run["initial_id"], "target_version": 0} if role == "critic" else {})})
@@ -2281,6 +2812,7 @@ class AnalysisOrchestrationService:
                     run["deadline"] = time.time() + seconds if seconds is not None else None
                 run["status"] = "running"
                 self._write_run(db, run)
+            self._prepare_intervals(run_id)
             while True:
                 with self._db() as db:
                     run = self._read_run(db, run_id)

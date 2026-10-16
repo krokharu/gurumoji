@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request
 
 from ..handlers.library_groups import LibraryGroups
 from ..text_utils import clean_single_line, utc_now_iso
+from .data_catalog_routes import register_data_catalog_routes
 
 
 def register_library_group_routes(
@@ -16,6 +17,7 @@ def register_library_group_routes(
     database_connection: Any,
     library_write_lock: Any,
 ) -> None:
+    register_data_catalog_routes(app, database_connection=database_connection, library_write_lock=library_write_lock)
     def create_library_group():
         payload = request.get_json(silent=True)
         try:

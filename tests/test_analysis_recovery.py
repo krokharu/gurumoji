@@ -9,8 +9,9 @@ class AnalysisRecoveryRulesTests(unittest.TestCase):
             with self.subTest(state=state), self.assertRaises(AnalysisContractError):
                 validate_transition("step", state, "running", "late.report")
 
-    def test_publication_retry_is_the_only_terminal_like_retry_transition(self):
+    def test_publication_retry_and_republication_require_the_declared_guard(self):
         validate_transition("publication", "failed", "publishing", "publication.retry")
+        validate_transition("publication", "published", "publishing", "publication.retry")
         with self.assertRaises(AnalysisContractError):
             validate_transition("publication", "published", "publishing", "duplicate.publish")
 

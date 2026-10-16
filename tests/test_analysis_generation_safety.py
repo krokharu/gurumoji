@@ -34,6 +34,9 @@ class GenerationSafetyTests(unittest.TestCase):
             with self.connect() as connection:
                 initialize_pipeline_store(connection)
             state = self.service.status("synthetic", pipeline_id)
+            self.assertEqual((state["status"], state["generation"]), ("waiting", expected_generation - 1))
+            self.assertEqual(state["allowed_actions"], ["resume"])
+            state = self.service.resume("synthetic", pipeline_id, {}, app_url="http://synthetic.invalid")
             self.assertEqual((state["status"], state["generation"]), ("accepted", expected_generation))
             self.assertEqual(self.step(pipeline_id)["attempt"], 1)
         self.service._run(pipeline_id, "http://synthetic.invalid")
@@ -48,6 +51,8 @@ class GenerationSafetyTests(unittest.TestCase):
                                (json.dumps({"fixed": "kept"}), pipeline_id))
             initialize_pipeline_store(connection)
         state = self.service.status("synthetic", pipeline_id)
+        self.assertEqual((state["status"], state["generation"]), ("waiting", 1))
+        state = self.service.resume("synthetic", pipeline_id, {}, app_url="http://synthetic.invalid")
         self.assertEqual((state["status"], state["generation"]), ("accepted", 2))
         frozen = self.step(pipeline_id, "freeze_input")
         self.assertEqual((frozen["status"], frozen["attempt"], frozen["artifact_json"]), ("committed", 1, json.dumps({"fixed": "kept"})))
@@ -63,6 +68,8 @@ class GenerationSafetyTests(unittest.TestCase):
             connection.execute("UPDATE analysis_pipeline_requests SET status='running' WHERE pipeline_id=?", (pipeline_id,))
             initialize_pipeline_store(connection)
         resumed = self.service.status("synthetic", pipeline_id)
+        self.assertEqual((resumed["status"], resumed["generation"]), ("waiting", 1))
+        resumed = self.service.resume("synthetic", pipeline_id, {}, app_url="http://synthetic.invalid")
         self.assertEqual((resumed["status"], resumed["generation"]), ("accepted", 2))
         with patch.object(self.service, "method_runner") as methods, patch.object(self.service, "save_result") as save:
             self.service._run(pipeline_id, "http://synthetic.invalid")
@@ -228,15 +235,19 @@ class GenerationSafetyTests(unittest.TestCase):
         self.assertEqual(self.service._pipeline_row(pipeline_id)["status"], "completed")
         self.assertEqual(len(self.saved), 1)
 
-    def test_cancelled_accepted_pipeline_can_retry_without_restarting_old_worker(self):
+    def test_cancelled_accepted_pipeline_requires_a_new_request(self):
         pipeline_id = self.start_auto()
         result = self.service.cancel("synthetic", pipeline_id)
         self.assertEqual(result["status"], "cancelled")
         self.service._run(pipeline_id, "http://synthetic.invalid", generation=1)
         self.assertEqual(self.saved, [])
-        self.service.retry("synthetic", pipeline_id, {}, app_url="http://synthetic.invalid")
-        self.service._run(pipeline_id, "http://synthetic.invalid", generation=2)
-        self.assertEqual(self.service._pipeline_row(pipeline_id)["status"], "completed")
+        with self.assertRaises(AnalysisContractError) as caught:
+            self.service.retry("synthetic", pipeline_id, {}, app_url="http://synthetic.invalid")
+        self.assertEqual(caught.exception.code, "pipeline_terminal")
+        new_id = self.start(definition_ids=[], mode="automatic", request_id="new-synthetic-request-0002")
+        self.service._run(new_id, "http://synthetic.invalid", generation=1)
+        self.assertEqual(self.service._pipeline_row(new_id)["status"], "completed")
+        self.assertEqual(self.service._pipeline_row(pipeline_id)["status"], "cancelled")
 
     def test_publication_retry_cannot_change_fixed_scope_or_package(self):
         pipeline_id = self.start_auto()

@@ -355,7 +355,7 @@ class ProductionStageParityTests(unittest.TestCase):
             archive_snapshot=app.archive_snapshot, archive_source_stamp=app.archive_source_stamp,
             group_analysis_for_row=app.group_analysis_for_row)
         with mock.patch("gurumoji.services.group_analysis.utc_now_iso", return_value="2026-10-04T00:00:00+00:00"):
-            expected = app.build_analysis_pipeline_snapshot(row)
+            expected = app.build_analysis_orchestration_snapshot(row)
             # Expected calculation populated the process cache. The staged base
             # must still be pure and the true statistics stage must run once.
             with mock.patch.object(research, "_statistics_analysis", wraps=research._statistics_analysis) as statistics:

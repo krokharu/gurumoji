@@ -17,9 +17,13 @@ from typing import Any, Callable
 
 from .analysis_plan_advisor import sign_proposal, verify_proposal
 from . import transcript_preparation as preparation
+from . import analysis_core as core
+from .analysis_method_registry import REGISTRY_VERSION
 from .analysis_core import (
     AnalysisContractError,
-    ALLOWED_TRANSITIONS,
+    TRANSITION_VERSION,
+    transition_guard,
+    validate_transition,
     build_execution_binding,
     build_plan_envelope,
     canonical,
@@ -35,11 +39,8 @@ from .analysis_core import (
 )
 
 
-ACTIVE_STEP_STATES = (
-    "checking", "ready", "running", "validating", "persisting", "waiting_resource",
-    "retry_wait", "cancelling",
-)
-TERMINAL_SUCCESS = {"committed", "reused", "not_applicable"}
+ACTIVE_STEP_STATES = core.ACTIVE_STEP_STATES
+TERMINAL_SUCCESS = core.TERMINAL_SUCCESS
 MILESTONES = tuple(f"M{index}" for index in range(8))
 RUNTIME_LOCK = threading.RLock()
 RUNTIMES: dict[str, threading.Thread] = {}
@@ -49,7 +50,75 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def _event(connection: sqlite3.Connection, pipeline_id: str, kind: str, payload: dict[str, Any]) -> None:
+    connection.execute("""INSERT INTO analysis_pipeline_events
+        (pipeline_id,sequence,event_type,payload_json,created_at)
+        SELECT ?,COALESCE(MAX(sequence),0)+1,?,?,? FROM analysis_pipeline_events WHERE pipeline_id=?""",
+        (pipeline_id, kind, canonical(payload).decode("utf-8"), utc_now(), pipeline_id))
+
+
+def _record_decision(connection: sqlite3.Connection, pipeline_id: str, result: dict[str, Any]) -> None:
+    _event(connection, pipeline_id, "core_decision", {"contract": "CoreDecision",
+        "value": result["decision"], "transitions": result["transitions"], "facts": result["facts"]})
+
+
+_STATE_TABLES = {
+    "pipeline": ("analysis_pipeline_requests", ("pipeline_id",)),
+    "step": ("analysis_step_attempts", ("attempt_id",)),
+    "publication": ("analysis_pipeline_publications", ("pipeline_id", "target_role")),
+}
+_STATE_FIELDS = {
+    "pipeline": {"wait_reason", "error", "current_milestone", "cancel_requested", "generation"},
+    "step": {"error_code", "error", "started_at", "ended_at", "artifact_json", "report_json",
+             "reuse_key", "artifact_hash", "reused_from", "reused_at"},
+    "publication": {"error", "result_run_id", "attempt_id", "generation"},
+}
+
+
+def _transition_state(connection: sqlite3.Connection, machine: str, key: tuple[str, ...],
+                      target: str, *, generation: int, changes: dict[str, Any] | None = None,
+                      guard_id: str | None = None) -> None:
+    """Validate and compare-update inside the caller's transaction, without commit.
+
+    Status and generation are compared for every entity. Step/publication writes
+    additionally compare the owning request's generation, so late workers fail.
+    """
+    table, keys = _STATE_TABLES[machine]
+    where = " AND ".join(name + "=?" for name in keys)
+    row = connection.execute(f"SELECT status,generation,pipeline_id FROM {table} WHERE {where}", key).fetchone()
+    if row is None:
+        raise AnalysisContractError("状態更新の対象がありません。", code="stale_attempt")
+    guard = guard_id if guard_id is not None else transition_guard(machine, row["status"], target) or "transition.invalid"
+    validate_transition(machine, row["status"], target, guard)
+    changes = dict(changes or {})
+    if not changes.keys() <= _STATE_FIELDS[machine]:
+        raise ValueError("Unsupported transition metadata")
+    changes.update(status=target, updated_at=utc_now())
+    fields = ",".join(name + "=?" for name in changes)
+    if machine == "pipeline":
+        compare_generation = generation
+        owner_where, owner_values = "", ()
+    else:
+        compare_generation = row["generation"]
+        owner_where = " AND EXISTS (SELECT 1 FROM analysis_pipeline_requests WHERE pipeline_id=? AND generation=?)"
+        owner_values = (row["pipeline_id"], generation)
+        if machine == "step" and compare_generation != generation:
+            raise AnalysisContractError("旧世代の試行です。", code="stale_generation")
+    updated = connection.execute(
+        f"UPDATE {table} SET {fields} WHERE {where} AND status=? AND generation=?" + owner_where,
+        (*changes.values(), *key, row["status"], compare_generation, *owner_values))
+    if updated.rowcount != 1:
+        raise AnalysisContractError("状態または世代が更新されています。", code="stale_generation")
+    _event(connection, row["pipeline_id"], "state_transition", {
+        "machine": machine, "key": list(key), "from": row["status"], "to": target,
+        "guard_id": guard, "generation": generation,
+        "rule_version": TRANSITION_VERSION,
+    })
+
+
 def initialize_pipeline_store(connection: sqlite3.Connection) -> None:
+    from .services import change_log
+    change_log.initialize(connection)
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_definitions (
         item_id TEXT NOT NULL, definition_id TEXT NOT NULL, revision INTEGER NOT NULL,
         status TEXT NOT NULL, payload_json TEXT NOT NULL, last_trial_json TEXT NOT NULL DEFAULT '{}',
@@ -74,40 +143,52 @@ def initialize_pipeline_store(connection: sqlite3.Connection) -> None:
         started_at TEXT, updated_at TEXT NOT NULL, ended_at TEXT,
         UNIQUE(pipeline_id,step_id,attempt))""")
     connection.execute("CREATE INDEX IF NOT EXISTS analysis_steps_pipeline ON analysis_step_attempts(pipeline_id,milestone,step_id,attempt)")
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(analysis_step_attempts)")}
+    for column in ("reuse_key", "artifact_hash", "reused_from", "reused_at"):
+        if column not in columns:
+            connection.execute(f"ALTER TABLE analysis_step_attempts ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+    connection.execute("CREATE INDEX IF NOT EXISTS analysis_steps_reuse ON analysis_step_attempts(reuse_key,status)")
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_pipeline_publications (
         pipeline_id TEXT NOT NULL, target_role TEXT NOT NULL, result_run_id TEXT NOT NULL DEFAULT '',
         package_hash TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, attempt_id TEXT NOT NULL DEFAULT '',
-        error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+        error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY(pipeline_id,target_role))""")
+    if "generation" not in {row[1] for row in connection.execute("PRAGMA table_info(analysis_pipeline_publications)")}:
+        connection.execute("ALTER TABLE analysis_pipeline_publications ADD COLUMN generation INTEGER NOT NULL DEFAULT 1")
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_pipeline_events (
         pipeline_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL,
         payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
         PRIMARY KEY(pipeline_id,sequence))""")
     # A crash may happen before any step starts or between committed milestones.
     # Record the generation even when no active attempt can carry an interruption.
-    for row in connection.execute("SELECT pipeline_id,generation,status,cancel_requested FROM analysis_pipeline_requests WHERE status IN ('accepted','running','cancelling')").fetchall():
-        connection.execute("""INSERT INTO analysis_pipeline_events(pipeline_id,sequence,event_type,payload_json,created_at)
-            SELECT ?,COALESCE(MAX(sequence),0)+1,'process_restart',?,? FROM analysis_pipeline_events WHERE pipeline_id=?""",
-            (row["pipeline_id"], canonical({"generation": row["generation"], "previous_status": row["status"],
-                                            "cancel_requested": bool(row["cancel_requested"])}).decode(), utc_now(), row["pipeline_id"]))
-    placeholders = ",".join("?" for _ in ACTIVE_STEP_STATES)
-    connection.execute(
-        f"UPDATE analysis_step_attempts SET status='interrupted',error_code='process_restart',"
-        f"error='アプリの再起動により中断しました。固定入力から再開します。',updated_at=? "
-        f"WHERE status IN ({placeholders})",
-        (utc_now(), *ACTIVE_STEP_STATES),
-    )
-    connection.execute(
-        "UPDATE analysis_pipeline_requests SET status='cancelled',wait_reason='',updated_at=? "
-        "WHERE status IN ('accepted','running','cancelling') AND (cancel_requested=1 OR status='cancelling')",
-        (utc_now(),),
-    )
-    connection.execute(
-        "UPDATE analysis_pipeline_requests SET status='waiting',wait_reason='retry',"
-        "error='アプリの再起動後に再開を待っています。',updated_at=? "
-        "WHERE status IN ('accepted','running','cancelling')",
-        (utc_now(),),
-    )
+    for row in connection.execute("SELECT pipeline_id,generation,status,cancel_requested,plan_hash FROM analysis_pipeline_requests WHERE status IN ('accepted','running','cancelling')").fetchall():
+        pid, generation = row["pipeline_id"], row["generation"]
+        _event(connection, pid, "process_restart", {"generation": generation,
+               "previous_status": row["status"], "cancel_requested": bool(row["cancel_requested"])})
+        decision = core.decide_restart(dict(row))
+        _record_decision(connection, pid, decision)
+        cancelled = decision["decision"]["action"] == "cancel"
+        for step in _latest_steps(connection, pid):
+            if step["generation"] != generation or step["status"] in TERMINAL_SUCCESS | {"failed", "cancelled", "interrupted"}:
+                continue
+            step_decision = core.decide_restart_step(step, cancelled=cancelled, context=dict(row))
+            if step_decision["transitions"]:
+                _record_decision(connection, pid, step_decision)
+            for effect in step_decision["transitions"]:
+                changes = ({"error_code": "cancelled", "ended_at": utc_now()} if cancelled else
+                    {"error_code": "process_restart", "error": "アプリの再起動により中断しました。再開操作を待っています。", "ended_at": utc_now()})
+                _transition_state(connection, "step", (step["attempt_id"],), effect["to"], generation=generation,
+                    guard_id=effect["guard_id"], changes=changes if effect == step_decision["transitions"][-1] else {})
+        for publication in connection.execute("SELECT target_role FROM analysis_pipeline_publications WHERE pipeline_id=? AND status='publishing'", (pid,)).fetchall():
+            _transition_state(connection, "publication", (pid, publication["target_role"]), "unknown", generation=generation,
+                              changes={"error": "再起動時点の公開結果を確認できません。"})
+        if cancelled:
+            if row["status"] != "cancelling":
+                _transition_state(connection, "pipeline", (pid,), "cancelling", generation=generation)
+            _transition_state(connection, "pipeline", (pid,), "cancelled", generation=generation, changes={"wait_reason": ""})
+        else:
+            _transition_state(connection, "pipeline", (pid,), "waiting", generation=generation,
+                changes={"wait_reason": "retry", "error": "アプリの再起動後に再開操作を待っています。"})
 
 
 def _has_restart_event(connection: sqlite3.Connection, pipeline_id: str, generation: int) -> bool:
@@ -115,8 +196,13 @@ def _has_restart_event(connection: sqlite3.Connection, pipeline_id: str, generat
     return bool(row and json.loads(row[0]).get("generation") == generation)
 
 
-def _latest_steps(connection: sqlite3.Connection, pipeline_id: str) -> list[dict[str, Any]]:
-    rows = connection.execute("""SELECT attempt.* FROM analysis_step_attempts attempt
+def _latest_steps(connection: sqlite3.Connection, pipeline_id: str, *, include_payload: bool = True) -> list[dict[str, Any]]:
+    columns = "attempt.*" if include_payload else ",".join("attempt." + column for column in (
+        "step_id", "attempt_id", "attempt", "milestone", "status", "error_code", "error",
+        "started_at", "updated_at", "ended_at",
+        "reused_from", "reused_at",
+    ))
+    rows = connection.execute(f"""SELECT {columns} FROM analysis_step_attempts attempt
         JOIN (SELECT step_id,MAX(attempt) AS number FROM analysis_step_attempts
               WHERE pipeline_id=? GROUP BY step_id) latest
           ON latest.step_id=attempt.step_id AND latest.number=attempt.attempt
@@ -294,6 +380,10 @@ class AnalysisPipelineService:
     def capabilities(self) -> dict[str, Any]:
         return capability_catalog()
 
+    def _snapshot(self, item):
+        from .services.analysis_pipeline_adapters import validate_pipeline_snapshot
+        return validate_pipeline_snapshot(self.snapshot_builder(item))
+
     def _definition_rows(self, connection: sqlite3.Connection, item_id: str, ids: list[str],
                          *, adopted_only: bool = True) -> list[dict[str, Any]]:
         if not ids:
@@ -347,6 +437,7 @@ class AnalysisPipelineService:
         if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
             raise AnalysisContractError("expected_revisionは整数で指定してください。", code="revision_conflict")
         now = utc_now()
+        from .services import change_log
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -381,14 +472,15 @@ class AnalysisPipelineService:
                         or last_trial.get("definition_hash") != fingerprint(value)
                         or item is None or self.source_fingerprint(item) != last_trial.get("input_hash")):
                     raise AnalysisContractError("試行した定義または入力が更新されています。再試行してください。", code="trial_conflict")
-            connection.execute("""INSERT INTO analysis_definitions
-                (item_id,definition_id,revision,status,payload_json,last_trial_json,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(item_id,definition_id) DO UPDATE SET
-                revision=excluded.revision,status=excluded.status,payload_json=excluded.payload_json,
-                last_trial_json=excluded.last_trial_json,updated_at=excluded.updated_at""",
-                (item_id, definition_id, revision, status, canonical(value).decode("utf-8"),
-                 canonical(last_trial).decode("utf-8"), existing["created_at"] if existing else now, now),
-            )
+            with change_log.tracking(connection, [("analysis_definitions", item_id)], process="analysis_definition_save"):
+                connection.execute("""INSERT INTO analysis_definitions
+                    (item_id,definition_id,revision,status,payload_json,last_trial_json,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(item_id,definition_id) DO UPDATE SET
+                    revision=excluded.revision,status=excluded.status,payload_json=excluded.payload_json,
+                    last_trial_json=excluded.last_trial_json,updated_at=excluded.updated_at""",
+                    (item_id, definition_id, revision, status, canonical(value).decode("utf-8"),
+                     canonical(last_trial).decode("utf-8"), existing["created_at"] if existing else now, now),
+                )
         return {**value, "revision": revision, "status": status, "updated_at": now, "last_trial": last_trial}
 
     def trial_definition(self, item_id: str, definition_id: str, *, limit: int = 20) -> dict[str, Any]:
@@ -398,7 +490,7 @@ class AnalysisPipelineService:
         item = self.find_item(item_id)
         if item is None:
             raise LookupError("分析対象が見つかりません。")
-        snapshot = self.snapshot_builder(item)
+        snapshot = self._snapshot(item)
         rows = measure_segments(snapshot["analysis"], [definition], limit=limit)
         column = definition["output_column"]
         values = [row[column] for row in rows if row.get(column) is not None]
@@ -414,16 +506,18 @@ class AnalysisPipelineService:
             "missing_count": len(rows) - len(values), "values": values[:20], "rows": rows,
             "external_calls": 0, "created_at": utc_now(),
         }
+        from .services import change_log
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = self._definition_rows(connection, item_id, [definition_id], adopted_only=False)[0]
             latest_item = self.find_item(item_id)
             if current != definition or latest_item is None or self.source_fingerprint(latest_item) != snapshot["input_hash"]:
                 raise AnalysisContractError("試行中に定義または入力が更新されました。", code="trial_conflict")
-            connection.execute(
-                "UPDATE analysis_definitions SET last_trial_json=?,updated_at=? WHERE item_id=? AND definition_id=? AND revision=?",
-                (canonical(trial).decode("utf-8"), utc_now(), item_id, definition_id, definition["revision"]),
-            )
+            with change_log.tracking(connection, [("analysis_definitions", item_id)], origin="rule", process="definition_trial"):
+                connection.execute(
+                    "UPDATE analysis_definitions SET last_trial_json=?,updated_at=? WHERE item_id=? AND definition_id=? AND revision=?",
+                    (canonical(trial).decode("utf-8"), utc_now(), item_id, definition_id, definition["revision"]),
+                )
         return trial
 
     @staticmethod
@@ -480,7 +574,7 @@ class AnalysisPipelineService:
         if not isinstance(ids, list) or any(not isinstance(value, str) for value in ids):
             raise AnalysisContractError("definition_idsはIDの配列です。", field="definition_ids")
         definitions = self._definitions(item_id, ids)
-        snapshot = self.snapshot_builder(item)
+        snapshot = self._snapshot(item)
         self._check_expected_definitions(payload, definitions, snapshot["input_hash"])
         if payload.get("planning_proposal") is not None:
             verify_proposal(payload["planning_proposal"])
@@ -504,7 +598,7 @@ class AnalysisPipelineService:
         if (payload.get("source_revision") != source_revision
                 or payload.get("analysis_revision") != analysis_revision):
             raise AnalysisContractError("入力版が更新されています。", code="revision_conflict")
-        snapshot = self.snapshot_builder(item)
+        snapshot = self._snapshot(item)
         proposal = self.plan_advisor(snapshot, payload)
         latest = self.find_item(item_id)
         if (latest is None
@@ -527,7 +621,7 @@ class AnalysisPipelineService:
         if preview["plan"]["eligibility"]["execution"] != "allowed":
             raise AnalysisContractError("必須の適用性検査に合格していません。", code="ineligible")
         item = self.find_item(item_id)
-        snapshot = self.snapshot_builder(item)
+        snapshot = self._snapshot(item)
         if snapshot["input_hash"] != preview["plan"]["input_hash"]:
             raise AnalysisContractError("計画確認中に入力が更新されました。", code="revision_conflict")
         library_key = self.runtime_key
@@ -539,8 +633,15 @@ class AnalysisPipelineService:
                 "SELECT * FROM analysis_pipeline_requests WHERE request_id=?", (request_id,)
             ).fetchone()
             if existing:
-                if (existing["item_id"] != item_id or existing["plan_hash"] != preview["plan"]["plan_hash"]
-                        or json.loads(existing["binding_json"]) != preview["binding"]):
+                expected_plan, expected_binding = preview["plan"], preview["binding"]
+                if "reuse" not in json.loads(existing["plan_json"]) and expected_plan["reuse"] == "auto":
+                    # Retain idempotence for requests accepted before this additive
+                    # policy field existed; never rewrite their frozen envelopes.
+                    expected_plan = {k: v for k, v in expected_plan.items() if k not in {"reuse", "plan_hash"}}
+                    expected_plan["plan_hash"] = fingerprint(expected_plan)
+                    expected_binding = {**expected_binding, "plan_hash": expected_plan["plan_hash"]}
+                if (existing["item_id"] != item_id or existing["plan_hash"] != expected_plan["plan_hash"]
+                        or json.loads(existing["binding_json"]) != expected_binding):
                     raise AnalysisContractError("request_idが別の計画に使われています。", code="request_conflict")
                 result = self.status(item_id, existing["pipeline_id"], ensure_running=False)
                 if result["status"] in {"accepted", "running", "waiting"}:
@@ -577,30 +678,24 @@ class AnalysisPipelineService:
                      canonical(directive).decode("utf-8"), now),
                 )
             for target in EFFECTIVE_PUBLICATION_WRITERS:
-                status = "pending" if preview["plan"]["publication_targets"] else "not_selected"
                 connection.execute("""INSERT INTO analysis_pipeline_publications
-                    (pipeline_id,target_role,status,updated_at) VALUES (?,?,?,?)""",
-                    (pipeline_id, target, status, now),
+                    (pipeline_id,target_role,status,updated_at) VALUES (?,?,'pending',?)""",
+                    (pipeline_id, target, now),
                 )
+                if not preview["plan"]["publication_targets"]:
+                    _transition_state(connection, "publication", (pipeline_id, target), "not_selected", generation=1)
             self._event(connection, pipeline_id, "pipeline_accepted", {
                 "plan_hash": preview["plan"]["plan_hash"], "input_hash": snapshot["input_hash"]})
         self._schedule(pipeline_id, app_url)
         return self.status(item_id, pipeline_id, ensure_running=False), 202
 
     def _event(self, connection: sqlite3.Connection, pipeline_id: str, kind: str, payload: dict[str, Any]) -> None:
-        sequence = connection.execute(
-            "SELECT COALESCE(MAX(sequence),0)+1 FROM analysis_pipeline_events WHERE pipeline_id=?",
-            (pipeline_id,),
-        ).fetchone()[0]
-        connection.execute(
-            "INSERT INTO analysis_pipeline_events(pipeline_id,sequence,event_type,payload_json,created_at) VALUES (?,?,?,?,?)",
-            (pipeline_id, sequence, kind, canonical(payload).decode("utf-8"), utc_now()),
-        )
+        _event(connection, pipeline_id, kind, payload)
 
     def _schedule(self, pipeline_id: str, app_url: str) -> None:
         key = self.runtime_key + ":" + pipeline_id
         with RUNTIME_LOCK:
-            row = self._pipeline_row(pipeline_id)
+            row = self._pipeline_row(pipeline_id, columns="status,generation")
             if row["status"] != "accepted":
                 return
             generation = row["generation"]
@@ -618,24 +713,24 @@ class AnalysisPipelineService:
     def _run_guarded(self, pipeline_id: str, app_url: str, runtime_key: str,
                      generation: int | None = None) -> None:
         if generation is None:
-            generation = self._pipeline_row(pipeline_id)["generation"]
+            generation = self._pipeline_row(pipeline_id, columns="generation")["generation"]
         try:
             self._run(pipeline_id, app_url, generation=generation)
         except Exception as exc:
             with self.connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute("SELECT * FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone()
+                row = connection.execute("SELECT pipeline_id,plan_hash,generation,status,cancel_requested FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone()
                 if row and row["generation"] == generation and row["status"] not in {"completed", "cancelled", "failed"}:
-                    cancelled = bool(row["cancel_requested"])
+                    decision = core.decide_failure([{"code": getattr(exc, "code", "execution_failed")}],
+                        cancelled=bool(row["cancel_requested"]), context=dict(row), unexpected=True)
+                    _record_decision(connection, pipeline_id, decision)
+                    cancelled = decision["decision"]["action"] == "cancel"
                     if cancelled:
                         self._finish_cancelled(connection, pipeline_id, generation)
                         return
-                    status = "cancelled" if cancelled else "failed"
-                    connection.execute(
-                        "UPDATE analysis_pipeline_requests SET status=?,error=?,updated_at=? WHERE pipeline_id=? AND generation=?",
-                        (status, str(exc)[:1000], utc_now(), pipeline_id, generation),
-                    )
-                    self._event(connection, pipeline_id, "pipeline_" + status, {"error": str(exc)[:1000], "generation": generation})
+                    _transition_state(connection, "pipeline", (pipeline_id,), "failed", generation=generation,
+                                      changes={"error": str(exc)[:1000]})
+                    self._event(connection, pipeline_id, "pipeline_failed", {"error": str(exc)[:1000], "generation": generation})
         finally:
             with RUNTIME_LOCK:
                 if RUNTIMES.get(runtime_key) is threading.current_thread():
@@ -644,13 +739,13 @@ class AnalysisPipelineService:
     @staticmethod
     def _assert_current(connection: sqlite3.Connection, pipeline_id: str, generation: int,
                         *, allow_cancel: bool = False, attempt_id: str | None = None) -> None:
-        row = connection.execute("SELECT * FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone()
+        row = connection.execute("SELECT generation,status,cancel_requested FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone()
         if row is None or row["generation"] != generation or row["status"] not in {"accepted", "running", "cancelling"}:
             raise AnalysisContractError("旧世代の実行結果は採用しません。", code="stale_generation")
         if not allow_cancel and row["cancel_requested"]:
             raise AnalysisContractError("保存確定前に取り消されました。", code="cancelled")
         if attempt_id is not None:
-            step = connection.execute("SELECT * FROM analysis_step_attempts WHERE attempt_id=? AND pipeline_id=?", (attempt_id, pipeline_id)).fetchone()
+            step = connection.execute("SELECT step_id,generation,status FROM analysis_step_attempts WHERE attempt_id=? AND pipeline_id=?", (attempt_id, pipeline_id)).fetchone()
             latest = connection.execute("SELECT attempt_id FROM analysis_step_attempts WHERE pipeline_id=? AND step_id=? ORDER BY attempt DESC LIMIT 1",
                                         (pipeline_id, step["step_id"] if step else "")).fetchone()
             if (step is None or step["generation"] != generation or latest is None or latest["attempt_id"] != attempt_id
@@ -664,17 +759,20 @@ class AnalysisPipelineService:
             self._assert_current(connection, pipeline_id, generation, allow_cancel=allow_cancel)
             yield connection
 
-    def _pipeline_row(self, pipeline_id: str) -> dict[str, Any]:
+    def _pipeline_row(self, pipeline_id: str, *, columns: str = (
+        "pipeline_id,item_id,source_revision,analysis_revision,input_hash,plan_hash,"
+        "status,generation,result_run_id"
+    )) -> dict[str, Any]:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)
+                f"SELECT {columns} FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)
             ).fetchone()
         if row is None:
             raise LookupError("分析pipelineが見つかりません。")
         return dict(row)
 
     def _cancelled(self, pipeline_id: str, generation: int) -> bool:
-        row = self._pipeline_row(pipeline_id)
+        row = self._pipeline_row(pipeline_id, columns="cancel_requested,generation")
         return bool(row["cancel_requested"]) or int(row["generation"]) != int(generation)
 
     def _cancel_attempt(self, connection: sqlite3.Connection, step: dict[str, Any],
@@ -684,19 +782,17 @@ class AnalysisPipelineService:
             return
         self._assert_current(connection, step["pipeline_id"], generation,
                              allow_cancel=True, attempt_id=step["attempt_id"])
-        current = step["status"]
-        if "cancelled" not in ALLOWED_TRANSITIONS["step"].get(current, set()):
-            if "cancelling" not in ALLOWED_TRANSITIONS["step"].get(current, set()):
-                raise AnalysisContractError("試行を安全に取り消せません。", code="invalid_transition")
-            connection.execute("UPDATE analysis_step_attempts SET status='cancelling' WHERE attempt_id=?", (step["attempt_id"],))
-        fields = "status='cancelled',error_code='cancelled',error=?,updated_at=?,ended_at=?"
+        context = dict(connection.execute("SELECT pipeline_id,plan_hash,generation FROM analysis_pipeline_requests WHERE pipeline_id=?",
+                                          (step["pipeline_id"],)).fetchone())
+        decision = core.decide_cancel_step(step, context)
+        _record_decision(connection, step["pipeline_id"], decision)
         now = utc_now()
-        values: list[Any] = ["取り消されました。確定済み成果は保持しています。", now, now]
+        changes = {"error_code": "cancelled", "error": "取り消されました。確定済み成果は保持しています。", "ended_at": now}
         if artifact is not None:
-            fields += ",artifact_json=?"
-            values.append(canonical(artifact).decode("utf-8"))
-        connection.execute("UPDATE analysis_step_attempts SET " + fields + " WHERE attempt_id=?",
-                           (*values, step["attempt_id"]))
+            changes["artifact_json"] = canonical(artifact).decode("utf-8")
+        for effect in decision["transitions"]:
+            _transition_state(connection, "step", (step["attempt_id"],), effect["to"], generation=generation,
+                guard_id=effect["guard_id"], changes=changes if effect == decision["transitions"][-1] else {})
 
     def _finish_cancelled(self, connection: sqlite3.Connection, pipeline_id: str,
                           generation: int, *, milestone: str | None = None) -> None:
@@ -706,12 +802,18 @@ class AnalysisPipelineService:
             if step["generation"] == generation:
                 self._cancel_attempt(connection, step, generation)
         # A terminal pipeline cannot truthfully claim an unobserved write is ongoing.
-        connection.execute("""UPDATE analysis_pipeline_publications SET status='unknown',
-            error='取消時点の公開結果を確認できません。',updated_at=?
-            WHERE pipeline_id=? AND status='publishing'""", (utc_now(), pipeline_id))
-        connection.execute("""UPDATE analysis_pipeline_requests SET status='cancelled',
-            wait_reason='',error='',current_milestone=COALESCE(?,current_milestone),updated_at=?
-            WHERE pipeline_id=? AND generation=?""", (milestone, utc_now(), pipeline_id, generation))
+        for row in connection.execute("SELECT target_role FROM analysis_pipeline_publications WHERE pipeline_id=? AND status='publishing'", (pipeline_id,)).fetchall():
+            _transition_state(connection, "publication", (pipeline_id, row["target_role"]), "unknown", generation=generation,
+                              changes={"error": "取消時点の公開結果を確認できません。"})
+        row = dict(connection.execute("SELECT pipeline_id,plan_hash,status,generation,cancel_requested FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone())
+        decision = core.decide_cancel_pipeline(row)
+        _record_decision(connection, pipeline_id, decision)
+        changes = {"wait_reason": "", "error": ""}
+        if milestone is not None:
+            changes["current_milestone"] = milestone
+        for effect in decision["transitions"]:
+            _transition_state(connection, "pipeline", (pipeline_id,), effect["to"], generation=generation,
+                guard_id=effect["guard_id"], changes=changes if effect == decision["transitions"][-1] else {})
         self._event(connection, pipeline_id, "pipeline_cancelled", {"generation": generation, "milestone": milestone})
 
     def _cancel_step(self, attempt_id: str, generation: int, *, artifact: Any = None) -> None:
@@ -722,58 +824,94 @@ class AnalysisPipelineService:
                 raise AnalysisContractError("試行がありません。", code="stale_attempt")
             self._cancel_attempt(connection, dict(step), generation, artifact=artifact)
 
-    def _set_step(self, attempt_id: str, status: str, *, artifact: Any = None,
-                  report: Any = None, error_code: str = "", error: str = "", generation: int) -> None:
+    def _fail_attempt(self, pipeline_id: str, attempt_id: str, generation: int, exc: Exception) -> None:
+        with self._worker_transaction(pipeline_id, generation, allow_cancel=True) as connection:
+            self._assert_current(connection, pipeline_id, generation, allow_cancel=True, attempt_id=attempt_id)
+            context = dict(connection.execute("SELECT pipeline_id,plan_hash,generation,status,cancel_requested FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone())
+            step = dict(connection.execute("SELECT * FROM analysis_step_attempts WHERE attempt_id=?", (attempt_id,)).fetchone())
+            code = getattr(exc, "code", "execution_failed")
+            decision = core.decide_failed_attempt(step, error_code=code, cancelled=bool(context["cancel_requested"]), context=context)
+            if decision["decision"]["action"] == "cancel":
+                self._cancel_attempt(connection, step, generation)
+                return
+            _record_decision(connection, pipeline_id, decision)
+            effect = decision["transitions"][0]
+            _transition_state(connection, "step", (attempt_id,), effect["to"], generation=generation,
+                guard_id=effect["guard_id"], changes={"error_code": code, "error": str(exc)[:1000], "ended_at": utc_now()})
+
+    def _set_step(self, attempt_id: str, status: str | tuple[str, ...], *, artifact: Any = None,
+                  report: Any = None, error_code: str = "", error: str = "", generation: int,
+                  decision: dict[str, Any] | None = None, reuse_key: str = "") -> None:
         now = utc_now()
-        fields = ["status=?", "updated_at=?", "error_code=?", "error=?"]
-        values: list[Any] = [status, now, error_code, error]
-        if status == "running":
-            fields.append("started_at=COALESCE(started_at,?)")
-            values.append(now)
-        if status in TERMINAL_SUCCESS | {"failed", "cancelled", "interrupted"}:
-            fields.append("ended_at=?")
-            values.append(now)
+        statuses = (status,) if isinstance(status, str) else status
+        changes = {"error_code": error_code, "error": error}
+        if statuses[-1] in TERMINAL_SUCCESS | {"failed", "cancelled", "interrupted"}:
+            changes["ended_at"] = now
         if artifact is not None:
-            fields.append("artifact_json=?")
-            values.append(canonical(artifact).decode("utf-8"))
+            changes["artifact_json"] = canonical(artifact).decode("utf-8")
+            if statuses[-1] == "committed":
+                changes.update(artifact_hash=fingerprint(artifact), reuse_key=reuse_key)
         if report is not None:
-            fields.append("report_json=?")
-            values.append(canonical(report).decode("utf-8"))
-        values.append(attempt_id)
+            changes["report_json"] = canonical(report).decode("utf-8")
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             step = connection.execute("SELECT * FROM analysis_step_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
             if step is None:
                 raise AnalysisContractError("試行がありません。", code="stale_attempt")
             self._assert_current(connection, step["pipeline_id"], generation,
-                                 allow_cancel=status in {"cancelled", "failed"}, attempt_id=attempt_id)
-            if status not in ALLOWED_TRANSITIONS["step"].get(step["status"], set()):
-                raise AnalysisContractError("試行状態を逆戻りできません。", code="invalid_transition")
-            connection.execute(
-                "UPDATE analysis_step_attempts SET " + ",".join(fields) + " WHERE attempt_id=?",
-                tuple(values),
-            )
+                                 allow_cancel=statuses[-1] in {"cancelled", "failed"}, attempt_id=attempt_id)
+            if decision:
+                _record_decision(connection, step["pipeline_id"], decision)
+                if "reuse_decision" in decision:
+                    _record_decision(connection, step["pipeline_id"], decision["reuse_decision"])
+            for target in statuses:
+                metadata = changes if target == statuses[-1] else {}
+                if target == "running" and not step["started_at"]:
+                    metadata = {**metadata, "started_at": now}
+                _transition_state(connection, "step", (attempt_id,), target, generation=generation, changes=metadata)
 
     def _execute_step(self, pipeline: dict[str, Any], step: dict[str, Any], snapshot: dict[str, Any],
-                      definitions: list[dict[str, Any]], app_url: str) -> dict[str, Any]:
+                      definitions: list[dict[str, Any]], app_url: str, *,
+                      dispatch_decision: dict[str, Any] | None = None) -> dict[str, Any]:
         attempt_id = step["attempt_id"]
         generation = int(step["generation"])
         if self._cancelled(pipeline["pipeline_id"], generation):
             self._cancel_step(attempt_id, generation)
             return {"status": "cancelled"}
-        self._set_step(attempt_id, generation=generation, status="checking")
+        self._set_step(attempt_id, generation=generation, status="checking", decision=dispatch_decision)
         plan_steps = {value["step_id"]: value for value in json.loads(pipeline["plan_json"])["steps"]}
         spec = plan_steps[step["step_id"]]
-        if spec.get("allow_not_applicable") and (
-            step["step_id"] in {"outline_scope", "comparison_scope"}
-            or (step["step_id"] == "manual_measurement" and not definitions)
-            or (step["step_id"] == "publish_result" and not json.loads(pipeline["plan_json"])["publication_targets"])
-        ):
+        decision = core.decide_applicability(step["step_id"], spec, has_definitions=bool(definitions),
+            has_targets=bool(json.loads(pipeline["plan_json"])["publication_targets"]), context=pipeline)
+        if decision["decision"]["action"] == "mark_not_applicable":
             artifact = {"reason_code": "not_selected", "rule_version": "analysis-core-1", "verified_by": "analysis_core"}
-            self._set_step(attempt_id, generation=generation, status="not_applicable", artifact=artifact, report={"status": "not_applicable"})
+            self._set_step(attempt_id, generation=generation, status="not_applicable", artifact=artifact,
+                           report={"status": "not_applicable"}, decision=decision)
             return {"status": "not_applicable", "artifact": artifact}
-        self._set_step(attempt_id, generation=generation, status="ready")
-        self._set_step(attempt_id, generation=generation, status="running")
+        reuse_key = pipeline.get("_reuse_keys", {}).get(step["step_id"], "")
+        if reuse_key:
+            reuse_decision = core.decide_reuse(step["step_id"], reuse_key, pipeline.get("_reuse_candidates", []),
+                mode=json.loads(pipeline["plan_json"]).get("reuse", "auto"), context=pipeline)
+            if reuse_decision["decision"]["action"] == "reuse":
+                source = reuse_decision["candidate"]
+                artifact = json.loads(source["artifact_json"])
+                with self._worker_transaction(pipeline["pipeline_id"], generation) as connection:
+                    self._assert_current(connection, pipeline["pipeline_id"], generation, attempt_id=attempt_id)
+                    _record_decision(connection, pipeline["pipeline_id"], decision)
+                    _record_decision(connection, pipeline["pipeline_id"], reuse_decision)
+                    _transition_state(connection, "step", (attempt_id,), "reused", generation=generation,
+                        guard_id=reuse_decision["transitions"][0]["guard_id"], changes={
+                            "artifact_json": source["artifact_json"], "artifact_hash": source["artifact_hash"],
+                            "reuse_key": reuse_key, "reused_from": source["attempt_id"], "reused_at": source["ended_at"],
+                            "ended_at": utc_now(), "report_json": canonical({"status": "reused",
+                                "reused_from": source["attempt_id"], "artifact_hash": source["artifact_hash"]}).decode("utf-8")})
+                    self._event(connection, pipeline["pipeline_id"], "step_reused", {
+                        "step_id": step["step_id"], "attempt_id": attempt_id, "reused_from": source["attempt_id"],
+                        "artifact_hash": source["artifact_hash"], "reuse_key": reuse_key, "generation": generation})
+                return {"status": "reused", "artifact": artifact}
+            # Both judgments belong to the existing dispatch transaction.
+            decision = {**decision, "reuse_decision": reuse_decision}
+        self._set_step(attempt_id, generation=generation, status=("ready", "running"), decision=decision)
         step_id = step["step_id"]
         if step_id == "freeze_input":
             artifact = {"input_hash": snapshot["input_hash"], "source_revision": pipeline["source_revision"],
@@ -810,7 +948,7 @@ class AnalysisPipelineService:
             "step_id": step_id, "attempt_id": attempt_id, "generation": generation,
             "status": "completed", "input_hash": pipeline["input_hash"],
         }
-        self._set_step(attempt_id, generation=generation, status="committed", artifact=artifact, report=report)
+        self._set_step(attempt_id, generation=generation, status="committed", artifact=artifact, report=report, reuse_key=reuse_key)
         return {"status": "committed", "artifact": artifact}
 
     def _chart_specs(self, pipeline_id: str) -> list[dict[str, Any]]:
@@ -862,13 +1000,17 @@ class AnalysisPipelineService:
             "binding": json.loads(pipeline["binding_json"]), "definitions": definitions,
             "research_protocol": plan["research_protocol"],
             "publication_targets": validate_publication_targets(plan["publication_targets"]),
+            "reused_steps": [],
         }
+        with self.connect() as connection:
+            parameters["reused_steps"] = [{key: value[key] for key in ("step_id", "reused_from", "artifact_hash")}
+                for value in _latest_steps(connection, pipeline["pipeline_id"]) if value["status"] == "reused"]
         if "planning_proposal" in plan:
             parameters["planning_proposal"] = plan["planning_proposal"]
         result = {
             "schema_version": 1,
             "parameters": parameters,
-            "algorithms": {"analysis_pipeline": "analysis-pipeline-1",
+            "algorithms": {"analysis_pipeline": core.PIPELINE_VERSION,
                            "automatic": snapshot.get("analysis", {}).get("algorithm_version")},
             "methods": methods, "chart_specs": artifacts.get("chart_specs", {}).get("chart_specs", []),
         }
@@ -900,7 +1042,7 @@ class AnalysisPipelineService:
         return {"result_run_id": run["id"], "package_hash": package_hash, "status": run["status"]}
 
     def _publish_package(self, pipeline: dict[str, Any], *, step: dict[str, Any]) -> dict[str, Any]:
-        current = self._pipeline_row(pipeline["pipeline_id"])
+        current = self._pipeline_row(pipeline["pipeline_id"], columns="pipeline_id,result_run_id,plan_json")
         run_id = current["result_run_id"]
         if not run_id:
             raise AnalysisContractError("保存済みresult_runがありません。", code="publication_failed")
@@ -911,10 +1053,9 @@ class AnalysisPipelineService:
         with self._worker_transaction(current["pipeline_id"], step["generation"]) as connection:
             self._assert_current(connection, current["pipeline_id"], step["generation"], attempt_id=step["attempt_id"])
             for kind in effective:
-                connection.execute("""INSERT INTO analysis_pipeline_publications
-                    (pipeline_id,target_role,status,result_run_id,updated_at) VALUES (?,?,'publishing',?,?)
-                    ON CONFLICT(pipeline_id,target_role) DO UPDATE SET status='publishing',error='',updated_at=excluded.updated_at""",
-                    (current["pipeline_id"], kind, run_id, utc_now()))
+                _transition_state(connection, "publication", (current["pipeline_id"], kind), "publishing",
+                    generation=step["generation"], changes={"result_run_id": run_id, "error": "",
+                    "attempt_id": step["attempt_id"], "generation": step["generation"]})
         publication_error = ""
         try:
             self.publish_result(run_id, targets=selected, commit_guard=lambda connection: self._assert_current(
@@ -936,13 +1077,15 @@ class AnalysisPipelineService:
         with self._worker_transaction(current["pipeline_id"], step["generation"], allow_cancel=True) as connection:
             self._assert_current(connection, current["pipeline_id"], step["generation"], allow_cancel=True, attempt_id=step["attempt_id"])
             for target, value in outcomes.items():
-                connection.execute("""UPDATE analysis_pipeline_publications
-                    SET status=?,error=?,updated_at=? WHERE pipeline_id=? AND target_role=?""",
-                    (value["status"], str(value.get("error") or ""), utc_now(), current["pipeline_id"], target))
+                _transition_state(connection, "publication", (current["pipeline_id"], target), value["status"],
+                    generation=step["generation"], changes={"error": str(value.get("error") or "")})
         return {"result_run_id": run_id, "outcomes": outcomes}
 
     def _run(self, pipeline_id: str, app_url: str, *, generation: int | None = None) -> None:
-        pipeline = self._pipeline_row(pipeline_id)
+        pipeline = self._pipeline_row(pipeline_id, columns=(
+            "pipeline_id,item_id,source_revision,analysis_revision,input_hash,plan_hash,"
+            "status,generation,result_run_id,snapshot_json,plan_json,binding_json"
+        ))
         if pipeline["status"] != "accepted" or (generation is not None and generation != pipeline["generation"]):
             return
         generation = pipeline["generation"]
@@ -950,19 +1093,41 @@ class AnalysisPipelineService:
         snapshot = json.loads(pipeline["snapshot_json"])
         if snapshot.get("input_hash") != pipeline["input_hash"]:
             raise AnalysisContractError("固定入力のhashが一致しません。", code="binding_conflict")
+        from .services.analysis_pipeline_adapters import validate_pipeline_snapshot
+        validate_pipeline_snapshot(snapshot)
+        plan = json.loads(pipeline["plan_json"])
+        binding = json.loads(pipeline["binding_json"])
+        analysis_hash = core.reuse_analysis_hash(snapshot["analysis"])
+        definition_hashes = [s["definition_hash"] for s in binding.get("resolved", [])]
+        pipeline["_reuse_keys"] = {spec["step_id"]: core.step_reuse_key(
+            library=self.runtime_key, item_id=pipeline["item_id"], spec=spec,
+            analysis_hash=analysis_hash,
+            registry_version=REGISTRY_VERSION, algorithm_version=snapshot["analysis"].get("algorithm_version"),
+            definition_hashes=definition_hashes) for spec in plan["steps"]}
+        keys = [key for key in pipeline["_reuse_keys"].values() if key]
+        pipeline["_reuse_candidates"] = []
+        if keys and plan.get("reuse", "auto") == "auto":
+            with self.connect() as connection:
+                pipeline["_reuse_candidates"] = [dict(row) for row in connection.execute(
+                    "SELECT attempt_id,step_id,status,reuse_key,artifact_hash,artifact_json,ended_at "
+                    "FROM analysis_step_attempts WHERE reuse_key IN (" + ",".join("?" for _ in keys) + ") "
+                    "AND status='committed' AND artifact_hash<>'' AND pipeline_id<>? ORDER BY ended_at DESC,attempt_id",
+                    (*keys, pipeline_id)).fetchall()]
         # Previously accepted snapshots must meet the same effective-input gate.
-        if eligibility_assessment(definitions, segment_count=len(_included_segments(snapshot["analysis"])))["execution"] != "allowed":
-            raise AnalysisContractError("分析できる発話がありません。", code="no_valid_input")
+        segment_count = len(_included_segments(snapshot["analysis"]))
+        if eligibility_assessment(definitions, segment_count=segment_count)["execution"] != "allowed":
+            raise AnalysisContractError(
+                "必須の適用性検査に合格していません。" if segment_count else "分析できる発話がありません。",
+                code="ineligible" if segment_count else "no_valid_input",
+            )
         with self._worker_transaction(pipeline_id, generation) as connection:
             if connection.execute("SELECT status FROM analysis_pipeline_requests WHERE pipeline_id=?", (pipeline_id,)).fetchone()[0] != "accepted":
                 return
-            connection.execute(
-                "UPDATE analysis_pipeline_requests SET status='running',wait_reason='',error='',updated_at=? WHERE pipeline_id=?",
-                (utc_now(), pipeline_id),
-            )
+            _transition_state(connection, "pipeline", (pipeline_id,), "running", generation=generation,
+                              changes={"wait_reason": "", "error": ""})
             self._event(connection, pipeline_id, "pipeline_running", {"generation": generation})
         for milestone in MILESTONES:
-            pipeline = self._pipeline_row(pipeline_id)
+            pipeline.update(self._pipeline_row(pipeline_id))
             if self._cancelled(pipeline_id, generation):
                 with self._worker_transaction(pipeline_id, generation, allow_cancel=True) as connection:
                     self._finish_cancelled(connection, pipeline_id, generation, milestone=milestone)
@@ -980,20 +1145,11 @@ class AnalysisPipelineService:
             while True:
                 with self._worker_transaction(pipeline_id, generation) as connection:
                     all_steps = _latest_steps(connection, pipeline_id)
-                by_id = {step["step_id"]: step for step in all_steps}
-                pending = [
-                    step for step in all_steps
-                    if step["milestone"] == milestone and step["status"] not in TERMINAL_SUCCESS
-                ]
-                if not pending:
+                    dispatch = core.decide_dispatch(all_steps, plan_steps, milestone, pipeline)
+                if dispatch["decision"]["action"] == "release_gate":
                     break
-                ready = [
-                    step for step in pending
-                    if step["status"] not in {"failed", "cancelled"}
-                    and all(by_id.get(parent, {}).get("status") in TERMINAL_SUCCESS
-                            for parent in plan_steps[step["step_id"]].get("parents", []))
-                ]
-                if not ready:
+                ready = [s for s in all_steps if s["step_id"] in dispatch["decision"]["affected_steps"]]
+                if dispatch["decision"]["action"] == "fail":
                     raise AnalysisContractError(
                         "親stepが未確定のため段階を進められません。", code="parent_incomplete"
                     )
@@ -1002,7 +1158,8 @@ class AnalysisPipelineService:
                 with ThreadPoolExecutor(max_workers=max(1, min(2, len(ready))),
                                         thread_name_prefix=f"{milestone}-analysis") as executor:
                     futures = {
-                        executor.submit(self._execute_step, pipeline, step, snapshot, definitions, app_url): step
+                        executor.submit(self._execute_step, pipeline, step, snapshot, definitions, app_url,
+                                        dispatch_decision=dispatch): step
                         for step in ready
                     }
                     failed: list[tuple[dict[str, Any], Exception]] = []
@@ -1011,12 +1168,8 @@ class AnalysisPipelineService:
                         try:
                             future.result()
                         except Exception as exc:
-                            code = exc.code if isinstance(exc, AnalysisContractError) else "execution_failed"
                             try:
-                                if self._cancelled(pipeline_id, generation):
-                                    self._cancel_step(step["attempt_id"], generation)
-                                else:
-                                    self._set_step(step["attempt_id"], "failed", generation=generation, error_code=code, error=str(exc)[:1000])
+                                self._fail_attempt(pipeline_id, step["attempt_id"], generation, exc)
                             except AnalysisContractError as stale:
                                 if stale.code not in {"stale_generation", "stale_attempt"}:
                                     raise
@@ -1026,85 +1179,74 @@ class AnalysisPipelineService:
                             self._finish_cancelled(connection, pipeline_id, generation, milestone=milestone)
                         return
                     if failed:
-                        reason = "publication" if any(
-                            isinstance(exc, AnalysisContractError) and exc.code == "publication_failed"
-                            for _, exc in failed
-                        ) else "retry"
+                        decision = core.decide_failure([{"step_id": s["step_id"], "code": getattr(exc, "code", "execution_failed")}
+                            for s, exc in failed], cancelled=False, context=pipeline)
+                        reason = decision["wait_reason"]
                         with self._worker_transaction(pipeline_id, generation) as connection:
-                            connection.execute(
-                                "UPDATE analysis_pipeline_requests SET status='waiting',wait_reason=?,error=?,updated_at=? WHERE pipeline_id=?",
-                                (reason, str(failed[0][1])[:1000], utc_now(), pipeline_id),
-                            )
+                            _record_decision(connection, pipeline_id, decision)
+                            _transition_state(connection, "pipeline", (pipeline_id,), "waiting", generation=generation,
+                                changes={"wait_reason": reason, "error": str(failed[0][1])[:1000]})
                             self._event(connection, pipeline_id, "milestone_waiting", {
                                 "milestone": milestone, "reason": reason,
                                 "failed_steps": [value[0]["step_id"] for value in failed]})
                         return
             with self._worker_transaction(pipeline_id, generation) as connection:
                 final_steps = [step for step in _latest_steps(connection, pipeline_id) if step["milestone"] == milestone]
-                if any(step["status"] not in TERMINAL_SUCCESS for step in final_steps):
+                if core.derive_milestone_status(final_steps) != "committed":
                     raise AnalysisContractError("段階の必須stepが未確定です。", code="gate_incomplete")
+                _record_decision(connection, pipeline_id, dispatch)
                 self._event(connection, pipeline_id, "milestone_committed", {"milestone": milestone})
-        current = self._pipeline_row(pipeline_id)
+        current = self._pipeline_row(pipeline_id, columns="result_run_id")
         with self._worker_transaction(pipeline_id, generation) as connection:
             publications = connection.execute(
                 "SELECT * FROM analysis_pipeline_publications WHERE pipeline_id=?", (pipeline_id,)
             ).fetchall()
-            if any(row["status"] not in {"published", "not_selected"} for row in publications):
-                connection.execute(
-                    "UPDATE analysis_pipeline_requests SET status='waiting',wait_reason='publication',updated_at=? WHERE pipeline_id=?",
-                    (utc_now(), pipeline_id),
-                )
+            decision = core.decide_completion([dict(row) for row in publications], pipeline)
+            _record_decision(connection, pipeline_id, decision)
+            if decision["decision"]["action"] != "commit":
+                _transition_state(connection, "pipeline", (pipeline_id,), "waiting", generation=generation,
+                                  changes={"wait_reason": "publication"})
                 return
-            connection.execute(
-                "UPDATE analysis_pipeline_requests SET status='completed',wait_reason='',error='',current_milestone='M7',updated_at=? WHERE pipeline_id=?",
-                (utc_now(), pipeline_id),
-            )
+            _transition_state(connection, "pipeline", (pipeline_id,), "completed", generation=generation,
+                              changes={"wait_reason": "", "error": "", "current_milestone": "M7"})
             self._event(connection, pipeline_id, "pipeline_completed", {"result_run_id": current["result_run_id"]})
 
     def status(self, item_id: str, pipeline_id: str, *, ensure_running: bool = True) -> dict[str, Any]:
         with self.connect() as connection:
             connection.execute("BEGIN")
-            row = connection.execute("SELECT * FROM analysis_pipeline_requests WHERE pipeline_id=? AND item_id=?", (pipeline_id, item_id)).fetchone()
+            row = connection.execute("""SELECT request_id,status,generation,current_milestone,wait_reason,
+                cancel_requested,result_run_id,error,plan_hash,input_hash,
+                json_extract(plan_json,'$.planning_proposal') AS planning_proposal_json
+                FROM analysis_pipeline_requests WHERE pipeline_id=? AND item_id=?""", (pipeline_id, item_id)).fetchone()
             if row is None:
                 raise LookupError("分析pipelineが見つかりません。")
             row = dict(row)
-            steps = _latest_steps(connection, pipeline_id)
+            steps = _latest_steps(connection, pipeline_id, include_payload=False)
             publications = [dict(value) for value in connection.execute(
-                "SELECT * FROM analysis_pipeline_publications WHERE pipeline_id=? ORDER BY target_role",
+                "SELECT target_role,status,error,result_run_id,package_hash FROM analysis_pipeline_publications WHERE pipeline_id=? ORDER BY target_role",
                 (pipeline_id,),
             ).fetchall()]
             restart_pending = _has_restart_event(connection, pipeline_id, row["generation"])
+            # New decision records must not evict the existing 80-event progress
+            # history. Bound each stream separately and retain sequence order.
             events = [dict(value) for value in connection.execute(
-                "SELECT * FROM analysis_pipeline_events WHERE pipeline_id=? ORDER BY sequence DESC LIMIT 80",
-                (pipeline_id,),
-            ).fetchall()][::-1]
-        recovery_error = ""
-        if (ensure_running and row["status"] == "waiting" and row["wait_reason"] == "retry" and not row["cancel_requested"]
-                and (restart_pending or any(step["status"] == "interrupted" and step["error_code"] == "process_restart"
-                                            for step in steps))):
-            try:
-                self.retry(item_id, pipeline_id, {}, app_url="http://127.0.0.1:7860")
-            except AnalysisContractError as exc:
-                # Recovery refusal is a readable waiting state, not a GET 500 or
-                # permission to bypass a limit/cancellation/ownership boundary.
-                recovery_error = exc.code
-                row["error"] = str(exc)
-            else:
-                return self.status(item_id, pipeline_id, ensure_running=False)
+                """WITH progress AS (
+                    SELECT sequence,event_type,payload_json,created_at FROM analysis_pipeline_events
+                    WHERE pipeline_id=? AND event_type<>'core_decision' ORDER BY sequence DESC LIMIT 80),
+                decisions AS (
+                    SELECT sequence,event_type,payload_json,created_at FROM analysis_pipeline_events
+                    WHERE pipeline_id=? AND event_type='core_decision' ORDER BY sequence DESC LIMIT 80)
+                SELECT * FROM progress UNION ALL SELECT * FROM decisions ORDER BY sequence""",
+                (pipeline_id,pipeline_id),
+            ).fetchall()]
+        # ensure_running is retained for callers of the old API; GET never writes.
+        restart_pending = bool(restart_pending and row["status"] == "waiting"
+                               and row["wait_reason"] == "retry" and not row["cancel_requested"])
+        recovery_error = core.recovery_error(steps) if restart_pending else ""
         milestones = []
         for milestone in MILESTONES:
             values = [step for step in steps if step["milestone"] == milestone]
-            statuses = [value["status"] for value in values]
-            if statuses and all(value in TERMINAL_SUCCESS for value in statuses):
-                status = "committed"
-            elif any(value == "failed" for value in statuses):
-                status = "failed"
-            elif any(value in ACTIVE_STEP_STATES for value in statuses):
-                status = "active"
-            elif any(value == "cancelled" for value in statuses):
-                status = "cancelled"
-            else:
-                status = "pending"
+            status = core.derive_milestone_status(values)
             milestones.append({"id": milestone, "status": status, "steps": [self._public_step(value) for value in values]})
         result_run = None
         if row["result_run_id"]:
@@ -1113,7 +1255,7 @@ class AnalysisPipelineService:
             except (LookupError, KeyError, TypeError):
                 result_run = {"id": row["result_run_id"]}
         completed = sum(step["status"] in TERMINAL_SUCCESS for step in steps)
-        proposal = json.loads(row["plan_json"]).get("planning_proposal")
+        proposal = json.loads(row["planning_proposal_json"]) if row["planning_proposal_json"] else None
         planning = ({key: proposal[key] for key in
                      ("objective", "provider", "model", "primary_method")}
                     if isinstance(proposal, dict) else None)
@@ -1125,15 +1267,14 @@ class AnalysisPipelineService:
             "progress": round(100 * completed / len(steps)) if steps else 0,
             "planning": planning,
             "recovery": {"pending": restart_pending, "mode": "blocked" if recovery_error else
-                         "automatic" if restart_pending and not row["cancel_requested"] else "none",
+                         "manual" if restart_pending else "none",
                          "reason_code": recovery_error},
             "milestones": milestones,
             "publications": [{key: value[key] for key in ("target_role", "status", "error", "result_run_id", "package_hash")} for value in publications],
             "events": [{"sequence": value["sequence"], "type": value["event_type"],
                         "payload": json.loads(value["payload_json"]), "created_at": value["created_at"]} for value in events],
             "result_run": result_run,
-            "allowed_actions": [action for action in self._allowed_actions(row, steps)
-                                if not recovery_error or action not in {"retry_failed", "retry_publication"}],
+            "allowed_actions": core.derive_allowed_actions(row, steps, restart_pending=restart_pending),
             "summary": {"completed": completed, "total": len(steps),
                         "failed": sum(step["status"] == "failed" for step in steps),
                         "not_applicable": sum(step["status"] == "not_applicable" for step in steps)},
@@ -1144,18 +1285,12 @@ class AnalysisPipelineService:
         return {key: value[key] for key in (
             "step_id", "attempt_id", "attempt", "status", "error_code", "error",
             "started_at", "updated_at", "ended_at",
+            "reused_from", "reused_at",
         )}
 
     @staticmethod
     def _allowed_actions(row: dict[str, Any], steps: list[dict[str, Any]]) -> list[str]:
-        if row["status"] in {"accepted", "running", "waiting"}:
-            actions = ["cancel"]
-            if row["status"] == "waiting" and any(step["status"] in {"failed", "interrupted"} for step in steps):
-                actions.append("retry_failed")
-            if row["wait_reason"] == "publication":
-                actions.append("retry_publication")
-            return actions
-        return ["view_results"] if row["status"] == "completed" else []
+        return core.derive_allowed_actions(row, steps)
 
     def cancel(self, item_id: str, pipeline_id: str) -> dict[str, Any]:
         with self.connect() as connection:
@@ -1164,49 +1299,58 @@ class AnalysisPipelineService:
             if row is None:
                 raise LookupError("分析pipelineが見つかりません。")
             if row["status"] not in {"completed", "failed", "cancelled"}:
-                status = "cancelling" if row["status"] in {"running", "cancelling"} else "cancelled"
-                connection.execute(
-                    "UPDATE analysis_pipeline_requests SET cancel_requested=1,status=?,updated_at=? WHERE pipeline_id=?",
-                    (status, utc_now(), pipeline_id),
-                )
-                self._event(connection, pipeline_id, "cancel_requested", {"generation": row["generation"]})
+                if row["status"] != "cancelling":
+                    _transition_state(connection, "pipeline", (pipeline_id,), "cancelling", generation=row["generation"],
+                                      changes={"cancel_requested": 1})
+                    self._event(connection, pipeline_id, "cancel_requested", {"generation": row["generation"]})
+                if row["status"] in {"accepted", "waiting"}:
+                    self._finish_cancelled(connection, pipeline_id, row["generation"])
         return self.status(item_id, pipeline_id, ensure_running=False)
 
     def retry(self, item_id: str, pipeline_id: str, payload: dict[str, Any], *, app_url: str) -> dict[str, Any]:
+        return self._retry(item_id, pipeline_id, payload, app_url=app_url, resuming=False)
+
+    def resume(self, item_id: str, pipeline_id: str, payload: dict[str, Any], *, app_url: str) -> dict[str, Any]:
+        return self._retry(item_id, pipeline_id, payload, app_url=app_url, resuming=True)
+
+    def _retry(self, item_id: str, pipeline_id: str, payload: dict[str, Any], *, app_url: str,
+               resuming: bool) -> dict[str, Any]:
         target = payload.get("step_id")
+        if resuming and target:
+            raise AnalysisContractError("再開では残る全stepを対象とします。step_idは指定できません。", code="invalid_resume")
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM analysis_pipeline_requests WHERE pipeline_id=? AND item_id=?", (pipeline_id, item_id)).fetchone()
             if row is None:
                 raise LookupError("分析pipelineが見つかりません。")
+            if row["status"] in {"cancelled", "failed"}:
+                raise AnalysisContractError("この分析は終了しています。新しいrequest_idで分析を開始してください。", code="pipeline_terminal")
             if row["status"] in {"accepted", "running", "cancelling"}:
                 raise AnalysisContractError("実行または中止処理の完了を待ってから再試行してください。", code="retry_in_progress")
             if row["status"] == "completed":
+                if resuming:
+                    raise AnalysisContractError("この分析は終了しています。", code="pipeline_terminal")
                 return self.status(item_id, pipeline_id, ensure_running=False)
+            restart_pending = _has_restart_event(connection, pipeline_id, row["generation"])
+            if resuming and not restart_pending:
+                raise AnalysisContractError("再起動後の再開待ちではありません。", code="nothing_to_resume")
+            if not resuming and restart_pending:
+                raise AnalysisContractError("再起動後は再開操作を使用してください。", code="resume_required")
+            if resuming:
+                self._validate_resume(dict(row))
             if "publication_targets" in payload and validate_publication_targets(payload["publication_targets"]) != json.loads(row["plan_json"])["publication_targets"]:
                 raise AnalysisContractError("再試行で公開範囲を変更できません。", code="publication_scope_conflict")
             if "result_run_id" in payload and payload["result_run_id"] != row["result_run_id"]:
                 raise AnalysisContractError("再試行で固定packageを変更できません。", code="publication_scope_conflict")
             steps = _latest_steps(connection, pipeline_id)
-            if any(step["status"] in ACTIVE_STEP_STATES for step in steps):
-                raise AnalysisContractError("未確定の試行が残っています。", code="retry_in_progress")
-            candidates = [step for step in steps if step["status"] in {"failed", "interrupted", "cancelled"}
-                          or row["status"] == "cancelled" and step["status"] == "planned"]
-            if target:
-                candidates = [step for step in candidates if step["step_id"] == target]
-            if row["wait_reason"] == "publication" and not candidates:
-                candidates = [step for step in steps if step["step_id"] == "publish_result"]
-            resume_planned = (row["status"] == "waiting" and row["wait_reason"] == "retry"
-                              and _has_restart_event(connection, pipeline_id, row["generation"])
-                              and (any(step["status"] == "planned" for step in steps)
-                                   or bool(steps) and all(step["status"] in TERMINAL_SUCCESS for step in steps)))
-            if not candidates and not resume_planned:
-                raise AnalysisContractError("再試行できるstepがありません。", code="nothing_to_retry")
-            if any(int(step["attempt"]) >= 3 for step in candidates):
-                raise AnalysisContractError(
-                    "再試行上限に達しました。完了済み成果を保持して停止します。",
-                    code="retry_limit_reached",
-                )
+            decision = core.decide_retry(steps, dict(row), target=target, restart_pending=restart_pending)
+            if decision["error_code"]:
+                messages = {"retry_in_progress": "未確定の試行が残っています。",
+                            "nothing_to_retry": "再試行できるstepがありません。",
+                            "retry_limit_reached": "再試行上限に達しました。完了済み成果を保持して停止します。"}
+                raise AnalysisContractError(messages[decision["error_code"]], code=decision["error_code"])
+            _record_decision(connection, pipeline_id, decision)
+            candidates = [s for s in steps if s["step_id"] in decision["decision"]["affected_steps"]]
             generation = int(row["generation"]) + 1
             candidate_ids = {value["step_id"] for value in candidates}
             for old in candidates:
@@ -1229,10 +1373,32 @@ class AnalysisPipelineService:
                     "UPDATE analysis_step_attempts SET generation=?,directive_json=?,updated_at=? WHERE attempt_id=?",
                     (generation, canonical(directive).decode("utf-8"), utc_now(), future["attempt_id"]),
                 )
-            connection.execute(
-                "UPDATE analysis_pipeline_requests SET status='accepted',wait_reason='',error='',cancel_requested=0,generation=?,updated_at=? WHERE pipeline_id=?",
-                (generation, utc_now(), pipeline_id),
-            )
-            self._event(connection, pipeline_id, "retry_accepted", {"steps": [value["step_id"] for value in candidates], "generation": generation})
+            _transition_state(connection, "pipeline", (pipeline_id,), "accepted", generation=row["generation"],
+                changes={"wait_reason": "", "error": "", "cancel_requested": 0, "generation": generation})
+            self._event(connection, pipeline_id, "resume_accepted" if resuming else "retry_accepted",
+                        {"steps": [value["step_id"] for value in candidates], "generation": generation})
         self._schedule(pipeline_id, app_url)
         return self.status(item_id, pipeline_id, ensure_running=False)
+
+    def _validate_resume(self, row: dict[str, Any]) -> None:
+        """Revalidate fixed input, policy and binding; attempt budget is checked in _retry."""
+        item = self.find_item(row["item_id"])
+        if item is None:
+            raise LookupError("対象の会話が見つかりません。")
+        if (item["revision_count"] != row["source_revision"] or item["analysis_revision"] != row["analysis_revision"]
+                or self.source_fingerprint(item) != row["input_hash"]):
+            raise AnalysisContractError("入力版が更新されています。新しい分析を開始してください。", code="revision_conflict")
+        plan = json.loads(row["plan_json"])
+        snapshot = json.loads(row["snapshot_json"])
+        if (snapshot.get("input_hash") != row["input_hash"] or plan.get("input_hash") != row["input_hash"]
+                or plan.get("plan_hash") != row["plan_hash"]
+                or fingerprint({key: value for key, value in plan.items() if key != "plan_hash"}) != row["plan_hash"]):
+            raise AnalysisContractError("固定入力・計画のhashが一致しません。", code="binding_conflict")
+        from .services.analysis_pipeline_adapters import validate_pipeline_snapshot
+        validate_pipeline_snapshot(snapshot)
+        definitions = self._bound_definitions(row)
+        checked = build_plan_envelope(item_id=row["item_id"], source_revision=row["source_revision"],
+            analysis_revision=row["analysis_revision"], input_fingerprint=row["input_hash"], payload=plan,
+            definitions=definitions, segment_count=len(_included_segments(snapshot["analysis"])))
+        if checked["eligibility"]["execution"] != "allowed":
+            raise AnalysisContractError("分析できる発話がありません。", code="no_valid_input")

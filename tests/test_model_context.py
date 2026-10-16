@@ -88,14 +88,14 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(context["raw_evidence"][0]["evidence_id"], "e0")
         measured = []
         def meter(*args):
-            measured.append(json.loads(args[3]))
+            measured.append(model_context.restored_reference_context(args[3]))
             return {"fits": False}
         resolve, runner = self.adapter(meter)
         options = {**resolve({"model_context_version": 1}), "_source_evidence": pool}
         with self.assertRaises(AnalysisContractError):
             runner("core", context, options, lambda: None, lambda _: None)
         self.assertEqual([len(row["raw_evidence"]) for row in measured], [2, 1])
-        self.assertEqual([row["evidence_id"] for row in measured[-1]["raw_evidence"]], ["e1"])
+        self.assertEqual([row["evidence_id"] for row in measured[-1]["raw_evidence"]], ["e2"])
 
     def test_model_discovery_never_autoloads_and_rechecks_instance(self):
         import lmstudio
@@ -142,7 +142,7 @@ class DurableContextTests(unittest.TestCase):
             for i in range(323)]
         def reply(*args, **kwargs):
             role = args[5].removeprefix("analysis_orchestration_")
-            context = json.loads(args[4])
+            context = model_context.restored_reference_context(args[4])
             self.sent.append((role, context))
             return fixtures.InitialSpecialistTests.valid_agent(self, role, context)
         self.sent = []
@@ -198,7 +198,7 @@ class DurableContextTests(unittest.TestCase):
         self.snapshot["analysis"]["segments"] = self.snapshot["analysis"]["segments"][:11]
         def reply(*args, **kwargs):
             role = args[5].removeprefix("analysis_orchestration_")
-            context = json.loads(args[4])
+            context = model_context.restored_reference_context(args[4])
             self.sent.append((role, context))
             return fixtures.InitialSpecialistTests.valid_agent(self, role, context)
         def meter(model, base, system, user, schema):

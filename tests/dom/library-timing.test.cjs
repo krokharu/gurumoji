@@ -7,7 +7,11 @@ const fixtures = require('./fixtures/remaining-timing-v7.json');
 const plain = value => JSON.parse(JSON.stringify(value));
 const text = node => node.textContent.replace(/\s+/g, ' ').trim();
 async function setup(t, records) {
-  const h = await createHarness(); t.after(() => h.close());
+  const h = await createHarness(); t.after(async () => {
+    for (const request of h.requests.filter(r => !r.settled && /\/analysis\/runs\?limit=100&offset=0$/.test(r.url)))
+      h.reply(request, {runs: [], pagination: {has_more: false}});
+    await h.flush(); h.close();
+  });
   h.fixture(records);
   h.evaluate('analysisCatalog=window.fixture;analysisCatalogLoaded=true;analysisState.itemId="";analysisState.data=null;analysisState.dirty=false;analysisCard.hidden=false;document.body.dataset.view="analysis";analysisItemSelect.replaceChildren(...analysisCatalog.map(item=>new Option(item.source_name,item.id)));analysisItemSelect.value="";renderLibraryOverview(analysisCatalog);renderLibraryItems(analysisCatalog)');
   return h;

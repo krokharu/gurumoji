@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "description": "架空の窓口サービスに関する3会話。実DB・実Vault由来のデータを含まない。",
+  "definitions": {
+    "text_size_v1": {
+      "definition_id": "utterance_size", "version": 1, "revision": 1, "status": "adopted",
+      "name": "発話の大きさ", "description": "発話本文の文字数",
+      "unit_of_analysis": "segment", "source_columns": ["text"], "output_column": "utterance_size",
+      "data_type": "number", "measurement_level": "ratio", "measurement_rule": "text_length", "method": "descriptive"
+    },
+    "duration_size_v2": {
+      "definition_id": "utterance_size", "version": 2, "revision": 2, "status": "adopted",
+      "name": "発話の大きさ", "description": "発話の秒数。同じIDでも文字数定義と異なる",
+      "unit_of_analysis": "segment", "source_columns": ["duration"], "output_column": "utterance_size",
+      "data_type": "number", "measurement_level": "ratio", "measurement_rule": "duration", "method": "descriptive"
+    }
+  },
+  "conversations": [
+    {
+      "definition_refs": ["text_size_v1"],
+      "speaker_person_ids": {"A": "synthetic-person-1", "B": "synthetic-person-2"},
+      "analysis": {
+        "item": {"id": "synthetic-interview-1", "revision_count": 1, "analysis_revision": 1},
+        "config": {}, "automatic": {},
+        "manual": {"codebook": [{"id": "access", "label": "利用しやすさ"}]},
+        "segments": [
+          {"id": "u1", "speaker": "A", "speaker_name": "架空参加者1", "role": "participant", "text": "朝の窓口は利用しやすい。", "start": 0, "end": 4, "duration": 4, "excluded": false, "annotation": {"codes": ["access"], "important": true}},
+          {"id": "u2", "speaker": "B", "speaker_name": "架空参加者2", "role": "participant", "text": "夕方にも開いてほしい。", "start": 5, "end": 8, "duration": 3, "excluded": false, "annotation": {"codes": []}}
+        ]
+      },
+      "edits": []
+    },
+    {
+      "definition_refs": ["text_size_v1"],
+      "speaker_person_ids": {"A": "synthetic-person-3", "B": "synthetic-person-1"},
+      "analysis": {
+        "item": {"id": "synthetic-interview-2", "revision_count": 2, "analysis_revision": 1},
+        "config": {}, "automatic": {},
+        "manual": {"codebook": [{"id": "access", "label": "利用しやすさ"}]},
+        "segments": [
+          {"id": "u1", "speaker": "A", "speaker_name": "架空参加者3", "role": "participant", "text": "案内が分かりやすい。", "start": 0, "end": 3, "duration": 3, "excluded": false, "annotation": {"codes": []}},
+          {"id": "u2", "speaker": "B", "speaker_name": "架空参加者1", "role": "participant", "text": "朝より夕方の窓口を利用したい。", "start": 4, "end": 9, "duration": 5, "excluded": false, "annotation": {"codes": ["access"]}}
+        ]
+      },
+      "edits": [{"segment_id": "u2", "source_revision_before": 1, "source_revision_after": 2, "text_before": "朝の窓口を利用したい。", "text_after": "朝より夕方の窓口を利用したい。"}]
+    },
+    {
+      "definition_refs": ["duration_size_v2"],
+      "speaker_person_ids": {"A": "synthetic-person-2", "B": "synthetic-person-4"},
+      "analysis": {
+        "item": {"id": "synthetic-interview-3", "revision_count": 1, "analysis_revision": 2},
+        "config": {}, "automatic": {},
+        "manual": {"codebook": [{"id": "access", "label": "利用しやすさ"}]},
+        "segments": [
+          {"id": "u1", "speaker": "A", "speaker_name": "架空参加者2", "role": "participant", "text": "夕方の窓口は混んでいた。", "start": 0, "end": 6, "duration": 6, "excluded": false, "annotation": {"codes": ["access"]}},
+          {"id": "u2", "speaker": "B", "speaker_name": "架空参加者4", "role": "participant", "text": "待ち時間は分からない。", "duration": 0, "time_unknown": true, "excluded": false, "annotation": {"codes": []}}
+        ]
+      },
+      "edits": []
+    }
+  ]
+}

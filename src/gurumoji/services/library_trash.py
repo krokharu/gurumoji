@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .durable_files import write_durably
+from . import change_log
 
 MANIFEST = "manifest.json"
 PENDING = "manifest.pending.json"
@@ -30,7 +31,13 @@ ENTRY_PATTERN = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{12}")
 DEFAULT_RETENTION_DAYS = 30
 # Rows removed by a library delete, restored in this order.
 ITEM_TABLES = ("library_items", "transcript_versions", "transcript_preparations",
-               "transcript_preparation_events", "output_import_provenance")
+               "transcript_preparation_events", "output_import_provenance",
+               "transcript_change_bases", "transcript_changes",
+               "conversation_attributes", "conversation_tags", "data_group_members", "analysis_definitions")
+# Disposable query copies and derived facts are deleted, but not put in the manifest.
+DISPOSABLE_ITEM_TABLES = (
+    "conversation_speakers", "conversation_segments", "media_assets", "segment_embeddings", "segment_labels",
+)
 ASSET_FOLDERS = {"media": "media", "thumbnail": "thumbnails"}
 
 
@@ -79,7 +86,29 @@ def snapshot_rows(connection: Any, item_id: str) -> dict[str, list[dict[str, Any
         cursor = connection.execute(f"SELECT * FROM {table} WHERE {key}=?", (item_id,))
         names = [column[0] for column in cursor.description]
         rows[table] = [{name: _encode(value) for name, value in zip(names, row)} for row in cursor.fetchall()]
+    if _table_exists(connection, "change_log"):
+        cursor = connection.execute("SELECT * FROM change_log WHERE " + change_log.conversation_condition(),
+                                    change_log.conversation_parameters(item_id))
+        names = [column[0] for column in cursor.description]
+        rows["change_log"] = [dict(zip(names, row)) for row in cursor.fetchall()]
     return rows
+
+
+def delete_disposable_rows(connection: Any, item_id: str) -> None:
+    """Run within the library-delete transaction; tolerate later-stage tables being absent."""
+    if _table_exists(connection, "data_group_members"):
+        targets = [("data_groups", r[0]) for r in connection.execute(
+            "SELECT group_id FROM data_group_members WHERE item_id=?", (item_id,))]
+        with change_log.tracking(connection, targets, origin="rule", process="conversation_trash"):
+            connection.execute("DELETE FROM data_group_members WHERE item_id=?", (item_id,))
+    if _table_exists(connection, "analysis_definitions"):
+        connection.execute("DELETE FROM analysis_definitions WHERE item_id=?", (item_id,))
+    for table in DISPOSABLE_ITEM_TABLES:
+        if _table_exists(connection, table):
+            connection.execute(f"DELETE FROM {table} WHERE item_id=?", (item_id,))
+    if _table_exists(connection, "change_log"):
+        connection.execute("DELETE FROM change_log WHERE " + change_log.conversation_condition(),
+                           change_log.conversation_parameters(item_id))
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -387,8 +416,19 @@ def restore(root: Path, entry_id: str, *, connect: Callable[[], Any],
             move(source, target)
             done.append((source, target))
         with connect() as connection:
-            for table in ITEM_TABLES:
-                _insert(connection, table, rows.get(table, []))
+            for table, key, parent in (("conversation_tags", "tag_id", "tags"),
+                                       ("data_group_members", "group_id", "data_groups")):
+                for row in rows.get(table, []):
+                    if not connection.execute(f"SELECT 1 FROM {parent} WHERE {key}=?", (row[key],)).fetchone():
+                        raise TrashError("所属先のタグまたはグループが削除されています。復元前に確認してください。")
+            targets = [("data_groups", r["group_id"]) for r in rows.get("data_group_members", [])]
+            with change_log.tracking(connection, targets, origin="rule", process="conversation_restore"):
+                for table in ITEM_TABLES:
+                    _insert(connection, table, rows.get(table, []))
+                history = rows.get("change_log", [])
+                if any(row.get("entity_id") != item_id or row.get("entity") not in change_log.CONVERSATION_ENTITIES for row in history):
+                    raise TrashError("会話の変更履歴の識別情報が不正です。")
+                _insert(connection, "change_log", history)
             for canonical_path in manifest.get("tombstones_added", []):
                 connection.execute("DELETE FROM output_import_tombstones WHERE canonical_path=?", (canonical_path,))
             _insert(connection, "output_import_tombstones", manifest.get("tombstones_replaced", []))

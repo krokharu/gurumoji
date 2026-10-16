@@ -91,6 +91,7 @@ for(const [name,settings,expected] of [
  ['three-writers-only',{publications:roles.map(r=>({target_role:r,status:'published'})),resultRun:{publication_attempts:[{...complete,executed:roles.slice(1)}]}},false]
 ]) {const p=setup('completed',settings);assert.equal(p.ctx.analysisExecutionPublicationEvidence().complete,expected);p.ctx.renderAnalysisExecution();passed.push(name);}
 for(const [name,settings,action] of [
+ ['explicit-resume',{allowedActions:['resume'],recovery:{pending:true,mode:'manual'}},'resume'],
  ['retry-failed',{allowedActions:['retry_failed']},'retry_failed'],
  ['retry-publication',{allowedActions:['retry_publication']},'retry_publication'],
  ['unknown-action',{allowedActions:['retry_whatever']},''],

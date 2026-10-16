@@ -173,6 +173,20 @@
       </div>
 
       <div id="item-panel-files" class="item-panel" role="tabpanel" aria-labelledby="item-tab-files" data-item-panel="files" hidden>
+        <details class="item-files-card" id="research-import-panel">
+          <summary>研究ノート・外部分析結果を取り込む</summary>
+          <p>研究ノートの原本はそのまま保持します。解釈・コード案・外部分析結果は未承認として保存します。</p>
+          <button id="research-notes-preview" type="button" class="secondary-button">研究ノートの差分を確認</button>
+          <button id="research-notes-history" type="button" class="secondary-button">取り込み済みノートを読む</button>
+          <label class="field"><span>外部分析結果（JSON）</span><input id="external-analysis-file" type="file" accept="application/json,.json"></label>
+          <button id="external-analysis-import" type="button" class="secondary-button">外部分析結果を登録</button>
+          <p id="research-import-status" role="status" aria-live="polite"></p><div id="research-import-preview"></div>
+        </details>
+        <section class="item-files-card" aria-labelledby="media-basic-info-title">
+          <h3 id="media-basic-info-title">基本情報</h3>
+          <p>メディアの長さと、文字起こしの最終時刻は別の値です。</p>
+          <div id="media-basic-info"></div>
+        </section>
         <section class="item-files-card">
           <h3>出力ファイル</h3>
           <p>編集内容を保存すると、出力ファイルも同じ内容で更新されます。</p>
@@ -189,6 +203,17 @@
       </div>
 
       <div id="save-message" class="alert" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+      <section class="item-files-card" aria-labelledby="notation-title">
+        <h3 id="notation-title">表記ゆれの確認</h3>
+        <p>研究者が本文を編集した発話は除外します。AIが選んだ表記は下書きです。</p>
+        <label for="notation-provider">未確定の表記の送信先</label>
+        <select id="notation-provider"><option value="none">送信なし（確定済みだけ）</option><option value="openai">OpenAI</option><option value="google">Google Gemini</option><option value="lmstudio">LM Studio</option></select>
+        <button id="notation-preview" type="button" class="secondary-button">表記ゆれを統一</button>
+        <button id="notation-load-review" type="button" class="secondary-button">保存した結果を確認</button>
+        <p id="notation-status" role="status" aria-live="polite"></p>
+        <div id="notation-groups"></div>
+        <button id="notation-apply" type="button" class="primary-button small" hidden>表示した候補を適用</button>
+      </section>
       <section id="result-draft-recovery" class="draft-recovery" aria-label="未保存内容の退避" hidden>
         <p data-draft-count></p><button id="export-result-draft" class="secondary-button" type="button">未保存内容をJSONで退避</button>
       </section>

@@ -329,6 +329,55 @@ class ObsidianLayoutTests(unittest.TestCase):
         self.assertEqual(report['backup'], before['backup'])
         self.assertFalse(pending.exists())
 
+    def test_migration_new_backup_root_and_legacy_pending_are_both_resumable(self):
+        import shutil
+        from gurumoji import obsidian_migration
+        old, text = self.seed_legacy()
+        backup_root = self.database.parent / 'external-backups'
+        original = obsidian_migration.write_atomic
+        def fail(path, data):
+            if path.name == 'part-0001.md':
+                raise OSError('synthetic interruption')
+            return original(path, data)
+        with patch.object(obsidian_migration, 'write_atomic', side_effect=fail):
+            with self.assertRaises(OSError):
+                migrate(self.database, backup_root=backup_root)
+        pending = self.database.parent / 'obsidian_layout/migration-pending.json'
+        plan = json.loads(pending.read_text(encoding='utf-8'))
+        backup = Path(plan['backup'])
+        self.assertEqual(backup.parent, backup_root.resolve())
+        self.assertEqual((backup / 'vault' / old).read_text(encoding='utf-8'), text)
+        with closing(sqlite3.connect(backup / 'library.sqlite3')) as connection:
+            self.assertEqual(connection.execute('SELECT note_path FROM analysis_runs').fetchone()[0], old)
+        # A pre-change pending backup stays readable in its old control folder.
+        legacy = pending.parent / backup.name
+        shutil.copytree(backup, legacy)
+        plan['backup'] = str(legacy)
+        pending.write_text(json.dumps(plan), encoding='utf-8')
+        report = migrate(self.database, backup_root=backup_root)
+        self.assertEqual(report['backup'], str(legacy))
+        self.assertTrue(backup.is_dir())
+
+    def test_migration_external_backup_resumes_and_rejects_untrusted_pending_root(self):
+        from gurumoji import obsidian_migration
+        self.seed_legacy()
+        backup_root = self.database.parent / 'configured-backups'
+        original = obsidian_migration.write_atomic
+        def fail(path, data):
+            if path.name == 'part-0001.md':
+                raise OSError('synthetic interruption')
+            return original(path, data)
+        with patch.object(obsidian_migration, 'write_atomic', side_effect=fail):
+            with self.assertRaises(OSError):
+                migrate(self.database, backup_root=backup_root)
+        pending = self.database.parent / 'obsidian_layout/migration-pending.json'
+        plan = json.loads(pending.read_text(encoding='utf-8'))
+        with self.assertRaisesRegex(ValueError, 'バックアップの場所'):
+            migrate(self.database, backup_root=self.database.parent / 'untrusted')
+        report = migrate(self.database, backup_root=backup_root)
+        self.assertEqual(report['backup'], plan['backup'])
+        self.assertFalse(pending.exists())
+
     def test_legacy_fences_and_quote_literals_are_never_rewritten(self):
         original = '~~~text\n[[old]]\n~~~\n> [[old]]\n\n[[old#^s-61|引用]]\n'
         self.assertEqual(rewrite_links(original, {'old.md': 'new.md'}),

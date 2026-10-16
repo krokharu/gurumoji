@@ -124,6 +124,7 @@ function orchestrationPayload() {
     concurrency:integer('concurrency',true,4), research_mode:'exploratory', roles:orchestrationRoleOverrides(),
     model_context_version:cloud.length ? 0 : 1, context_reference_version:cloud.length ? 0 : 1,
     context_evidence_limit:24, context_text_limit:6000,
+    analysis_interval_version:1, analysis_interval_seconds:300,
     publication_targets:orchestrationNode('publication-all').checked ? [...orchestrationPublicationTargets] : []};
 }
 async function startAnalysisOrchestration(event) {

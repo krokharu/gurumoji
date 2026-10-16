@@ -34,6 +34,11 @@ class MixedRoleTests(unittest.TestCase):
                 analysis_annotations_json=?,analysis_config_json=?,revision_count=revision_count+1 WHERE id='content'""",
                 (json.dumps(segments), json.dumps({sid: {"excluded": True} for sid in excluded}),
                  json.dumps({"group_by": "role", "exclude_moderator": exclude_moderator})))
+            # The fixture replaces source JSON directly; record that save just
+            # like the transcript writer so preparation sees a fixed version.
+            from gurumoji import transcript_preparation
+            transcript_preparation.capture(connection, connection.execute(
+                "SELECT * FROM library_items WHERE id='content'").fetchone())
         data = self.client.get(self.url).get_json()
         preparation = data["manual"]["preparation"]
         response = self.client.put("/api/library/content/preparation", json={

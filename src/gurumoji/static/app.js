@@ -174,6 +174,8 @@ const speakerSurveyAnalysisState = {
 };
 let libraryRequestController = null;
 let libraryRequestSequence = 0;
+let libraryPageOffset = 0;
+let libraryPageFilter = '';
 let libraryGroups = [];
 let trainingStatusLoaded = false;
 let analysisCatalogLoaded = false;
@@ -938,8 +940,9 @@ function updateCreateSummary() {
   const recommendedCleanup = finishingMode === 'recommended' && !finishInVault
     && Boolean(tokenConfigSnapshot.typesafe) && cleanupLevel !== 'off';
   const otherAiWork = Boolean(detectNames && detectNames.checked);
+  const notationWork = !finishInVault && (document.querySelector('[name="ai_effort_notation"]')?.value || 'off') !== 'off';
   const finishNow = Boolean(providerLabel) && finishingMode !== 'off'
-    && (finishingMode === 'advanced' || recommendedCleanup || otherAiWork);
+    && (finishingMode === 'advanced' || recommendedCleanup || otherAiWork || notationWork);
   const configuredModel = finishNow ? String(tokenConfigSnapshot[`${aiProvider.value}_model`] || '').trim() : '';
   const finishingState = finishNow ? 'する' : 'しない';
   const finishingModel = finishNow
@@ -2937,7 +2940,7 @@ transcriptFinishingModeInputs.forEach(input => listen(input, 'change', () => {
   listen(input, 'change', updateCreateSummary);
 });
 listen(form, 'change', event => {
-  if (event.target.name === 'ai_effort_choice_cleanup') window.queueMicrotask(updateCreateSummary);
+  if (['ai_effort_choice_cleanup', 'ai_effort_notation'].includes(event.target.name)) window.queueMicrotask(updateCreateSummary);
 });
 aiOptionInputs.forEach(input => listen(input, 'change', updateCreateSummary));
 listen(transcriptionBackend, 'change', () => {
@@ -3483,7 +3486,7 @@ function updateLibraryGroupSelect(select, groups, {includeAll = false, includeUn
   if (!select) return;
   const selected = select.value;
   select.replaceChildren();
-  if (includeAll) select.add(new Option('すべてのグループ', ''));
+  if (includeAll) select.add(new Option('すべてのフォルダー', ''));
   if (includeAll || includeUngrouped) select.add(new Option('未分類', includeAll ? '__ungrouped__' : ''));
   groups.forEach(group => select.add(new Option(`${group.name}（${group.item_count || 0}件）`, group.id)));
   if ([...select.options].some(option => option.value === selected)) select.value = selected;
@@ -3498,7 +3501,7 @@ async function assignLibraryItemGroup(item, select) {
       body: JSON.stringify({group_id: select.value})
     });
     const data = await readJsonResponse(response);
-    if (!response.ok) throw new Error(data.error || 'グループを変更できませんでした。');
+    if (!response.ok) throw new Error(data.error || 'フォルダーを変更できませんでした。');
     await loadLibrary();
   } catch (error) {
     select.value = previous;
@@ -3513,7 +3516,7 @@ function renderLibraryGroupManager() {
   if (!libraryGroups.length) {
     const empty = document.createElement('p');
     empty.className = 'library-group-empty';
-    empty.textContent = 'グループはまだありません。上の欄から作成できます。';
+    empty.textContent = 'フォルダーはまだありません。上の欄から作成できます。';
     libraryGroupList.append(empty);
     return;
   }
@@ -3528,7 +3531,7 @@ function renderLibraryGroupManager() {
     input.type = 'text';
     input.maxLength = 80;
     input.value = group.name;
-    input.setAttribute('aria-label', `${group.name}のグループ名`);
+    input.setAttribute('aria-label', `${group.name}のフォルダー名`);
     field.append(label, input);
     const save = document.createElement('button');
     save.type = 'button';
@@ -3542,10 +3545,10 @@ function renderLibraryGroupManager() {
           body: JSON.stringify({name: input.value})
         });
         const data = await readJsonResponse(response);
-        if (!response.ok) throw new Error(data.error || 'グループ名を変更できませんでした。');
+        if (!response.ok) throw new Error(data.error || 'フォルダー名を変更できませんでした。');
         await loadLibrary();
         renderLibraryGroupManager();
-        setAlert(libraryGroupMessage, 'グループ名を変更しました。');
+        setAlert(libraryGroupMessage, 'フォルダー名を変更しました。');
       } catch (error) {
         save.disabled = false;
         setAlert(libraryGroupMessage, error.message, true);
@@ -3558,12 +3561,12 @@ function renderLibraryGroupManager() {
     remove.addEventListener('click', async () => {
       const count = Number(group.item_count || 0);
       const note = count ? `\n所属する${count}件のデータは「未分類」に戻ります。` : '';
-      if (!window.confirm(`グループ「${group.name}」を削除しますか？${note}\n処理済みデータ本体は削除されません。`)) return;
+      if (!window.confirm(`フォルダー「${group.name}」を削除しますか？${note}\n処理済みデータ本体は削除されません。`)) return;
       remove.disabled = true;
       try {
         const response = await apiFetch(`/api/library/groups/${encodeURIComponent(group.id)}`, {method: 'DELETE'});
         const data = await readJsonResponse(response);
-        if (!response.ok) throw new Error(data.error || 'グループを削除できませんでした。');
+        if (!response.ok) throw new Error(data.error || 'フォルダーを削除できませんでした。');
         await loadLibrary();
         renderLibraryGroupManager();
         setAlert(libraryGroupMessage, `「${group.name}」を削除しました。`);
@@ -3583,7 +3586,13 @@ function libraryFilterState() {
     speaker: document.querySelector('#library-speaker').value,
     emotion: document.querySelector('#library-emotion').value,
     group: document.querySelector('#library-group').value,
-    sort: document.querySelector('#library-sort').value
+    data_group: document.querySelector('#library-data-group')?.value || '',
+    tag: document.querySelector('#library-tag')?.value || '',
+    sort: document.querySelector('#library-sort').value,
+    recorded_from: document.querySelector('#library-recorded-from')?.value || '',
+    recorded_to: document.querySelector('#library-recorded-to')?.value || '',
+    media_duration_min: document.querySelector('#library-media-duration-min')?.value || '',
+    media_duration_max: document.querySelector('#library-media-duration-max')?.value || ''
   };
 }
 
@@ -3593,9 +3602,15 @@ function updateLibraryFilterState() {
   if (state.keyword) conditions.push(`「${state.keyword}」`);
   if (state.speaker) conditions.push(`話者: ${state.speaker}`);
   if (state.emotion) conditions.push(`感情: ${state.emotion}`);
+  if (state.data_group) conditions.push(`分析グループ: ${document.querySelector('#library-data-group').selectedOptions[0].textContent}`);
+  if (state.tag) conditions.push(`タグ: ${document.querySelector('#library-tag').selectedOptions[0].textContent}`);
+  if (state.recorded_from) conditions.push(`収録日: ${state.recorded_from}以降`);
+  if (state.recorded_to) conditions.push(`収録日: ${state.recorded_to}以前`);
+  if (state.media_duration_min) conditions.push(`メディア: ${state.media_duration_min}秒以上`);
+  if (state.media_duration_max) conditions.push(`メディア: ${state.media_duration_max}秒以下`);
   if (state.group) {
     const group = document.querySelector('#library-group');
-    conditions.push(`グループ: ${group.options[group.selectedIndex].text}`);
+    conditions.push(`フォルダー: ${group.options[group.selectedIndex].text}`);
   }
   if (state.sort !== 'updated_desc') {
     const sort = document.querySelector('#library-sort');
@@ -3708,13 +3723,21 @@ async function changeLibraryTrash(entry, action) {
   }
 }
 
-async function loadLibrary() {
+async function loadLibrary(pageOffset = 0) {
   const list = document.querySelector('#library-list');
   const message = document.querySelector('#library-message');
   setAlert(message, '');
   updateLibraryFilterState();
   const state = libraryFilterState();
+  const filterKey = JSON.stringify(state);
+  libraryPageOffset = filterKey === libraryPageFilter && Number.isInteger(pageOffset) ? pageOffset : 0;
+  libraryPageFilter = filterKey;
   const params = new URLSearchParams(state);
+  params.set('limit', '50'); params.set('offset', String(libraryPageOffset));
+  // Preserve the existing unfiltered request shape for offline fixtures and clients.
+  ['recorded_from', 'recorded_to', 'media_duration_min', 'media_duration_max', 'data_group', 'tag'].forEach(key => {
+    if (state[key] === '') params.delete(key);
+  });
   if (libraryRequestController) libraryRequestController.abort();
   libraryRequestController = new AbortController();
   const requestId = ++libraryRequestSequence;
@@ -3728,9 +3751,19 @@ async function loadLibrary() {
     updateFacetSelect(document.querySelector('#library-speaker'), data.facets.speakers || [], 'すべての話者');
     updateFacetSelect(document.querySelector('#library-emotion'), data.facets.emotions || [], 'すべての感情');
     libraryGroups = Array.isArray(data.groups) ? data.groups : [];
+    document.dispatchEvent(new CustomEvent('gurumoji-library-catalog', {detail: data}));
     updateLibraryGroupSelect(document.querySelector('#library-group'), libraryGroups, {includeAll: true});
     const items = data.items || [];
-    document.querySelector('#library-count').textContent = `${data.total}件を表示`;
+    document.querySelector('#library-count').textContent = `${data.total}件中 ${libraryPageOffset + (items.length ? 1 : 0)}〜${libraryPageOffset + items.length}件を表示`;
+    const pager = document.querySelector('#library-pagination');
+    if (pager) {
+      pager.replaceChildren();
+      const previous = contentButton('前の50件', () => loadLibrary(Math.max(0, libraryPageOffset - 50)));
+      previous.disabled = libraryPageOffset === 0;
+      const next = contentButton('次の50件', () => loadLibrary(libraryPageOffset + 50));
+      next.disabled = !data.pagination?.has_more;
+      pager.append(previous, next);
+    }
     renderLibraryOverview(items);
     renderLibraryItems(items);
     updateLibraryFilterState();
@@ -3827,6 +3860,8 @@ function renderLibraryItems(items) {
     const mediaLabel = item.media_url ? (item.media_kind === 'video' ? '動画あり' : '音声あり') : '元メディアなし';
     [
       `発話 ${item.segment_count}件`,
+      `収録日 ${item.media_created_at ? String(item.media_created_at).slice(0, 10) : '不明'}`,
+      `メディア ${item.media_duration_seconds == null ? '不明' : item.media_duration_seconds < 1 ? `${item.media_duration_seconds}秒` : formatTime(item.media_duration_seconds)}`,
       `最終時刻 ${analysisEndpointText(item.duration, item.timed_turn_count, item.missing_time_turn_count)}`,
       mediaLabel,
       `修正 ${item.revision_count}回`
@@ -3877,9 +3912,9 @@ function renderLibraryItems(items) {
     groupLabel.className = 'library-group-assignment';
     const groupLabelText = document.createElement('span');
     groupLabelText.className = 'visually-hidden';
-    groupLabelText.textContent = `${item.source_name}のグループ`;
+    groupLabelText.textContent = `${item.source_name}のフォルダー`;
     const groupSelect = document.createElement('select');
-    groupSelect.setAttribute('aria-label', `${item.source_name}のグループ`);
+    groupSelect.setAttribute('aria-label', `${item.source_name}のフォルダー`);
     updateLibraryGroupSelect(groupSelect, libraryGroups, {includeUngrouped: true});
     groupSelect.value = item.group_id || '';
     groupSelect.addEventListener('click', event => event.stopPropagation());
@@ -3940,7 +3975,7 @@ async function loadTrainingStatus() {
   }
 }
 
-['#library-speaker', '#library-emotion', '#library-group', '#library-sort'].forEach(selector => {
+['#library-speaker', '#library-emotion', '#library-group', '#library-sort', '#library-recorded-from', '#library-recorded-to', '#library-media-duration-min', '#library-media-duration-max'].forEach(selector => {
   listen(document.querySelector(selector), 'change', () => loadLibrary());
 });
 listen(document.querySelector('#library-keyword'), 'input', () => {
@@ -3954,6 +3989,10 @@ function clearLibraryFilters() {
   document.querySelector('#library-emotion').value = '';
   document.querySelector('#library-group').value = '';
   document.querySelector('#library-sort').value = 'updated_desc';
+  ['#library-recorded-from', '#library-recorded-to', '#library-media-duration-min', '#library-media-duration-max', '#library-data-group', '#library-tag'].forEach(selector => {
+    const input = document.querySelector(selector);
+    if (input) input.value = '';
+  });
   updateLibraryFilterState();
   loadLibrary();
 }
@@ -4817,7 +4856,54 @@ function renderFormattingResult(result) {
   appendDetails('話者ラベルの統合', value.speaker_changes, row => `${row.from} → ${row.to}`);
 }
 
+function renderMediaBasicInfo(job) {
+  const target = document.querySelector('#media-basic-info');
+  if (!target) return;
+  target.replaceChildren();
+  const reasons = {
+    ffprobe_unavailable: 'ffprobeを利用できません', file_not_found: 'ファイルが見つかりません',
+    no_media_path: '元メディアの記録がありません', path_check_failed: '保存場所を確認できません',
+    ffprobe_failed: 'メディア情報を取得できません', invalid_probe_json: '取得結果を読み取れません',
+    metadata_unavailable: 'メタデータに値がありません'
+  };
+  const add = (list, label, value) => {
+    const term = document.createElement('dt'), description = document.createElement('dd');
+    term.textContent = label;
+    description.textContent = value;
+    list.append(term, description);
+  };
+  const general = document.createElement('dl');
+  add(general, 'アプリへの取込日時', job.created_at || '不明');
+  add(general, '文字起こしの最終時刻', analysisEndpointText(job.duration, job.timed_turn_count, job.missing_time_turn_count));
+  target.append(general);
+  if (!job.media_assets?.length) {
+    const note = document.createElement('p');
+    note.textContent = 'メディア情報は未記録です。起動後の記録処理が終わってから開き直してください。';
+    target.append(note);
+  }
+  (job.media_assets || []).forEach(asset => {
+    const heading = document.createElement('h4');
+    heading.textContent = asset.role === 'original' ? '元ファイル' : 'アプリ保存版';
+    const list = document.createElement('dl');
+    add(list, '保存場所', asset.path || (asset.path_status === 'no_media_path'
+      ? '不明（元メディアの記録がありません）' : '不明（保存場所の表示は許可されていません）'));
+    add(list, '現在の状態', asset.path_status === 'available' ? '見つかりました' : reasons[asset.path_status] || '不明');
+    const fields = [
+      ['original_filename', '元ファイル名'], ['media_created_at', '収録日時'], ['file_modified_at', 'ファイル更新日時'],
+      ['imported_at', 'アプリへの取込日時'], ['duration_seconds', 'メディアの長さ（秒）'], ['bytes', 'サイズ（バイト）'],
+      ['container', '形式'], ['video_codec', '映像コーデック'], ['width', '幅'], ['height', '高さ'], ['fps', 'フレームレート'],
+      ['audio_codec', '音声コーデック'], ['sample_rate', 'サンプリング周波数'], ['channels', 'チャンネル数'],
+      ['probed_at', 'メディア情報の取得日時'], ['path_checked_at', '記録時の保存場所確認日時']
+    ];
+    fields.forEach(([field, label]) => add(list, label, asset[field] == null
+      ? `不明（${reasons[asset.unknown_reasons?.[field]] || '値が記録されていません'}）` : String(asset[field])));
+    target.append(heading, list);
+  });
+}
+
 function renderResult(job) {
+  if (rerunSpeakerIdentificationButton) rerunSpeakerIdentificationButton.disabled = false;
+  if (speakerIdentityProvider) speakerIdentityProvider.disabled = false;
   const evidenceReturnButton = document.querySelector('#return-to-analysis-evidence');
   if (evidenceReturnButton) evidenceReturnButton.hidden = analysisEvidenceReturn?.itemId !== job.id;
   analysisCatalogLoaded = false;
@@ -4845,6 +4931,7 @@ function renderResult(job) {
       : '話者名は未反映です。OpenAI、Gemini、またはローカルLLMで話者特定だけを実行できます。';
   }
   currentJobId = job.id;
+  if (typeof resetNotationView === 'function') resetNotationView();
   if (!activeJobId) storeActiveJobId('');
   document.querySelector('#result-title').textContent = job.source_name || '確認・手動編集';
   const outputDirectory = document.querySelector('#result-output-dir');
@@ -4853,6 +4940,7 @@ function renderResult(job) {
     outputDirectory.hidden = !job.output_dir;
   }
   renderDownloads(job.files);
+  renderMediaBasicInfo(job);
   renderAiTokenUsage('#result-ai-usage', job.ai_usage);
   renderFormattingResult(job.formatting_result);
   renderMeetingMinutes(currentJob.meeting_minutes, job.id);
@@ -5698,18 +5786,22 @@ function updateSpeakerBadges() {
 }
 
 async function rerunSpeakerIdentification() {
-  if (!currentJobId || !currentJob || !rerunSpeakerIdentificationButton) return;
+  if (!currentJobId || !currentJob || !rerunSpeakerIdentificationButton
+      || rerunSpeakerIdentificationButton.disabled) return;
   if (currentJobDirty) {
     setAlert(document.querySelector('#save-message'), '編集内容を保存してから話者名を再特定してください。', true);
     return;
   }
   const provider = speakerIdentityProvider ? speakerIdentityProvider.value : 'openai';
+  const owner = {id: currentJobId, job: currentJob, navigation: resultRequestSequence,
+    mutation: currentJobMutationGeneration};
+  const ownsScreen = () => currentJobId === owner.id && resultRequestSequence === owner.navigation;
   rerunSpeakerIdentificationButton.disabled = true;
   if (speakerIdentityProvider) speakerIdentityProvider.disabled = true;
   if (speakerIdentityStatus) speakerIdentityStatus.textContent = '自己紹介候補の抽出と話者IDの再確認を実行しています…';
   setAlert(document.querySelector('#save-message'), '');
   try {
-    const response = await apiFetch(`/api/library/${encodeURIComponent(currentJobId)}/speaker-identification`, {
+    const response = await apiFetch(`/api/library/${encodeURIComponent(owner.id)}/speaker-identification`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -5718,9 +5810,19 @@ async function rerunSpeakerIdentification() {
       })
     });
     const data = await readJsonResponse(response);
+    if (!ownsScreen() || currentJob !== owner.job) return;
     if (!response.ok) throw new Error(data.error || '話者名を再特定できませんでした。');
+    if (currentJobMutationGeneration !== owner.mutation || currentJobDirty) {
+      resultSaveConflict = true;
+      showDraftRecovery('transcript');
+      setAlert(document.querySelector('#save-message'),
+        '話者の再特定は保存済みです。編集中の内容は保持しました。未保存内容を退避してから再読み込みしてください。', true);
+      return;
+    }
     const summary = data.speaker_identity || {};
     renderResult(data);
+    owner.job = currentJob;
+    owner.navigation = resultRequestSequence;
     const ambiguousCount = Object.keys(summary.ambiguous_labels || {}).length
       + Object.keys(summary.duplicate_names || {}).length;
     const repairs = summary.repairs || {};
@@ -5742,14 +5844,18 @@ async function rerunSpeakerIdentification() {
       : '';
     const message = nameMessage + registrationMessage + repairMessage + ambiguityMessage;
     if (registeredCount && !speakerRegistryDirty) await loadSpeakerRegistry(true);
+    if (!ownsScreen() || currentJobMutationGeneration !== owner.mutation) return;
     if (speakerIdentityStatus) speakerIdentityStatus.textContent = message;
     setAlert(document.querySelector('#save-message'), message, !hasChanges);
   } catch (error) {
+    if (!ownsScreen()) return;
     if (speakerIdentityStatus) speakerIdentityStatus.textContent = error.message;
     setAlert(document.querySelector('#save-message'), error.message, true);
   } finally {
-    rerunSpeakerIdentificationButton.disabled = false;
-    if (speakerIdentityProvider) speakerIdentityProvider.disabled = false;
+    if (ownsScreen()) {
+      rerunSpeakerIdentificationButton.disabled = false;
+      if (speakerIdentityProvider) speakerIdentityProvider.disabled = false;
+    }
   }
 }
 
@@ -6196,8 +6302,15 @@ function renderAnalysisWorkspace() {
       const desc = empty.querySelector('p');
       if (title) title.textContent = '分析はまだ実行されていません';
       if (desc) desc.textContent = '右上の［分析を実行］ボタンを押すと、発話量・会話構造・形態素・共起・統計検定の分析を開始します。';
+      let history = empty.querySelector('.analysis-empty-history');
+      if (!history) {
+        history = analysisElement('div', 'analysis-empty-history');
+        empty.append(history);
+      }
+      history.replaceChildren(buildAnalysisStorage({readOnly: true}));
     }
-    setAnalysisDirty(false);
+    setAnalysisDirty(analysisState.dirty, false);
+    refreshAnalysisStorage();
     return;
   }
   document.querySelectorAll('[data-analysis-mode]').forEach(button => {

@@ -24,7 +24,7 @@ test('real HTML and all scripts initialize offline with four uniquely labelled e
 test('real mode handler preserves four independent efforts and FormData across simple/detail/advanced/off transitions',async t=>{
  const h=await setup(t);h.change(h.document.querySelector('#ai-provider'),'openai');const expected={outline:'ultra',cleanup:'low',name_extract:'off',name_verify:'high'};
  for(const [key,value]of Object.entries(expected))h.change(h.document.querySelector(`#effort-select-${key}`),value);
- const assertValues=()=>{assert.deepEqual(plain(h.evaluate('readAiEfforts()')),expected);const data=new h.w.FormData(h.document.querySelector('#job-form'));for(const key of stages){assert.equal(data.get(`ai_effort_${key}`),expected[key]);assert.equal(h.document.querySelector(`#effort-select-${key}`).value,expected[key]);}};
+ const assertValues=()=>{assert.deepEqual(plain(h.evaluate('readAiEfforts()')),{notation:'off',...expected});const data=new h.w.FormData(h.document.querySelector('#job-form'));for(const key of stages){assert.equal(data.get(`ai_effort_${key}`),expected[key]);assert.equal(h.document.querySelector(`#effort-select-${key}`).value,expected[key]);}};
  assertValues();h.click('#effort-detail-toggle');assertValues();h.click('#effort-detail-toggle');
  for(const value of ['advanced','off','recommended','advanced','recommended']){const mode=h.document.querySelector(`input[name="transcript_finishing_mode"][value="${value}"]`);h.click(mode);assertValues();assert.equal(mode.checked,true);}
  for(const key of stages){const on=h.document.querySelector(`[name="ai_thinking_mode_${key}"][value="on"]`);if(on)h.click(on);const radio=h.document.querySelector(`[name="ai_effort_choice_${key}"][value="medium"]`);h.click(radio);expected[key]='medium';assertValues();}
@@ -69,7 +69,7 @@ test('actual close and reopen reject an old fixed-run response',async t=>{
 });
 
 test('actual history reload/open handlers preserve fixed item and run IDs',async t=>{
- const h=await setup(t);analysisPanel(h);h.click([...h.document.querySelectorAll('.analysis-storage button')].find(b=>b.textContent==='保存履歴を更新'));h.reply(latest(h,'/api/library/A/analysis/runs'),{runs:[fixed('saved').run]});await h.flush();h.click([...h.document.querySelectorAll('[data-archive-history] button')].find(b=>b.textContent==='この保存済み結果を読む'));h.reply(latest(h,'/api/library/A/analysis/runs/saved'),fixed('saved'));await h.flush();assert(h.document.querySelector('.analysis-fixed-header').textContent.includes('固定run saved'));assert.equal(h.requests.filter(r=>r.options.method==='POST').length,0);
+ const h=await setup(t);analysisPanel(h);h.click([...h.document.querySelectorAll('.analysis-storage button')].find(b=>b.textContent==='保存履歴を更新'));h.reply(latest(h,'/api/library/A/analysis/runs?limit=100&offset=0'),{runs:[fixed('saved').run]});await h.flush();h.click([...h.document.querySelectorAll('[data-archive-history] button')].find(b=>b.textContent==='この保存済み結果を読む'));h.reply(latest(h,'/api/library/A/analysis/runs/saved'),fixed('saved'));await h.flush();assert(h.document.querySelector('.analysis-fixed-header').textContent.includes('固定run saved'));assert.equal(h.requests.filter(r=>r.options.method==='POST').length,0);
 });
 
 test('Save double click dispatches once; A-B-A navigation rejects old owner even on same item ID',async t=>{

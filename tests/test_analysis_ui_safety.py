@@ -62,7 +62,7 @@ class AnalysisUiSafetyTests(unittest.TestCase):
                     self.assertTrue(rows[1][column + "__missing_reason"])
 
     def test_truthful_pipeline_status(self):
-        self.assertEqual(len(self.probe("test_analysis_status_ui.cjs")["passed"]), 32)
+        self.assertEqual(len(self.probe("test_analysis_status_ui.cjs")["passed"]), 33)
 
     def test_evidence_audio_guard(self):
         result = self.probe("test_analysis_evidence_ui.cjs")

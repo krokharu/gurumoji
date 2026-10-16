@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..ai_effort import cleanup_enabled
+from ..ai_finishing import FINISHING_VERSION
 from .ai.transcript_finishing import run_full_cleanup
+from .notation import NOTATION_VERSION
 
 
 @dataclass(frozen=True)
@@ -88,10 +90,40 @@ class ObsidianWorkflowService:
                 latest = d.library_row(item_id)
                 if latest is None or int(latest["revision_count"] or 0) != context["revision"]:
                     raise ValueError("AI処理後にアプリ側の会話が更新されました。反映を停止しました。")
-                profiles = d.row_speaker_profiles(latest, segments, context["names"])
+                profiles = d.row_speaker_profiles(latest, context["segments"], context["names"])
                 for label, name in context["names"].items():
                     if label in profiles:
                         profiles[label]["display_name"] = name
+                before_names = context.get("before_names", d.json_load(latest["speaker_names_json"], {}))
+                finishing_history = [
+                    {"segments": context["before"], "speaker_names": before_names,
+                     "speaker_profiles": d.row_speaker_profiles(latest, context["before"], before_names),
+                     "origin": "researcher", "process": "workbench_input"},
+                    {"segments": context.get("before_notation", context["segments"]), "speaker_names": context["names"],
+                     "speaker_profiles": profiles, "origin": "ai", "process": "ai_finishing",
+                     "process_version": FINISHING_VERSION,
+                     "metadata": {"run_id": "obsidian-finishing-" + context["run_id"],
+                                  "provider": context["provider"], "model": context["model"],
+                                  "stages": context["stages"]}},
+                    {"segments": segments, "speaker_names": context["names"],
+                     "speaker_profiles": profiles,
+                     "origin": "researcher", "process": "workbench_result_edit"},
+                ]
+                if context.get("notation") is not None:
+                    notation_names = before_names
+                    notation_profiles = d.row_speaker_profiles(latest, context["notation_segments"], notation_names)
+                    finishing_history[1]["speaker_names"] = notation_names
+                    finishing_history[1]["speaker_profiles"] = notation_profiles
+                    finishing_history.insert(-1, {"segments": context["notation_segments"], "speaker_names": notation_names,
+                        "speaker_profiles": notation_profiles, "origin": "ai", "process": "notation",
+                        "process_version": NOTATION_VERSION,
+                        "metadata": {"run_id": "obsidian-finishing-" + context["run_id"], "provider": context["provider"],
+                                     "model": context["model"], "notation": context["notation"]}})
+                    finishing_history.insert(-1, {"segments": context["segments"], "speaker_names": context["names"],
+                        "speaker_profiles": profiles, "origin": "ai", "process": "ai_finishing",
+                        "process_version": FINISHING_VERSION,
+                        "metadata": {"run_id": "obsidian-finishing-" + context["run_id"], "provider": context["provider"],
+                                     "model": context["model"], "stages": {"speaker_identity": context["stages"]["speaker_identity"]}}})
                 result = d.update_library_item_locked(
                     item_id,
                     {
@@ -107,6 +139,7 @@ class ObsidianWorkflowService:
                         state.get("pending_usage", {}),
                     ),
                     check_cancelled=check,
+                    finishing_history=finishing_history,
                 )
                 d.publish_input_vault(d.library_row(item_id))
                 try:
@@ -143,6 +176,7 @@ class ObsidianWorkflowService:
             d.workbench().publish_status(state)
 
         names = d.json_load(row["speaker_names_json"], {})
+        before_names = dict(names)
 
         def create_context_outline(source: list[dict[str, Any]]) -> dict[str, Any]:
             return d.create_outline_with_ai(
@@ -178,6 +212,10 @@ class ObsidianWorkflowService:
             review_with_jev=review_source_with_jev if state.get("jev_compare") else None,
             attach_jev=d.attach_jev_comparison,
             outline=context,
+            ai_efforts=state.get("ai_efforts"),
+            unify_notation=lambda source: d.unify_notation(
+                source, provider, api_key, model, check, record_usage,
+                base_url=base_url, ai_efforts=state.get("ai_efforts"), item_id=item_id),
         )
         revised = full_cleanup["segments"]
         context = full_cleanup["context_outline"]
@@ -212,4 +250,7 @@ class ObsidianWorkflowService:
             "context_outline": context, "stages": stages, "provider": provider,
             "model": model, "usage": state.get("pending_usage", usage),
             "jev_usage": jev_usage,
+            "before_names": before_names,
+            "before_notation": full_cleanup["before_notation"], "notation": full_cleanup["notation"],
+            "notation_segments": full_cleanup["segments"],
         }

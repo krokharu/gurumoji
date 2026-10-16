@@ -24,6 +24,8 @@ class FixedRunTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.client = self.fixture.client
         self.store = app.analysis_archive_store()
+        original_save = self.store.save
+        self.store.save = lambda **kwargs: original_save(**{'package_version': 1, **kwargs})
         self.counter = 0
 
     def save(self, *, result=None, datasets=None, kind='text_analysis'):

@@ -19,6 +19,7 @@ from ..segment_classification import (
     crosstab_rows as segment_classification_crosstab_rows,
 )
 from ..transformer_analysis import TRANSFORMER_CSV_FIELDS, transformer_csv_sources
+from .analysis_networks import FIELDS as NETWORK_FIELDS, csv_sources as network_csv_sources
 
 
 def focus_group_analysis_report_markdown(analysis: dict[str, Any]) -> str:
@@ -237,6 +238,7 @@ ANALYSIS_CSV_FIELDS: dict[str, list[str]] = {
 }
 ANALYSIS_CSV_FIELDS.update(RESEARCH_CSV_FIELDS)
 ANALYSIS_CSV_FIELDS.update(TRANSFORMER_CSV_FIELDS)
+ANALYSIS_CSV_FIELDS.update(NETWORK_FIELDS)
 
 
 def analysis_csv_safe(value: Any) -> Any:
@@ -389,8 +391,10 @@ def analysis_csv_rows(
             analysis.get("segment_classification", {}).get("result")
         ),
     }
-    sources.update(research_csv_sources(analysis))
+    if dataset in RESEARCH_CSV_FIELDS:
+        sources.update(research_csv_sources(analysis))
     sources.update(transformer_csv_sources(analysis.get("transformer", {}).get("result")))
+    sources.update(network_csv_sources(analysis))
     if dataset not in ANALYSIS_CSV_FIELDS:
         raise ValueError("出力する分析データの種類が正しくありません。")
     common = {

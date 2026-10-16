@@ -8,7 +8,11 @@ const node = (h, selector) => { const value = h.document.querySelector(selector)
 const definitionRequests = h => h.requests.filter(request => request.url.includes('/definitions/'));
 function input(h, selector, value) { const field = node(h, selector); field.value = value; field.dispatchEvent(new h.w.Event('input', {bubbles: true})); field.dispatchEvent(new h.w.Event('change', {bubbles: true})); }
 async function setup(t, dirty = true) {
-  const h = await createHarness(); t.after(() => h.close());
+  const h = await createHarness(); t.after(async () => {
+    for (const request of h.requests.filter(r => !r.settled && /\/analysis\/runs\?limit=100&offset=0$/.test(r.url)))
+      h.reply(request, {runs: [], pagination: {has_more: false}});
+    await h.flush(); h.close();
+  });
   h.fixture({itemId: 'A', data: data(1), config: {research_question: 'Synthetic draft'}, annotations: {}, dirty, mode: 'manual'});
   h.evaluate('Object.assign(analysisState,window.fixture);analysisCard.hidden=false;document.body.dataset.view="analysis";renderAnalysisWorkspace()');
   return h;

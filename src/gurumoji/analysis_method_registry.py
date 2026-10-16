@@ -1,7 +1,7 @@
 """Versioned output contracts for saved text-analysis results."""
 from __future__ import annotations
 
-REGISTRY_VERSION = "text-analysis-store-12"
+REGISTRY_VERSION = "text-analysis-store-13"
 
 COMMON_EXPORT_FIELDS = {
     "schema_version", "item_id", "source_name", "revision_count", "analysis_revision",
@@ -10,6 +10,11 @@ COMMON_EXPORT_FIELDS = {
 }
 
 PREVIEW_FIELD_PRIORITIES = {
+    "response_nodes": ["speaker_name", "incoming", "outgoing", "reciprocity", "outgoing_bias", "strength_centrality"],
+    "response_edges": ["from_speaker", "to_speaker", "weight", "segment_ids"],
+    "cooccurrence_nodes": ["term", "community", "degree", "strength", "strength_centrality"],
+    "cooccurrence_edges": ["term_a", "term_b", "weight", "segment_ids"],
+    "coding_consistency": ["segment_id", "label", "code_ids", "nearest_other_code", "own_similarity", "other_similarity"],
     "segment_classifications": [
         "utterance_order", "speaker_name", "manual_dialogue_act_label",
         "template_dialogue_act_label", "llm_dialogue_act_label",
@@ -58,6 +63,9 @@ METHODS = [
     ("transformer_topics", "Transformerテーマ分析", ["transformer_topics", "transformer_assignments", "transformer_speakers", "transformer_timeline", "transformer_outliers", "transformer_backchannels", "transformer_backchannel_speakers", "transformer_backchannel_rates", "transformer_backchannel_tests", "transformer_speaker_results"]),
     ("participation", "発話量・参加バランス", ["speakers", "groups", "summary", "observations"]),
     ("conversation_dynamics", "会話の時間構造", ["transitions", "gaps", "overlaps", "timeline"]),
+    ("response_network", "応答関係ネットワーク", ["response_nodes", "response_edges", "response_summary"]),
+    ("cooccurrence_network", "共起ネットワークの構造", ["cooccurrence_nodes", "cooccurrence_edges", "cooccurrence_communities"]),
+    ("coding_consistency", "コーディングの一貫性チェック", ["consistency_codes", "coding_consistency"]),
     ("morphology", "形態素・品詞", ["morphemes", "pos_frequency"]),
     ("syntax", "係り受け", ["dependencies"]),
     ("lexical_frequency", "語彙頻度", ["term_frequency", "keywords"]),
@@ -82,7 +90,7 @@ SEPARATE_RUN_METHODS = {"meeting_minutes", "interview_comparison", "segment_clas
 METHOD_GROUPS = [
     ("text", "KH Coder系・計量テキスト分析",
      "語彙頻度・共起・特徴語・文脈を比較します。KH Coderの考え方を参照した独自実装で、KH Coder本体の出力ではありません。",
-     ("local_insights", "morphology", "syntax", "lexical_frequency", "cooccurrence", "speaker_characteristics", "kwic")),
+     ("local_insights", "morphology", "syntax", "lexical_frequency", "cooccurrence", "cooccurrence_network", "speaker_characteristics", "kwic")),
     ("transformer", "Transformer系・意味分析",
      "多言語E5による本文テーマ分析と、HuBERT・wav2vec 2.0による音声感情推定を確認します。",
      ("transformer_topics", "audio_emotion")),
@@ -94,10 +102,10 @@ METHOD_GROUPS = [
      ("descriptive_statistics", "group_statistics", "correlation")),
     ("conversation", "会話構造・参加バランス",
      "発話量、話者交替、間、重なりなど会話の構造を確認します。",
-     ("participation", "conversation_dynamics", "segment_classification")),
+     ("participation", "conversation_dynamics", "response_network", "segment_classification")),
     ("qualitative", "質的分析・コード・引用",
      "手動コードと重要引用を、元の発言や文脈と合わせて確認します。",
-     ("qualitative_coding",)),
+     ("qualitative_coding", "coding_consistency")),
     ("meeting", "会議・議事録",
      "会議モードの発話から、タスク候補・決定事項候補・発話量をルールで抽出した記録です。担当・期限は元発話で確認します。",
      ("meeting_minutes",)),
@@ -109,7 +117,7 @@ METHOD_GROUPS = [
 METHOD_STATUS_LABELS = {
     "completed": "結果あり", "empty": "データなし", "not_run": "未実行",
     "unavailable": "利用不可", "fallback": "簡易解析", "stale": "更新が必要",
-    "partial": "一部完了",
+    "partial": "一部完了", "not_applicable": "適用外",
 }
 
 
@@ -313,6 +321,18 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
                 "transformer": (result.get("sources") or {}).get("transformer", {}),
             }
             limitations = list(result.get("limitations", limitations))
+        local = (analysis.get("local_methods") or {}).get(key)
+        if key in {"response_network", "cooccurrence_network", "coding_consistency"}:
+            from .services.analysis_networks import CARDS, VERSION
+            details = local or {}
+            state = local["status"] if local else "not_run"
+            unit = CARDS[key]["analysis_unit"]
+            limitations = CARDS[key]["limitations"]
+            method_engine = details.get("engine", {})
+            summaries = [{"title": "適用条件", "text": CARDS[key]["conditions"]},
+                         {"title": "計算法", "text": CARDS[key]["calculation"]}]
+            if details.get("reason"):
+                summaries.append({"title": "適用外の理由", "text": details["reason"]})
         previews = [{"dataset": name, "fields": preview_fields(name, datasets[name][0]),
                      "rows": datasets[name][1][:10], "total": len(datasets[name][1])}
                     for name in selected if datasets[name][1] and key not in {"local_insights", "ai_insights", "kwic", "ai_finishing"}]
@@ -321,4 +341,6 @@ def method_results(analysis: dict, datasets: dict, *, outline: dict | None = Non
                         "summaries": summaries, "details": details, "previews": previews,
                         "analysis_unit": unit, "engine": method_engine,
                         "limitations": limitations})
+        if local:
+            results[-1]["method_version"] = VERSION
     return results

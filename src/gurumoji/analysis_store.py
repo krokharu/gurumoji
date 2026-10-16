@@ -24,10 +24,11 @@ from urllib.parse import quote, urlencode
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
 from .analysis_core import PUBLICATION_TARGETS, EFFECTIVE_PUBLICATION_WRITERS, validate_publication_targets
 from .services.durable_files import write_durably
+from .services import analysis_package as package_v2
 
 LOGGER = logging.getLogger(__name__)
 STORE_LOCK = threading.RLock()
-STORE_VERSION = 1
+STORE_VERSION = 2
 TABLE_FORMAT_VERSION = 1
 
 
@@ -44,6 +45,7 @@ def digest(value) -> str:
 
 
 def initialize_store(connection) -> None:
+    package_v2.initialize(connection)
     connection.execute("INSERT OR IGNORE INTO application_metadata(key,value) VALUES ('library_id',?)", (uuid.uuid4().hex,))
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_runs (
         id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, item_id TEXT NOT NULL,
@@ -67,6 +69,11 @@ def initialize_store(connection) -> None:
         connection.execute("UPDATE analysis_publication_attempts SET status='incomplete',outcomes_json=?,error=?,ended_at=? WHERE attempt_id=?",
                            (canonical(outcomes).decode(), "公開試行が中断されました。", datetime.now(timezone.utc).isoformat(), attempt["attempt_id"]))
     connection.execute("CREATE INDEX IF NOT EXISTS analysis_runs_item ON analysis_runs(item_id,created_at)")
+    if 'reuse_fingerprint' not in {row[1] for row in connection.execute('PRAGMA table_info(analysis_runs)')}:
+        connection.execute("ALTER TABLE analysis_runs ADD COLUMN reuse_fingerprint TEXT NOT NULL DEFAULT ''")
+    connection.execute("CREATE INDEX IF NOT EXISTS analysis_runs_reuse ON analysis_runs(item_id,reuse_fingerprint,status)")
+    connection.execute("""CREATE TABLE IF NOT EXISTS analysis_save_requests (
+        request_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, fingerprint TEXT NOT NULL)""")
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_artifacts (
         id TEXT PRIMARY KEY, run_id TEXT NOT NULL, path TEXT NOT NULL,
         name TEXT NOT NULL, media_type TEXT NOT NULL, sha256 TEXT NOT NULL,
@@ -80,6 +87,9 @@ def initialize_store(connection) -> None:
     connection.execute("""CREATE TABLE IF NOT EXISTS analysis_run_members (
         run_id TEXT NOT NULL, item_id TEXT NOT NULL, PRIMARY KEY(run_id,item_id))""")
     connection.execute("CREATE INDEX IF NOT EXISTS analysis_run_members_item ON analysis_run_members(item_id)")
+    connection.execute("""CREATE TABLE IF NOT EXISTS analysis_run_groups (
+        run_id TEXT NOT NULL, group_id TEXT NOT NULL, PRIMARY KEY(run_id,group_id))""")
+    connection.execute("CREATE INDEX IF NOT EXISTS analysis_run_groups_group ON analysis_run_groups(group_id)")
     connection.execute("""CREATE TRIGGER IF NOT EXISTS analysis_store_member_changed
         AFTER UPDATE OF segments_json,speaker_names_json,speaker_profiles_json,session_profile_json,
             analysis_config_json,analysis_annotations_json,revision_count,analysis_revision,outline_json,emotion_analysis_json ON library_items
@@ -258,6 +268,40 @@ class AnalysisStore:
         self.run_notes = Path(database_file).parent / "obsidian_layout" / "run_notes"
         self._note_events: list = []
 
+    def export_artifacts(self, run_id: str) -> list[dict]:
+        artifacts = self.artifacts(run_id)
+        manifest_artifact = next((a for a in artifacts if a['name'] == 'manifest.json'), None)
+        if not manifest_artifact:
+            return artifacts
+        manifest = json.loads(self.read_artifact(manifest_artifact['id'])[1])
+        if manifest.get('schema_version') != 2:
+            return artifacts
+        for name, entry in manifest.get('typed_tables', {}).items():
+            artifacts.append({'id': run_id + '.' + name, 'run_id': run_id,
+                'name': f'tables/{name}.csv', 'media_type': 'text/csv', 'rows': entry['row_count'],
+                'bytes': None, 'sha256': entry['rows_hash'], 'generated': True,
+                'url': f'/api/analysis/runs/{run_id}/tables/{name}.csv'})
+        return artifacts
+
+    def table_csv(self, run_id: str, name: str) -> bytes:
+        table = self.read_table(run_id, name)
+        return csv_bytes(table['fields'], [r['values'] for r in table['rows']])
+
+    def readable_package(self, run_id: str):
+        try:
+            return self.verified_package(run_id)
+        except package_v2.MissingReference as exc:
+            if exc.recoverable:
+                manifest = json.loads(self.read_artifact(next(a['id'] for a in self.artifacts(run_id)
+                    if a['name'] == 'manifest.json'))[1])
+                snapshot = json.loads(self.read_artifact(next(a['id'] for a in self.artifacts(run_id)
+                    if a['name'] == 'input.json'))[1])
+                status = package_v2.schedule_recovery(self, run_id, manifest['references'], snapshot)
+                if status == 'ready':
+                    return self.verified_package(run_id)
+                exc.recovery_status = status
+            raise
+
     def _publish_generated_vaults(self, run_id: str) -> dict[str, str]:
         """Mirror a completed run into the Input, Orchestrator, and Visualization Vaults.
 
@@ -268,14 +312,20 @@ class AnalysisStore:
         if not run or run["status"] != "completed":
             return {}
         try:
-            snapshot, result = self._read_package(run_id)
-            artifacts = self.artifacts(run_id)
+            snapshot, result, manifest, content = self.readable_package(run_id)
+            artifacts = self.export_artifacts(run_id)
             fields = {}
             for artifact in artifacts:
                 name = artifact["name"]
                 if name.startswith("tables/") and name.endswith(".csv"):
-                    content = self.read_artifact(artifact["id"])[1].decode("utf-8-sig")
-                    fields[name[len("tables/"):-len(".csv")]] = next(csv.reader(io.StringIO(content)), [])
+                    dataset = name[7:-4]
+                    if artifact.get('generated'):
+                        entry = manifest['typed_tables'][dataset]
+                        fields[dataset] = (manifest['references'][dataset]['fields'] if 'reference' in entry
+                                           else json.loads(content[entry['data']])['fields'])
+                    else:
+                        table_content = content[name].decode('utf-8-sig')
+                        fields[dataset] = next(csv.reader(io.StringIO(table_content)), [])
             self.vaults.note_events = []
             statuses = self.vaults.publish_analysis(run, snapshot, result, artifacts, fields)
             self._note_events.extend(self.vaults.note_events)
@@ -361,12 +411,24 @@ class AnalysisStore:
     def by_request(self, request_id: str):
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM analysis_runs WHERE request_id=?", (request_id,)).fetchone()
+            if row is None:
+                alias = conn.execute("SELECT r.*,q.fingerprint AS request_fingerprint FROM analysis_save_requests q JOIN analysis_runs r ON r.id=q.run_id WHERE q.request_id=?", (request_id,)).fetchone()
+                if alias is not None:
+                    value = dict(alias)
+                    value['fingerprint'] = value.pop('request_fingerprint')
+                    return value
         return dict(row) if row else None
 
-    def list(self, item_id: str) -> list[dict]:
+    def list(self, item_id: str, *, limit: int = 100, offset: int = 0) -> list[dict]:
+        if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
+            raise ValueError("履歴のページ指定が正しくありません。")
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM analysis_runs WHERE item_id=? ORDER BY created_at DESC,id DESC LIMIT 100", (item_id,)).fetchall()
+            rows = conn.execute("SELECT * FROM analysis_runs WHERE item_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", (item_id, limit, offset)).fetchall()
         return [dict(row) for row in rows]
+
+    def run_count(self, item_id: str) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT count(*) FROM analysis_runs WHERE item_id=?", (item_id,)).fetchone()[0]
 
     def artifacts(self, run_id: str) -> list[dict]:
         with self.connect() as conn:
@@ -374,6 +436,10 @@ class AnalysisStore:
         return [dict(row) for row in rows]
 
     def read_artifact(self, artifact_id: str):
+        if re.fullmatch(r'[0-9a-f]{32}\.[a-z_]+', artifact_id):
+            run_id, name = artifact_id.split('.')
+            data = self.table_csv(run_id, name)
+            return next(a for a in self.export_artifacts(run_id) if a['id'] == artifact_id), data
         with self.connect() as conn:
             row = conn.execute("""SELECT a.* FROM analysis_artifacts a JOIN analysis_runs r ON r.id=a.run_id
                 WHERE a.id=? AND r.status='completed'""", (artifact_id,)).fetchone()
@@ -390,9 +456,10 @@ class AnalysisStore:
                   "created_at", "status", "vault_status", "stale", "error", "provider", "model")}
         result.update({key: row.get(key) for key in ("fingerprint", "input_fingerprint", "snapshot_id")})
         result["artifacts"] = [{key: a[key] for key in ("id", "name", "media_type", "rows", "bytes", "sha256")}
-                               for a in self.artifacts(row["id"])]
+                               for a in self.export_artifacts(row["id"])]
         for artifact in result["artifacts"]:
-            artifact["url"] = f"/api/analysis/artifacts/{artifact['id']}"
+            artifact["url"] = (f"/api/analysis/runs/{row['id']}/tables/{artifact['name'][7:-4]}.csv"
+                if '.' in artifact['id'] else f"/api/analysis/artifacts/{artifact['id']}")
         result["obsidian_uri"] = ("obsidian://open?" + urlencode({"path": str(self.vault / row["note_path"])})
                                     if local and row["note_path"] and row["vault_status"] == "completed" else "")
         result["vault_notes"] = self.vault_notes(row["id"])
@@ -448,7 +515,8 @@ class AnalysisStore:
              request_id: str, input_fingerprint: str, source_revision: int, analysis_revision: int,
              app_url: str = "http://127.0.0.1:7860", provider: str = "", model: str = "",
              member_ids: list[str] | None = None, check_cancelled=lambda: None,
-             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION) -> dict:
+             publish: bool = True, commit_guard=None, table_format_version=TABLE_FORMAT_VERSION,
+             package_version=STORE_VERSION) -> dict:
         with STORE_LOCK:
             check_cancelled()
             library_id = self.library_id()
@@ -458,14 +526,41 @@ class AnalysisStore:
                         "input_fingerprint": input_fingerprint,
                         "algorithms": result.get("algorithms", {}), "parameters": result.get("parameters", {}),
                         "ai_request": result.get("ai_request_id", "")}
-            if kind in {"ai_finishing", "ai_insights"}: identity["request"] = request_id
+            inference = kind in {'ai_finishing', 'ai_insights'} or package_version == 2 and (kind in {"segment_classification", "transformer_topics",
+                                 "autonomous_analysis", "milestone_analysis"} or any(
+                datasets.get(name, ([], []))[1] for name in package_v2.LABEL_TABLES))
+            if kind in {"ai_finishing", "ai_insights"} or package_version == 2 and inference:
+                identity["request"] = request_id
+            payload_hash = package_v2.input_hash(result, datasets)
+            if package_version == 2:
+                identity['package_version'] = 2
+                identity['payload_hash'] = payload_hash
+                identity.update(provider=provider, model=model, member_ids=list(member_ids or []),
+                                source_revision=source_revision, analysis_revision=analysis_revision)
             fingerprint = digest(identity)
+            # Q23: exact scientific content can share an immutable run. Request
+            # identity remains separate, so resending an alias with new content
+            # still conflicts. Never deduplicate from input alone.
+            reusable_result = copy.deepcopy(result)
+            for key in ('request_id', 'ai_request_id', 'generated_at'):
+                reusable_result.pop(key, None)
+            if isinstance(reusable_result.get('parameters'), dict):
+                reusable_result['parameters'].pop('pipeline_id', None)
+            for chart in reusable_result.get('chart_specs', []):
+                if isinstance(chart, dict):
+                    chart.pop('chart_id', None)
+            reuse_identity = {**identity, 'payload_hash': package_v2.input_hash(reusable_result, datasets)}
+            for key in ('request', 'ai_request'):
+                reuse_identity.pop(key, None)
+            if isinstance(reuse_identity.get('parameters'), dict):
+                reuse_identity['parameters'] = {k:v for k,v in reuse_identity['parameters'].items() if k != 'pipeline_id'}
+            reuse_fingerprint = digest(reuse_identity)
             previous = self.by_request(request_id)
             if previous and (previous["item_id"] != item_id or previous["fingerprint"] != fingerprint):
                 raise StoreConflict("リクエストIDが別の入力に使われています。")
-            if not previous and kind not in {"ai_finishing", "ai_insights"}:
+            if not previous:
                 with self.connect() as conn:
-                    match = conn.execute("SELECT * FROM analysis_runs WHERE fingerprint=? AND item_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1", (fingerprint, item_id)).fetchone()
+                    match = conn.execute("SELECT * FROM analysis_runs WHERE (reuse_fingerprint=? OR (fingerprint=? AND ?=0)) AND item_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1", (reuse_fingerprint, fingerprint, int(inference), item_id)).fetchone()
                 if match: previous = dict(match)
             if previous and previous["status"] == "completed":
                 if commit_guard is not None:
@@ -473,6 +568,9 @@ class AnalysisStore:
                         connection.execute("BEGIN IMMEDIATE")
                         commit_guard(connection)
                 self._verified_package(previous["id"])
+                if previous['request_id'] != request_id:
+                    with self.connect() as conn:
+                        conn.execute("INSERT OR IGNORE INTO analysis_save_requests VALUES (?,?,?)", (request_id, previous['id'], fingerprint))
                 if publish and previous["vault_status"] != "completed":
                     self.publish(previous["id"])
                 elif publish:
@@ -494,18 +592,27 @@ class AnalysisStore:
                        "source_revision": source_revision, "analysis_revision": analysis_revision,
                        "app_url": app_url, "provider": provider, "model": model,
                        "member_ids": list(member_ids or []), "publish": publish,
+                       "package_version": package_version,
                        "table_format_version": table_format_version}
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 if commit_guard is not None:
                     commit_guard(conn)
+                if package_version == 2:
+                    fixed = conn.execute('SELECT payload_hash FROM analysis_package_inputs WHERE run_id=?', (run_id,)).fetchone()
+                    if fixed and fixed[0] != payload_hash:
+                        raise StoreConflict('同じ実行IDに異なる入力・設定・結果は保存できません。')
+                    conn.execute('INSERT OR IGNORE INTO analysis_package_inputs VALUES (?,?)', (run_id, payload_hash))
                 conn.execute("""INSERT INTO analysis_runs(id,request_id,item_id,kind,fingerprint,input_fingerprint,
                     snapshot_id,source_revision,analysis_revision,created_at,status,app_url,provider,model)
                     VALUES (?,?,?,?,?,?,?,?,?,?,'writing',?,?,?) ON CONFLICT(id) DO UPDATE SET status='writing',error=''""",
                     (run_id, request_id, item_id, kind, fingerprint, input_fingerprint, snapshot_id,
                      source_revision, analysis_revision, now, app_url.rstrip("/"), provider, model))
+                conn.execute("UPDATE analysis_runs SET reuse_fingerprint=? WHERE id=?", (reuse_fingerprint, run_id))
                 conn.executemany("INSERT OR IGNORE INTO analysis_run_members(run_id,item_id) VALUES (?,?)",
                                  [(run_id, member) for member in (member_ids or [])])
+                conn.executemany("INSERT OR IGNORE INTO analysis_run_groups(run_id,group_id) VALUES (?,?)",
+                    [(run_id, group['group_id']) for group in result.get('parameters', {}).get('target_snapshot', {}).get('groups', [])])
                 existing = conn.execute("SELECT payload_json FROM analysis_pending_packages WHERE run_id=?", (run_id,)).fetchone()
                 if existing:
                     pending = json.loads(existing[0])
@@ -524,15 +631,27 @@ class AnalysisStore:
                                 _table_value_type(row)
                     conn.execute("INSERT INTO analysis_pending_packages(run_id,payload_json) VALUES (?,?)", (run_id, canonical(pending).decode('utf-8')))
             try:
+                version = pending.get('package_version', 1)
+                if type(version) is not int or version not in (1, 2):
+                    raise StoreConflict('保存packageの形式に対応していません。')
                 table_version = pending.get("table_format_version")
                 if table_version is not None and (type(table_version) is not int or table_version != TABLE_FORMAT_VERSION):
                     raise StoreConflict("再試行する表の保存形式に対応していません。")
                 files = {"input.json": (canonical(snapshot), "application/json", None),
                          "parameters.json": (canonical(result.get("parameters", {})), "application/json", None),
                          "result.json": (canonical(result), "application/json", None)}
+                references, table_mapping = {}, {}
+                run_record = self.get(run_id)
+                vectors = None
+                if version == 2:
+                    embedded = package_v2.embedding_reference(self, snapshot, result)
+                    if embedded:
+                        vectors, vector_rows, reference = embedded
+                        datasets = {**datasets, 'segment_embeddings': (reference['fields'], vector_rows)}
+                        references['segment_embeddings'] = reference
                 for name, (fields, rows) in datasets.items():
                     if not re.fullmatch(r"[a-z_]+", name): raise ValueError("表の名前が正しくありません。")
-                    if table_version == TABLE_FORMAT_VERSION:
+                    if version == 2 or table_version == TABLE_FORMAT_VERSION:
                         table = table_package(name, fields, rows, run_id=run_id, snapshot_id=snapshot_id,
                                               source_revision=source_revision, analysis_revision=analysis_revision)
                         table_data = canonical(table)
@@ -540,8 +659,32 @@ class AnalysisStore:
                         # tuple-to-array normalization, never from a display preview.
                         exported = json.loads(table_data)
                         rows = [row["values"] for row in exported["rows"]]
-                        files[f"tables/{name}.json"] = (table_data, "application/json", len(rows))
-                    files[f"tables/{name}.csv"] = (csv_bytes(fields, rows), "text/csv", len(rows))
+                        if version == 2:
+                            entry = {'row_count': len(rows), 'rows_hash': digest(rows)}
+                            if name == 'segment_embeddings':
+                                entry['reference'] = name
+                            elif name in {'morphemes', 'dependencies'}:
+                                references[name] = package_v2.lexical_reference(self, name, fields, rows, snapshot, result)
+                                entry['reference'] = name
+                            elif name in package_v2.LABEL_TABLES:
+                                references[name] = package_v2.label_reference(self, run_record, name, fields, rows, snapshot, result)
+                                entry['reference'] = name
+                            else:
+                                files[f'tables/{name}.json'] = (table_data, 'application/json', len(rows))
+                                entry['data'] = f'tables/{name}.json'
+                            table_mapping[name] = entry
+                        else:
+                            files[f"tables/{name}.json"] = (table_data, "application/json", len(rows))
+                    if version == 1:
+                        files[f"tables/{name}.csv"] = (csv_bytes(fields, rows), "text/csv", len(rows))
+                if version == 2:
+                    document = package_v2.compact_document(result, datasets, vectors, snapshot)
+                    document['schema_version'] = 2
+                    files['documents/result.json'] = (canonical(document), 'application/json', None)
+                    compact = {'schema_version': 2, 'parameters': result.get('parameters', {}),
+                        'algorithms': result.get('algorithms', {}), 'document': 'documents/result.json',
+                        'tables': table_mapping}
+                    files['result.json'] = (canonical(compact), 'application/json', None)
                 artifacts = []
                 for name, (content, media_type, rows) in files.items():
                     check_cancelled()
@@ -554,13 +697,16 @@ class AnalysisStore:
                                       "run_id": run_id, "path": relative, "name": name,
                                       "media_type": media_type, "sha256": hashlib.sha256(content).hexdigest(),
                                       "bytes": len(content), "rows": rows})
-                manifest = {"schema_version": STORE_VERSION, "analysis_id": run_id, "library_id": library_id,
+                manifest = {"schema_version": version, "analysis_id": run_id, "library_id": library_id,
                             "conversation_id": item_id, "input_snapshot_id": snapshot_id,
                             "input_fingerprint": input_fingerprint, "fingerprint": fingerprint,
                             "kind": kind, "created_at": now, "source_revision": source_revision,
                             "analysis_revision": analysis_revision, "artifacts": artifacts,
                             "method_version": REGISTRY_VERSION, "provider": provider, "model": model}
-                if table_version == TABLE_FORMAT_VERSION:
+                if version == 2:
+                    manifest.update(table_format_version=TABLE_FORMAT_VERSION, typed_tables=table_mapping,
+                                    references=references, document='documents/result.json')
+                elif table_version == TABLE_FORMAT_VERSION:
                     manifest.update(table_format_version=table_version,
                                     typed_tables={name: {"data": f"tables/{name}.json", "export": f"tables/{name}.csv"}
                                                   for name in datasets})
@@ -623,7 +769,8 @@ class AnalysisStore:
             raise StoreConflict("固定packageのファイル名が移動先で競合するため停止しました。")
         content = {artifact["name"]: self.read_artifact(artifact["id"])[1] for artifact in artifacts}
         manifest = json.loads(content["manifest.json"])
-        if not isinstance(manifest, dict) or manifest.get("schema_version") not in (None, STORE_VERSION):
+        if (not isinstance(manifest, dict) or manifest.get('schema_version') is not None
+                and (type(manifest['schema_version']) is not int or manifest['schema_version'] not in (1, 2))):
             raise StoreConflict("固定packageの形式に対応していません。")
         entries = manifest.get("artifacts")
         if not isinstance(entries, list) or any(not isinstance(entry, dict) or not isinstance(entry.get("name"), str) for entry in entries):
@@ -640,15 +787,73 @@ class AnalysisStore:
             raise StoreConflict("固定packageのJSON形式が正しくありません。")
         if digest(snapshot) != run["snapshot_id"]:
             raise StoreConflict("固定packageの入力snapshot hashが一致しません。再計算せず停止しました。")
-        if result.get("schema_version") not in (None, STORE_VERSION):
+        if (result.get('schema_version') is not None
+                and (type(result['schema_version']) is not int or result['schema_version'] not in (1, 2))):
             raise StoreConflict("固定結果の形式に対応していません。")
         parameters = json.loads(content["parameters.json"])
         if not isinstance(parameters, dict) or not isinstance(result.get("parameters", {}), dict):
             raise StoreConflict("固定packageの条件形式が正しくありません。")
         if parameters != result.get("parameters", {}):
             raise StoreConflict("固定packageの条件が一致しません。")
-        self._verify_typed_tables(run, manifest, by_name, content)
+        if manifest.get('schema_version') == 2:
+            result = self._verify_v2(run, snapshot, result, manifest, by_name, content)
+        else:
+            self._verify_typed_tables(run, manifest, by_name, content)
         return snapshot, result, manifest, content
+
+    def _verify_v2(self, run, snapshot, result, manifest, artifacts, content):
+        mapping, references = manifest.get('typed_tables'), manifest.get('references')
+        if (not isinstance(mapping, dict) or not isinstance(references, dict)
+                or type(manifest.get('table_format_version')) is not int
+                or manifest['table_format_version'] != TABLE_FORMAT_VERSION
+                or result.get('schema_version') != 2 or result.get('tables') != mapping
+                or manifest.get('document') != 'documents/result.json'
+                or result.get('document') != manifest['document']
+                or set(references) != {name for name, entry in mapping.items() if 'reference' in entry}
+                or {n for n in content if n.startswith('tables/')} !=
+                   {f'tables/{n}.json' for n, entry in mapping.items() if 'data' in entry}):
+            raise StoreConflict('版2の表・文書・参照の対応が一致しません。')
+        tables = {}
+        for name, entry in mapping.items():
+            if not re.fullmatch(r'[a-z_]+', name) or set(entry) not in (
+                    {'data','row_count','rows_hash'}, {'reference','row_count','rows_hash'}):
+                raise StoreConflict('版2の表の形式が正しくありません。')
+            if 'reference' in entry:
+                if entry['reference'] != name:
+                    raise StoreConflict('版2の参照先が一致しません。')
+                reference = references[name]
+                expected_kind = (name if name in {'morphemes','dependencies','segment_embeddings'}
+                                 else 'segment_labels' if name in package_v2.LABEL_TABLES else None)
+                if (type(reference.get('version')) is not int or reference['version'] != 1
+                        or reference.get('kind') != expected_kind):
+                    raise StoreConflict('版2のDB参照の形式版・種類に対応していません。')
+                if reference.get('run_id', run['id']) != run['id']:
+                    raise StoreConflict('推論結果の実行IDが一致しません。')
+                rows = package_v2.resolve(self, name, reference, snapshot)
+                table = table_package(name, reference['fields'], rows, run_id=run['id'],
+                    snapshot_id=run['snapshot_id'], source_revision=run['source_revision'],
+                    analysis_revision=run['analysis_revision'])
+            else:
+                if entry['data'] != f'tables/{name}.json':
+                    raise StoreConflict('版2の表の参照先が一致しません。')
+                table = _read_typed_json(content[entry['data']])
+                rows = [r['values'] for r in table['rows']]
+                expected = table_package(name, table['fields'], rows, run_id=run['id'],
+                    snapshot_id=run['snapshot_id'], source_revision=run['source_revision'],
+                    analysis_revision=run['analysis_revision'])
+                artifact = artifacts[entry['data']]
+                if canonical(table) != canonical(expected) or artifact['rows'] != len(rows) or artifact['media_type'] != 'application/json':
+                    raise StoreConflict('版2の型付き表の型・版・件数が一致しません。')
+            if type(entry['row_count']) is not int or len(rows) != entry['row_count'] or digest(rows) != entry['rows_hash']:
+                raise StoreConflict('版2の表の件数・hashが一致しません。')
+            tables[name] = table
+        document = _read_typed_json(content[manifest['document']])
+        expanded = package_v2.expand_document(document, tables, snapshot)
+        if (not isinstance(expanded, dict) or expanded.get('schema_version') != 2
+                or expanded.get('parameters', {}) != result.get('parameters', {})
+                or expanded.get('algorithms', {}) != result.get('algorithms', {})):
+            raise StoreConflict('版2の文書の条件が一致しません。')
+        return expanded
 
     @staticmethod
     def _verify_typed_tables(run, manifest, artifacts, content):
@@ -689,10 +894,16 @@ class AnalysisStore:
         """Resolve a complete machine table through the verified saved manifest."""
         if not isinstance(dataset_id, str) or not re.fullmatch(r"[a-z_]+", dataset_id):
             raise StoreConflict("表の識別子が正しくありません。")
-        _snapshot, _result, manifest, content = self.verified_package(run_id)
+        snapshot, _result, manifest, content = self.readable_package(run_id)
         references = manifest.get("typed_tables", {}).get(dataset_id)
         if references is None:
             raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")
+        if 'reference' in references:
+            run = self.get(run_id)
+            reference = manifest['references'][dataset_id]
+            rows = package_v2.resolve(self, dataset_id, reference, snapshot)
+            return table_package(dataset_id, reference['fields'], rows, run_id=run_id,
+                snapshot_id=run['snapshot_id'], source_revision=run['source_revision'], analysis_revision=run['analysis_revision'])
         return _read_typed_json(content[references["data"]])
 
     def _publication_scope(self, run: dict, result: dict, targets: list[str] | None) -> list[str]:
@@ -741,7 +952,7 @@ class AnalysisStore:
                 raise LookupError("完了した保存結果がありません。")
             # Scope resolution reads the saved result and never recomputes a missing package.
             try:
-                snapshot, result = self._verified_package(run_id)
+                snapshot, result, _manifest, _content = self.readable_package(run_id)
                 requested = self._publication_scope(run, result, targets)
                 if run["kind"] == "autonomous_analysis" and requested and commit_guard is None:
                     raise StoreConflict("自律分析の公開は専用の保存・公開再試行から実行してください。")
@@ -811,8 +1022,8 @@ class AnalysisStore:
                 status, error, None if status == "publishing" else datetime.now(timezone.utc).isoformat(), attempt_id))
 
     def _read_package(self, run_id: str) -> tuple[dict, dict]:
-        artifacts = {a["name"]: a for a in self.artifacts(run_id)}
-        return tuple(json.loads(self.read_artifact(artifacts[name]["id"])[1]) for name in ("input.json", "result.json"))
+        snapshot, result, _manifest, _content = self.readable_package(run_id)
+        return snapshot, result
 
     def follow_moves(self, item_id: str) -> None:
         """Apply interview folder moves detected by ObsidianLayout to the SQLite catalog."""
@@ -958,8 +1169,9 @@ class AnalysisStore:
                 source = [{**s, "text": originals.get(s["id"], s).get("text", "")}
                           for s in snapshot.get("segments", []) if not s.get("excluded")]
                 refs = self.source_notes(source, item_id, title, run["app_url"])
-                artifact_rows = self.artifacts(run_id)
-                links = {a["name"]: f"[{a['name']}]({run['app_url']}/api/analysis/artifacts/{a['id']})" for a in artifact_rows}
+                artifact_rows = self.export_artifacts(run_id)
+                links = {a["name"]: f"[{a['name']}]({run['app_url']}" +
+                    (a['url'] if a.get('generated') else f"/api/analysis/artifacts/{a['id']}") + ')' for a in artifact_rows}
                 main = frontmatter(f"analysis-{run_id}", title + "：保存済み分析", conversation_id=item_id,
                                    analysis_id=run_id, input_snapshot_id=run["snapshot_id"],
                                    source_revision=run["source_revision"], analysis_revision=run["analysis_revision"],
@@ -1024,6 +1236,9 @@ class AnalysisStore:
                     text += "解析器：" + markdown(json.dumps(method.get("engine", {}), ensure_ascii=False)) + "\n\n"
                     text += links["parameters.json"] + " / " + links["result.json"] + "\n\n"
                     for dataset in method.get("datasets", []):
+                        table_meta = next((a for a in artifact_rows if a['name'] == f'tables/{dataset}.csv' and a.get('generated')), None)
+                        if table_meta:
+                            text += f"- 固定表：{table_meta['rows']}行 / 行hash `{table_meta['sha256']}`\n"
                         for extension, purpose in (("json", "型付き全件データ"), ("csv", "表計算・共有用")):
                             name = f"tables/{dataset}.{extension}"
                             if name in links: text += f"- {purpose}：{links[name]}\n"

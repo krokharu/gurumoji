@@ -110,8 +110,9 @@ class DurationOutputTests(unittest.TestCase):
                     source_revision=snapshot["source_revision"], analysis_revision=snapshot["analysis_revision"], publish=False)
                 for dataset in ("timeline", "emotions", "codes"):
                     live = self.client.get(self.url + "/export.csv?dataset=" + dataset)
-                    artifact = next(row for row in store.artifacts(run["id"]) if row["name"] == "tables/" + dataset + ".csv")
-                    fixed = self.client.get('/api/analysis/artifacts/' + artifact["id"])
+                    artifact = next(row for row in store.export_artifacts(run["id"]) if row["name"] == "tables/" + dataset + ".csv")
+                    fixed = self.client.get(artifact["url"])
+                    self.assertEqual(fixed.status_code, 200)
                     live_rows = list(csv.DictReader(io.StringIO(live.data.decode("utf-8-sig"))))
                     fixed_rows = list(csv.DictReader(io.StringIO(fixed.data.decode("utf-8-sig"))))
                     # The two existing CSV writers encode booleans/nested JSON differently.

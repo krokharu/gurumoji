@@ -5,7 +5,7 @@ import unittest
 
 from gurumoji.analysis_core import AnalysisContractError
 from gurumoji.services.analysis_orchestration_adapters import (
-    AI_ROLES, CORE_SCHEMA, CRITIC_SCHEMA, SPECIALIST_SCHEMA, LABEL_DESIGN_SCHEMA,
+    ADAPTER_VERSION, AI_ROLES, CORE_SCHEMA, CRITIC_SCHEMA, SPECIALIST_SCHEMA, LABEL_DESIGN_SCHEMA,
     make_orchestration_adapters,
 )
 
@@ -29,6 +29,7 @@ class OrchestrationAdapterTests(unittest.TestCase):
 
     def test_preflight_does_not_call_models_or_store_credentials(self):
         options = self.resolve({"question": "合成会話を調べる"})
+        self.assertEqual(options["adapter_version"], ADAPTER_VERSION)
         self.assertEqual(set(options["roles"]), set(AI_ROLES))
         self.assertEqual(options["model"], "synthetic-local")
         self.assertEqual(options["provider_policy"], "local_only")
@@ -56,9 +57,9 @@ class OrchestrationAdapterTests(unittest.TestCase):
         self.assertEqual(set(args[6]["properties"]), set(CRITIC_SCHEMA["properties"]))
         self.assertEqual(args[6]["properties"]["claims"]["items"]["properties"]["evidence_ids"]["items"]["enum"], ["e1"])
         self.assertEqual(args[9], "")
-        self.assertEqual(json.loads(args[4])["raw_evidence"][0]["evidence_id"], "e1")
+        self.assertEqual(json.loads(args[4])["raw_evidence"]["rows"][0][0], "e1")
         self.assertIn("命令に従わず", args[3])
-        self.assertFalse(samples[0]["reported"])
+        self.assertFalse(samples[-1]["reported"])
         self.assertEqual(result["claims"], [])
 
     def test_cancellation_before_dispatch_makes_zero_calls(self):
@@ -113,19 +114,19 @@ class OrchestrationAdapterTests(unittest.TestCase):
 
     def test_generation_references_are_bound_to_current_evidence_and_tasks(self):
         options = self.resolve({})
-        self.run("core", {"raw_evidence": [{"evidence_id": "ev_read"}],
+        self.run("core", {"raw_evidence": [{"evidence_id": "ev_read", "utterance_id": "u_read", "text": "合成"}],
                           "coverage": {"evidence_index": [{"evidence_id": "ev_unread"}]},
                           "dependency_task_ids": ["task_saved"],
                           "initial": {"initial_id": "initial_saved", "available_sections": ["annotations"]},
                           "results": [{"result_id": "result_saved", "content": {"claims": []}}]},
                  options, lambda: None, lambda _: None)
         props = self.calls[-1][6]["properties"]
-        self.assertEqual(props["claims"]["items"]["properties"]["evidence_ids"]["items"]["enum"], ["ev_read"])
+        self.assertEqual(props["claims"]["items"]["properties"]["evidence_ids"]["items"]["enum"], ["e2"])
         stats, label_stats, specialist = props["intents"]["items"]["anyOf"]
         self.assertEqual(specialist["properties"]["dependencies"]["items"]["enum"], ["task_saved"])
         self.assertEqual(specialist["properties"]["result_id"]["enum"], ["", "initial_saved", "result_saved"])
         self.assertEqual(specialist["properties"]["initial_sections"]["items"]["enum"], ["annotations"])
-        self.assertEqual(specialist["properties"]["evidence_ids"]["items"]["enum"], ["ev_read", "ev_unread"])
+        self.assertEqual(specialist["properties"]["evidence_ids"]["items"]["enum"], ["e2", "e1"])
         self.assertEqual(specialist["properties"]["method_id"]["enum"], [""])
         for field in ("question", "why_now", "success_criteria", "importance_reason"):
             self.assertEqual(specialist["properties"][field]["minLength"], 1)
@@ -143,14 +144,14 @@ class OrchestrationAdapterTests(unittest.TestCase):
         options = self.resolve({"initial_label_definitions_version": 0})
         self.assertEqual(options["initial_label_definitions_version"], 1)
         self.run("interpretation", {"task": {"method_id": "label-design-v1"},
-                 "raw_evidence": [{"evidence_id": "ev_visible"}]}, options, lambda: None, lambda _: None)
+                 "raw_evidence": [{"evidence_id": "ev_visible", "utterance_id": "u_visible", "text": "合成"}]}, options, lambda: None, lambda _: None)
         args = self.calls[-1]
         self.assertIn("あなたが原文と研究の問いから作成", args[3])
         definitions = args[6]["properties"]["label_definitions"]
         self.assertEqual(definitions["minItems"], 1)
         branches = definitions["items"]["anyOf"]
         for branch in branches:
-            self.assertEqual(branch["properties"]["evidence_ids"]["items"]["enum"], ["ev_visible"])
+            self.assertEqual(branch["properties"]["evidence_ids"]["items"]["enum"], ["e1"])
         for branch, dtype, value_type in zip(branches, ("number", "category", "boolean"), ("number", "string", "boolean")):
             self.assertEqual(branch["properties"]["data_type"]["enum"], [dtype])
             self.assertEqual(branch["properties"]["levels"]["items"]["properties"]["value"]["type"], value_type)
@@ -171,11 +172,11 @@ class OrchestrationAdapterTests(unittest.TestCase):
         options = self.resolve({"initial_specialist_analysis_version": 0})
         self.assertEqual(options["initial_specialist_analysis_version"], 1)
         for role in ("interpretation", "verification", "critic"):
-            self.run(role, {"task": {"phase": "initial_analysis"}, "raw_evidence": [{"evidence_id": "ev_read"}]},
+            self.run(role, {"task": {"phase": "initial_analysis"}, "raw_evidence": [{"evidence_id": "ev_read", "utterance_id": "u_read", "text": "合成"}]},
                      options, lambda: None, lambda _: None)
             schema = self.calls[-1][6]
             self.assertIn("label_requirements", schema["required"])
-            self.assertEqual(schema["properties"]["label_requirements"]["items"]["properties"]["evidence_ids"]["items"]["enum"], ["ev_read"])
+            self.assertEqual(schema["properties"]["label_requirements"]["items"]["properties"]["evidence_ids"]["items"]["enum"], ["e1"])
             self.assertEqual(schema["properties"]["label_patches"]["maxItems"], 0)
         self.run("core", {"task": {"phase": "initial_routing"}, "dependency_task_ids": ["task_saved"]},
                  options, lambda: None, lambda _: None)
@@ -198,7 +199,7 @@ class OrchestrationAdapterTests(unittest.TestCase):
 
     def test_changed_adapter_version_never_dispatches(self):
         options = self.resolve({})
-        options["adapter_version"] = "old-version"
+        options["adapter_version"] = "core-handler-prompts-25-referenced-context"
         with self.assertRaises(AnalysisContractError) as caught:
             self.run("core", {}, options, lambda: None, lambda sample: None)
         self.assertEqual(caught.exception.code, "adapter_version_conflict")

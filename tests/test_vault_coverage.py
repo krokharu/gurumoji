@@ -85,7 +85,7 @@ class LibraryVaultTests(unittest.TestCase):
         app.publish_input_vault(row)
         before = app.row_segments(row)
         revised = [{**segment, "text": segment["text"] + "。"} for segment in before]
-        context = {"revision": 0, "names": {}, "before": before, "stages": {"cleanup": "completed"},
+        context = {"revision": 0, "names": {}, "before": before, "segments": revised, "stages": {"cleanup": "completed"},
                    "provider": "openai", "model": "test-model", "usage": {}, "context_outline": None,
                    "run_id": "apply-test-0001"}
         app.run_obsidian_finishing("apply", {"item_id": "finish", "revision": 0}, revised, context,
@@ -136,8 +136,7 @@ class LibraryVaultTests(unittest.TestCase):
         self.assertNotIn("[[10-Methods/morphology", body)
         visuals = read_notes(self.registry.root("visualization"))
         self.assertIn(f"10-Visuals/run-{run['id']}/meeting_minutes.md", visuals)
-        result = json.loads(self.store.read_artifact(
-            next(a["id"] for a in self.store.artifacts(run["id"]) if a["name"] == "result.json"))[1])
+        result = self.store.verified_package(run['id'])[1]
         self.assertEqual([method["method_id"] for method in result["methods"]], ["meeting_minutes"])
 
     def test_group_interview_comparison_is_saved_apart_from_each_interview(self):

@@ -1,0 +1,21 @@
+{
+  "fixture_version": 1,
+  "input_hash": "artifact-review-synthetic-v1",
+  "segments": [
+    {"id":"u1","text":"A: 費用が抑えられるので賛成です。","speaker":"A","start":0,"end":20},
+    {"id":"u2","text":"B: 運用が簡単なら賛成です。","speaker":"B","start":30,"end":50},
+    {"id":"u3","text":"A: 費用の説明を聞きました。","speaker":"A","start":60,"end":80},
+    {"id":"u4","text":"B: 導入時期を確認しましょう。","speaker":"B","start":90,"end":110},
+    {"id":"u5","text":"A: 提案をまとめます。","speaker":"A","start":120,"end":140},
+    {"id":"u6","text":"C: 私は反対です。保守の負担が大きいです。","speaker":"C","start":150,"end":170},
+    {"id":"u7","text":"別議題: 次回の日程を確認します。","speaker":"B","start":310,"end":330},
+    {"id":"u8","text":"来週を希望します。","speaker":"A","start":340,"end":360},
+    {"id":"u9","text":"予定は未確定です。","speaker":"C","start":370,"end":390},
+    {"id":"u10","text":"日程は後日決めます。","speaker":"B","start":400,"end":420}
+  ],
+  "claims": [
+    {"claim_id":"c1","text":"全員が賛成した。","kind":"interpretation","utterance_ids":["u1"]},
+    {"claim_id":"c2","text":"Aは費用を理由にした。","kind":"observation","utterance_ids":["u1"]}
+  ],
+  "answer_key": {"c1":{"verdict":"counterexample","utterance_ids":["u6"]},"c2":{"verdict":"not_found_in_scope","utterance_ids":["u1"]}}
+}

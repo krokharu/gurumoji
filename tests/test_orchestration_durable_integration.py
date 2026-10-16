@@ -1,5 +1,6 @@
 """Real app composition, staged statistics and temporary publication only."""
 import json
+from gurumoji.services import model_context
 import unittest
 from unittest.mock import patch
 
@@ -35,8 +36,7 @@ class DurableOutputIntegrationTests(unittest.TestCase):
             generated.assert_not_called(); owned.assert_not_called()
         saved = state["publication"]["result_run"]
         self.assertEqual(saved["kind"], "autonomous_analysis")
-        artifact = next(a for a in saved["artifacts"] if a["name"] == "result.json")
-        package = self.client.get(artifact["url"]).get_json()
+        package = app.analysis_archive_store().readable_package(saved["id"])[1]
         self.assertEqual(package["orchestration"]["run"]["run_id"], rid)
         self.assertTrue(package["orchestration"]["raw_results"])
         catalog = package["orchestration"]["run"]["initial_label_catalog"]
@@ -45,7 +45,10 @@ class DurableOutputIntegrationTests(unittest.TestCase):
         self.assertTrue(catalog["definitions"])
         self.assertEqual(self.calls[0][1]["task"]["phase"], "initial_analysis")
         first_core = next(context for role, context, *_ in self.calls if role == "core" and context["task"]["phase"] == "core")
-        self.assertEqual(first_core["initial_label_catalog"], catalog)
+        task = next(t for t in state["tasks"] if t["task_id"] == first_core["task"]["task_id"])
+        restored = model_context.transform_references(first_core["initial_label_catalog"],
+            task["context_manifest"]["reference_map"], restore=True)
+        self.assertEqual(restored, catalog)
         markdown = self.client.get(self.url + "/" + rid + "/export.md").get_data(as_text=True)
         self.assertIn("初回のラベル・尺度（専門エージェント作成・AI下書き）", markdown)
         self.assertIn("理由の具体性", markdown)

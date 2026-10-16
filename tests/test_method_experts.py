@@ -26,7 +26,8 @@ EXPECTED_REGISTRY_EXPERTS = {
 }
 # Tools, AI vehicles and editing aids: not research methods, so no expert (see 10-Experts/00-Index).
 METHODS_WITHOUT_EXPERT = {"local_insights", "qualitative_coding", "ai_insights", "outline", "ai_finishing",
-                          "meeting_minutes", "segment_classification", "autonomous_analysis"}
+                          "meeting_minutes", "segment_classification", "autonomous_analysis",
+                          "response_network", "cooccurrence_network", "coding_consistency"}
 LITERATURE_FIELDS = {"note_id", "note_type", "literature_id", "title", "authors", "year", "venue", "source_type",
                      "peer_review", "peer_review_basis", "doi", "url", "accessed", "access_scope",
                      "access_detail", "correction_status", "related_experts", "status", "updated", "tags"}
@@ -432,8 +433,7 @@ class ExpertApiTests(unittest.TestCase):
         run = app.archive_group_analysis(row, app.group_analysis_for_row(row, include_research_rows=True),
                                          "expert-archive-0000001")
         store = app.analysis_archive_store()
-        artifact = next(a["id"] for a in store.artifacts(run["id"]) if a["name"] == "result.json")
-        result = json.loads(store.read_artifact(artifact)[1])
+        result = store.readable_package(run["id"])[1]
         methods = {method["method_id"]: method for method in result["methods"]}
         review = methods["participation"]["expert_review"]
         self.assertEqual(review["expert_id"], "exp-participation-balance")

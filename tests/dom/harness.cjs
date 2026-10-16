@@ -43,7 +43,8 @@ async function createHarness() {
     const target=new URL(request.url,w.location.href);
     if(target.origin!==w.location.origin||!target.pathname.startsWith('/api/')){blocked.push(request.url);request.settled=true;reject(Error('Only offline same-origin API fixtures are allowed'));return;}
     const startup={ '/api/training':{event_count:0,ready_count:0}, '/api/jobs/active':{job:null}, '/api/library?keyword=&speaker=&emotion=&group=&sort=updated_desc':{items:[]}, '/api/library?sort=updated_desc':{items:[]}, '/api/library/interview-comparison/runs':{runs:[]}, '/api/config':{ok:true,runtime:{browser_upload:true}}, '/api/custom-vocabulary':{terms:[]}, '/api/speakers':{speakers:[],registry_revision:0}};
-    if(Object.hasOwn(startup,request.url))reply(request,startup[request.url]);
+    if(request.url==='/api/library?keyword=&speaker=&emotion=&group=&sort=updated_desc&limit=50&offset=0')reply(request,{items:[],pagination:{offset:0,limit:50,total:0,has_more:false}});
+    else if(Object.hasOwn(startup,request.url))reply(request,startup[request.url]);
   });
   w.sessionStorage.setItem('gurumoji.bootSplashSeen','1');
   for(const element of w.document.querySelectorAll('script[src]')) {

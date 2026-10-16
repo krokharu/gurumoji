@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+from runtime_isolation import application_paths
 
 
 def use_temporary_library(
@@ -22,6 +23,12 @@ def use_temporary_library(
     cannot leak its temporary paths into later tests.
     """
     database = Path(root) / "library.sqlite3"
+    for key, value in application_paths(Path(root) / "isolated").items():
+        if key == "DATABASE_FILE" or not hasattr(app, key):
+            continue
+        local_patcher = patch.object(app, key, value)
+        local_patcher.start()
+        testcase.addCleanup(local_patcher.stop)
     patcher = patch.object(app, "DATABASE_FILE", database)
     patcher.start()
     testcase.addCleanup(patcher.stop)

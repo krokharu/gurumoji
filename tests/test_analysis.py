@@ -16,6 +16,14 @@ from support import use_temporary_library
 
 
 ANALYSIS_DATASETS = {
+    "response_nodes": {"speaker", "incoming", "outgoing", "reciprocity", "strength_centrality"},
+    "response_edges": {"edge_id", "source", "target", "weight", "segment_ids"},
+    "response_summary": {"speaker_count", "transition_count", "reciprocity"},
+    "cooccurrence_nodes": {"term", "community", "degree", "strength"},
+    "cooccurrence_edges": {"edge_id", "term_a", "term_b", "weight", "segment_ids"},
+    "cooccurrence_communities": {"community", "terms", "term_count"},
+    "consistency_codes": {"code_id", "segment_count", "mean_similarity", "unscorable_count"},
+    "coding_consistency": {"segment_id", "code_ids", "label", "origin", "model_revision"},
     "prepared_turns": {"segment_id", "input_version", "text_status", "content_ready", "interaction_ready"},
     "analysis_units": {"segment_id", "text", "original_text", "source_hash"},
     "analysis_plan": {"section", "item", "status"},
@@ -379,7 +387,7 @@ class AnalysisApiTests(unittest.TestCase):
                 "config", "annotations", "classification", "cautions",
                 "automatic", "manual", "segments", "exports", "research", "insights", "transformer",
                 "experts", "plan_items", "executed",
-                "segment_classification", "session_outline",
+                "segment_classification", "session_outline", "local_methods",
             },
         )
         self.assertEqual(

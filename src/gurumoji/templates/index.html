@@ -210,23 +210,26 @@
   <script src="{{ url_for('static', filename='analysis-visualizations.js') }}" defer></script>
   <script src="{{ url_for('static', filename='analysis-method-view.js') }}" defer></script>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='data-catalog.js') }}" defer></script>
+  {% include 'dialogs/data_catalog.html' %}
+  <script src="{{ url_for('static', filename='notation.js') }}" defer></script>
   <script src="{{ url_for('static', filename='interview-comparison.js') }}" defer></script>
   <script src="{{ url_for('static', filename='ai-effort.js') }}" defer></script>
 
   <dialog id="library-group-dialog" class="app-dialog library-group-dialog" aria-labelledby="library-group-dialog-title">
     <form id="library-group-create-form" method="dialog">
       <div class="app-dialog-header">
-        <h2 id="library-group-dialog-title">グループ管理</h2>
+        <h2 id="library-group-dialog-title">フォルダー管理</h2>
         <p>処理済みデータを目的・プロジェクトごとに分類します。</p>
       </div>
       <div id="library-group-message" class="alert" hidden></div>
       <label class="field">
-        <span>グループ名</span>
+        <span>フォルダー名</span>
         <input id="library-group-name" type="text" placeholder="例：2026年春 評価実験" required>
       </label>
       <div class="app-dialog-actions">
         <button id="close-library-group-dialog" class="secondary-button" type="button">閉じる</button>
-        <button class="primary-button small" type="submit">グループを作成</button>
+        <button class="primary-button small" type="submit">フォルダーを作成</button>
       </div>
       <div id="library-group-list" class="library-group-list"></div>
     </form>
@@ -307,5 +310,6 @@
   {% include 'views/analysis-history.html' %}
   <script src="{{ url_for('static', filename='analysis-orchestration.js') }}" defer></script>
   <script src="{{ url_for('static', filename='analysis-history.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='research-workspace.js') }}" defer></script>
 </body>
 </html>

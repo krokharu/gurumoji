@@ -1,5 +1,6 @@
 """Full Flask/SQLite/real-adapter integration with synthetic provider responses."""
 import json
+from gurumoji.services.model_context import restored_reference_context
 import unittest
 from unittest.mock import patch
 
@@ -32,7 +33,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
 
     def response(self, provider, key, model, system, prompt, schema_name, schema, check, usage, base, timeout_seconds=240):
         check()
-        context = json.loads(prompt)
+        context = restored_reference_context(prompt)
         role = schema_name.removeprefix("analysis_orchestration_")
         self.calls.append((role, context, provider, model))
         usage({"provider": provider, "model": model, "request_count": 1,
@@ -121,7 +122,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
 
     def test_new_http_runs_delegate_reviews_and_keep_owned_exports_read_only(self):
         def response(*args, **kwargs):
-            context = json.loads(args[4]); role = args[5].removeprefix("analysis_orchestration_")
+            context = restored_reference_context(args[4]); role = args[5].removeprefix("analysis_orchestration_")
             if role == "orchestrator":
                 args[7]()
                 args[8]({"provider": args[0], "model": args[2], "request_count": 1,
@@ -170,7 +171,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         initial = None
         def response(*args):
             nonlocal initial
-            context = json.loads(args[4]); role = args[5].removeprefix("analysis_orchestration_")
+            context = restored_reference_context(args[4]); role = args[5].removeprefix("analysis_orchestration_")
             if role == "core" and initial is None:
                 # The initial builder is now durable/asynchronous. Capture its
                 # completed immutable output before the first Core decision.

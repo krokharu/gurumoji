@@ -34,6 +34,8 @@ def register_system_routes(
     system_activity_snapshot: Callable[[], dict[str, Any]],
     obsidian_watcher_status: Callable[[], dict[str, Any]] = lambda: {},
     create_backup: Callable[[bool], dict[str, Any]] | None = None,
+    library_diagnostics: Callable[[], dict[str, Any]] = lambda: {},
+    media_metadata_status: Callable[[], dict[str, Any]] = lambda: {},
 ) -> None:
     def index() -> str:
         runtime = runtime_info()
@@ -142,7 +144,10 @@ def register_system_routes(
             return jsonify({"error": str(exc)}), 500
 
     def api_system_activity():
-        return jsonify({"ok": True, **system_activity_snapshot()})
+        result = {"ok": True, **system_activity_snapshot(), "media_metadata": media_metadata_status()}
+        if request.args.get("library_check") == "1":
+            result["library_projection"] = library_diagnostics()
+        return jsonify(result)
 
     def api_create_backup():
         # The backup is written on this PC; only its own browser may start one.

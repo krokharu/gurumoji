@@ -12,6 +12,7 @@ from .. import transcript_preparation as preparation
 from ..handlers.analysis_commands import TranscriptConflictError
 from ..text_utils import json_load, utc_now_iso, validate_json_value
 from .durable_files import path_is_within
+from . import media_assets
 from .group_analysis import analysis_segment_bounds
 from .library_rows import (
     emotion_values,
@@ -123,6 +124,8 @@ def make_library_store(
             ],
         }
         if full:
+            with database_connection() as connection:
+                result["media_assets"] = media_assets.public(connection, str(row["id"]), reveal_paths=local_path_access_allowed())
             result.update({
                 "status": "completed",
                 "segments": segments,
@@ -146,6 +149,11 @@ def make_library_store(
                 "write_json": True,
                 "burn_subtitled_video": bool(row["burn_subtitled_video"]),
             })
+        # Media duration is independent of the final transcript timestamp.
+        result["media_duration_seconds"] = row["media_duration_seconds"] if "media_duration_seconds" in row.keys() else next(
+            (asset["duration_seconds"] for asset in result.get("media_assets", []) if asset["role"] == "stored"), None)
+        result["media_created_at"] = row["media_created_at"] if "media_created_at" in row.keys() else next(
+            (asset["media_created_at"] for asset in result.get("media_assets", []) if asset["role"] == "stored"), None)
         return result
 
     def upsert_library_item(
@@ -161,6 +169,8 @@ def make_library_store(
         meeting_minutes: dict[str, Any] | None = None,
         original_segments: list[dict[str, Any]] | None = None,
         formatting_result: dict[str, Any] | None = None,
+        original_media_path: Path | None = None,
+        finishing_history: list[dict[str, Any]] | None = None,
     ) -> sqlite3.Row:
         validate_json_value(segments)
         validate_json_value(original_segments)
@@ -184,6 +194,24 @@ def make_library_store(
             labels,
             speaker_names,
         )
+        def prepare_media(active_connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+            previous = active_connection.execute("SELECT created_at FROM library_items WHERE id=?", (item_id,)).fetchone()
+            imported_at = previous[0] if previous is not None else created_at or now
+            prepared = {}
+            for role, path in (("stored", media_path), ("original", original_media_path)):
+                if role == "original" and path is None:
+                    continue
+                if media_assets.needs_inspection(active_connection, item_id, path, role):
+                    prepared[role] = media_assets.inspect(path, imported_at=imported_at, original_filename=source_name)
+            return prepared
+
+        # Slow subprocesses stay outside the write transaction in the usual import path.
+        if connection is not None:
+            prepared_media = prepare_media(connection)
+        else:
+            with database_connection() as read_connection:
+                prepared_media = prepare_media(read_connection)
+
         def persist(active_connection: sqlite3.Connection) -> sqlite3.Row:
             if not active_connection.in_transaction:
                 active_connection.execute("BEGIN IMMEDIATE")
@@ -252,7 +280,28 @@ def make_library_store(
             ).fetchone()
             if row is None:
                 raise RuntimeError("The library record could not be read back before commit.")
-            preparation.capture(active_connection, row, "saved" if previous is not None else "initial_import")
+            history_steps = None
+            import_source = None
+            if finishing_history is not None:
+                final_source = preparation.source(row)
+                history_steps = []
+                if previous is None:
+                    import_source = {**final_source, "segments": import_segments, "speaker_names": {},
+                        "speaker_profiles": normalize_conversation_speaker_profiles(
+                            None, {str(s.get("speaker") or "UNKNOWN") for s in import_segments}, {})}
+                for step in finishing_history:
+                    step_segments = ensure_segment_ids(item_id, step["segments"])
+                    step_names = step.get("speaker_names", {})
+                    step_profiles = step.get("speaker_profiles")
+                    history_steps.append({**{k: v for k, v in step.items() if k not in {"segments", "speaker_names", "speaker_profiles"}},
+                        "source": {**final_source, "segments": step_segments, "speaker_names": step_names,
+                                   "speaker_profiles": normalize_conversation_speaker_profiles(
+                                       step_profiles, {str(s.get("speaker") or "UNKNOWN") for s in step_segments}, step_names)}})
+            preparation.capture(active_connection, row, "saved" if previous is not None else "initial_import",
+                                previous_source=preparation.source(previous) if previous is not None else None,
+                                history_steps=history_steps, import_source=import_source)
+            for role, facts in prepared_media.items():
+                media_assets.save(active_connection, item_id, role, facts)
             return row
 
         if connection is not None:

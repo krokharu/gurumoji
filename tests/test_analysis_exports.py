@@ -44,6 +44,10 @@ class AnalysisPipelineExportTests(unittest.TestCase):
             self.assertIn("tables/speakers.csv", archive.namelist())
             manifest = json.loads(archive.read("manifest.json"))
             package = json.loads(archive.read("result.json"))
+            if package.get('schema_version') == 2:
+                from gurumoji.services.analysis_package import expand_document
+                tables = {name: json.loads(archive.read(entry['data'])) for name, entry in manifest['typed_tables'].items()}
+                package = expand_document(json.loads(archive.read(package['document'])), tables, json.loads(archive.read('input.json')))
             speakers = list(csv.DictReader(io.StringIO(
                 archive.read("tables/speakers.csv").decode("utf-8-sig")
             )))

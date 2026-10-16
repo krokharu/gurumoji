@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
-from ...ai_effort import cleanup_enabled
+from ...ai_effort import cleanup_enabled, normalize_efforts
 
 
 def clean(
@@ -97,7 +97,7 @@ def create_outline(
     return result
 
 
-FULL_CLEANUP_STAGES = ("outline_context", "cleanup", "jev_comparison")
+FULL_CLEANUP_STAGES = ("outline_context", "cleanup", "jev_comparison", "notation")
 
 
 def run_full_cleanup(
@@ -109,6 +109,8 @@ def run_full_cleanup(
     attach_jev: Callable[[list[dict[str, Any]], dict[str, dict[str, Any]]], list[dict[str, Any]]] | None = None,
     outline: dict[str, Any] | None = None,
     on_failure: Callable[[str, BaseException | None], None] | None = None,
+    unify_notation: Callable[..., dict[str, Any]] | None = None,
+    ai_efforts: dict | None = None,
 ) -> dict[str, Any]:
     """Run context outline -> full cleanup -> Jev comparison for both finishing routes.
 
@@ -169,9 +171,29 @@ def run_full_cleanup(
                 jev_usage = {}
                 failed("jev_comparison", exc)
 
+    before_notation = deepcopy(result)
+    notation_result = None
+    if normalize_efforts(ai_efforts)["notation"] == "off":
+        stages["notation"] = "off"
+    elif unify_notation is None:
+        stages["notation"] = "not_requested"
+    else:
+        try:
+            check_cancelled()
+            notation_result = unify_notation(deepcopy(result))
+            result = notation_result["segments"]
+            stages["notation"] = "completed"
+            check_cancelled()
+        except Exception as exc:
+            result = before_notation
+            notation_result = None
+            failed("notation", exc)
+
     return {
         "segments": result,
         "context_outline": context,
         "stages": stages,
         "jev_usage": jev_usage,
+        "before_notation": before_notation,
+        "notation": notation_result["notation"] if notation_result else None,
     }

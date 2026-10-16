@@ -69,7 +69,7 @@ class OrchestratorRegressionTests(unittest.TestCase):
         self.assertEqual(self.saved, [])
         runner.assert_not_called()
 
-    def test_cancellation_at_each_step_transition_is_terminal_and_retryable(self):
+    def test_cancellation_at_each_step_boundary_is_terminal_and_requires_new_request(self):
         for target in ('checking', 'ready', 'running', 'validating', 'persisting', 'committed'):
             with self.subTest(target=target):
                 fixture = OrchestratorRegressionTests()
@@ -79,7 +79,7 @@ class OrchestratorRegressionTests(unittest.TestCase):
                     original = fixture.service._set_step
                     seen = []
                     def cancel_before(attempt_id, status, **kwargs):
-                        if status == target and not seen:
+                        if target in ((status,) if isinstance(status, str) else status) and not seen:
                             seen.append(attempt_id)
                             fixture.service.cancel('synthetic', pid)
                         return original(attempt_id, status, **kwargs)
@@ -89,12 +89,15 @@ class OrchestratorRegressionTests(unittest.TestCase):
                     self.assertTrue(seen)
                     self.assertFalse(any(s['status'] in ACTIVE_STEP_STATES for s in fixture.steps(pid)))
                     self.assertTrue(all(s['ended_at'] for s in fixture.steps(pid) if s['status'] == 'cancelled'))
-                    fixture.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
-                    self.assertEqual(fixture.run_pipeline(pid)['status'], 'completed')
+                    with self.assertRaises(AnalysisContractError) as caught:
+                        fixture.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
+                    self.assertEqual(caught.exception.code, 'pipeline_terminal')
+                    new_id = fixture.start(definition_ids=[], mode='automatic', request_id='new-boundary-request-0002')
+                    self.assertEqual(fixture.run_pipeline(new_id)['status'], 'completed')
                 finally:
                     fixture.doCleanups()
 
-    def test_cancel_after_commit_preserves_success_and_artifact_on_retry(self):
+    def test_cancel_after_commit_preserves_success_and_artifact_on_rejected_retry(self):
         pid = self.start(definition_ids=[], mode='automatic')
         original = self.service._set_step
         committed = []
@@ -108,8 +111,9 @@ class OrchestratorRegressionTests(unittest.TestCase):
             self.assertEqual(self.run_pipeline(pid)['status'], 'cancelled')
         with self.connect() as connection:
             before = tuple(connection.execute('SELECT status,artifact_json,attempt FROM analysis_step_attempts WHERE attempt_id=?', (committed[0],)).fetchone())
-        self.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
-        self.assertEqual(self.run_pipeline(pid)['status'], 'completed')
+        with self.assertRaises(AnalysisContractError) as caught:
+            self.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
+        self.assertEqual(caught.exception.code, 'pipeline_terminal')
         with self.connect() as connection:
             after = tuple(connection.execute('SELECT status,artifact_json,attempt FROM analysis_step_attempts WHERE attempt_id=?', (committed[0],)).fetchone())
         self.assertEqual(before, after)
@@ -150,10 +154,12 @@ class OrchestratorRegressionTests(unittest.TestCase):
                          {k: v['status'] for k, v in attempt['outcomes'].items()})
         self.assertFalse(any(s['status'] in ACTIVE_STEP_STATES for s in self.steps(pid)))
         self.service.publication_outcomes = store.publication_outcomes
-        self.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
+        with self.assertRaises(AnalysisContractError) as caught:
+            self.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
+        self.assertEqual(caught.exception.code, 'pipeline_terminal')
         with patch.object(store, '_publish_generated_vaults') as publish, patch.object(self.service, 'save_result') as save:
             final = self.run_pipeline(pid)
-        self.assertEqual(final['status'], 'completed', final)
+        self.assertEqual(final['status'], 'cancelled', final)
         publish.assert_not_called(); save.assert_not_called()
         self.assertEqual(store.publication_attempts(run_id), [attempt])
         self.assertEqual(final['result_run']['id'], run_id)
@@ -166,10 +172,6 @@ class OrchestratorRegressionTests(unittest.TestCase):
                 try:
                     store = fixture.configure_store()
                     pid = fixture.start(definition_ids=[], mode='automatic', publication_targets=list(PUBLICATION_TARGETS))
-                    def cancel_after(run_id):
-                        fixture.service.cancel('synthetic', pid)
-                        return store.publication_outcomes(run_id)
-                    fixture.service.publication_outcomes = cancel_after
                     state = fixture.run_pipeline(pid)
                     run_id = state['result_run']['id']
                     attempts = store.publication_attempts(run_id)
@@ -182,6 +184,7 @@ class OrchestratorRegressionTests(unittest.TestCase):
                         else:
                             path.write_bytes(b'{}')
                     fixture.service.publication_outcomes = store.publication_outcomes
+                    fixture.publication_wait(pid)
                     fixture.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
                     with patch.object(store, '_publish_generated_vaults') as publish, patch.object(fixture.service, 'save_result') as save:
                         final = fixture.run_pipeline(pid)
@@ -196,21 +199,25 @@ class OrchestratorRegressionTests(unittest.TestCase):
     def test_later_failed_publication_invalidates_prior_success_before_retry(self):
         store = self.configure_store()
         pid = self.start(definition_ids=[], mode='automatic', publication_targets=list(PUBLICATION_TARGETS))
-        def cancel_after(run_id):
-            self.service.cancel('synthetic', pid)
-            return store.publication_outcomes(run_id)
-        self.service.publication_outcomes = cancel_after
         state = self.run_pipeline(pid)
         run_id = state['result_run']['id']
         store._publish_research = lambda _: {'vault_status': 'conflict', 'error': 'synthetic newer conflict'}
         store.publish(run_id, targets=list(PUBLICATION_TARGETS))
         self.assertEqual(store.publication_outcomes(run_id)['research']['status'], 'conflict')
         self.service.publication_outcomes = store.publication_outcomes
+        self.publication_wait(pid)
         self.service.retry('synthetic', pid, {}, app_url='http://synthetic.invalid')
         final = self.run_pipeline(pid)
         self.assertEqual((final['status'], final['wait_reason']), ('waiting', 'publication'))
         self.assertEqual({p['target_role']: p['status'] for p in final['publications']}['research'], 'conflict')
         self.assertEqual(len(store.publication_attempts(run_id)), 3)
+
+    def publication_wait(self, pipeline_id):
+        # Synthetic crash/failure after a publication succeeds but before the
+        # pipeline finalizes. Re-publication must verify the fixed package again.
+        with self.connect() as connection:
+            connection.execute("UPDATE analysis_pipeline_requests SET status='waiting',wait_reason='publication' WHERE pipeline_id=?", (pipeline_id,))
+            connection.execute("UPDATE analysis_step_attempts SET status='failed' WHERE pipeline_id=? AND step_id='publish_result'", (pipeline_id,))
 
     def test_cancel_during_publication_preserves_mixed_durable_outcomes(self):
         store = self.configure_store()

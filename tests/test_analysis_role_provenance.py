@@ -116,9 +116,19 @@ class RoleProvenanceFlaskTests(unittest.TestCase):
             profiles = {"E": {"session_role": "participant", "session_role_source": "explicit"}, "M": {"session_role": "moderator"},
                         "G": {"global_speaker_id": "role_fixture_person"}, "X": {"session_role": "observer"}}
             annotations = {"excluded": {"excluded": True}}
+        current_row=app.library_row('content')
+        app._update_library_from_payload_locked('content',{'revision_count':current_row['revision_count'],
+            'segments':segments,'speaker_names':{},'speaker_profiles':profiles},record_training=False)
         with app.database_connection() as connection:
-            connection.execute("UPDATE library_items SET segments_json=?,speaker_names_json='{}',speaker_profiles_json=?,analysis_annotations_json=?,revision_count=revision_count+1 WHERE id='content'",
-                               (json.dumps(segments), json.dumps(profiles), json.dumps(annotations)))
+            connection.execute("UPDATE library_items SET analysis_annotations_json=? WHERE id='content'",(json.dumps(annotations),))
+        if not mixed:
+            # An empty legacy profile must remain ambiguous/default, without
+            # editing the current source behind an active delta chain.
+            with app.database_connection() as connection:
+                connection.execute("DELETE FROM transcript_changes WHERE item_id='content'")
+                connection.execute("DELETE FROM transcript_change_bases WHERE item_id='content'")
+                connection.execute("DELETE FROM transcript_versions WHERE item_id='content'")
+                connection.execute("UPDATE library_items SET speaker_profiles_json='{}' WHERE id='content'")
         if mixed:
             current = self.client.get(self.url).get_json()["manual"]["preparation"]
             response = self.client.put("/api/library/content/preparation", json={
@@ -160,7 +170,11 @@ class RoleProvenanceFlaskTests(unittest.TestCase):
         self.fail(str(state))
 
     def artifact_bytes(self, run_id):
-        return {row["name"]: self.store.read_artifact(row["id"])[1] for row in self.store.artifacts(run_id)}
+        result={row["name"]: self.store.read_artifact(row["id"])[1] for row in self.store.artifacts(run_id)}
+        for artifact in self.store.export_artifacts(run_id):
+            if artifact.get('generated') and artifact['name'].endswith('.csv'):
+                result[artifact['name']]=self.store.table_csv(run_id,Path(artifact['name']).stem)
+        return result
 
     def test_real_role_preset_reports_unregistered_role_missing_without_changing_analysis_defaults(self):
         current = self.install_source()
@@ -173,7 +187,7 @@ class RoleProvenanceFlaskTests(unittest.TestCase):
             run = self.run_trial(saved, trial)
             ai.assert_not_called()
         artifacts = self.artifact_bytes(run["id"])
-        result = json.loads(artifacts["result.json"])
+        result = self.store.readable_package(run['id'])[1]
         method = next(value for value in result["methods"] if value["method_id"] == "descriptive_statistics")
         self.assertEqual(method["summaries"][0]["text"], "有効N=0、度数={}")
         self.assertEqual(method["details"]["role_source_policy"]["value_field"], "recorded_role")
@@ -206,7 +220,7 @@ class RoleProvenanceFlaskTests(unittest.TestCase):
             run = self.run_trial(saved, trial)
             ai.assert_not_called()
         artifacts = self.artifact_bytes(run["id"])
-        result = json.loads(artifacts["result.json"])
+        result = self.store.readable_package(run['id'])[1]
         method = next(value for value in result["methods"] if value["method_id"] == "descriptive_statistics")
         self.assertIn('有効N=5、度数={"moderator": 1, "observer": 2, "participant": 2}', method["summaries"][0]["text"])
         csv_rows = list(csv.DictReader(io.StringIO(artifacts["tables/measurements.csv"].decode("utf-8-sig"))))
@@ -285,7 +299,7 @@ class RoleProvenanceFlaskTests(unittest.TestCase):
         self.assertEqual((trial["valid_count"], trial["missing_count"]), (5, 1))
         self.assertEqual(trial["values"], [True] * 5)
         run = self.run_trial(saved, trial)
-        result = json.loads(self.artifact_bytes(run["id"])["result.json"])
+        result = self.store.readable_package(run['id'])[1]
         method = next(value for value in result["methods"] if value["method_id"] == "descriptive_statistics")
         self.assertEqual(method["summaries"][0]["text"], '有効N=5、度数={"True": 5}')
 

@@ -35,7 +35,7 @@ class AnalysisCoreContractTests(unittest.TestCase):
         self.assertEqual(CAPABILITIES["methods"]["participation"]["status"], "available")
         self.assertEqual(CAPABILITIES["methods"]["conversation_dynamics"]["status"], "available")
         self.assertEqual(CAPABILITIES["methods"]["interview_evaluation"]["status"], "unavailable")
-        self.assertEqual(CAPABILITIES["exports"]["sav"]["status"], "unavailable")
+        self.assertEqual(CAPABILITIES["exports"]["sav"]["status"], "available")
         self.assertFalse(CAPABILITIES["llm_roles"]["manual"]["external"])
 
 

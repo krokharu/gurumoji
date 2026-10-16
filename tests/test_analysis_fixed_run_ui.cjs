@@ -13,7 +13,8 @@ function node(tag='div') {
  };
 }
 function make(){
- const requests=[],effects=[],ctx={analysisState:{itemId:'A',data:{id:'A'},dirty:false},analysisNavigationGeneration:0,
+ const requests=[],effects=[],timers=[],ctx={analysisState:{itemId:'A',data:{id:'A'},dirty:false},analysisNavigationGeneration:0,
+ setTimeout(fn){timers.push(fn);},
  document:{body:node('body'),querySelectorAll(){return[];}},Map,URLSearchParams,crypto:{randomUUID:()=> 'uuid'},
  captureAnalysisContext(){return {itemId:ctx.analysisState.itemId,data:ctx.analysisState.data,navigation:ctx.analysisNavigationGeneration};},
  isAnalysisContextCurrent(c){return c.itemId===ctx.analysisState.itemId&&c.data===ctx.analysisState.data&&c.navigation===ctx.analysisNavigationGeneration;},
@@ -23,7 +24,7 @@ function make(){
  readJsonResponse:async r=>r.payload,loadAnalysisItem(){throw Error('live calculation');},loadAnalysisStorage(){throw Error('history is not the result');}
  };
  vm.createContext(ctx);vm.runInContext(source,ctx);
- return {ctx,requests,effects,view:()=>ctx.analysisFixedViewerElements(),
+ return {ctx,requests,effects,timers,view:()=>ctx.analysisFixedViewerElements(),
   navigate(item){ctx.analysisState={itemId:item,data:{id:item}};ctx.analysisNavigationGeneration++;},
   reply(i,payload,ok=true){requests[i].resolve({ok,payload});}};
 }
@@ -129,5 +130,23 @@ const passed=[];async function check(name,fn){await fn();passed.push(name);}
   assert(host.textContent.includes('automatic: saved-only'));assert(!host.textContent.includes('保存した計算版: saved-only'));
  });
  await check('file-catalog-page-bounded-and-full-zip',async()=>{const p=make(),data=payload();data.run.artifacts=Array.from({length:101},(_,i)=>({id:'f'+i,name:'tables/t'+i+'.csv',rows:500,bytes:100,sha256:'abc'}));const host=node();p.ctx.renderFixedAnalysisRun(host,data,{itemId:'A',runId:'r1',current:()=>true});const buttons=[];function visit(n){if(n.tag==='button')buttons.push(n);n.children.forEach(visit);}visit(host);assert.equal(buttons.filter(b=>b.textContent.endsWith('を読む')).length,20);assert(host.textContent.includes('全101ファイル'));assert(host.textContent.includes('全ファイルをZIP'));});
+ await check('missing-reference-displays-no-values-or-downloads',async()=>{
+  const p=make(),done=p.ctx.openFixedAnalysisRun('A','r1');
+  p.reply(0,{...payload(),integrity:'missing_reference',recovery_status:'missing_reference',error:'参照先の行がありません（作り直しても一致しません）'});
+  await done;assert(p.view().body.textContent.includes('参照先の行がありません'));
+  assert(!p.view().body.textContent.includes('ZIP'));assert.equal(p.requests.length,1);assert.equal(p.timers.length,0);
+ });
+ await check('reference-recovery-poll-is-readonly-and-renders-verified-result',async()=>{
+  const p=make(),done=p.ctx.openFixedAnalysisRun('A','r1');
+  p.reply(0,{...payload(),integrity:'missing_reference',recovery_status:'rebuilding'});await done;
+  assert(p.view().body.textContent.includes('作り直しています'));assert.equal(p.timers.length,1);
+  const recovering=p.timers[0]();assert.equal(p.requests[1].url,'/api/library/A/analysis/runs/r1');assert(!p.requests[1].options.method);
+  p.reply(1,payload());await recovering;assert(p.view().body.textContent.includes('元データ 2版'));
+ });
+ await check('reference-recovery-poll-cannot-update-a-closed-viewer',async()=>{
+  const p=make(),done=p.ctx.openFixedAnalysisRun('A','r1');
+  p.reply(0,{...payload(),integrity:'missing_reference',recovery_status:'rebuilding'});await done;
+  p.ctx.closeFixedAnalysisViewer();await p.timers[0]();assert.equal(p.requests.length,1);assert.equal(p.view().body.children.length,0);
+ });
  console.log(JSON.stringify({scope:'Node synthetic DOM/deferred fetch; no GUI, AT, browser or network',passed},null,2));
 })().catch(e=>{console.error(e);process.exitCode=1;});

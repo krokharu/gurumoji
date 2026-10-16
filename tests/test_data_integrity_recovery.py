@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from sqlite_fixtures import ClosingConnection
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from gurumoji.services.outputs import write_outputs
 
 def connection_factory(path):
     def connect():
-        connection = sqlite3.connect(path)
+        connection = sqlite3.connect(path, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         return connection
     return connect

@@ -56,7 +56,7 @@ const keys=['outline','cleanup','name_extract','name_verify'];
 const snapshot={outline:'high',cleanup:'low',name_extract:'off',name_verify:'medium'};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 async function capability(s, cap, model='A') { s.doc.getElementById('ai-provider').value='lmstudio'; s.ctx.tokenConfigSnapshot.lmstudio_model=model; s.sync(); s.calls.at(-1).resolve({ok:true,json:async()=>({model,reasoning:cap})});await flush(); }
-function assertState(s,expected) { assert.deepEqual(s.values(),expected);keys.forEach(key=>{assert.equal(s.card(key).querySelector('input[type="hidden"]').value,expected[key]);assert.equal(s.card(key).dataset.effort,expected[key]);}); }
+function assertState(s,expected) { assert.deepEqual(s.values(),{notation:'off',...expected});keys.forEach(key=>{assert.equal(s.card(key).querySelector('input[type="hidden"]').value,expected[key]);assert.equal(s.card(key).dataset.effort,expected[key]);}); }
 test('E01 storage absent/corrupt/null/unknown/unavailable/legacy auto retains independent defaults',()=>{
   for(const saved of [null,'broken','null','[]','{"outline":"unknown"}','{"outline":"\"]"}']) {const s=setup(saved); assertState(s,Object.fromEntries(keys.map(k=>[k,'medium'])));assert.equal(s.writes.length,0);}
   assertState(setup(null,true),Object.fromEntries(keys.map(k=>[k,'medium'])));

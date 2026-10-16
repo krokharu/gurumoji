@@ -369,7 +369,8 @@ def make_speaker_registration(
                 if new_records:
                     now = utc_now_iso()
                     for label, _name, record in new_records:
-                        persist_speaker_registry_record(connection, record, None, now)
+                        persist_speaker_registry_record(connection, record, None, now,
+                            origin="rule", process="speaker_registry_auto_registration")
                         created[label] = record["id"]
                     connection.execute(
                         "UPDATE application_metadata SET value = ? WHERE key = ?",

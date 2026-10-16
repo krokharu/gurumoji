@@ -33,6 +33,11 @@ class ContentBrowserTests(unittest.TestCase):
             connection.execute("UPDATE library_items SET media_path=? WHERE id='content'", (str(audio),))
         _, args = self.fixture.start()
         self.fixture.run_worker(args, response=content_support.finding(["E0001"], text="保存済みAI見解。<img src=x onerror=window.injected=1>"))
+        # Browsing results is read-only; explicitly run the fictional local
+        # analysis first, as the production execution flow does.
+        with app.database_connection() as connection:
+            row = connection.execute("SELECT * FROM library_items WHERE id='content'").fetchone()
+        app.group_analysis_for_row(row, execute=True)
 
     def exercise_browser(self, mobile=False, reload_only=False, generate=False, linked='', unified_execution=False):
         browser_support.require_browser_executable()
@@ -78,8 +83,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       document.querySelector('#analysis-definition-output').value = 'utterance_length';
       document.querySelector('#analysis-definition-output').dispatchEvent(new Event('input', {bubbles: true}));
       const initialTrialText = document.querySelector('#analysis-definition-trial-result').textContent;
+      await analysisMeasurementAction('save');
+      await analysisMeasurementAction('trial');
+      const confirm = document.querySelector('#analysis-definition-confirm');
+      assert(!confirm.disabled, 'fixed trial confirmation unavailable');
+      confirm.checked = true; confirm.dispatchEvent(new Event('change', {bubbles: true}));
+      await analysisMeasurementAction('adopt');
+      assert(analysisMeasurement.adopted?.status === 'adopted', 'measurement was not adopted');
       document.querySelector('#analysis-run-publish').checked = false;
       document.querySelector('#analysis-run-form').requestSubmit();
+      await waitFor(() => !!analysisExecutionState.id);
+      const pipelineFinished = await fetch('/static/pipeline-worker-wait');
+      assert(pipelineFinished.ok, 'pipeline background worker did not finish');
       await waitFor(() => analysisExecutionState.status === 'completed');
       assert(!document.querySelector('#analysis-execution-view').hidden, 'execution screen missing');
       assert(document.querySelector('#analysis-execution-percent').textContent === '100%', 'execution progress incomplete');
@@ -87,9 +102,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       assert(document.querySelector('#analysis-execution-stages').textContent.includes('M7'), 'M0-M7 milestones missing');
       assert(document.querySelector('#analysis-definition-trial-result').textContent !== initialTrialText, 'manual trial result missing');
       document.querySelector('#analysis-execution-results').click();
-      await waitFor(() => document.querySelector('#analysis-execution-view').hidden && !document.querySelector('#analysis-shell').hidden);
-      assert(window.location.hash === '#/analysis/content', 'execution route did not return to results');
-      assert(!!document.querySelector('.analysis-archive-files a[href$="/export.zip"]'), 'pipeline ZIP export link missing');
+      await waitFor(() => document.querySelector('.analysis-fixed-dialog')?.open
+        && document.querySelector('.analysis-fixed-body a[href$="/export.zip"]'));
+      assert(document.querySelector('.analysis-fixed-body').textContent.includes('保存日時'), 'fixed run provenance missing');
+      assert(!!document.querySelector('.analysis-fixed-body a[href$="/export.zip"]'), 'pipeline ZIP export link missing');
       document.body.dataset.contentTest = 'passed'; return;
     }
     if (LINKED_MODE === 'valid') {
@@ -205,6 +221,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             return original_render(*args, **kwargs).replace("</body>", '<script src="/static/content-browser-driver.js" defer></script></body>')
 
         def serve_static(filename):
+            if filename == 'pipeline-worker-wait':
+                from gurumoji.analysis_pipeline import RUNTIMES
+                workers = list(RUNTIMES.values())
+                for worker in workers:
+                    worker.join(25)
+                complete = all(not worker.is_alive() for worker in workers)
+                return app.app.response_class('done' if complete else 'timeout', status=200 if complete else 504)
             if filename == 'content-worker-wait':
                 return app.app.response_class('done' if worker_done.wait(15) else 'timeout',
                                               status=200 if worker_done.is_set() else 504)
@@ -243,7 +266,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 result = browser_support.run_browser_dom(
                     f"http://127.0.0.1:{server.server_port}/?{urlencode(query)}",
                     profile=profile, viewport=(390, 844) if mobile else (1440, 1000),
-                    virtual_time_budget_ms=70000, timeout_seconds=40,
+                    virtual_time_budget_ms=70000, timeout_seconds=60,
                     device_scale_factor_one=True, allow_media_autoplay=True,
                 )
         finally:

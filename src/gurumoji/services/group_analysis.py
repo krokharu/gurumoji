@@ -53,6 +53,7 @@ from ..transformer_analysis import (
 from .. import method_experts
 from .. import transcript_preparation as preparation
 from .emotion import emotion_label_ja
+from .analysis_networks import attach_foundations
 from .outputs import SPEAKER_THEME_COLORS
 from .transcription.segments import default_speaker_name
 from .group_analysis_exports import (
@@ -2070,6 +2071,8 @@ def group_analysis_for_row(
             "時間の合計・平均・発話速度は時刻が有効な発話だけを対象にします。"
             "時刻不明の発話は0秒の観測とは扱わず、本文の件数・文字数には含めます。"
         )
+    with connect() as connection:
+        attach_foundations(analysis, connection, registry_profiles)
     if defer_research:
         # A genuine boundary: never consult the process research cache here.
         return analysis

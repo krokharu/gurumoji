@@ -393,7 +393,7 @@ class FullCleanupProcedureTests(unittest.TestCase):
         self.assertEqual(result['segments'][0]['text'], '校正後')
         self.assertTrue(result['segments'][0]['jev']['flagged'])
         self.assertEqual(result['stages'], {'outline_context': 'completed', 'cleanup': 'completed',
-                                            'jev_comparison': 'completed'})
+                                            'jev_comparison': 'completed', 'notation': 'off'})
         self.assertEqual(result['jev_usage'], {'request_count': 1})
 
     def test_existing_outline_is_reused_without_a_new_ai_call(self):
@@ -420,7 +420,7 @@ class FullCleanupProcedureTests(unittest.TestCase):
                           on_failure=lambda stage, exc: reported.append((stage, str(exc) if exc else None)))
         self.assertEqual(result['segments'], self.segments)
         self.assertEqual(result['stages'], {'outline_context': 'failed', 'cleanup': 'failed',
-                                            'jev_comparison': 'skipped'})
+                                            'jev_comparison': 'skipped', 'notation': 'off'})
         self.assertEqual([stage for stage, _ in reported], ['outline_context', 'cleanup', 'jev_comparison'])
         self.assertIsNone(reported[-1][1])
         self.assertNotIn('jev', self.calls)
@@ -434,7 +434,7 @@ class FullCleanupProcedureTests(unittest.TestCase):
     def test_jev_without_cleanup_is_skipped(self):
         result = self.procedure(clean_with_outline=None, on_failure=lambda *_: None)
         self.assertEqual(self.calls, [])
-        self.assertEqual(result['stages'], {'jev_comparison': 'skipped'})
+        self.assertEqual(result['stages'], {'jev_comparison': 'skipped', 'notation': 'off'})
 
 
 if __name__ == '__main__':

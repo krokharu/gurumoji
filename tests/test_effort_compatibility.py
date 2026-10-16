@@ -44,7 +44,7 @@ class EffortCompatibilityTests(unittest.TestCase):
                                       lmstudio_model_id=lambda model: model,
                                       lmstudio_reasoning=lambda *_: capability, providers={'lmstudio'},
                                       ai_efforts=efforts)
-                        resolver = local_cleanup_effort_payload if stage == 'cleanup' else local_effort_payload
+                        resolver = local_cleanup_effort_payload if stage in {'cleanup', 'notation'} else local_effort_payload
                         try:
                             expected = resolver(level, capability)
                         except UnsupportedLocalEffort:

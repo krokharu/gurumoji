@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from importlib import metadata
 from typing import Any, Callable
 
+from .analysis_core import EMBEDDING_STANDARD_V1
+
 
 TRANSFORMER_ANALYSIS_VERSION = "transformer-topics-9"
 EMBEDDING_INPUT_VERSION = "contextual-e5-input-1"
@@ -702,6 +704,11 @@ def _package_version(name: str) -> str:
 
 
 def _load_model(model_name: str, revision: str = "") -> tuple[Any, Any, str]:
+    if model_name == DEFAULT_MODEL:
+        standard_revision = EMBEDDING_STANDARD_V1["model_revision"]
+        if revision and revision != standard_revision:
+            raise ValueError("埋め込み標準 v1 のモデルrevisionと一致しません。再計算してください。")
+        revision = standard_revision
     key = (model_name, revision)
     with _MODEL_LOCK:
         cached = _MODEL_CACHE.get(key)
@@ -796,6 +803,10 @@ def encode_texts(
             progress(10 + int(50 * done / max(1, len(texts))), f"発話を意味ベクトル化しています（{done}/{len(texts)}）")
     matrix = np.concatenate(vectors, axis=0) if vectors else np.empty((0, 0), dtype="float32")
     commit = str(getattr(getattr(model, "config", None), "_commit_hash", "") or revision)
+    if model_name == DEFAULT_MODEL and texts:
+        if (commit != EMBEDDING_STANDARD_V1["model_revision"]
+                or matrix.shape[1] != EMBEDDING_STANDARD_V1["dimensions"]):
+            raise ValueError("埋め込み標準 v1 のモデル版・次元が一致しません。再計算してください。")
     return matrix, {
         "name": model_name,
         "revision": commit,
@@ -1482,6 +1493,8 @@ def semantic_search(
         revision = str(saved.get("engine", {}).get("revision") or "")
         if not revision:
             raise ValueError("保存済みベクトルのモデルrevisionが不明です。テーマ分析を再実行してください。")
+        if model == DEFAULT_MODEL and revision != EMBEDDING_STANDARD_V1["model_revision"]:
+            raise ValueError("埋め込み標準 v1 と一致しません。テーマ分析を再計算してください。")
         query_vectors, query_engine = encode_texts([query], model_name=model, revision=revision,
                                                    kind="query", check_cancelled=check_cancelled)
         if str(query_engine.get("revision") or "") != revision or str(query_engine.get("name") or "") != model:

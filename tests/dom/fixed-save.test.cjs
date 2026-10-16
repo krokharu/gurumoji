@@ -4,6 +4,36 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {createHarness} = require('./harness.cjs');
 function data(revision = 1) { return {executed: true, item: {id: 'A', source_name: 'Synthetic A', revision_count: revision, analysis_revision: revision}, segments: [], config: {}, annotations: {}}; }
+test('unexecuted analysis exposes saved history without discarding unsaved settings', async t => {
+  const h = await createHarness(); t.after(() => h.close());
+  h.fixture({itemId: 'A', data: {...data(), executed: false}, config: {}, annotations: {}, mode: 'automatic', dirty: true});
+  h.evaluate('Object.assign(analysisState,window.fixture);renderAnalysisWorkspace();onContentAnalysisLoaded();');
+  const empty = h.document.querySelector('#analysis-empty');
+  assert.equal(empty.hidden, false);
+  assert(empty.querySelector('.analysis-fixed-lookup'));
+  assert.equal(empty.querySelector('[data-archive-save]'), null);
+  assert.equal(h.evaluate('analysisState.dirty'), true);
+  const history = h.requests.find(r => r.url.includes('/A/analysis/runs?'));
+  assert(history); h.reply(history, {runs: [], pagination: {has_more: false}}); await h.flush();
+  assert.equal(h.requests.some(r => r.options.method === 'POST'), false);
+});
+test('mounted KWIC controls use the current state after a mutation and ignore its prior response', async t => {
+  const h = await createHarness(); t.after(() => h.close());
+  h.fixture({itemId:'A',data:{...data(),insights:{fingerprint:'synthetic'}},config:{},annotations:{},mode:'automatic',dirty:false});
+  h.evaluate('Object.assign(analysisState,window.fixture);renderAnalysisWorkspace();selectAnalysisPage("content");');
+  const query = h.document.querySelector('[data-kwic-query]');
+  const search = value => {query.value=value;query.dispatchEvent(new h.w.Event('input',{bubbles:true}));query.closest('form').requestSubmit();};
+  search('first');
+  const old = h.requests.findLast(r => r.url.includes('/kwic?'));
+  h.evaluate('setAnalysisDirty(true);setAnalysisDirty(false);');
+  search('second');
+  const current = h.requests.findLast(r => r.url.includes('/kwic?'));
+  assert(current.url.includes('q=second'));
+  h.reply(old,{fingerprint:'synthetic',query:'first',hits:[],total:0,offset:0});await h.flush();
+  assert.equal(h.evaluate('contentAnalysisState().result'),null);
+  h.reply(current,{fingerprint:'synthetic',query:'second',hits:[],total:0,offset:0});await h.flush();
+  assert.equal(h.evaluate('contentAnalysisState().result.query'),'second');
+});
 async function setup(t) {
   const h = await createHarness(); t.after(() => h.close());
   h.fixture({itemId: 'A', data: data(), config: {}, annotations: {}, mode: 'manual', dirty: true});
@@ -21,7 +51,7 @@ async function setup(t) {
 async function saved(h, request) {
   h.reply(request, data(2)); await h.flush();
   for (const suffix of ['runs', 'insights', 'transformer']) {
-    const request = h.requests.findLast(r => !r.settled && r.url === `/api/library/A/analysis/${suffix}`);
+    const request = h.requests.findLast(r => !r.settled && r.url === `/api/library/A/analysis/${suffix}${suffix==='runs'?'?limit=100&offset=0':''}`);
     if (request) h.reply(request, suffix === 'runs' ? {runs: []} : {run: null});
   }
   await h.flush();

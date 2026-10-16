@@ -125,8 +125,7 @@ class SpeakerMissingnessTests(unittest.TestCase):
         for key in ("speaking_seconds", "speaking_percent", "participant_percent", "timed_turn_count", "missing_time_turn_count", "algorithm_version"):
             self.assertEqual({speaker: row[key] for speaker, row in fixed.items()}, {speaker: row[key] for speaker, row in live.items()})
         self.assertEqual(float(fixed["Z"]["speaking_seconds"]), 0)
-        result_artifact = next(row for row in state["result_run"]["artifacts"] if row["name"] == "result.json")
-        saved = self.client.get(result_artifact["url"]).get_json()
+        saved = app.analysis_archive_store().readable_package(state["result_run"]["id"])[1]
         self.assertEqual(saved["algorithms"]["automatic"], "focus-group-local-7")
         participation = next(method for method in saved["methods"] if method["method_id"] == "participation")
         self.assertEqual(participation["engine"]["version"], "focus-group-local-7")

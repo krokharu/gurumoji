@@ -196,7 +196,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             return found.group(1) if found else ""
 
         self.assertEqual(marker("method-view"), "passed", result.stdout[-3000:])
-        self.assertEqual(marker("method-count"), "18")
+        self.assertEqual(marker("method-count"), str(len({key for key, *_ in METHODS} - SEPARATE_RUN_METHODS)))
         self.assertEqual(marker("method-summary"), "5")
         self.assertGreaterEqual(int(marker("method-panels")), 4)
         self.assertIn("参加バランスの専門家", marker("method-expert"))

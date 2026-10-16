@@ -146,7 +146,8 @@ class HistoryViewerTests(unittest.TestCase):
         adopted = self.viewer.timeline('conversation', self.run_id, kind='label', operation='adopt', status='committed')
         self.assertEqual(adopted['pagination']['total'], 1)
         timestamp = adopted['entries'][0]['created_at']
-        self.assertEqual(self.viewer.timeline('conversation', self.run_id, kind='label', after=timestamp, before=timestamp)['pagination']['total'], 1)
+        self.assertEqual(self.viewer.timeline('conversation', self.run_id, kind='label', operation='adopt',
+            status='committed', after=timestamp, before=timestamp)['pagination']['total'], 1)
 
     def test_invalid_filters_and_versions_rejected(self):
         for query in ({'limit': 0}, {'limit': 101}, {'offset': -1}, {'limit': '1.0'}, {'offset': '99999999999999999999'}, {'after': '2026-10-04'},

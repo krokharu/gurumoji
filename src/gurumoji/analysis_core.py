@@ -16,6 +16,12 @@ from typing import Any
 
 
 CONTRACT_VERSION = "analysis-core-1"
+TRANSITION_VERSION = "analysis-transitions-3-1"
+DECISION_VERSION = "analysis-decisions-3-1"
+PIPELINE_VERSION = "analysis-pipeline-1"
+TERMINAL_SUCCESS = frozenset({"committed", "reused", "not_applicable"})
+ACTIVE_STEP_STATES = ("checking", "ready", "running", "validating", "persisting", "cancelling")
+REUSABLE_STEPS = frozenset({"participation", "conversation_dynamics", "manual_measurement"})
 PIPELINE_STATES = frozenset({
     "accepted", "running", "waiting", "cancelling", "completed", "failed",
     "cancelled",
@@ -40,27 +46,24 @@ WAIT_REASONS = frozenset({
 
 ALLOWED_TRANSITIONS = {
     "pipeline": {
-        "accepted": {"running", "cancelling", "failed"},
+        "accepted": {"running", "waiting", "cancelling", "failed"},
         "running": {"waiting", "cancelling", "completed", "failed"},
-        "waiting": {"running", "cancelling", "failed"},
+        "waiting": {"accepted", "cancelling", "failed"},
         "cancelling": {"cancelled", "failed"},
         "completed": set(), "failed": set(), "cancelled": set(),
     },
     "step": {
         "planned": {"checking", "cancelled"},
-        "checking": {"ready", "awaiting_input", "blocked", "failed",
-                     "not_applicable", "cancelled"},
-        "ready": {"running", "waiting_resource", "cancelled"},
-        "waiting_resource": {"ready", "cancelled", "failed"},
-        "running": {"validating", "retry_wait", "failed", "cancelling",
+        "checking": {"ready", "failed", "interrupted", "not_applicable", "cancelled", "reused"},
+        "ready": {"running", "failed", "interrupted", "cancelled"},
+        "waiting_resource": set(),
+        "running": {"validating", "failed", "cancelling",
                     "interrupted"},
-        "validating": {"persisting", "retry_wait", "failed", "cancelling"},
-        "persisting": {"committed", "blocked", "failed", "cancelling"},
-        "retry_wait": {"ready", "failed", "cancelled"},
-        "awaiting_input": {"checking", "cancelled", "failed"},
-        "blocked": {"checking", "failed", "cancelled"},
-        "cancelling": {"cancelled", "committed", "failed"},
-        "interrupted": {"ready", "failed", "cancelled"},
+        "validating": {"persisting", "failed", "cancelling", "interrupted"},
+        "persisting": {"committed", "failed", "cancelling", "interrupted"},
+        "retry_wait": set(), "awaiting_input": set(), "blocked": set(),
+        "cancelling": {"cancelled", "failed", "interrupted"},
+        "interrupted": set(),
         "committed": set(), "reused": set(), "failed": set(),
         "cancelled": set(), "not_applicable": set(),
     },
@@ -74,15 +77,66 @@ ALLOWED_TRANSITIONS = {
         "pending": {"publishing", "not_selected"},
         "publishing": {"published", "failed", "conflict", "unknown"},
         "failed": {"publishing"}, "conflict": {"publishing"},
-        "unknown": {"publishing"}, "published": set(), "not_selected": set(),
+        "unknown": {"publishing"}, "published": {"publishing"}, "not_selected": set(),
     },
 }
+
+RESERVED_STATES = {"step": frozenset({"waiting_resource", "awaiting_input", "retry_wait", "blocked"})}
+# These IDs describe the checks made by Runtime at the existing execution
+# boundaries. A new attempt always starts at planned; old reports never reopen it.
+_TARGET_GUARDS = {
+    "pipeline": {"accepted": "recovery.valid", "running": "execution.accepted",
+                 "waiting": "execution.wait", "cancelling": "cancel.requested",
+                 "cancelled": "cancel.settled", "failed": "execution.failed",
+                 "completed": "pipeline.complete"},
+    "step": {"checking": "attempt.current", "ready": "eligibility.allowed",
+             "running": "execution.ready", "validating": "report.received",
+             "persisting": "artifact.valid", "committed": "artifact.persisted",
+             "not_applicable": "eligibility.not_applicable", "failed": "execution.failed",
+             "cancelling": "cancel.requested", "cancelled": "cancel.settled",
+             "interrupted": "process.restarted", "reused": "step.reuse_verified"},
+    "publication": {"publishing": "publication.retry", "not_selected": "publication.unselected",
+                    "published": "publication.confirmed", "failed": "publication.failed",
+                    "conflict": "publication.conflict", "unknown": "publication.unknown"},
+    "milestone": {"active": "parents.committed", "waiting": "execution.wait",
+                  "committed": "steps.committed", "failed": "execution.failed",
+                  "cancelled": "cancel.settled"},
+}
+TRANSITION_GUARDS = {
+    machine: {(current, target):
+              ("process.restarted" if machine == "pipeline" and current == "accepted" and target == "waiting"
+               else _TARGET_GUARDS[machine][target])
+              for current, targets in states.items() for target in targets}
+    for machine, states in ALLOWED_TRANSITIONS.items()
+}
+
+
+def transition_guard(machine: str, current: str, target: str) -> str:
+    return TRANSITION_GUARDS.get(machine, {}).get((current, target), "")
+
+
+def state_machine_contracts() -> dict[str, Any]:
+    """Export the sole transition authority for the design contract and tests."""
+    return {machine: {
+        "rule_version": TRANSITION_VERSION,
+        "states": list(states),
+        "reserved": sorted(RESERVED_STATES.get(machine, ())),
+        "transitions": [{"from": current, "to": target, "guard": guards[(current, target)]}
+                        for current, targets in states.items() for target in sorted(targets)],
+    } for machine, states in ALLOWED_TRANSITIONS.items()
+       for guards in [TRANSITION_GUARDS[machine]]}
 
 CAPABILITIES = {
     "methods": {
         "participation": {"status": "available", "milestone": "M2", "llm": False},
         "conversation_dynamics": {"status": "available", "milestone": "M2", "llm": False},
-        "manual_measurement": {"status": "available", "milestone": "M5", "llm": False},
+        "manual_measurement": {
+            "status": "available", "milestone": "M5", "llm": False,
+            "definition_methods": {
+                "frequency": {"inference_scope": "descriptive"},
+                "descriptive": {"inference_scope": "descriptive"},
+            },
+        },
         "outline": {"status": "unavailable", "reason": "初回範囲では既存確定アウトラインの閲覧のみです。"},
         "stance": {"status": "unavailable", "reason": "立場推定は未提供です。"},
         "interview_evaluation": {"status": "unavailable", "reason": "JEV8軸はEVALゲート未完了です。"},
@@ -92,9 +146,9 @@ CAPABILITIES = {
         "json": {"status": "available"},
         "csv": {"status": "available"},
         "zip": {"status": "available"},
-        "xlsx": {"status": "unavailable", "reason": "pipeline固定packageからのXLSXは未提供です。"},
-        "sav": {"status": "unavailable", "reason": "pyreadstatを導入していません。"},
-        "static_image": {"status": "unavailable", "reason": "初回範囲は画面SVGと代替表です。"},
+        "xlsx": {"status": "available", "source": "verified_typed_package"},
+        "sav": {"status": "available", "source": "verified_typed_package", "container": "zip"},
+        "static_image": {"status": "available", "formats": ["svg", "png"], "dataset_required": True},
     },
     "llm_roles": {
         "manual": {"status": "available", "external": False},
@@ -114,7 +168,7 @@ SOURCE_COLUMNS = frozenset({
 MEASUREMENT_RULES = frozenset({
     "identity", "text_length", "nonempty", "duration", "boolean_true",
 })
-SUPPORTED_METHODS = frozenset({"frequency", "descriptive"})
+SUPPORTED_METHODS = frozenset(CAPABILITIES["methods"]["manual_measurement"]["definition_methods"])
 
 
 class AnalysisContractError(ValueError):
@@ -137,6 +191,359 @@ def fingerprint(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical(value)).hexdigest()
 
 
+EMBEDDING_STANDARD_V1 = {
+    "standard_id": "embedding-standard-v1",
+    "model_name": "intfloat/multilingual-e5-small",
+    "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "dimensions": 384, "encoding": "int8-scale-127",
+    "query_prefix": "query: ", "passage_prefix": "passage: ",
+}
+
+
+def validate_embedding_compatibility(values: list[dict[str, Any]], *,
+                                     standard: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Accept one explicitly versioned coordinate system, never mixed vectors."""
+    expected = EMBEDDING_STANDARD_V1 if standard is None else standard
+    keys = ("model_name", "model_revision", "dimensions", "encoding")
+    if (any(not isinstance(expected.get(key), str) or not expected[key] for key in
+            ("model_name", "model_revision", "encoding"))
+            or type(expected.get("dimensions")) is not int or expected["dimensions"] <= 0):
+        raise AnalysisContractError("埋め込み標準の設定が正しくありません。", code="embedding_standard_invalid")
+    for value in values:
+        if (not isinstance(value, dict) or any(value.get(key) != expected[key] for key in keys)
+                or type(value.get("dimensions")) is not int):
+            raise AnalysisContractError("埋め込み標準が一致しません。同じモデル・版で再計算してください。",
+                                        code="embedding_standard_mismatch")
+    return dict(expected)
+
+
+def definition_identity(definition: dict[str, Any]) -> str:
+    """Same normalized definition body as the immutable execution binding."""
+    return fingerprint(validate_definition(definition, require_version=True))
+
+
+def group_definitions_by_hash(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group frozen definitions across conversations after verifying every hash."""
+    groups: dict[str, dict[str, Any]] = {}
+    seen = set()
+    for snapshot in snapshots:
+        item_id = snapshot.get("item_id")
+        _graph_component(item_id)
+        payload = validate_definition(snapshot.get("payload"), require_version=True)
+        digest = definition_identity(payload)
+        if snapshot.get("definition_hash") != digest:
+            raise AnalysisContractError("固定定義のhashが一致しません。", code="definition_hash_mismatch")
+        member = (item_id, payload["definition_id"])
+        if member in seen:
+            raise AnalysisContractError("集計対象の会話・定義が重複しています。", code="definition_member_duplicate")
+        seen.add(member)
+        group = groups.setdefault(digest, {"definition_hash": digest, "definition": payload, "members": []})
+        group["members"].append({"item_id": item_id, "definition_id": payload["definition_id"]})
+    return [{**groups[key], "members": sorted(groups[key]["members"], key=lambda row: (row["item_id"], row["definition_id"]))}
+            for key in sorted(groups)]
+
+
+def _graph_component(value: Any) -> str:
+    if (not isinstance(value, str) or not value or value != value.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+        raise AnalysisContractError("グラフIDの要素が正しくありません。", code="graph_id_invalid")
+    return value.replace("%", "%25").replace(":", "%3A")
+
+
+def graph_node_id(kind: str, *, item_id: str = "", segment_id: str = "",
+                  participant_code: str = "", speaker: str = "", lemma: str = "", pos: str = "",
+                  definition_hash: str = "", claim_id: str = "") -> str:
+    """Canonical IDs; callers resolve participant_code against speaker_registry."""
+    if kind == "utt":
+        parts = (item_id, segment_id)
+    elif kind == "spk":
+        parts = (participant_code,) if participant_code else (item_id, speaker)
+    elif kind == "term":
+        parts = (lemma, pos)
+    elif kind == "def":
+        if not isinstance(definition_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", definition_hash):
+            raise AnalysisContractError("定義hashが正しくありません。", code="graph_id_invalid")
+        parts = (definition_hash,)
+    elif kind == "clm":
+        parts = (claim_id,)
+    else:
+        raise AnalysisContractError("未対応の節点種別です。", code="graph_id_invalid")
+    return kind + ":" + ":".join(_graph_component(value) for value in parts)
+
+
+def validate_graph_node_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise AnalysisContractError("節点IDは文字列で指定してください。", code="graph_id_invalid")
+    parts = value.split(":")
+    counts = {"utt": {3}, "spk": {2, 3}, "term": {3}, "def": {2}, "clm": {2}}
+    if len(parts) not in counts.get(parts[0], set()):
+        raise AnalysisContractError("節点IDの形式が正しくありません。", code="graph_id_invalid")
+    for part in parts[1:]:
+        decoded = part.replace("%3A", ":").replace("%25", "%")
+        if _graph_component(decoded) != part:
+            raise AnalysisContractError("節点IDの符号化が正しくありません。", code="graph_id_invalid")
+    if parts[0] == "def" and not re.fullmatch(r"[0-9a-f]{64}", parts[1]):
+        raise AnalysisContractError("定義節点のhashが正しくありません。", code="graph_id_invalid")
+    return value
+
+
+def validate_graph_edge(value: Any, *, evidence_ids: set[str] | None = None) -> dict[str, Any]:
+    """Provenance is part of edge identity; AI drafts cannot alias researcher edges."""
+    if not isinstance(value, dict):
+        raise AnalysisContractError("辺はJSONオブジェクトで指定してください。", code="graph_edge_invalid")
+    result = {key: value.get(key) for key in ("source", "target", "relation", "weight", "provenance",
+              "method", "method_version", "input_hash", "evidence_segment_ids")}
+    for key in ("source", "target"):
+        validate_graph_node_id(result[key])
+    for key in ("relation", "method", "method_version"):
+        _graph_component(result[key])
+    if (not isinstance(result["provenance"], str) or result["provenance"] not in {"rule", "ai_draft", "researcher"}
+            or type(result["weight"]) not in (int, float) or not math.isfinite(result["weight"])
+            or not isinstance(result["input_hash"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", result["input_hash"])):
+        raise AnalysisContractError("辺の出所・重み・入力hashが正しくありません。", code="graph_edge_invalid")
+    evidence = result["evidence_segment_ids"]
+    if not isinstance(evidence, list) or not evidence:
+        raise AnalysisContractError("辺の根拠発話IDがありません。", code="graph_evidence_invalid")
+    for identifier in evidence:
+        validate_graph_node_id(identifier)
+        if not identifier.startswith("utt:") or evidence_ids is not None and identifier not in evidence_ids:
+            raise AnalysisContractError("辺の根拠発話IDが対象集合にありません。", code="graph_evidence_invalid")
+    result["evidence_segment_ids"] = sorted(set(evidence))
+    result["edge_id"] = "edge:" + fingerprint(result)
+    if "edge_id" in value and value["edge_id"] != result["edge_id"]:
+        raise AnalysisContractError("辺IDと内容が一致しません。", code="graph_edge_id_mismatch")
+    return result
+
+
+def core_decision(action: str, reason: str | None, affected: list[str], *,
+                  facts: Any, context: dict[str, Any], rule: str,
+                  transitions: list[dict[str, str]] | None = None,
+                  resume_condition: str | None = None, **derived: Any) -> dict[str, Any]:
+    """Return a Schema CoreDecision and separately guarded effects; no I/O."""
+    pid = str(context.get("pipeline_id", "unbound"))
+    facts = {"observed": facts, "pipeline": {key: context[key] for key in
+             ("status", "generation", "cancel_requested", "wait_reason", "plan_hash") if key in context}}
+    fact_hash = fingerprint(facts)
+    plan_hash = str(context.get("plan_hash", ""))
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", plan_hash):
+        plan_hash = fingerprint(context.get("plan", {}))
+    value = {
+        "decision_id": "decision." + fingerprint({"rule": rule, "facts": facts,
+            "pipeline": pid, "generation": context.get("generation"), "action": action})[7:],
+        "pipeline_id": "pipeline." + pid, "step_id": affected[0] if len(affected) == 1 else None,
+        "plan_ref": {"id": "plan." + pid, "revision": CONTRACT_VERSION, "sha256": plan_hash[7:]},
+        "rule_refs": [{"id": rule, "version": DECISION_VERSION}],
+        "fact_refs": [{"id": "facts." + fact_hash[7:], "revision": str(context.get("generation", 1)),
+                       "sha256": fact_hash[7:]}],
+        "reason_code": reason, "action": action, "affected_steps": affected,
+        "resume_condition": resume_condition,
+    }
+    return {"decision": value, "facts": facts, "transitions": transitions or [], **derived}
+
+
+def step_facts(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: s[key] for key in ("step_id", "status", "milestone", "attempt", "generation", "attempt_id")
+             if key in s} for s in steps]
+
+
+def decision_transition(machine: str, current: str, target: str) -> dict[str, str]:
+    guard = transition_guard(machine, current, target)
+    validate_transition(machine, current, target, guard)
+    return {"machine": machine, "from": current, "to": target, "guard_id": guard}
+
+
+def decide_dispatch(steps: list[dict[str, Any]], specs: dict[str, Any], milestone: str,
+                    context: dict[str, Any]) -> dict[str, Any]:
+    pending = [s for s in steps if s["milestone"] == milestone and s["status"] not in TERMINAL_SUCCESS]
+    by_id = {s["step_id"]: s for s in steps}
+    ready = [s["step_id"] for s in pending if s["status"] not in {"failed", "cancelled"}
+             and all(by_id.get(p, {}).get("status") in TERMINAL_SUCCESS
+                     for p in specs[s["step_id"]].get("parents", []))]
+    action = "release_gate" if not pending else "dispatch" if ready else "fail"
+    return core_decision(action, "PARENT_INCOMPLETE" if pending and not ready else None,
+        ready, facts={"milestone": milestone, "steps": step_facts(steps), "specs": specs}, context=context,
+        rule="execution.parents", transitions=[decision_transition("step", by_id[s]["status"], "checking")
+                                               for s in ready], milestone=milestone)
+
+
+def decide_applicability(step_id: str, spec: dict[str, Any], *, has_definitions: bool,
+                         has_targets: bool, context: dict[str, Any]) -> dict[str, Any]:
+    excluded = bool(spec.get("allow_not_applicable") and (step_id in {"outline_scope", "comparison_scope"}
+        or step_id == "manual_measurement" and not has_definitions
+        or step_id == "publish_result" and not has_targets))
+    return core_decision("mark_not_applicable" if excluded else "dispatch", "NOT_SELECTED" if excluded else None,
+        [step_id], facts={"spec": spec, "has_definitions": has_definitions, "has_targets": has_targets},
+        context=context, rule="eligibility.plan", transitions=[decision_transition("step", "checking",
+            "not_applicable" if excluded else "ready")])
+
+
+ERROR_REASONS = {"publication_failed": "PUBLICATION_FAILED", "no_valid_input": "EMPTY_EFFECTIVE_DATASET",
+                 "step_unavailable": "METHOD_UNSUPPORTED", "parent_incomplete": "PARENT_INCOMPLETE",
+                 "binding_conflict": "PROTOCOL_MISMATCH", "provider_unavailable": "AUTH_OR_POLICY",
+                 "execution_failed": "UNKNOWN_EXECUTION_FAILURE"}
+
+
+def decide_failure(errors: list[dict[str, str]], *, cancelled: bool,
+                   context: dict[str, Any], unexpected: bool = False) -> dict[str, Any]:
+    # Preserve Runtime's legacy fallback explicitly, without inventing retryability.
+    codes = {e["code"] for e in errors}
+    reason = ("USER_CANCELLED" if cancelled else "PUBLICATION_FAILED" if "publication_failed" in codes
+              else ERROR_REASONS.get(errors[0]["code"], "UNKNOWN_EXECUTION_FAILURE") if errors else "UNKNOWN_EXECUTION_FAILURE")
+    action = "cancel" if cancelled else "fail" if unexpected else "retry"
+    target = "cancelling" if cancelled else "failed" if unexpected else "waiting"
+    current = context.get("status", "running")
+    return core_decision(action, reason, [e["step_id"] for e in errors if e.get("step_id")],
+        facts={"errors": errors, "cancelled": cancelled, "unexpected": unexpected}, context=context,
+        rule="execution.failure", transitions=[] if current == target else [decision_transition("pipeline", current, target)],
+        resume_condition="explicit_retry" if action == "retry" else None,
+        wait_reason="publication" if reason == "PUBLICATION_FAILED" else "retry")
+
+
+def decide_cancel_step(step: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    current = step["status"]
+    transitions = []
+    if current not in TERMINAL_SUCCESS | {"failed", "cancelled", "interrupted"}:
+        if "cancelled" not in ALLOWED_TRANSITIONS["step"][current]:
+            transitions.append(decision_transition("step", current, "cancelling"))
+            current = "cancelling"
+        transitions.append(decision_transition("step", current, "cancelled"))
+    return core_decision("cancel", "USER_CANCELLED", [step["step_id"]] if transitions else [],
+        facts={"step": step_facts([step])[0]}, context=context, rule="cancel.settle_step", transitions=transitions)
+
+
+def decide_failed_attempt(step: dict[str, Any], *, error_code: str, cancelled: bool,
+                          context: dict[str, Any]) -> dict[str, Any]:
+    if cancelled:
+        return decide_cancel_step(step, context)
+    return core_decision("fail", ERROR_REASONS.get(error_code, "UNKNOWN_EXECUTION_FAILURE"), [step["step_id"]],
+        facts={"step": step_facts([step])[0], "error_code": error_code}, context=context, rule="execution.failed_attempt",
+        transitions=[decision_transition("step", step["status"], "failed")])
+
+
+def decide_cancel_pipeline(context: dict[str, Any]) -> dict[str, Any]:
+    current = context["status"]
+    transitions = [] if current == "cancelling" else [decision_transition("pipeline", current, "cancelling")]
+    transitions.append(decision_transition("pipeline", "cancelling", "cancelled"))
+    return core_decision("cancel", "USER_CANCELLED", [], facts=context, context=context,
+                         rule="cancel.settle_pipeline", transitions=transitions)
+
+
+def decide_restart_step(step: dict[str, Any], *, cancelled: bool, context: dict[str, Any]) -> dict[str, Any]:
+    if cancelled:
+        return decide_cancel_step(step, context)
+    active = step["status"] in ACTIVE_STEP_STATES
+    return core_decision("reconcile", "PROCESS_RESTART", [step["step_id"]] if active else [],
+        facts={"step": step_facts([step])[0]}, context=context, rule="recovery.interrupt_step",
+        transitions=[decision_transition("step", step["status"], "interrupted")] if active else [])
+
+
+def decide_completion(publications: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    complete = all(p["status"] in {"published", "not_selected"} for p in publications)
+    return core_decision("commit" if complete else "reconcile", None if complete else "PUBLICATION_FAILED", [],
+        facts=publications, context=context, rule="pipeline.publications",
+        transitions=[decision_transition("pipeline", "running", "completed" if complete else "waiting")],
+        resume_condition=None if complete else "explicit_publication_retry")
+
+
+def decide_restart(context: dict[str, Any]) -> dict[str, Any]:
+    cancelled = bool(context["cancel_requested"] or context["status"] == "cancelling")
+    current = context["status"]
+    transitions = ([decision_transition("pipeline", current, "cancelling")] if cancelled and current != "cancelling" else [])
+    transitions.append(decision_transition("pipeline", "cancelling" if cancelled else current,
+                                          "cancelled" if cancelled else "waiting"))
+    return core_decision("cancel" if cancelled else "reconcile", "USER_CANCELLED" if cancelled else "PROCESS_RESTART", [],
+        facts=context, context=context, rule="recovery.restart", transitions=transitions,
+        resume_condition=None if cancelled else "explicit_resume")
+
+
+def decide_retry(steps: list[dict[str, Any]], context: dict[str, Any], *, target: str | None,
+                 restart_pending: bool) -> dict[str, Any]:
+    candidates = [s for s in steps if s["status"] in {"failed", "interrupted", "cancelled"}
+                  and (not target or s["step_id"] == target)]
+    if context["wait_reason"] == "publication" and not candidates:
+        candidates = [s for s in steps if s["step_id"] == "publish_result"]
+    resume_planned = (context["status"] == "waiting" and context["wait_reason"] == "retry" and restart_pending
+        and (any(s["status"] == "planned" for s in steps) or bool(steps) and all(s["status"] in TERMINAL_SUCCESS for s in steps)))
+    error = ("retry_in_progress" if any(s["status"] in ACTIVE_STEP_STATES for s in steps)
+             else "nothing_to_retry" if not candidates and not resume_planned
+             else "retry_limit_reached" if any(int(s["attempt"]) >= 3 for s in candidates) else "")
+    return core_decision("fail" if error else "retry", "RETRY_EXHAUSTED" if error == "retry_limit_reached"
+        else "RETRY_UNAVAILABLE" if error else None, [s["step_id"] for s in candidates],
+        facts={"steps": step_facts(steps), "target": target, "restart": restart_pending}, context=context,
+        rule="retry.attempt_budget", transitions=[] if error else [decision_transition("pipeline", context["status"], "accepted")],
+        error_code=error)
+
+
+def derive_milestone_status(steps: list[dict[str, Any]]) -> str:
+    statuses = [s["status"] for s in steps]
+    if statuses and all(s in TERMINAL_SUCCESS for s in statuses):
+        return "committed"
+    for outcome, values in (("failed", {"failed"}), ("active", set(ACTIVE_STEP_STATES)), ("cancelled", {"cancelled"})):
+        if any(s in values for s in statuses):
+            return outcome
+    return "pending"
+
+
+def derive_allowed_actions(context: dict[str, Any], steps: list[dict[str, Any]], *, restart_pending: bool = False) -> list[str]:
+    if restart_pending:
+        return ["cancel"] if recovery_error(steps) else ["resume"]
+    if context["status"] in {"accepted", "running", "waiting"}:
+        actions = ["cancel"]
+        if context["status"] == "waiting" and any(s["status"] in {"failed", "interrupted"} for s in steps):
+            actions.append("retry_failed")
+        if context["wait_reason"] == "publication":
+            actions.append("retry_publication")
+        return actions
+    return ["view_results"] if context["status"] == "completed" else []
+
+
+def recovery_error(steps: list[dict[str, Any]]) -> str:
+    return "retry_limit_reached" if any(s["status"] in {"failed", "interrupted", "cancelled"}
+                                       and s["attempt"] >= 3 for s in steps) else ""
+
+
+def step_reuse_key(*, library: str, item_id: str, spec: dict[str, Any], analysis_hash: str,
+                   registry_version: str, algorithm_version: Any, definition_hashes: list[str]) -> str:
+    if spec["step_id"] not in REUSABLE_STEPS:
+        return ""
+    return fingerprint({"library": library, "item_id": item_id, "step_id": spec["step_id"], "spec": spec,
+        "analysis_hash": analysis_hash, "reuse_hash_rule": "analysis-content-1", "registry_version": registry_version, "pipeline_version": PIPELINE_VERSION,
+        "algorithm_version": algorithm_version,
+        "definition_hashes": definition_hashes if spec["step_id"] == "manual_measurement" else []})
+
+
+def reuse_analysis_hash(analysis: dict[str, Any]) -> str:
+    """Ignore only the adapter capture clock, never source/model/result versions.
+
+    snapshot.analysis_hash continues to verify the entire frozen snapshot.
+    Copied CSV metadata retains the original calculation time and artifact hash.
+    """
+    return fingerprint({key: value for key, value in analysis.items() if key != "generated_at"})
+
+
+def decide_reuse(step_id: str, reuse_key: str, candidates: list[dict[str, Any]], *,
+                 mode: str, context: dict[str, Any]) -> dict[str, Any]:
+    selected = None
+    if mode == "auto" and reuse_key and step_id in REUSABLE_STEPS:
+        for candidate in candidates:
+            try:
+                artifact = json.loads(candidate["artifact_json"])
+                valid = candidate["artifact_hash"] == fingerprint(artifact)
+            except (ValueError, TypeError):
+                continue
+            if candidate["status"] == "committed" and candidate["reuse_key"] == reuse_key and valid:
+                selected = candidate
+                break
+    candidate_facts = [{key: c.get(key) for key in ("attempt_id", "status", "reuse_key", "artifact_hash")}
+                       for c in candidates]
+    return core_decision("reuse" if selected else "dispatch", "REUSED_COMMITTED_STEP" if selected else None,
+        [step_id], facts={"reuse_key": reuse_key, "mode": mode, "candidates": candidate_facts,
+                         "selected": selected["attempt_id"] if selected else None}, context=context,
+        rule="reuse.verified_artifact", transitions=[decision_transition("step", "checking", "reused" if selected else "ready")],
+        candidate=selected)
+
+
 def validate_transition(machine: str, current: str, target: str, guard_id: str) -> None:
     if machine not in ALLOWED_TRANSITIONS:
         raise AnalysisContractError("状態機械が正しくありません。", code="unknown_machine")
@@ -147,6 +554,8 @@ def validate_transition(machine: str, current: str, target: str, guard_id: str) 
             f"許可されていない状態遷移です: {machine} {current} -> {target}",
             code="invalid_transition",
         )
+    if guard_id != transition_guard(machine, current, target):
+        raise AnalysisContractError("状態遷移のguard IDが正本と一致しません。", code="invalid_guard")
 
 
 def validate_definition(value: Any, *, require_version: bool = False) -> dict[str, Any]:
@@ -316,10 +725,16 @@ def eligibility_assessment(definitions: list[dict[str, Any]], *, segment_count: 
         "outcome": "pass" if segment_count > 0 else "fail",
         "reason_code": "input_available" if segment_count > 0 else "no_valid_input",
     })
+    capability = CAPABILITIES["methods"].get("manual_measurement", {})
     for definition in definitions:
+        method = definition.get("method", "frequency")
+        method_capability = capability.get("definition_methods", {}).get(method, {}) if isinstance(method, str) else {}
+        descriptive = (capability.get("status") == "available"
+                       and method_capability.get("inference_scope") == "descriptive")
         checks.append({
             "dimension": "inference_validity", "severity": "hard",
-            "outcome": "pass", "reason_code": "descriptive_scope_only",
+            "outcome": "pass" if descriptive else "unknown",
+            "reason_code": "descriptive_scope_only" if descriptive else "inference_validity_unknown",
             "definition_id": definition["definition_id"],
         })
         checks.append({
@@ -397,6 +812,9 @@ def build_plan_envelope(
     input_fingerprint: str, payload: dict[str, Any], definitions: list[dict[str, Any]],
     segment_count: int,
 ) -> dict[str, Any]:
+    reuse = payload.get("reuse", "auto")
+    if not isinstance(reuse, str) or reuse not in {"auto", "none"}:
+        raise AnalysisContractError("reuseはautoまたはnoneです。", field="reuse")
     mode = payload.get("mode", "automatic")
     if mode not in {"automatic", "manual"}:
         raise AnalysisContractError("modeはautomaticまたはmanualです。", field="mode")
@@ -405,7 +823,9 @@ def build_plan_envelope(
         "exploratory", "confirmatory",
     }:
         raise AnalysisContractError("研究区分が正しくありません。", field="research_protocol")
-    if research.get("classification") == "confirmatory" and not research.get("preregistered"):
+    research = dict(research)
+    research.setdefault("classification", "exploratory")
+    if research["classification"] == "confirmatory" and research.get("preregistered") is not True:
         raise AnalysisContractError(
             "検証的分析には事前固定した仮説・規則が必要です。",
             code="confirmatory_not_predefined", field="research_protocol",
@@ -445,7 +865,7 @@ def build_plan_envelope(
         "contract": "PlanEnvelope", "contract_version": CONTRACT_VERSION,
         "item_id": item_id, "source_revision": int(source_revision),
         "analysis_revision": int(analysis_revision), "input_hash": input_fingerprint,
-        "mode": mode, "provider_policy": provider_policy,
+        "mode": mode, "provider_policy": provider_policy, "reuse": reuse,
         "research_protocol": research, "publication_targets": targets,
         "effective_publication_writers": list(EFFECTIVE_PUBLICATION_WRITERS) if targets else [],
         "capability_scope": {
@@ -468,7 +888,8 @@ def build_plan_envelope(
 def build_execution_binding(envelope: dict[str, Any], definitions: list[dict[str, Any]]) -> dict[str, Any]:
     values = validate_definitions(definitions)
     by_id = {value["definition_id"]: value for value in values}
-    revisions = {value["definition_id"]: value.get("revision") for value in definitions}
+    revisions = {value["definition_id"]: original.get("revision")
+                 for value, original in zip(values, definitions)}
     resolved = []
     snapshots = {}
     for slot in envelope.get("binding_slots", []):

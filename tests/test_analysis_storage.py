@@ -30,6 +30,21 @@ class AnalysisStorageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.data
 
+    def save_finishing_transcript(self, segments, stages=None):
+        row = app.library_row('content')
+        history = None if stages is None else [{
+            'segments': segments, 'speaker_names': json.loads(row['speaker_names_json']),
+            'speaker_profiles': json.loads(row['speaker_profiles_json']),
+            'origin': 'ai', 'process': 'ai_finishing', 'process_version': app.FINISHING_VERSION,
+            'metadata': {'run_id': 'finishing-content', 'provider': 'openai', 'model': 'mock', 'stages': stages},
+        }]
+        return app.upsert_library_item(item_id='content', source_name=row['source_name'],
+            output_dir=Path(row['output_dir']), media_path=None, language=row['language'], segments=segments,
+            speaker_names=json.loads(row['speaker_names_json']), speaker_profiles=json.loads(row['speaker_profiles_json']),
+            session_profile=json.loads(row['session_profile_json']), outline=json.loads(row['outline_json'] or 'null'),
+            emotion_analysis=None, files=[], write_srt=False, write_json=True,
+            increment_revision=True, finishing_history=history)
+
     def test_full_package_catalog_notes_links_and_idempotency_without_ai(self):
         with patch.object(app, 'call_ai_json') as ai:
             response = self.save()
@@ -44,7 +59,7 @@ class AnalysisStorageTests(unittest.TestCase):
         self.assertEqual(manifest['conversation_id'], 'content')
         for record in manifest['artifacts']:
             self.assertEqual(analysis_store.hashlib.sha256((self.store.root / record['path']).read_bytes()).hexdigest(), record['sha256'])
-        result = json.loads(self.artifact(run, 'result.json'))
+        result = self.store.verified_package(run['id'])[1]
         self.assertGreaterEqual(len(result['methods']), 15)
         self.assertTrue(next(m for m in result['methods'] if m['method_id'] == 'morphology')['previews'])
         notes = '\n'.join(p.read_text(encoding='utf-8') for p in self.store.vault.rglob('*.md'))
@@ -173,7 +188,7 @@ class AnalysisStorageTests(unittest.TestCase):
         rows = list(csv.DictReader(io.StringIO(self.artifact(run, 'tables/kwic.csv').decode('utf-8-sig'))))
         self.assertEqual(len(rows), 221)
         self.assertNotIn('x1', {r['segment_id'] for r in rows})
-        result = json.loads(self.artifact(run, 'result.json'))
+        result = self.store.verified_package(run['id'])[1]
         self.assertEqual([m['method_id'] for m in result['methods']], ['kwic'])
         self.assertEqual(result['parameters']['mode'], 'literal')
 
@@ -302,7 +317,7 @@ class AnalysisStorageTests(unittest.TestCase):
     def test_mid_write_failure_retries_deterministically_and_detects_tamper(self):
         write = analysis_store.write_atomic
         def fail_on_table(path, data):
-            if path.suffix == '.csv': raise OSError('disk full')
+            if path.parent.name == 'tables': raise OSError('disk full')
             return write(path, data)
         with patch.object(analysis_store, 'write_atomic', side_effect=fail_on_table):
             self.assertEqual(self.save().status_code, 500)
@@ -376,9 +391,11 @@ class AnalysisStorageTests(unittest.TestCase):
         row = app.library_row('content')
         original = copy.deepcopy(app.row_segments(row))
         original[0]['text'] = '価格の誤変換'
+        self.save_finishing_transcript(original)
+        row = self.save_finishing_transcript(app.row_segments(row), {'cleanup': 'completed', 'outline': 'failed'})
         run = app.archive_ai_finishing(row, original, {'cleanup': 'completed', 'outline': 'failed'}, 'openai', 'mock', {})
         self.assertEqual(run['vault_status'], 'completed', run)
-        result = json.loads(self.artifact(self.store.public(run), 'result.json'))
+        result = self.store.verified_package(run['id'])[1]
         finishing = next(m for m in result['methods'] if m['method_id'] == 'ai_finishing')
         self.assertEqual(finishing['status'], 'partial')
         self.assertEqual(finishing['details']['changes'][0]['before_text'], '価格の誤変換')
@@ -404,9 +421,7 @@ class AnalysisStorageTests(unittest.TestCase):
         normalized = app.normalize_edited_segments('content', revised)
         self.assertEqual(normalized[0]['ai_review'], revised[0]['ai_review'])
         self.assertEqual(normalized[0]['jev_review'], revised[0]['jev_review'])
-        with app.database_connection() as connection:
-            connection.execute("UPDATE library_items SET segments_json=? WHERE id='content'",
-                               (json.dumps(normalized),))
+        self.save_finishing_transcript(normalized, {'outline_context': 'completed', 'cleanup': 'completed'})
         context = {'sections': [{'title': '参照用議題', 'bullets': ['会話全体の要点']}]}
         run = app.archive_ai_finishing(app.library_row('content'), original,
             {'outline_context': 'completed', 'cleanup': 'completed'}, 'openai', 'mock', {},
@@ -414,7 +429,7 @@ class AnalysisStorageTests(unittest.TestCase):
             jev_usage={'provider': 'typesafe', 'model': 'jev-test', 'input_tokens': 12})
         self.assertEqual(run['vault_status'], 'completed', run)
         public = self.store.public(run)
-        details = json.loads(self.artifact(public, 'result.json'))['finishing']
+        details = self.store.verified_package(public['id'])[1]['finishing']
         self.assertEqual(details['context_outline'], context)
         self.assertEqual(details['changes'][0]['ai_review'], revised[0]['ai_review'])
         self.assertEqual(details['jev_comparison']['reviewed_segment_count'], 1)

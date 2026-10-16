@@ -140,9 +140,10 @@ window.addEventListener('DOMContentLoaded', () => {
     effort.click();
     if (readAiEfforts().cleanup !== 'high' || readAiEfforts().outline !== 'medium') throw new Error('efforts are not independent: ' + JSON.stringify(readAiEfforts()) + ' disabled=' + effort.matches(':disabled'));
     if (effort.closest('fieldset').dataset.effort !== 'high') throw new Error('effort visual did not update');
-    const off = document.querySelector('input[name="ai_thinking_mode_cleanup"][value="off"]');
-    off.click();
-    if (readAiEfforts().cleanup !== 'off' || !effort.matches(':disabled')) throw new Error('thinking mode OFF did not disable effort');
+    const cleanupLevel = document.querySelector('#effort-select-cleanup');
+    cleanupLevel.value = 'off';
+    cleanupLevel.dispatchEvent(new Event('change', {bubbles: true}));
+    if (readAiEfforts().cleanup !== 'off' || effort.matches(':disabled')) throw new Error('cleanup OFF must stop cleanup while allowing another adjustment level');
     renderAiFinishingActivity({status: 'running', stage: 'finishing', message: 'test activity'});
     if (document.querySelector('#ai-finishing-activity').hidden) throw new Error('missing animation');
     renderAiFinishingActivity({status: 'failed', stage: 'finishing'});
@@ -471,6 +472,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const previousFetchForPlan = window.fetch;
     analysisState.itemId = 'browser-plan-fixture';
     analysisState.data = {item: {revision_count: 1, analysis_revision: 1}};
+    openAnalysisExecutionDialog();
     window.fetch = (input, options) => String(input).includes('/plans/proposals')
       ? Promise.resolve(new Response(JSON.stringify({proposal: {
           version: 'o01-plan-advice-1', input_hash: 'fixture-hash',
@@ -507,6 +509,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     analysisExecutionState.settings = previousExecutionSettings;
     analysisExecutionState.status = previousExecutionStatus;
     analysisExecutionState.currentIndex = previousExecutionIndex;
+    closeAnalysisExecutionDialog();
     window.fetch = previousFetchForPlan;
     analysisState.itemId = previousAnalysisItem;
     analysisState.data = previousAnalysisData;

@@ -88,6 +88,25 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
             "research_protocol": {"classification": "exploratory", "data_viewed": True},
         }
 
+    def test_missing_classification_is_saved_as_exploratory(self):
+        payload = self.pipeline_payload("research-default-classification-0001")
+        payload["research_protocol"] = {"data_viewed": True}
+        response = self.client.post(self.url + "/pipelines", json=payload)
+        self.assertEqual(response.status_code, 202, response.get_json())
+        result = self.wait(response.get_json()["pipeline_id"])
+        self.assertEqual(result["status"], "completed", result)
+        package = json.loads(self.artifact(result["result_run"], "result.json"))
+        self.assertEqual(package["parameters"]["research_protocol"], {
+            "classification": "exploratory", "data_viewed": True,
+        })
+
+    def test_confirmatory_preregistered_no_is_rejected(self):
+        payload = self.pipeline_payload("research-preregistered-no-0001")
+        payload["research_protocol"] = {"classification": "confirmatory", "preregistered": "no"}
+        response = self.client.post(self.url + "/pipelines", json=payload)
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()["reason_code"], "confirmatory_not_predefined")
+
     def test_existing_method_adapter_matches_legacy_csv_values(self):
         response = self.client.post(
             self.url + "/pipelines",
@@ -109,7 +128,7 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
         )
         method_ids = [
             value["method_id"]
-            for value in json.loads(self.artifact(result["result_run"], "result.json"))["methods"]
+            for value in app.analysis_archive_store().readable_package(result["result_run"]["id"])[1]["methods"]
         ]
         self.assertEqual(method_ids, ["participation", "conversation_dynamics"])
 
@@ -155,7 +174,7 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
         self.assertEqual(rows[0]["utterance_length"], str(len("価格を価格で比べる")))
         self.assertTrue(all(row["utterance_length__missing_reason"] == "" for row in rows))
 
-        package = json.loads(self.artifact(result["result_run"], "result.json"))
+        package = app.analysis_archive_store().readable_package(result["result_run"]["id"])[1]
         manual = next(value for value in package["methods"] if value["method_id"] == "descriptive_statistics")
         self.assertIn("有効N=4", manual["summaries"][0]["text"])
         self.assertEqual(package["parameters"]["research_protocol"]["classification"], "exploratory")
@@ -194,7 +213,7 @@ class AnalysisResearchProtocolTests(unittest.TestCase):
         )))
         self.assertEqual([row["duration_value"] for row in rows], ["10.0", ""])
         self.assertEqual([row["duration_value__missing_reason"] for row in rows], ["", "invalid_source_value"])
-        package = json.loads(self.artifact(result["result_run"], "result.json"))
+        package = app.analysis_archive_store().readable_package(result["result_run"]["id"])[1]
         manual = next(row for row in package["methods"] if row["method_id"] == "descriptive_statistics")
         self.assertIn("有効N=1、平均=10.000", manual["summaries"][0]["text"])
 

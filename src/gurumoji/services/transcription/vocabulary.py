@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
 from typing import Any, Callable
 
-from ..durable_files import atomic_write_text
+from ..vocabulary_store import VocabularyStore
 
 CUSTOM_VOCABULARY_MAX_TERMS = 100
 CUSTOM_VOCABULARY_MAX_TERM_LENGTH = 80
@@ -78,38 +77,9 @@ def whisper_vocabulary_prompt(values: Any) -> str:
 
 
 def make_custom_vocabulary_store(
-    *,
-    custom_vocabulary_file: Callable[[], Any],
-    custom_vocabulary_lock: Any,
+    *, custom_vocabulary_file: Callable[[], Any], custom_vocabulary_lock: Any,
+    database_connection: Any,
 ) -> tuple[Callable[..., Any], ...]:
-    def load_custom_vocabulary() -> tuple[str, ...]:
-        """Read the local, application-wide recognition vocabulary safely."""
-        with custom_vocabulary_lock:
-            try:
-                payload = json.loads(custom_vocabulary_file().read_text(encoding="utf-8"))
-            except FileNotFoundError:
-                return ()
-            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-                # A damaged settings file must never prevent transcription. The UI
-                # will show an empty list, which users can save again if desired.
-                return ()
-        if not isinstance(payload, dict):
-            return ()
-        try:
-            return normalize_custom_vocabulary(payload.get("terms", []))
-        except ValueError:
-            return ()
-
-    def save_custom_vocabulary(values: Any) -> tuple[str, ...]:
-        """Persist the recognition vocabulary as non-secret local settings."""
-        terms = normalize_custom_vocabulary(values)
-        payload = {"version": 1, "terms": list(terms)}
-        with custom_vocabulary_lock:
-            atomic_write_text(
-                custom_vocabulary_file(),
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        return terms
-
-    return (load_custom_vocabulary, save_custom_vocabulary)
+    store = VocabularyStore(database_connection, custom_vocabulary_file,
+                            custom_vocabulary_lock, normalize_custom_vocabulary)
+    return store.load, store.save, store.reconcile

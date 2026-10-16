@@ -436,7 +436,7 @@ def call_ai_json(
         level = normalize_efforts(ai_efforts).get(SCHEMA_STAGES.get(schema_name), "auto")
         if level != "auto":
             resolve_effort = (local_cleanup_effort_payload
-                              if SCHEMA_STAGES.get(schema_name) == "cleanup"
+                              if SCHEMA_STAGES.get(schema_name) in {"cleanup", "notation"}
                               else local_effort_payload)
             reasoning = resolve_effort(level, lmstudio_reasoning(base_url, api_key, model))
         request = lmstudio_request(

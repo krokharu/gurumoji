@@ -1271,9 +1271,11 @@ def edit_transaction_cleanup_inventory(
     return inventory
 
 
-def transaction_file_kind(path: Path, entry: dict[str, Any]) -> str:
+def transaction_file_kind(path: Path, entry: dict[str, Any], *, previous=False) -> str:
     if not path_entry_exists(path):
         return 'missing'
+    if previous and entry['previous_sha256'] and file_matches_fingerprint(path,entry['previous_sha256'],entry['previous_size']):
+        return 'previous'
     if file_matches_fingerprint(path, entry['new_sha256'], entry['new_size']):
         return 'new'
     previous_sha256 = entry['previous_sha256']
@@ -1290,9 +1292,9 @@ def preflight_rollback_edit_transaction(
 ) -> list[tuple[dict[str, Any], str, str, str, str]]:
     states: list[tuple[dict[str, Any], str, str, str, str]] = []
     for entry in payload['_resolved_files']:
-        target_kind = transaction_file_kind(entry['target'], entry)
+        target_kind = transaction_file_kind(entry['target'], entry, previous=True)
         staged_kind = transaction_file_kind(entry['staged'], entry)
-        backup_kind = transaction_file_kind(entry['backup'], entry)
+        backup_kind = transaction_file_kind(entry['backup'], entry, previous=True)
         discarded_kind = transaction_file_kind(entry['discarded'], entry)
         if staged_kind not in {'missing', 'new'}:
             raise OSError('An edit transaction staged file was changed externally.')
@@ -1398,7 +1400,7 @@ def finish_committed_edit_transaction(
     for entry in payload['_resolved_files']:
         target_kind = transaction_file_kind(entry['target'], entry)
         staged_kind = transaction_file_kind(entry['staged'], entry)
-        backup_kind = transaction_file_kind(entry['backup'], entry)
+        backup_kind = transaction_file_kind(entry['backup'], entry, previous=True)
         discarded_kind = transaction_file_kind(entry['discarded'], entry)
         if staged_kind not in {'missing', 'new'}:
             raise OSError('A committed edit staged file was changed externally.')

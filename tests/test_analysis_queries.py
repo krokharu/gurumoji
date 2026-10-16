@@ -17,8 +17,11 @@ class FakeStore:
             "local_path": "C:/private/result.json",
         }]
 
-    def list(self, item_id):
-        return self.rows
+    def list(self, item_id, *, limit=100, offset=0):
+        return self.rows[offset:offset + limit]
+
+    def run_count(self, item_id):
+        return len(self.rows)
 
     def public(self, row, *, local=False):
         result = dict(row)

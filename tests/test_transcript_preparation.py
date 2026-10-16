@@ -225,6 +225,8 @@ class TranscriptPreparationTests(unittest.TestCase):
         original = app.library_row(self.item_id)['original_segments_json']
         with app.database_connection() as connection:
             connection.execute('DELETE FROM transcript_versions WHERE item_id=?', (self.item_id,))
+            connection.execute('DELETE FROM transcript_changes WHERE item_id=?', (self.item_id,))
+            connection.execute('DELETE FROM transcript_change_bases WHERE item_id=?', (self.item_id,))
         app.initialize_library()
         app.initialize_library()
         p = self.analysis()['manual']['preparation']
@@ -232,7 +234,9 @@ class TranscriptPreparationTests(unittest.TestCase):
         self.assertFalse(p['versions'])
         result = self.save(self.payload())
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.get_json()['versions'][0]['origin'], 'preparation_baseline')
+        self.assertEqual(result.get_json()['versions'][0]['origin'], 'rule')
+        with app.database_connection() as connection:
+            self.assertEqual(preparation._changes(connection, self.item_id)[0]['process'], 'legacy_bridge')
         self.assertEqual(app.library_row(self.item_id)['original_segments_json'], original)
 
     def test_preparation_vault_only_receives_counts_and_hashes(self):

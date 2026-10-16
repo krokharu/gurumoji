@@ -1,6 +1,7 @@
 """Render trusted templates without importing Gurumoji, opening a DB or a server."""
 from pathlib import Path
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parents[2]
 env = Environment(loader=FileSystemLoader(root / 'src/gurumoji/templates'), undefined=StrictUndefined,

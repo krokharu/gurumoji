@@ -1,0 +1,5 @@
+# Test tooling only; install with the application's requirements.
+pytest>=8,<10
+pytest-xdist>=3,<4
+# Offline queue fixtures from the development knowledge console.
+google-api-python-client>=2.140,<3

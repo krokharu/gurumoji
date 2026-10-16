@@ -325,7 +325,7 @@ def repair_recommended_segments(
 
 
 def create_outline(segments: list[dict], names: dict, call: Callable, status: Callable,
-                   check_cancelled: Callable) -> dict:
+                   check_cancelled: Callable, *, analysis_boundaries=False, outline_hint=None) -> dict:
     records = fragments(segments)
     for record in records:
         record["speaker_name"] = names.get(record["speaker"], record["speaker"])
@@ -347,6 +347,12 @@ def create_outline(segments: list[dict], names: dict, call: Callable, status: Ca
     section = {"type": "object", "properties": {"title": {"type": "string"},
                "bullets": {"type": "array", "items": bullet}},
                "required": ["title", "bullets"], "additionalProperties": False}
+    if analysis_boundaries:
+        section["properties"].update(start_segment_id={"type": "string"}, end_segment_id={"type": "string"})
+        section["required"].extend(["start_segment_id", "end_segment_id"])
+        system += ("分析区間の候補として、各議題の先頭と末尾の発話IDをstart_segment_id/end_segment_idへ指定します。"
+                   "要点の引用IDとは区別し、引用されない応答・否定・少数意見を含む連続区間にします。"
+                   "同じ議題が後で再登場した場合は別のsectionにします。粗い議題は小議題に分けます。")
     schema = {"type": "object", "properties": {"sections": {"type": "array", "items": section}},
               "required": ["sections"], "additionalProperties": False}
     sections = []
@@ -376,12 +382,25 @@ def create_outline(segments: list[dict], names: dict, call: Callable, status: Ca
                                "bullet_evidence": evidence, "segment_ids": refs,
                                "start": min(float(by_id[s].get("start", 0)) for s in refs),
                                "end": max(float(by_id[s].get("end", 0)) for s in refs)})
+            if analysis_boundaries:
+                first, last = raw.get("start_segment_id"), raw.get("end_segment_id")
+                order = list(by_id)
+                if first not in allowed or last not in allowed or order.index(first) > order.index(last):
+                    raise RuntimeError("AIの区間境界が対象発話と一致しません。")
+                normalized[-1].update(start_segment_id=first, end_segment_id=last)
         return normalized
 
     for index, batch in enumerate(batches):
         check_cancelled()
         status(f"AIで根拠付きの議題を整理しています（{index + 1}/{len(batches)}）…")
         prompt = "発話記録:\n" + json.dumps(batch, ensure_ascii=False)
+        if analysis_boundaries and outline_hint:
+            allowed_hint = {r["segment_id"] for r in batch}
+            hints = [{"title": s.get("title"), "segment_ids": [sid for sid in s.get("segment_ids", []) if sid in allowed_hint]}
+                     for s in outline_hint.get("sections", []) if isinstance(s, dict)
+                     and (any(sid in allowed_hint for sid in s.get("segment_ids", []))
+                          or s.get("start_segment_id") in allowed_hint or s.get("end_segment_id") in allowed_hint)]
+            prompt += "\nAI下書きの議題候補（原文で境界を再検査する）:\n" + json.dumps(hints, ensure_ascii=False)
         response = call(system, prompt, "meeting_outline", schema)
         allowed = {r["segment_id"] for r in batch}
         try:

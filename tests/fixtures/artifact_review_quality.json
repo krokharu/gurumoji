@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "scope": "Synthetic examples only; gold labels fixed before inference",
+  "cases": [
+    {"case_id":"q01","category":"counterexample","segments":[{"id":"u1","text":"A: 費用が抑えられるので賛成です。"},{"id":"u2","text":"B: 賛成です。"},{"id":"u3","text":"C: 私は反対です。保守の負担が大きいです。"}],"correct_finding":"一部は賛成したがCは反対した。","incorrect_finding":"全員が賛成した。","gold":{"counterexample_ids":["u3"],"missing":[]}},
+    {"case_id":"q02","category":"counterexample","segments":[{"id":"u1","text":"A: 作業は簡単でした。"},{"id":"u2","text":"B: 私には難しく、最後まで完了できませんでした。"}],"correct_finding":"作業の難しさは話者で異なる。","incorrect_finding":"全員が簡単に完了した。","gold":{"counterexample_ids":["u2"],"missing":[]}},
+    {"case_id":"q03","category":"counterexample","segments":[{"id":"u1","text":"A: 料金には満足しました。"},{"id":"u2","text":"B: 料金には満足していません。"}],"correct_finding":"料金への評価は分かれた。","incorrect_finding":"料金への不満はなかった。","gold":{"counterexample_ids":["u2"],"missing":[]}},
+    {"case_id":"q04","category":"counterexample","segments":[{"id":"u1","text":"A: 時間を短縮できました。"},{"id":"u2","text":"B: 準備に時間がかかり、短縮にはなりませんでした。"}],"correct_finding":"Aは時間短縮を報告しBは否定した。","incorrect_finding":"全員の作業時間を短縮した。","gold":{"counterexample_ids":["u2"],"missing":[]}},
+    {"case_id":"q05","category":"counterexample","segments":[{"id":"u1","text":"A: 来週の導入に賛成です。"},{"id":"u2","text":"B: 来週は導入できません。再来月なら賛成です。"}],"correct_finding":"導入時期には条件付きの異論がある。","incorrect_finding":"全員が来週の導入に賛成した。","gold":{"counterexample_ids":["u2"],"missing":[]}},
+    {"case_id":"q06","category":"counterexample","segments":[{"id":"u1","text":"A: この方式を続けたいです。"},{"id":"u2","text":"B: 変更したいです。今の方式は続けたくありません。"}],"correct_finding":"継続希望は全員一致ではない。","incorrect_finding":"全員が現行方式の継続を希望した。","gold":{"counterexample_ids":["u2"],"missing":[]}},
+    {"case_id":"q07","category":"insufficient","segments":[{"id":"u1","text":"A: 今回の議題には賛成です。"}],"correct_finding":"今回の議題以外の意見は不明である。","incorrect_finding":"会話全体ですべての議題に全員が賛成した。","gold":{"counterexample_ids":[],"missing":["他の議題と他の話者の原文は配送されていない"]}},
+    {"case_id":"q08","category":"insufficient","segments":[{"id":"u1","text":"話者不明: それでよいと思います。"}],"correct_finding":"話者と指示対象が不明である。","incorrect_finding":"Aが提案Xを承認した。","gold":{"counterexample_ids":[],"missing":["話者の同定とそれの指示対象がない"]}},
+    {"case_id":"q09","category":"insufficient","segments":[{"id":"u1","text":"A: 少し改善した気がします。"}],"correct_finding":"発話は主観的な改善感で、尺度値は確定できない。","incorrect_finding":"改善尺度の値は3である。","gold":{"counterexample_ids":[],"missing":["改善尺度の定義と値の判定基準がない"]}},
+    {"case_id":"q10","category":"not_found","segments":[{"id":"u1","text":"A: 費用が下がるので賛成です。"},{"id":"u2","text":"B: 私も賛成です。"}],"correct_finding":"この区間のAとBは賛成を表明した。","incorrect_finding":"全会話で反対意見は存在しない。","gold":{"counterexample_ids":[],"checked_ids":["u1","u2"],"missing":[],"scope_limit":"配送区間のみ。全会話の正しさは確認しない"}},
+    {"case_id":"q11","category":"not_found","segments":[{"id":"u1","text":"A: 料金には満足しています。"},{"id":"u2","text":"B: 私も料金には満足です。"}],"correct_finding":"この区間では料金への満足が表明された。","incorrect_finding":"利用者全員が料金に満足している。","gold":{"counterexample_ids":[],"checked_ids":["u1","u2"],"missing":[],"scope_limit":"参加者全員や母集団への一般化は確認しない"}},
+    {"case_id":"q12","category":"not_found","segments":[{"id":"u1","text":"A: 今日の操作は簡単でした。"},{"id":"u2","text":"B: 今日の操作は簡単にできました。"}],"correct_finding":"AとBは今日の操作を簡単と述べた。","incorrect_finding":"誰でもいつでも簡単に操作できる。","gold":{"counterexample_ids":[],"checked_ids":["u1","u2"],"missing":[],"scope_limit":"今日の区間だけ。他の人や時点は確認しない"}}
+  ]
+}

@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from sqlite_fixtures import ClosingConnection
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -28,7 +29,7 @@ class HistoryAppBoundaryTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_legacy_database_list_is_empty_without_ddl_or_repair(self):
-        with sqlite3.connect(self.db) as db:
+        with sqlite3.connect(self.db, factory=ClosingConnection) as db:
             db.execute("CREATE TABLE library_items(id TEXT PRIMARY KEY, source_name TEXT)")
             db.execute("INSERT INTO library_items VALUES ('synthetic','合成会話')")
         before = self.db.read_bytes()
@@ -61,10 +62,15 @@ class TemplateDesignBindingTests(unittest.TestCase):
         design = self.root / DESIGN_PATH
         design.parent.mkdir(parents=True)
         design.write_text("Synthetic design record only", encoding="utf-8")
+        parts={}
+        for index in range(1,6):
+            part=design.with_name(f'{index:02d}-section.md')
+            part.write_text(f'Synthetic section {index}',encoding='utf-8')
+            parts[part.name]=hashlib.sha256(part.read_bytes()).hexdigest()
         catalog = self.root / CATALOG_PATH
         catalog.parent.mkdir(parents=True)
         value = {"schema_version": 1, "design_document": {"path": DESIGN_PATH,
-                 "sha256": hashlib.sha256(design.read_bytes()).hexdigest()}, "templates": {"test": {"id": "test"}}}
+                 "sha256": hashlib.sha256(design.read_bytes()).hexdigest(),'parts':parts}, "templates": {"test": {"id": "test"}}}
         catalog.write_text(json.dumps(value))
         self.assertEqual(load_slide_templates(self.root), value["templates"])
         design.write_text("Changed record", encoding="utf-8")
