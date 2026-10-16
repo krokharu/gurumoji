@@ -22,3 +22,6 @@ Thumbs.db
 *.lnk
 .idea/
 .vscode/
+
+# Local verification evidence; development prototypes remain tracked separately.
+output/validation/

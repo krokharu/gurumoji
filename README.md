@@ -1,5 +1,7 @@
 # 話者分離文字起こし Web UI
 
+このブランチ `archive/development-assets-20261016` は、テストコード・架空データ・開発用プログラム・完全な設計Vaultの保存先です。利用・引渡し用は [main](https://github.com/krokharu/gurumoji/tree/main)。以下の詳細な操作手順と開発資料は履歴を含めて保持しています。
+
 フォルダー構成とバックアップ対象は [フォルダー構成](docs/PROJECT_LAYOUT.md) を参照してください。起動は最上位の `run.bat`、初回セットアップは `setup_gui.bat` だけで行えます。
 
 動画・音声を Whisper / WhisperX で文字起こしし、pyannote で話者分離する Windows / Google Colab 対応 Web UI です。Windows版のサーバーはこの PC の `127.0.0.1` だけで待ち受けます。Colab版はノートブック内の認証付きポート表示を使用します。

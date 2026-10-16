@@ -40,7 +40,8 @@ def _files(root: Path, folder: PurePosixPath) -> list[PurePosixPath]:
     base = root / folder
     if not base.is_dir():
         return []
-    return sorted(PurePosixPath(path.relative_to(root).as_posix()) for path in base.rglob("*") if path.is_file())
+    return sorted(PurePosixPath(path.relative_to(root).as_posix()) for path in base.rglob("*")
+                  if path.is_file() and "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"})
 
 
 def source_map(root: Path) -> dict[PurePosixPath, PurePosixPath]:

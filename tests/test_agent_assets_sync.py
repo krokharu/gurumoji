@@ -73,6 +73,14 @@ class SyncBehaviourTests(unittest.TestCase):
         self.assertFalse((self.root / ".claude/rules").exists())
         self.assertEqual(sync.differences(self.root), [])
 
+    def test_python_bytecode_created_by_verification_is_not_a_source_asset(self):
+        write(self.root, ".agents/skills/demo/scripts/__pycache__/x.cpython-312.pyc", "local cache")
+        write(self.root, ".agents/skills/demo/scripts/x.pyc", "loose bytecode")
+        sync.apply(self.root)
+        self.assertFalse((self.root / ".claude/skills/demo/scripts/__pycache__").exists())
+        self.assertFalse((self.root / ".claude/skills/demo/scripts/x.pyc").exists())
+        self.assertEqual(sync.differences(self.root), [])
+
     def test_check_reports_edited_missing_and_stale_copies(self):
         sync.apply(self.root)
         write(self.root, ".claude/skills/demo/SKILL.md", "edited\n")

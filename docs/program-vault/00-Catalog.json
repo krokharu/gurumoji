@@ -1916,8 +1916,8 @@
     },
     {
       "path": "40-Design/10-Analysis/analysis-immediate-changes-plan.md",
-      "sha256": "0776c25cee932e67c75b7d3aabdaf3bf3f54777765a52273cdaec84682283bf7",
-      "chars": 98885,
+      "sha256": "4ac06f57669f38f7c98f6f620a853f5e5055aedd162d1ad7b27328c62670ea1c",
+      "chars": 98899,
       "metadata": {
         "note_id": "design-analysis-immediate-changes-plan",
         "note_type": "architecture-plan",
@@ -5848,8 +5848,8 @@
     },
     {
       "path": "40-Design/20-Knowledge/model-context-and-work-memory-plan/01-section.md",
-      "sha256": "064631f978884e0fdc11e5eedbd2600846b42f96d3e86905ddea7d90141b03cd",
-      "chars": 2972,
+      "sha256": "d25a00aa36f4c3dca9faef6e9498445a97a741cf48ba6751d4f7f1c6890613c5",
+      "chars": 2986,
       "metadata": {
         "note_type": "reference-section",
         "status": "in_progress",
@@ -19386,8 +19386,8 @@
     },
     {
       "path": "60-Operations/20-Development/dot-cloud-development-handoff/11-section.md",
-      "sha256": "8cdad4e1f00b29dc443fc3998547fc9f95d2443f0ad6bfab67614257ddaa0fbf",
-      "chars": 4731,
+      "sha256": "5a2022691f84bb1884620bd55ea462152a6a72b69a4b0b44ac4ffeaee30db424",
+      "chars": 6464,
       "metadata": {
         "note_type": "reference-section",
         "status": "current",
@@ -19883,8 +19883,8 @@
     },
     {
       "path": "60-Operations/20-Development/gurumoji-improvement-session/03-topics/17-section.md",
-      "sha256": "907d75b24282102ef6490b8b04efe7153d4e01fd9130ad800417b446c6f4e15a",
-      "chars": 3532,
+      "sha256": "a9d2eb623c515981c2b810eabfe923bae9ca387d753a23bcbe2fcdb5d0805f23",
+      "chars": 3588,
       "metadata": {
         "note_type": "reference-section",
         "status": "current",
@@ -19907,8 +19907,8 @@
     },
     {
       "path": "60-Operations/20-Development/gurumoji-improvement-session/03-topics/18-section.md",
-      "sha256": "ee807964ebee4d2fad5502b958ca5e4bfcd16c1a786a884af946cb2c286ed058",
-      "chars": 5832,
+      "sha256": "94c6d22bd682cef03f02872533e30f1afb45dc3304a7f93122328b521b94675d",
+      "chars": 5972,
       "metadata": {
         "note_type": "reference-section",
         "status": "current",

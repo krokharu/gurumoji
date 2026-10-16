@@ -8,6 +8,8 @@ never printed. Templates and archives are skipped unless explicitly included.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import math
 import re
 import sys
@@ -39,6 +41,7 @@ class Note:
     body: str
     fields: dict[str, str]
     score: float = 0.0
+    content_sha256: str = ''
 
 
 def terms(query: str) -> list[Term]:
@@ -77,13 +80,15 @@ def parse_metadata(text: str) -> tuple[dict[str, str], str]:
 
 
 def read_note(path: Path, vault: Path) -> Note:
-    text = path.read_text(encoding="utf-8", errors="replace")[:MAX_FILE_CHARS]
+    data = path.read_bytes()
+    text = data.decode("utf-8", errors="replace")[:MAX_FILE_CHARS]
     metadata, body = parse_metadata(text)
     match = TITLE.search(body)
     title = metadata.get("title") or (match.group(1) if match else path.stem)
     fields = {"title": title.casefold(), "metadata": " ".join(metadata.values()).casefold(),
               "body": body.casefold()}
-    return Note(path.relative_to(vault).as_posix(), metadata, title, body, fields)
+    return Note(path.relative_to(vault).as_posix(), metadata, title, body, fields,
+                content_sha256=hashlib.sha256(data).hexdigest())
 
 
 def exclusion(note: Note, include_templates: bool, include_archived: bool) -> str:
@@ -92,6 +97,8 @@ def exclusion(note: Note, include_templates: bool, include_archived: bool) -> st
         return "template"
     if not include_archived and (folders & ARCHIVE_DIRS or note.metadata.get("status", "").casefold() == "archived"):
         return "archive"
+    if note.metadata.get('note_type') == 'path-redirect':
+        return 'redirect'
     return ""
 
 
@@ -106,10 +113,38 @@ def rank(notes: list[Note], query_terms: list[Term]) -> list[Note]:
     return sorted((note for note in notes if note.score > 0), key=lambda note: (-note.score, note.relative))
 
 
-def excerpt(note: Note, query_terms: list[Term], limit: int) -> str:
+def selected_section(body: str, heading: str) -> str:
+    """Select one real heading and its children, excluding fenced examples."""
+    headings, offset, fence = [], 0, None
+    for line in body.splitlines(keepends=True):
+        marker = re.match(r'^\s*(`{3,}|~{3,})', line)
+        if marker:
+            if fence is None:
+                fence = marker[1][0]
+            elif fence == marker[1][0]:
+                fence = None
+        elif fence is None:
+            match = re.match(r'^(#{1,6})\s+(.+?)\s*#*\s*$', line)
+            if match:
+                headings.append((offset, len(match[1]), match[2]))
+        offset += len(line)
+    matches = [(i, row) for i, row in enumerate(headings) if row[2] == heading]
+    if len(matches) != 1:
+        raise ValueError('Section must identify exactly one heading: ' + heading)
+    i, (start, level, _) = matches[0]
+    end = next((position for position, depth, _ in headings[i + 1:] if depth <= level), len(body))
+    return body[start:end].strip()
+
+
+def excerpt(note: Note, query_terms: list[Term], limit: int, *, metadata_only: bool = False,
+            section: str = '') -> str:
     summary = note.metadata.get("summary", "").strip()
-    if summary:
-        return summary[:limit]
+    if metadata_only:
+        return (summary or note.title)[:limit]
+    if section:
+        return selected_section(note.body, section)[:limit]
+    if note.metadata.get('note_type') in {'section-index', 'retrieval-index'}:
+        return note.body.strip()[:limit]
     lower = note.body.casefold()
     needles = [term.text for term in query_terms] or []
     positions = [lower.find(value) for value in needles if lower.find(value) >= 0]
@@ -127,26 +162,53 @@ def excerpt(note: Note, query_terms: list[Term], limit: int) -> str:
 def provenance(note: Note) -> str:
     meta = note.metadata
     return (f"{meta.get('note_id') or 'no-note-id'} / revision {meta.get('revision') or '-'}"
-            f" / source_hash {meta.get('source_hash') or '-'} / status {meta.get('status') or '-'}")
+            f" / source_hash {meta.get('source_hash') or meta.get('source_sha256') or '-'}"
+            f" / sha256 {note.content_sha256} / status {meta.get('status') or '-'}")
 
 
 def packet(vault: Path, query: str, max_notes: int, max_chars: int,
-           include_templates: bool, include_archived: bool) -> str:
+           include_templates: bool, include_archived: bool, *, scope: str = '',
+           note_id: str = '', section: str = '', metadata_only: bool = False) -> str:
+    vault = vault.resolve()
+    search_root = (vault / scope).resolve()
+    if not search_root.is_relative_to(vault) or not search_root.is_dir():
+        raise ValueError('--scope must be an existing folder inside this Vault')
+    if section and not note_id:
+        raise ValueError('--section requires --note-id')
     query_terms = terms(query)
     notes: list[Note] = []
-    skipped = {"template": 0, "archive": 0}
-    for path in sorted(vault.rglob("*.md")):
+    skipped = {"template": 0, "archive": 0, 'redirect': 0}
+    catalog_file = vault / '00-Catalog.json'
+    if note_id and catalog_file.is_file():
+        catalog = json.loads(catalog_file.read_text(encoding='utf-8'))
+        records = [row for row in catalog['notes'] if str(row['metadata'].get('note_id')) == note_id]
+        if len(records) != 1:
+            raise ValueError('--note-id must resolve exactly once in 00-Catalog.json')
+        record = records[0]
+        path = (vault / record['path']).resolve()
+        if not path.is_relative_to(search_root) or not path.is_file():
+            raise ValueError('Catalogue path missing or outside requested scope')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != record['sha256']:
+            raise ValueError('Catalogue is stale; regenerate it before resolving this ID')
+        paths = [path]
+    else:
+        paths = sorted(search_root.rglob('*.md'))
+    for path in paths:
         if any(part.startswith(".") for part in path.relative_to(vault).parts):
             continue
         note = read_note(path, vault)
+        if note_id and note.metadata.get('note_id') != note_id:
+            continue
         reason = exclusion(note, include_templates, include_archived)
         if reason:
             skipped[reason] += 1
             continue
         notes.append(note)
-    ranked = rank(notes, query_terms) if query_terms else []
+    if note_id and len(notes) != 1:
+        raise ValueError('--note-id must resolve exactly once in the requested scope')
+    ranked = notes if note_id else (rank(notes, query_terms) if query_terms else [])
     selected = ranked[:max_notes]
-    lines = [f"Request: {query}", f"Vault: {vault.name}", "", "Selected sources:"]
+    lines = [f"Request: {query}", f"Vault: {vault.name}" + (f" / scope {scope}" if scope else ''), "", "Selected sources:"]
     lines.extend(f"- {provenance(note)} — {note.relative} (score {note.score:g})" for note in selected)
     if not selected:
         lines.append("- none. Read 00-Home.md or 00-Index.md and refine the query.")
@@ -157,7 +219,8 @@ def packet(vault: Path, query: str, max_notes: int, max_chars: int,
         if remaining <= 0:
             break
         header = f"### {note.title} ({note.relative})\n"
-        content = excerpt(note, query_terms, max(300, min(2_000, remaining - len(header))))
+        content = excerpt(note, query_terms, max(300, min(remaining if section else 2_000, remaining - len(header))),
+                          metadata_only=metadata_only, section=section)
         block = header + content + "\n"
         if len(block) > remaining:
             block = block[:remaining].rstrip() + "\n"
@@ -165,6 +228,10 @@ def packet(vault: Path, query: str, max_notes: int, max_chars: int,
         remaining -= len(block) + 1
         loaded += 1
     omitted = []
+    if metadata_only:
+        omitted.append('note bodies (--metadata-only)')
+    elif selected:
+        omitted.append('text outside the selected section/excerpt; raw artifacts and unrelated notes')
     if len(selected) > loaded:
         omitted.append(f"{len(selected) - loaded} selected notes beyond --max-chars")
     if len(ranked) > len(selected):
@@ -173,6 +240,10 @@ def packet(vault: Path, query: str, max_notes: int, max_chars: int,
         omitted.append(f"{skipped['template']} template notes (--include-templates)")
     if skipped["archive"]:
         omitted.append(f"{skipped['archive']} archived notes (--include-archived)")
+    if skipped['redirect']:
+        omitted.append(f"{skipped['redirect']} legacy path redirects (use the destination ID)")
+    if scope:
+        omitted.append('notes outside the requested scope')
     if omitted:
         lines.extend(["Not loaded:", *("- " + value for value in omitted)])
     rendered = "\n".join(lines).rstrip() + "\n"
@@ -189,14 +260,22 @@ def main() -> int:
     parser.add_argument("--max-chars", type=int, default=8_000)
     parser.add_argument("--include-templates", action="store_true")
     parser.add_argument("--include-archived", action="store_true")
+    parser.add_argument('--scope', default='', help='Search one Vault-relative folder only')
+    parser.add_argument('--note-id', default='', help='Resolve one stable ID through 00-Catalog.json')
+    parser.add_argument('--section', default='', help='Exact heading; requires --note-id')
+    parser.add_argument('--metadata-only', action='store_true', help='Return summaries, without body excerpts')
     args = parser.parse_args()
     vault = args.vault.resolve()
     if not vault.is_dir():
         parser.error(f"vault does not exist: {args.vault}")
     if args.max_notes < 1 or args.max_chars < 500:
         parser.error("--max-notes must be positive and --max-chars must be at least 500")
-    print(packet(vault, args.query, args.max_notes, args.max_chars,
-                 args.include_templates, args.include_archived), end="")
+    try:
+        print(packet(vault, args.query, args.max_notes, args.max_chars,
+                     args.include_templates, args.include_archived, scope=args.scope,
+                     note_id=args.note_id, section=args.section, metadata_only=args.metadata_only), end='')
+    except ValueError as error:
+        parser.error(str(error))
     return 0
 
 
