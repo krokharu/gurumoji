@@ -1,3 +1,4 @@
+<!-- 生成物: .agents/skills/gurumoji-obsidian-memory/references/retrieval-and-write.md から scripts/sync_agent_assets.py で生成。直接編集しない -->
 # Retrieval and write protocol
 
 ## Retrieve in layers
