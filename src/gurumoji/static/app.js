@@ -3391,7 +3391,7 @@ function renderAiTokenUsage(rootSelector, rawUsage) {
   const visible = ['openai', 'google', 'lmstudio'].includes(provider) && requestCount > 0;
   root.hidden = !visible;
   if (!visible) return;
-  const format = value => new Intl.NumberFormat('ja-JP').format(Math.max(0, Number(value) || 0));
+  const format = value => value == null ? '未計測' : new Intl.NumberFormat('ja-JP').format(Math.max(0, Number(value) || 0));
   const providerElement = root.querySelector('[data-ai-provider]');
   const modelElement = root.querySelector('[data-ai-model]');
   const inputElement = root.querySelector('[data-ai-input]');
@@ -3421,7 +3421,8 @@ function renderAiTokenUsage(rootSelector, rawUsage) {
     if (number) number.textContent = format(count);
   });
   const unreported = root.querySelector('[data-ai-unreported]');
-  if (unreported) unreported.hidden = Boolean(usage.reported);
+  if (unreported) unreported.hidden = Boolean(usage.reported) &&
+    [usage.input_tokens, usage.output_tokens, usage.total_tokens].every(value => value != null);
 }
 
 function renderProgress(job) {
