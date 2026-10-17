@@ -230,7 +230,7 @@ function renderAnalysisOrchestration() {
   setAlert(orchestrationNode('live-message'),notice,Boolean(notice));
   const usage = run.usage || {}, tasks = run.tasks || [];
   const tokenValue = usage.total_tokens ?? usage.tokens;
-  const tokenLabel = ['partial','reported'].includes(usage.measurement_status) || usage.tokens_complete === false || usage.tokens_partial || usage.partial ? 'トークン（一部計測）' : 'トークン（実測）';
+  const tokenLabel = usage.measurement_status === 'partial' || (usage.measurement_status === 'reported' && usage.tokens_complete !== true) || usage.tokens_complete === false || usage.tokens_partial || usage.partial ? 'トークン（一部計測）' : 'トークン（実測）';
   const metrics = [[run.completed_core_iterations ?? run.iteration ?? null,run.completed_core_iterations == null ? 'Core巡回' : '採用済みCore判断'],[usage.calls ?? usage.llm_calls ?? null,`AI呼出し / ${run.config?.max_calls ?? '—'}`],[Array.isArray(run.tasks) ? tasks.length : null,'登録タスク'],[tokenValue ?? null,tokenLabel]];
   orchestrationNode('metrics').replaceChildren(...metrics.map(([value,label])=>{const node=orchestrationElement('div');node.append(orchestrationElement('strong',orchestrationNumber(value)),orchestrationElement('span',label));return node;}));
   orchestrationNode('role-core').replaceChildren(orchestrationRenderRole(orchestrationRoles[0]));
@@ -259,7 +259,7 @@ function renderAnalysisOrchestration() {
   const config = run.config || {};
   orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
   for (const [id, suffix] of [['export-json','export.json'],['export-md','export.md']]) orchestrationNode(id).href = `${orchestrationBase()}/${suffix}`;
-  orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
+  orchestrationText('usage-note',`利用量の計測: ${{reported:'計測済み',partial:'一部計測（表示値は既知分）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
   orchestrationText('conclusion',run.current_view?.summary || '統合結果はまだ保存されていません。');
   const notes=orchestrationNode('conclusion-notes');notes.replaceChildren();
   if(run.config?.initial_label_definitions_version){
@@ -280,8 +280,8 @@ function orchestrationRenderInitial(run) {
   if(!available)return;
   const completed=stages.filter(stage=>stage.status==='completed').length;
   const canResume=Array.isArray(run.allowed_actions) ? run.allowed_actions.includes('resume') : run.can_resume===true;
-  orchestrationText('initial-summary',stages.length ? `${completed} / ${stages.length} 段階を保存済み。${initial.status==='ready' ? '初期版は保存済みです。' : run.status==='recovery_required' ? canResume ? '中断した段階は、下の再開操作から復旧できます。' : '再開は許可されていません。表示されたエラーを確認してください。' : ''}` : initial.status==='ready' ? '初期版は保存済みです。この実行には段階別の記録がありません。' : '初期分析の保存地点を確認しています。');
-  const fingerprint=JSON.stringify([run.run_id,stages]);
+  orchestrationText('initial-summary',initial.status==='revalidation_required' ? '保存済みの初期版は保持しています。builder・段階版を確認できないため再評価が必要です。再開・自動再計算は行いません。' : stages.length ? `${completed} / ${stages.length} 段階を保存済み。${initial.status==='ready' ? '初期版は保存済みです。' : run.status==='recovery_required' ? canResume ? '中断した段階は、下の再開操作から復旧できます。' : '再開は許可されていません。表示されたエラーを確認してください。' : ''}` : initial.status==='ready' ? '初期版は保存済みです。この実行には段階別の記録がありません。' : '初期分析の保存地点を確認しています。');
+  const fingerprint=JSON.stringify([run.run_id,stages,initial.status,initial.recovery_error]);
   if(fingerprint===orchestrationState.initialFingerprint)return;
   orchestrationState.initialFingerprint=fingerprint;
   const host=orchestrationNode('initial-stages');host.replaceChildren();
@@ -289,7 +289,7 @@ function orchestrationRenderInitial(run) {
     const row=orchestrationElement('li');row.dataset.status=stage.status || 'unknown';
     row.append(orchestrationElement('strong',stage.label || stage.stage_id || stage.id || '段階名未取得'),orchestrationElement('span',stage.status==='completed' ? '保存済み' : orchestrationLabel(stage.status),'orchestration-checkpoint-status'));
     const attempts=stage.attempt_count ?? stage.attempts;
-    row.append(orchestrationElement('small',`コード処理 · 実行回数 ${orchestrationNumber(attempts)}${stage.status==='completed' ? ' · 保存済み（再開時に再利用）' : ''}`));
+    row.append(orchestrationElement('small',`コード処理 · 実行回数 ${orchestrationNumber(attempts)}${stage.status==='completed' ? initial.status==='revalidation_required' ? ' · 保存済み（現行版での再利用は未確認）' : ' · 保存済み（再開時に再利用）' : ''}`));
     if(stage.error)row.append(orchestrationElement('p',stage.error,'orchestration-checkpoint-error'));
     if(stage.output_hash || stage.artifact_hash){const details=orchestrationElement('details');details.append(orchestrationElement('summary','保存記録'),orchestrationElement('p',`Hash: ${stage.output_hash || stage.artifact_hash}${stage.completed_at ? ` · 保存日時: ${stage.completed_at}` : ''}`));row.append(details);}
     host.append(row);

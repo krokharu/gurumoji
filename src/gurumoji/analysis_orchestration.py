@@ -27,7 +27,8 @@ from .analysis_core import (AnalysisContractError, canonical, fingerprint,
                             validate_publication_targets, validate_label_definitions, EFFECTIVE_PUBLICATION_WRITERS)
 from .services import artifact_review
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
-    read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
+    read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints,
+    validate_ready_initial)
 
 SCHEMA_VERSION = 1
 ROLES = {"core": "Core", "handler": "Handler", "interpretation": "会話解釈",
@@ -395,6 +396,7 @@ class AnalysisOrchestrationService:
                 raise _error("同じ初期分析が作成中、または復旧確認待ちです。自動再実行しません。", "initial_recovery_required")
             else:
                 initial_id = initial["initial_id"]
+                validate_ready_initial(db, initial_id, self.initial_builder)
                 snapshot = self._initial(db, initial_id)
         if build:
             try:
@@ -475,6 +477,7 @@ class AnalysisOrchestrationService:
             else:
                 initial_id = initial["initial_id"]
                 if initial["status"] == "ready":
+                    validate_ready_initial(db, initial_id, self.initial_builder)
                     snapshot = self._initial(db, initial_id)
                 else:
                     build, _, states, _, _ = read_initial_checkpoints(db, initial_id, self.initial_builder)
@@ -662,18 +665,29 @@ class AnalysisOrchestrationService:
         def total(key):
             values = [r[key] for r in records if type(r.get(key)) in {int, float}]
             return sum(values) if values else None
+        measured_calls = len({r.get("task_id") for r in records})
+        tokens_complete = bool(records) and measured_calls == run["calls_started"] and all(
+            type(r.get(key)) in {int, float} for r in records
+            for key in ("input_tokens", "output_tokens", "total_tokens"))
         return {"calls": run["calls_started"], "code_executions": run["code_executions"],
                 "input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"),
                 "total_tokens": total("total_tokens"), "cost": total("cost"),
                 "currency": "USD" if any(r.get("currency") == "USD" for r in records) else None,
-                "measured_calls": len({r.get("task_id") for r in records}),
-                "measurement_status": "reported" if records else "unavailable"}
+                "measured_calls": measured_calls, "tokens_complete": tokens_complete,
+                "measurement_status": ("reported" if tokens_complete else "partial") if records else "unavailable"}
 
     def _public(self, db, run):
         result = copy.deepcopy(run)
         result["config"].setdefault("publication_targets", [])
         result["config"]["effective_publication_writers"] = list(EFFECTIVE_PUBLICATION_WRITERS) if result["config"]["publication_targets"] else []
         result["initial"] = initial_progress(db, run["initial_id"])
+        initial_reusable = True
+        if self.initial_builder is not None and result["initial"]["status"] == "ready":
+            try:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
+            except AnalysisContractError as exc:
+                initial_reusable = False
+                result["initial"].update(status="revalidation_required", stored_status="ready", recovery_error=exc.code)
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
         result["tasks"] = tasks
@@ -709,7 +723,7 @@ class AnalysisOrchestrationService:
         result["label_proposals"] = [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_label_proposals WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
         result["unresolved_issues"] = [issue for issue in result["issues"] if issue.get("status") != "resolved"]
         uncertain = [t["task_id"] for t in tasks if t["status"] in {"running", "uncertain", "cancel_requested"}]
-        result["can_resume"] = run["status"] in {"queued", "recovery_required"} and not uncertain
+        result["can_resume"] = run["status"] in {"queued", "recovery_required"} and not uncertain and initial_reusable
         if run["phase"] == "initial":
             result["can_resume"] = result["can_resume"] and not run["stale"]
             try:
@@ -815,6 +829,8 @@ class AnalysisOrchestrationService:
                 if self.initial_builder is None:
                     raise _error("初期分析の実装が利用できません。", "initial_version_conflict")
                 read_initial_checkpoints(db, run["initial_id"], self.initial_builder)
+            elif self.initial_builder is not None:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
             if run["status"] in TERMINAL:
                 raise _error("終了済みrunは再実行しません。新しいrunを開始してください。", "run_terminal")
             uncertain = []
@@ -1596,20 +1612,32 @@ class AnalysisOrchestrationService:
                 self._event(db, run_id, "context_prepared", "入力範囲とモデルの予算を保存しました。",
                             task_id=task_id, context_manifest_hash=task["context_manifest_hash"])
             return
-        if data.get("reported") is False:
-            return
         record = {"task_id": task_id, "reported_at": _now()}
         for key in ("input_tokens", "output_tokens", "total_tokens", "cost"):
             value = data.get(key)
-            if type(value) in {int, float} and math.isfinite(value) and value >= 0:
+            if value is None and key in data:
+                record[key] = None
+            elif type(value) in {int, float} and math.isfinite(value) and value >= 0:
                 record[key] = value
-        if not any(k in record for k in ("input_tokens", "output_tokens", "total_tokens", "cost")):
-            return
         if data.get("currency") == "USD":
             record["currency"] = "USD"
         usage_id = str(data.get("usage_id") or task_id + ":response")
+        # Timestamps are observations of delivery, not part of a call's payload.
+        payload_hash = fingerprint({"task_id": task_id, "usage": {
+            key: value for key, value in data.items() if key not in {"usage_id", "reported_at"}}})
         with self._db() as db:
-            db.execute("INSERT OR IGNORE INTO orchestration_usage VALUES (?,?,?,?)", (run_id + ":" + usage_id, run_id, task_id, _json(record)))
+            identifier = run_id + ":" + usage_id
+            existing = db.execute("SELECT task_id,payload_json FROM orchestration_usage WHERE usage_id=?", (identifier,)).fetchone()
+            if existing:
+                saved = json.loads(existing["payload_json"])
+                if existing["task_id"] == task_id and saved.get("usage_payload_hash") == payload_hash:
+                    return
+                raise _error("同じ利用量IDに異なる記録があります。保存済み記録を保持し、照合が必要です。", "usage_conflict")
+            if data.get("reported") is False or not any(
+                    type(record.get(k)) in {int, float} for k in ("input_tokens", "output_tokens", "total_tokens", "cost")):
+                return
+            record["usage_payload_hash"] = payload_hash
+            db.execute("INSERT INTO orchestration_usage VALUES (?,?,?,?)", (identifier, run_id, task_id, _json(record)))
 
     def _execute(self, run_id: str, task_id: str):
         with self._db() as db:
@@ -1619,6 +1647,8 @@ class AnalysisOrchestrationService:
             if task["status"] != "queued" or run["status"] in TERMINAL:
                 return
             self._check_version(run)
+            if self.initial_builder is not None:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
             if task.get("input_artifacts"):
                 try:
                     self._recheck_review_binding(db, run, task)
@@ -2802,6 +2832,8 @@ class AnalysisOrchestrationService:
                 if run["status"] in TERMINAL or run["status"] == "recovery_required":
                     return
                 self._check_version(run)
+                if self.initial_builder is not None:
+                    validate_ready_initial(db, run["initial_id"], self.initial_builder)
                 if any(t["status"] in {"running", "uncertain"} for t in self._tasks(db, run_id)):
                     run.update(status="recovery_required", error="進行中だった呼出しを照合してから再開してください。")
                     self._write_run(db, run)
@@ -2959,4 +2991,8 @@ class AnalysisOrchestrationService:
                 run = self._read_run(db, run_id)
                 if run["status"] not in TERMINAL:
                     run["error"] = getattr(exc, "code", type(exc).__name__)
-                    self._stop(db, run, "execution_failure")
+                    if run["error"] == "initial_revalidation_required":
+                        run["status"] = "recovery_required"
+                        self._write_run(db, run)
+                    else:
+                        self._stop(db, run, "execution_failure")

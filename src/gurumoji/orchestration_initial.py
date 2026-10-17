@@ -99,6 +99,25 @@ def read_initial_checkpoints(db, initial_id, builder):
     return build, frozen, states, outputs, hashes
 
 
+def validate_ready_initial(db, initial_id, builder):
+    """Read-only reuse guard. Keep incompatible/legacy ready bytes for review."""
+    try:
+        if builder is None or not isinstance(builder.version, str) or not builder.version.strip():
+            raise ValueError("unknown builder")
+        if not builder.stages or any(not isinstance(s.version, str) or not s.version.strip() for s in builder.stages):
+            raise ValueError("unknown stage version")
+        build, _, states, _, _ = read_initial_checkpoints(db, initial_id, builder)
+        if not states or any(s["status"] != "completed" for s in states):
+            raise ValueError("ready build is incomplete")
+        initial = db.execute("SELECT status,snapshot_json FROM orchestration_initials WHERE initial_id=?", (initial_id,)).fetchone()
+        if initial is None or initial["status"] != "ready" or json.loads(initial["snapshot_json"]).get("input_hash") != build["source_hash"]:
+            raise ValueError("ready source differs")
+    except (AnalysisContractError, ValueError, TypeError, KeyError, AttributeError):
+        raise AnalysisContractError(
+            "保存済み初期分析のアルゴリズム・段階版を確認できません。旧結果を保持しているため、再評価が必要です。",
+            code="initial_revalidation_required", field="initial_id") from None
+
+
 def write_stage(db, initial_id, state, output=None):
     db.execute("UPDATE orchestration_initial_stages SET state_json=?,output_json=? WHERE initial_id=? AND stage_id=?",
                (encoded(state), encoded(output) if state["status"] == "completed" else None, initial_id, state["stage_id"]))

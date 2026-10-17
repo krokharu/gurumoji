@@ -34,7 +34,8 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
     def contract_error(exc):
         conflict = exc.code in {"revision_conflict", "request_conflict", "active_run",
                                 "provider_unavailable", "resume_blocked", "uncertain_execution",
-                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch"}
+                                "nothing_to_resume", "recovery_required", "version_conflict", "history_integrity_mismatch", "initial_hash_mismatch",
+                                "initial_revalidation_required", "usage_conflict"}
         return jsonify(error=str(exc), reason_code=exc.code, field=exc.field), 409 if conflict else 400
 
     @blueprint.errorhandler(StoreConflict)

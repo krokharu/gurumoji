@@ -241,6 +241,21 @@ def safe_token_count(value: Any) -> int:
     return max(0, min(10**12, int(value)))
 
 
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens", "cached_tokens", "reasoning_tokens")
+
+
+def optional_token_count(value: Any) -> int | None:
+    """Missing/invalid measurements are unknown; an explicitly reported zero is real."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        if not math.isfinite(float(value)) or value < 0 or int(value) != value:
+            return None
+    except (OverflowError, ValueError):
+        return None
+    return safe_token_count(value)
+
+
 def normalize_ai_usage(value: Any, providers: set[str] | frozenset[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -250,11 +265,7 @@ def normalize_ai_usage(value: Any, providers: set[str] | frozenset[str]) -> dict
     return {
         "provider": provider, "model": str(value.get("model") or "").strip()[:200],
         "request_count": safe_token_count(value.get("request_count")),
-        "input_tokens": safe_token_count(value.get("input_tokens")),
-        "output_tokens": safe_token_count(value.get("output_tokens")),
-        "total_tokens": safe_token_count(value.get("total_tokens")),
-        "cached_tokens": safe_token_count(value.get("cached_tokens")),
-        "reasoning_tokens": safe_token_count(value.get("reasoning_tokens")),
+        **{key: optional_token_count(value.get(key)) for key in TOKEN_FIELDS},
         "reported": bool(value.get("reported")),
     }
 
@@ -265,11 +276,14 @@ def merge_ai_usage(current_value: Any, sample_value: Any, providers: set[str] | 
         return current
     if current and current["provider"] != sample["provider"]:
         current = {}
+    if not current:
+        return sample
     return normalize_ai_usage({
         "provider": sample["provider"], "model": sample["model"] or current.get("model", ""),
-        **{key: current.get(key, 0) + sample[key] for key in (
-            "request_count", "input_tokens", "output_tokens", "total_tokens", "cached_tokens", "reasoning_tokens"
-        )}, "reported": bool(current.get("reported") or sample["reported"]),
+        "request_count": current["request_count"] + sample["request_count"],
+        **{key: current[key] + sample[key] if current[key] is not None and sample[key] is not None else None
+           for key in TOKEN_FIELDS},
+        "reported": bool(current.get("reported") or sample["reported"]),
     }, providers)
 
 
@@ -285,18 +299,13 @@ def extract_ai_token_usage(provider: str, model: str, response: dict[str, Any], 
     elif provider == "lmstudio":
         prompt = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
         completion = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
-        values = (usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"), prompt.get("cached_tokens") or prompt.get("cached_tokens_count"), completion.get("reasoning_tokens"))
+        values = (usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"), prompt.get("cached_tokens", prompt.get("cached_tokens_count")), completion.get("reasoning_tokens"))
     else:
         return {}
-    result = normalize_ai_usage({
+    return normalize_ai_usage({
         "provider": provider, "model": model, "request_count": 1,
-        "input_tokens": safe_token_count(values[0]), "output_tokens": safe_token_count(values[1]),
-        "total_tokens": safe_token_count(values[2]), "cached_tokens": safe_token_count(values[3]),
-        "reasoning_tokens": safe_token_count(values[4]), "reported": bool(usage),
+        **dict(zip(TOKEN_FIELDS, values)), "reported": bool(usage),
     }, providers)
-    if result and not result["total_tokens"]:
-        result["total_tokens"] = result["input_tokens"] + result["output_tokens"] + result["reasoning_tokens"]
-    return result
 
 
 def json_messages(system_prompt: str, user_prompt: str, data_messages=None) -> list[dict[str, str]]:
@@ -358,8 +367,7 @@ LMSTUDIO_TRUNCATED_MESSAGE = (
     "ローカルLLMの応答がトークン上限で途中終了しました。"
     "入力を小さくするか、LM Studioのコンテキスト長・出力上限を見直してください。"
 )
-# Gemini finish reasons that mean the answer was withheld or cut short.  Other
-# values (STOP, or a reason added later) fall through to normal parsing.
+# Only the provider's supported successful terminal state proves completion.
 GOOGLE_BLOCKED_FINISH_REASONS = frozenset({
     "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY",
 })
@@ -368,6 +376,15 @@ GOOGLE_INCOMPLETE_FINISH_REASONS = frozenset({"LANGUAGE", "OTHER"})
 
 def _dict_items(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+class ResponseCompletionError(RuntimeError):
+    """A response cannot be adopted merely because its text parses as JSON."""
+
+    def __init__(self, *, unknown: bool = False):
+        self.code = "response_completion_unknown" if unknown else "response_completion_unsupported"
+        super().__init__("AI応答の終了状態が不明です。" if unknown else
+                         "AI応答の終了状態は正常完了として未対応です。結果は採用しません。")
 
 
 def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
@@ -390,6 +407,11 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
                 if content.get("type") == "refusal":
                     refusal = str(content.get("refusal") or "").strip()[:300]
                     raise RuntimeError("AI が回答を拒否しました" + (f": {refusal}" if refusal else "。"))
+        if response.get("status") != "completed":
+            raise ResponseCompletionError(unknown=not response.get("status"))
+        # Responses may also report completion on individual output messages.
+        if any(item.get("status") not in (None, "completed") for item in _dict_items(response.get("output"))):
+            raise ResponseCompletionError()
     elif provider == "google":
         candidates = _dict_items(response.get("candidates"))
         if not candidates:
@@ -397,7 +419,7 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
             block_reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
             if block_reason:
                 raise RuntimeError(f"入力が Google の安全判定でブロックされました（{str(block_reason)[:80]}）。")
-            return
+            raise ResponseCompletionError(unknown=True)
         finish_reason = str(candidates[0].get("finishReason") or "")
         if finish_reason == "MAX_TOKENS":
             raise RuntimeError(TRUNCATED_MESSAGE)
@@ -405,9 +427,16 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
             raise RuntimeError(f"Google の安全判定により応答が止められました（{finish_reason}）。")
         if finish_reason in GOOGLE_INCOMPLETE_FINISH_REASONS:
             raise RuntimeError(f"Google の応答が完了しませんでした（{finish_reason}）。")
+        if finish_reason != "STOP":
+            raise ResponseCompletionError(unknown=not finish_reason or finish_reason == "FINISH_REASON_UNSPECIFIED")
     elif provider == "lmstudio":
-        if any(choice.get("finish_reason") == "length" for choice in _dict_items(response.get("choices"))):
+        choices = _dict_items(response.get("choices"))
+        if any(choice.get("finish_reason") == "length" for choice in choices):
             raise RuntimeError(LMSTUDIO_TRUNCATED_MESSAGE)
+        if not choices or any(choice.get("finish_reason") != "stop" for choice in choices):
+            raise ResponseCompletionError(unknown=not choices or any(not choice.get("finish_reason") for choice in choices))
+    else:
+        raise ResponseCompletionError()
 
 
 def call_ai_json(

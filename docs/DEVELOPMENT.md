@@ -24,3 +24,7 @@ python -m venv .venv
 ブラウザー実操作と実モデルは通常の試験とは別に明示実行します。合成試験の成功、実モデルの契約合格、研究上の品質承認を同一視しません。
 
 mainの整理はファイルの配布範囲だけを変え、利用者DB・研究者ノート・モデル・認証設定を移行しません。未実装・品質未承認の機能の状態も変えません。
+
+応答・利用量・初期cacheの防御修正では、OpenAI `completed`、Google `STOP`、LM Studio `stop` を正常終端として確認します。欠落は `response_completion_unknown`、未知の値は `response_completion_unsupported` として採用を止めます。JSONとして読めることだけでは完了を証明しません。未対応providerの正常値は、実行契約を確認してから明示的に追加します。
+
+利用量の欠測はnull、実測zeroは0です。未報告のtotalは作らず、集計の一部計測を明示します。同usage IDの同payloadは冪等、異payloadは `usage_conflict` で元の記録を保持します。既存のpayload hashがない記録も、同一性を証明できない場合は照合が必要です。ready cacheのbuilder／段階版が不一致または不明なら `initial_revalidation_required` を返し、保存済みcacheを更新・再計算せず保持します。過去成果物の閲覧と、現在条件での再利用を区別します。
