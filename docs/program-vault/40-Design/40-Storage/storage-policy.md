@@ -122,3 +122,11 @@ $env:PYTHONPATH = "$appRoot/src;$devRoot/tests"
 ```
 
 別途、隔離したアプリ本体importと無効時GET=200／POST=503、Python 3.10文法との互換、`git diff --check` を確認。Python 3.10実機、実ObusSQL wheel・PostgreSQL・MCP・実LLM・双方向同期・復旧・性能・ブラウザーUI・全体試験は未実行。本接続時は上流の固定版の完成範囲を再確認し、実パッケージ試験と保存／移行契約の検証を進める。
+
+### MAF拡張の確認と接続準備の補完（2026-10-22）
+
+利用者の指摘で開発ブランチも確認し、ObusSQLの `packages/obussql-maf` が既に実装済みと判明。最初に参照したmainの `5be3212` には含まれず、mainだけの確認では不足していた。`dot/af2-provenance-activation-20261021` の固定版 [228a864](https://github.com/krokharu/ObusSQL/tree/228a86477aa5cee7e651b9fd661b4f4e8c6d2fdc/packages/obussql-maf)を追加の参照先とした。実装本体は `dot/maf-execution-package-20261020` の `77b68fe` と同じblob。`obussql-maf 0.1.0.dev0` は `agent-framework-core==1.22.0` に依存する独立配布物で、Pythonは3.12限定。
+
+アプリ側 `5f113448ef38293995ebee5cb61e3a5c3db97bfc` で固定commit・subdirectory指定の任意requirementsと、既存診断APIの `maf` 項目を追加。上流の `RuntimeConfig/create_runtime/readiness` を使い、MAFを再実装しない。既定OFFは依存の調査・importを行わない。ON時も本番用 `obus.maf.pipeline.v1` のreadinessだけを確認し、workflow.run・callback・モデル・DB操作を起動しない。拡張の確認と `execution_ready` を区別し、上流の現在の `NOT_READY / HOST_BINDING_UNAVAILABLE` を維持する。未知の版・契約変更は拒否し、試験用プロファイルへ自動切替しない。MAF未導入でも既存の読取プレビューは利用できる。
+
+同じ専用venv・一時データで `test_obussql_integration.py` **47 PASS / 2 SKIP**（4.07秒、今回12件追加）。Python版・依存欠落／不一致、readiness確認時の実行禁止、上流の状態変更の拒否、例外内容の非公開、読取機能との独立を確認。HTTP応答とPython 3.10文法も確認。実MAF・実ObusSQLのインストール／実行と本番host接続は未実施。既存Vault側24件は直前変更の成功記録を維持し、今回そのコードは変更していない。実利用者データ・認証設定の変更なし。

@@ -85,6 +85,85 @@ def test_unavailable_diagnostics_hide_dependency_exception(monkeypatch, mode, ex
     assert "sensitive-path" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("python", [(3, 10), (3, 11), (3, 13)])
+def test_maf_requires_python_312_before_probing_dependencies(monkeypatch, python):
+    monkeypatch.setenv(bridge.ENV_ENABLED, "1")
+    monkeypatch.setattr(bridge.sys, "version_info", python)
+    probe = Mock(side_effect=AssertionError("dependency probe"))
+    monkeypatch.setattr(bridge.metadata, "version", probe)
+    assert bridge.maf_status()["status"] == "python_unsupported"
+    probe.assert_not_called()
+
+
+@pytest.mark.parametrize("package", ["obussql-maf", "agent-framework-core"])
+@pytest.mark.parametrize("condition", ["missing", "wrong"])
+def test_maf_dependencies_fail_before_any_runtime_import(monkeypatch, package, condition):
+    monkeypatch.setenv(bridge.ENV_ENABLED, "1")
+    monkeypatch.setattr(bridge.sys, "version_info", (3, 12))
+    def version(name):
+        if name == package:
+            if condition == "missing":
+                raise metadata.PackageNotFoundError("sensitive-path")
+            return "unknown"
+        return {"obussql-maf": "0.1.0.dev0", "agent-framework-core": "1.22.0"}[name]
+    importer = Mock(side_effect=AssertionError("MAF import"))
+    monkeypatch.setattr(bridge.metadata, "version", version)
+    monkeypatch.setattr(bridge, "import_module", importer)
+    result = bridge.maf_status()
+    assert result["status"] == ("not_installed" if condition == "missing" else "incompatible")
+    assert result["execution_ready"] is False
+    assert "sensitive" not in json.dumps(result)
+    importer.assert_not_called()
+
+
+@pytest.mark.parametrize("readiness", ["NOT_READY", "READY", "READY_SYNTHETIC", "raises"])
+def test_maf_uses_upstream_readiness_without_running_or_falling_back(monkeypatch, readiness):
+    monkeypatch.setenv(bridge.ENV_ENABLED, "1")
+    monkeypatch.setattr(bridge.sys, "version_info", (3, 12))
+    monkeypatch.setattr(bridge.metadata, "version", {
+        "obussql-maf": "0.1.0.dev0", "agent-framework-core": "1.22.0",
+    }.__getitem__)
+    unavailable = object()
+    runtime = SimpleNamespace(
+        readiness=Mock(return_value=SimpleNamespace(status=readiness, code=unavailable)),
+        run=Mock(side_effect=AssertionError("workflow must never run")),
+    )
+    if readiness == "raises":
+        runtime.readiness.side_effect = RuntimeError("sensitive-path")
+    api = SimpleNamespace(
+        PRODUCTION_PROFILE="obus.maf.pipeline.v1", TESTED_CORE_VERSION="1.22.0",
+        RuntimeConfig=Mock(return_value=object()), create_runtime=Mock(return_value=runtime),
+        ErrorCode=SimpleNamespace(HOST_BINDING_UNAVAILABLE=unavailable),
+    )
+    importer = Mock(return_value=api)
+    monkeypatch.setattr(bridge, "import_module", importer)
+    result = bridge.maf_status()
+    assert result["execution_ready"] is False
+    if readiness == "NOT_READY":
+        assert result["status"] == "host_binding_unavailable"
+        assert result["package_available"] is True
+    else:
+        assert result["status"] == ("import_failed" if readiness == "raises" else "incompatible")
+        assert result["package_available"] is False
+    assert "sensitive" not in json.dumps(result)
+    importer.assert_called_once_with("obussql_maf")
+    api.RuntimeConfig.assert_called_once_with(profile_id="obus.maf.pipeline.v1", enabled=True)
+    api.create_runtime.assert_called_once_with(api.RuntimeConfig.return_value)
+    runtime.run.assert_not_called()
+
+
+def test_missing_maf_does_not_disable_the_read_preview(monkeypatch):
+    monkeypatch.setenv(bridge.ENV_ENABLED, "1")
+    monkeypatch.setattr(bridge.sys, "version_info", (3, 12))
+    monkeypatch.setattr(bridge, "_load_api", lambda: api_double())
+    monkeypatch.setattr(bridge.metadata, "version", Mock(side_effect=metadata.PackageNotFoundError))
+    result = bridge.status()
+    assert result["status"] == "available_for_preview"
+    assert result["available"] is True
+    assert result["maf"]["status"] == "not_installed"
+    assert result["maf"]["execution_ready"] is False
+
+
 def test_registered_source_preserves_bytes_identity_and_does_not_write(notes, tmp_path):
     before = files_under(tmp_path)
     snapshot, = notes.source.capture((notes.selection,))
