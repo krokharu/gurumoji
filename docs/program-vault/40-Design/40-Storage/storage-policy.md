@@ -3,7 +3,7 @@ note_id: design-storage-policy
 note_type: storage-policy
 title: 保存先と正本の分類
 status: current
-updated: 2026-10-16
+updated: 2026-10-22
 schema_version: 1
 tags:
 - gurumoji/storage
@@ -102,3 +102,23 @@ CSV／JSONの大量データは `analysis_store` に一度保存し、通常のV
 研究用Vaultの表示名は既定で参加者コード／仮名を優先する。これは本文中の個人情報を匿名化する処理とは別である。配布パッケージは、対象会話・属性・原文・音声の範囲を指定して作成する。プログラムVaultに実際の参加者情報や原文を載せない。
 
 関連：[[40-Design/40-Storage/sync-contract|sync-contract]]、[[40-Design/50-Governance/method-rules/00-Index|method-rules]]。
+
+## ObusSQL接続準備（2026-10-22）
+
+利用者の依頼「作成中のObusSQLをグルモジへ入れる基盤を用意」に対応。アプリ変更は `krokharu/ObusSQL導入` の `175018992f6d92466444c54e50a2a2811a248be5`（基点 `e33a91d`）。参照した上流は [krokharu/ObusSQL の 5be3212](https://github.com/krokharu/ObusSQL/tree/5be32120d17a7f07eac7a2c41b0bab1372ae4cdb)、内部パッケージは `obsipg 0.0.1.dev0`。上流README・CLOUD_IMPLEMENTATION_PLANの本接続前の実装／検証順序を維持する。
+
+- `services/obussql.py` と `web/obussql_routes.py` に既定OFFの読取プレビューを追加。通常のrequirementsと分離した固定commitの任意依存、状態診断、利用手順はアプリ側の `config/requirements-obussql.txt`・`docs/OBUSSQL.md` に置く。Python 3.12以上が必要なのはこの任意接続だけ。
+- `VaultRegistry` のID・path・revision・source_hash・sha256を再利用する。scopeは既存SQLiteの `application_metadata.library_id`、sourceはVault種別、resourceはnote_id。DB接続は `mode=ro`、欠けたIDの作成や補修をしない。既存カラム・正本・書込経路・バックアップの変更はゼロ。
+- 明示した最大16ノート（各256 KiB、合計1 MiB）だけを読み、原UTF-8 bytes・BOM・改行を維持。同期済みかつcurrentのInput／Visualization／Orchestratorの管理ノートに限定し、本文編集、stale、欠落、pending、曖昧なID、Vault外参照・reparseを拒否する。全選択の事前確認と返却前のhash・台帳・library ID再確認を行う。hash再確認は外部編集に対するOSレベルの排他保証ではない。
+- 上流のMemoryBackendは要求ごとに破棄するプレビュー用。権限・actor・scope・任意パスはHTTP入力から受け取らず、既存認証／Host／CSRF／ローカルパス制限を通す。検索結果はAIへ送らず、永続索引・DSN・SQL実行口・同期・復旧ジョブを追加しない。無効化は `MOJIOKOSI_OBUSSQL_ENABLED=0` で、移行／ロールバック不要。
+
+検証は当該worktree専用 `.venv`（Windows CPython 3.12）と一時DB・一時Vaultで実行。待受ポートは開かず、実runtime・実Vault・tokens.json・.envは変更していない。追加の `tests/test_obussql_integration.py`、既存 `test_four_vaults.py`、`test_vault_note_policy.py` は **59 PASS / 2 SKIP**（29.04秒）。追加分は35 PASS。skipは実シンボリックリンク作成権限不足と、ネイティブObusSQLパッケージ未導入。プレビューの依存側はテストダブルで接続契約を確認しており、実パッケージ結合の合格ではない。
+
+実行時はアプリcheckoutのsrcを使う。開発資料ブランチのpytest設定がsrcを上書きするため、`PYTHONPATH` に加えて `-o pythonpath` を指定する。
+
+```powershell
+$env:PYTHONPATH = "$appRoot/src;$devRoot/tests"
+& "$appRoot/.venv/Scripts/python.exe" -m pytest "$devRoot/tests/test_obussql_integration.py" "$devRoot/tests/test_four_vaults.py" "$devRoot/tests/test_vault_note_policy.py" -o "pythonpath=$appRoot/src" -q -rs -p no:cacheprovider
+```
+
+別途、隔離したアプリ本体importと無効時GET=200／POST=503、Python 3.10文法との互換、`git diff --check` を確認。Python 3.10実機、実ObusSQL wheel・PostgreSQL・MCP・実LLM・双方向同期・復旧・性能・ブラウザーUI・全体試験は未実行。本接続時は上流の固定版の完成範囲を再確認し、実パッケージ試験と保存／移行契約の検証を進める。
