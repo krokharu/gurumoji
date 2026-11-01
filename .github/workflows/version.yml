@@ -1,0 +1,94 @@
+name: version
+
+# mainへのpushで版を自動で上げ、タグを打つ。
+#   feat: を含む       -> 通常アップデート（β0.46.1 -> β0.47.0）
+#   docs/chore/ci/test/style のみ -> 上げない
+#   それ以外           -> 細かいパッチ（β0.46.1 -> β0.46.2）
+# βの付け外しとメジャーアップデートは自動判断せず、手動実行でだけ行う。
+# ルールは docs/DEVELOPMENT.md の「バージョンの付け方」。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 手動で行う更新（自動判断しない種別）
+        type: choice
+        required: true
+        options: [release, major, beta-on, beta-off]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/bump_version.py check
+
+  bump:
+    if: github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message, 'chore(release)')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check current version
+        run: python scripts/bump_version.py check
+
+      - name: Collect commit subjects
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            git log -1 --format=%s "$AFTER" > "$RUNNER_TEMP/subjects.txt"
+          else
+            git log --format=%s "$BEFORE..$AFTER" > "$RUNNER_TEMP/subjects.txt"
+          fi
+          cat "$RUNNER_TEMP/subjects.txt"
+
+      - name: Bump version
+        id: bump
+        env:
+          MANUAL_KIND: ${{ inputs.kind }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python scripts/bump_version.py "$MANUAL_KIND" --github-output
+          else
+            python scripts/bump_version.py auto --subjects "$RUNNER_TEMP/subjects.txt" --github-output
+          fi
+
+      - name: Commit and tag
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "タグ $TAG は既にあります。" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/gurumoji/app.py README.md
+          git commit -m "chore(release): $VERSION"
+          git tag -a "$TAG" -m "$VERSION"
+          git push origin HEAD:main "$TAG"
