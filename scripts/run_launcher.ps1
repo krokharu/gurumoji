@@ -29,11 +29,11 @@ function Show-StartupSplash {
     $art = @($art | ForEach-Object { $_.PadRight($artWidth) })
     Write-LaunchLine ''
     Write-LaunchLine $border -Color DarkCyan
-    $rows = @('', '*  G U R U M O J I  *', '') + $art + @('', '---  MADE BY KUROKAWA  ---', '')
+    $rows = @('', '*  G U R U M O J I  *', '') + $art + @('', '---  MADE BY Re.kloc  ---', '')
     foreach ($row in $rows) {
         $padding = [int][Math]::Floor((70 - $row.Length) / 2)
         $line = '  |' + ((' ' * $padding) + $row).PadRight(70) + '|'
-        $color = if ($row -like '*KUROKAWA*') { 'Yellow' } else { 'Cyan' }
+        $color = if ($row -like '*Re.kloc*') { 'Yellow' } else { 'Cyan' }
         Write-LaunchLine $line -Color $color
     }
     Write-LaunchLine $border -Color DarkCyan

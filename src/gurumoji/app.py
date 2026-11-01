@@ -298,8 +298,8 @@ warnings.filterwarnings(
 )
 
 PRODUCT_NAME = "グルモジ"
-APP_VERSION = "1.8.0"
-APP_CREATOR = "Kurokawa"
+APP_VERSION = "β0.46.0"
+APP_CREATOR = "Re.kloc"
 APP_NAME = f"{PRODUCT_NAME} | 話者分離文字起こし"
 APP_DIRECTORY = Path(__file__).resolve().parent
 PROJECT_DIRECTORY = APP_DIRECTORY.parents[1]

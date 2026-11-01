@@ -353,7 +353,7 @@ function startBootSequence() {
         bootSplash.setAttribute('aria-hidden', 'true');
       }, reducedMotion ? 50 : 400);
     }, reducedMotion ? 150 : 650);
-  }, 200);
+  }, reducedMotion ? 200 : 1200);
 }
 
 function setAlert(element, message, error = false) {
