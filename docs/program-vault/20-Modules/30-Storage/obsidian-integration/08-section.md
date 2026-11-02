@@ -57,3 +57,14 @@ split_on: '2026-10-11'
 - Edgeの1365pxと390pxで画面遷移・保存済み文字起こし表示を確認し、JavaScriptエラー0件、解析APIへの通信0件。Python／JavaScript構文、版表記、差分整合、公開範囲853 blobの検査が成功。PR #1 の公開範囲CI・版管理CIも成功。実音声モデル・実LLM・全体試験は未実行。実利用者のDB・Vault・本文・タグ・別名・認証設定には触れていない。検証用ポート17864とサーバーは終了した。
 
 再検証用資産はこの開発資料ブランチの `tests/public/test_analysis_removal.py` と `tests/public/analysis_removal_browser.cjs` に保持する。Python試験には `GURUMOJI_APP_ROOT` を公開版、`GURUMOJI_BASELINE_ROOT` を変更前公開版の隔離コピーに設定し、公開版専用venvで `pytest <開発資料>/tests/public/test_analysis_removal.py --confcutdir=<開発資料>/tests/public -o pythonpath=<公開版>/src -q -p no:cacheprovider` を使う。試験・検証記録を公開版へ追加しない。
+
+## 配布データ・秘密情報・起動時更新の監査（2026-11-03）
+
+利用者の「データの初期化やAPIKeyなどが無いか確認」に対して、公開配布版 `f96e815`（β0.47.1）を読み取り監査した。公開コードと実利用者データは変更していない。
+
+- 到達可能な公開履歴855 blobに対する既存の秘密情報検査は成功。公開されている3ブランチ・2タグはすべてこの履歴に含まれる。`git archive --format=zip HEAD` の629ファイルにruntime・DB・実録音・`.env`・`tokens.json`・秘密鍵はない。設定例の認証5項目はすべて空。Colabの実行出力・実行番号も空。GitHub Releaseの添付ファイルはなく、提供物はGitHubのソースアーカイブ。検査は既知のパターンによるテキスト監査であり、未知の秘密値を完全検出する保証ではない。
+- 一時設定にダミー値を用意して `/api/config` を実行し、値が返らないことを確認。認証ファイルのURLは404。データディレクトリに置いたダミー認証ファイルもバックアップに含まれず、バックアップ検証エラー0件。実際の資格情報は読み取らず、ログにも出していない。
+- **未修正のデータ更新を確認**：`services/library_schema.py` の起動時互換処理が `library_items.session_profile_json` 内の旧項目 `confidentiality_notes` を自動削除する。一時DBで実際の `initialize_application()` を実行すると、このJSON列だけが変わり、当該キーが失われることを再現した。文字起こし本文と、話者名・仮名・タグ・属性・メモは保持された。全件削除型の初期化ではないが、ユーザー記入値を消すため、保持方針を決めて修正する対象。今回の依頼は確認なのでコード修正はしていない。
+- ほかに、起動時の不足テーブル／列追加、取り込み来歴表の互換移行、表示投影の再構築、`write_json` の有効化がある。一時アップロードは既定15分経過した非実行中の管理フォルダーを掃除し、ゴミ箱は既定30日で期限切れを完全削除する。`scripts/cleanup_env.bat` は明示的なDELETE入力後に `.venv` だけを削除する。これらを「削除処理が一切ない」とは報告しない。
+
+一時DB・一時ファイルだけで実行した監査資産は `tests/public/audit_data_keys.py` に保持する。監査の要点は、配布物とキー露出の検査に合格したことと、旧JSON項目の削除を検出・再現したことを区別する。実Vaultの同期・移行・初期化やキーの失効・変更は行っていない。
