@@ -79,3 +79,12 @@ split_on: '2026-10-11'
 - PythonとJavaScriptの構文、PowerShellスクリプトの構文、Colabのコード6セル、版整合、公開範囲855 blobの検査に成功した。公開版のGit差分は空。実利用者のDB・Vault・資格情報には触れていない。前節で検出した旧 `confidentiality_notes` 削除処理は今回修正しておらず、追加試験の成功をその問題の解消とは扱わない。
 
 追加資産は `tests/public/test_deletion_regressions.py` と `tests/public/analysis_removal_extended_browser.cjs`。Python試験は前掲の環境変数を設定し、同じ隔離venvから既存 `test_analysis_removal.py` と併せて実行する（`--confcutdir=<開発資料>/tests/public -o pythonpath=<公開版>/src -q -p no:cacheprovider`）。ブラウザー試験はPlaywrightとEdge、一時DBで構成した専用サーバー `127.0.0.1:17864` を使用する。検証サーバーは終了済み。
+
+## 公開リポジトリの説明整備（2026-11-03）
+
+利用者の「公開用にGitの説明を整えて」に対し、`Gurumoji-public` の概要欄、README、画面紹介を更新した。概要欄に残っていた削除済みの会話分析・Obsidian保存の案内を、文字起こし・話者管理・編集・保存の説明へ変更し、検索用トピック7件を設定した。
+
+- READMEは用途、機能一覧、Windows／Colab／Linuxの入口、保存と外部通信、提供範囲、問い合わせ先を整理し、配布ZIPへの直接リンクを追加した。公開版で提供しないObusSQL接続を明記し、開発版の未コミット接続コードは変更していない。
+- 旧β0.47.0の画像をβ0.47.1のPC画面へ差し替え、スマートフォン幅の画像を追加した。一時DB、空の認証設定、録音未登録で撮影し、保存先表示は `runtime/output` として個人パスを含めていない。画面に残る「感情解析」スイッチは利用対象外と説明し、実装を再追加していない。
+- 独自変更はREADMEと画像2点。実装コミットは `e31c38246ecf299105a5a8c8f9fef46ab928996c`。[PR #3](https://github.com/krokharu/Gurumoji-public/pull/3) を `public/develop`、[PR #4](https://github.com/krokharu/Gurumoji-public/pull/4) を `public/release` へ統合した。配布HEADは `8d9847f3075408629a2750662bfdfeff9cdc3ee8`、版はβ0.47.1のまま。
+- READMEのローカルリンク14件、PNG画像、撮影時JavaScript例外0件、差分、版整合、公開履歴858 blobの検査に成功。PRのCIと、配布HEADの「公開版の検査と版管理」「公開範囲の読取専用検査」が成功し、配布版のツリーが検証済みコミットと一致することも確認した。実行コード・設定・保持指定定義は変更せず、実音声モデルやLLMの追加試験は行っていない。前節のデータ更新の指摘は未修正。一時サーバーは終了済み。
