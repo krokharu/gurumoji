@@ -1,0 +1,75 @@
+    <section id="library-card" class="view library-card" role="tabpanel" aria-labelledby="show-library-list-button" hidden>
+      <header class="view-header library-header">
+        <div>
+          <p class="view-kicker">処理済みデータ</p>
+          <h1 id="library-title">処理済みデータ</h1>
+          <p>過去の文字起こしを探して開き、内容の確認・修正・分析に進みます。</p>
+        </div>
+        <div class="library-header-actions">
+          <button id="library-refresh-button" class="secondary-button compact-button" type="button">↻ 更新</button>
+          <button id="manage-library-groups-button" class="secondary-button compact-button" type="button">フォルダー管理</button>
+          <button id="manage-data-catalog-button" class="secondary-button compact-button" type="button">分析グループ・タグ</button>
+          <button id="add-record-button" class="secondary-button" type="button">空のデータを追加</button>
+          <button id="library-create-new-button" class="primary-button small" type="button">＋ 新しい文字起こし</button>
+        </div>
+      </header>
+
+      <div class="library-overview" aria-label="処理済みデータの概要">
+        <div><span>表示中</span><strong id="library-total-metric">—</strong><small>件</small></div>
+        <div><span>最終時刻の合計</span><strong id="library-duration-metric">—</strong></div>
+        <div><span>話者</span><strong id="library-speaker-metric">—</strong><small>人</small></div>
+        <div><span>最終更新</span><strong id="library-updated-metric">—</strong></div>
+      </div>
+
+      <button id="library-filter-toggle" class="library-filter-toggle mobile-only" type="button" aria-expanded="false" aria-controls="library-filter-panel">
+        <span>絞り込み条件</span>
+      </button>
+
+      <div class="library-workspace">
+        <aside id="library-filter-panel" class="library-filter-panel" aria-label="絞り込み条件">
+          <div class="library-filter-heading">
+            <div><strong>絞り込み条件</strong></div>
+            <button id="library-clear-filters" type="button">条件をクリア</button>
+          </div>
+          <div class="library-filters">
+            <div class="library-filter-more">
+              <div class="library-filter-more-body">
+                <label class="field">
+                  <span>話者</span>
+                  <select id="library-speaker"><option value="">すべての話者</option></select>
+                </label>
+                <label class="field">
+                  <span>感情</span>
+                  <select id="library-emotion"><option value="">すべての感情</option></select>
+                </label>
+                <div class="library-filter-pair">
+                  <label class="field"><span>収録日（以降）</span><input id="library-recorded-from" type="date"></label>
+                  <label class="field"><span>収録日（以前）</span><input id="library-recorded-to" type="date"></label>
+                </div>
+                <div class="library-filter-pair">
+                  <label class="field"><span>長さ・最短（秒）</span><input id="library-media-duration-min" type="number" min="0" step="any"></label>
+                  <label class="field"><span>長さ・最長（秒）</span><input id="library-media-duration-max" type="number" min="0" step="any"></label>
+                </div>
+                <p class="field-note">収録日・長さを指定すると、不明のデータは表示しません。</p>
+              </div>
+            </div>
+          </div>
+          <p id="library-filter-summary" class="library-filter-summary">すべてのデータを表示しています</p>
+        </aside>
+
+        <div class="library-results">
+          <div class="library-status-row">
+            <p id="library-count" aria-live="polite">読み込んでいます…</p>
+            <div id="training-status" class="training-status"></div>
+          </div>
+          <div id="library-message" class="alert error" role="alert" hidden></div>
+          <div id="library-list" class="library-list" aria-live="polite"></div>
+          <nav id="library-pagination" class="content-ai-toolbar" aria-label="データ一覧のページ"></nav>
+          <details id="library-trash" class="library-trash">
+            <summary>ゴミ箱 <span data-trash-summary></span></summary>
+            <p class="library-trash-note" data-trash-note>削除した会話はここに移り、保持期間を過ぎると自動で完全に削除されます。</p>
+            <div class="library-trash-list" data-trash-list aria-live="polite"></div>
+          </details>
+        </div>
+      </div>
+    </section>

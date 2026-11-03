@@ -1,0 +1,12 @@
+/* 開発版のObusSQL接続と、根拠を確認する読取画面。 */
+.obussql-dialog { padding: 24px; box-sizing: border-box; font: inherit; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.obussql-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0; }
+.obussql-notes { display: grid; gap: 8px; max-height: 240px; overflow: auto; }
+.obussql-note { display: flex; align-items: start; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.obussql-note input { flex: none; margin-top: 4px; }
+.obussql-note span { min-width: 0; overflow-wrap: anywhere; }
+.obussql-note small { display: block; color: var(--muted); }
+.obussql-dialog form { padding: 0; display: grid; gap: 12px; margin: 16px 0; }
+.obussql-results article { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.obussql-results pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.obussql-results small { overflow-wrap: anywhere; color: var(--muted); }

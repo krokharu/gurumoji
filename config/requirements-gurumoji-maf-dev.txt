@@ -1,0 +1,3 @@
+# 開発版の実行ブリッジ。上流の本番用obussql-mafプロファイルとは別の接続。
+# Python 3.12と、requirements-obussql.txtの固定版obsipgが必要。
+agent-framework-core==1.22.0

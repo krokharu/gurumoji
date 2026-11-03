@@ -1,0 +1,22 @@
+<dialog id="obussql-dialog" class="app-dialog obussql-dialog" aria-labelledby="obussql-title">
+  <div class="app-dialog-header">
+    <h2 id="obussql-title">ObusSQL接続・ノート検索</h2>
+    <p>選択した管理ノートだけを読み取ります。原本の更新やAIへの送信は行いません。</p>
+  </div>
+  <div class="obussql-toolbar"><span class="status-pill loading" data-obussql-pill>ObusSQL 確認中</span><button id="obussql-refresh" class="secondary-button compact-button" type="button">接続を再確認</button></div>
+  <p data-obussql-detail role="status" aria-live="polite"></p>
+  <p id="obussql-maf-detail" class="field-note"></p>
+  <section aria-labelledby="obussql-notes-title">
+    <h3 id="obussql-notes-title">対象ノート</h3>
+    <p class="field-note">Input・Visualization・Orchestratorの管理ノートから最大16件を選べます。</p>
+    <div id="obussql-notes" class="obussql-notes"></div>
+    <div class="obussql-toolbar"><span id="obussql-selected-count" role="status">0 / 16件を選択</span><button id="obussql-more" class="secondary-button compact-button" type="button" hidden>次のノートを表示</button></div>
+  </section>
+  <form id="obussql-search-form">
+    <label class="field"><span>検索語</span><input id="obussql-query" type="text" maxlength="512" required autocomplete="off" placeholder="ノート内の言葉を入力"></label>
+    <button id="obussql-search" class="primary-button" type="submit" disabled>選んだノートを検索</button>
+  </form>
+  <p id="obussql-message" role="status" aria-live="polite"></p>
+  <div id="obussql-results" class="obussql-results"></div>
+  <div class="app-dialog-actions"><button id="obussql-close" class="secondary-button" type="button">閉じる</button></div>
+</dialog>

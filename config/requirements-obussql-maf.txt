@@ -1,0 +1,5 @@
+# Optional execution extension already implemented in ObusSQL's development branch.
+# Python 3.12 only; depends on agent-framework-core==1.22.0 via upstream metadata.
+# Separate from the obsipg read preview. Installing does not activate workflows.
+# Upstream's tested hash lock is for Linux x86_64 CPython 3.12; see docs/OBUSSQL.md.
+obussql-maf @ git+https://github.com/krokharu/ObusSQL.git@228a86477aa5cee7e651b9fd661b4f4e8c6d2fdc#subdirectory=packages/obussql-maf
