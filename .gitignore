@@ -30,3 +30,11 @@ output/
 scratch/
 devtools/
 tests/
+
+# 個人設定・別リポジトリ・復旧用コピーは開発版にも収録しない
+.codex/
+ObusSQL/
+**/.obsidian/
+*.recovered
+*.orig
+*.rej
