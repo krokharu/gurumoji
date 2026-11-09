@@ -1,6 +1,6 @@
 # 開発・試験・設計書
 
-利用者の指定により、mainは引渡し用、`archive/development-assets-20261016` は開発資料・試験の保存用です。
+利用者の指定により、このリポジトリのmainは開発版アプリ、`archive/development-assets-20261016` は開発資料・試験の保存用です。公開・配布用は別リポジトリ [Gurumoji-publicのpublic/release](https://github.com/krokharu/Gurumoji-public/tree/public/release) に分離します。開発版のmainからReleaseを自動公開せず、公開側へ開発版の履歴やファイルを直接移しません。
 
 | main | 開発資料ブランチ |
 | --- | --- |

@@ -27,6 +27,26 @@
       </header>
 
       <div id="item-panel-transcript" class="item-panel" role="tabpanel" aria-labelledby="item-tab-transcript" data-item-panel="transcript">
+        <section id="speaker-timeline" class="speaker-timeline" aria-labelledby="speaker-timeline-title">
+          <header class="timeline-header">
+            <div><h2 id="speaker-timeline-title">発話タイムライン</h2><p id="timeline-help">上段はアウトライン、下段は話者ごとの発話です。発話を選ぶと、その位置から再生します。</p></div>
+            <div class="timeline-tools">
+              <output id="timeline-position" aria-label="再生位置">00:00 / 00:00</output>
+              <button id="timeline-current" class="secondary-button" type="button">再生位置へ</button>
+              <div class="timeline-zoom-controls" role="group" aria-label="時間軸の拡大・縮小">
+                <button id="timeline-zoom-out" class="secondary-button" type="button" aria-label="時間軸を縮小">− 縮小</button>
+                <label>時間軸<select id="timeline-zoom"><option value="1">全体</option><option value="2">2倍</option><option value="4">4倍</option><option value="8">8倍</option><option value="16">16倍</option><option value="32">32倍</option></select></label>
+                <button id="timeline-zoom-in" class="secondary-button" type="button" aria-label="時間軸を拡大">＋ 拡大</button>
+                <button id="timeline-zoom-fit" class="secondary-button" type="button" aria-label="時間軸の全体を表示">全体</button>
+              </div>
+            </div>
+          </header>
+          <label class="timeline-seek-label">再生位置<input id="timeline-seek" type="range" min="0" max="0" step="0.1" value="0" disabled aria-label="タイムラインの再生位置"></label>
+          <p id="timeline-notice" class="timeline-notice" role="status"></p>
+          <div id="timeline-viewport" class="timeline-viewport" tabindex="0" role="region" aria-label="話者とアウトラインの時間軸。拡大時は横にスクロールできます" aria-describedby="timeline-help">
+            <div id="timeline-canvas" class="timeline-canvas"></div>
+          </div>
+        </section>
         <div class="transcript-layout">
           <aside class="transcript-side">
             <div id="media-review" class="media-review" hidden>

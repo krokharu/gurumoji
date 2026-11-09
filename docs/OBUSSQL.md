@@ -1,10 +1,10 @@
 # ObusSQLの接続とノート検索
 
-[ObusSQL](https://github.com/krokharu/ObusSQL)は開発中です。グルモジには、任意依存の診断と、明示した管理ノートを読むプレビュー接続を用意しています。公開版では接続を既定で無効にします。試用する場合は `MOJIOKOSI_OBUSSQL_ENABLED=1` を指定します。手元の開発版の起動設定は変更しません。SQLite・Vaultの保存先、既存カラム、正本、バックアップ形式は変わりません。
+[ObusSQL](https://github.com/krokharu/ObusSQL)は開発中です。グルモジには、任意依存の診断と、明示した管理ノートを読むプレビュー接続を用意しています。手元の開発版では、Windowsの `run.bat` が接続を有効にします。直接PythonやLinuxから起動する場合は `MOJIOKOSI_OBUSSQL_ENABLED=1` を指定します。SQLite・Vaultの保存先、既存カラム、正本、バックアップ形式は変わりません。
 
-接続対象は内部パッケージ `obsipg` の `0.0.1.dev0`、参照したソースは [5be3212](https://github.com/krokharu/ObusSQL/tree/5be32120d17a7f07eac7a2c41b0bab1372ae4cdb) です。パッケージの読込成功は、実アプリ連携・研究品質・本番運用の検証完了を意味しません。同じ開発版番号でも内容が変わるため、試用には固定したcommitの成果物を使ってください。
+接続対象は内部パッケージ `obsipg` の `0.0.1.dev0`、2026-11-09に取得した最新ソースは [07128ac](https://github.com/krokharu/ObusSQL/tree/07128acfe13c1162552f7928b5ab0e7c954fac1b) です。パッケージの読込成功は、実アプリ連携・研究品質・本番運用の検証完了を意味しません。同じ開発版番号でも内容が変わるため、試用には固定したcommitの成果物を使ってください。
 
-MAF（Microsoft Agent Framework）の実行拡張は、ObusSQLの開発ブランチに既にあります。`main` の上記commitには含まれません。今回のMAF接続準備は [dot/af2-provenance-activation-20261021 の固定版228a864](https://github.com/krokharu/ObusSQL/tree/228a86477aa5cee7e651b9fd661b4f4e8c6d2fdc/packages/obussql-maf)を参照します。
+MAF（Microsoft Agent Framework）の実行拡張 `packages/obussql-maf` は、ObusSQLの上記 `main` コミットに含まれています。読取用の `obsipg` と同じ固定コミットを参照します。
 
 ## 試用環境
 
@@ -17,6 +17,8 @@ Python 3.12以上の専用環境と、一時DB・一時Vaultを用意します�
 $env:MOJIOKOSI_OBUSSQL_ENABLED = "1"
 ```
 
+同じ `0.0.1.dev0` を旧コミットから導入済みの場合は、試用環境で `pip install --upgrade --force-reinstall -r config/requirements-obussql.txt` を実行してください。版番号だけではコミットの違いを検出できません。
+
 `MOJIOKOSI_DATA_DIR`・`MOJIOKOSI_OUTPUT_DIR`・`MOJIOKOSI_BACKUP_DIR` は試用先へ指定し、別worktreeのPython・データ・待受ポートを共有しないでください。既定のセットアップはObusSQL、PostgreSQL、MCPを追加インストールしません。
 
 ## 既存のMAF拡張
@@ -25,13 +27,13 @@ ObusSQL内の `packages/obussql-maf` は、独立して導入する `obussql-maf
 
 任意依存は `config/requirements-obussql-maf.txt` に分離しました。対象Pythonは **3.12のみ**（3.13以降も対象外）です。読取用の `obsipg` とMAF拡張は別の配布物なので、`requirements-obussql.txt` の導入だけではMAFは入りません。両者の実行連携も未構成です。
 
-上流の配布物を試用環境に導入する際は、`requirements-obussql-maf.txt` を追加で指定します。依存全体の再現には、固定commit内の `packages/obussql-maf/requirements-linux-cp312.lock` を `--require-hashes` で先に導入してください。このlockはLinux x86_64 CPython 3.12用で、Windowsでの動作確認は別途必要です。通常のrequirements指定だけでは推移的な依存のhashは固定されません。
+上流の配布物を試用環境に導入する際は、`requirements-obussql-maf.txt` を追加で指定します。旧コミットの同じ `0.1.0.dev0` を導入済みなら、こちらも `pip install --upgrade --force-reinstall -r config/requirements-obussql-maf.txt` で更新します。依存全体の再現には、固定commit内の `packages/obussql-maf/requirements-linux-cp312.lock` を `--require-hashes` で先に導入してください。このlockはLinux x86_64 CPython 3.12用で、Windowsでの動作確認は別途必要です。通常のrequirements指定だけでは推移的な依存のhashは固定されません。
 
 `GET /api/obsidian/obussql` の `maf` 項目で、無効・Python非対応・未導入・版不一致・読込失敗・実行接続未構成を区別します。診断は `MOJIOKOSI_OBUSSQL_ENABLED=1` のときだけ行い、既定OFFでは拡張もフレームワークもimportしません。MAF未導入でも、読取用obsipgのプレビューは独立して使えます。
 
 導入済みなら上流の本番用プロファイル `obus.maf.pipeline.v1` のreadinessだけを確認します。現在は `NOT_READY / HOST_BINDING_UNAVAILABLE` で、グルモジの診断も `execution_ready: false` を返します。`package_available: true` は拡張の確認結果であり、ワークフローやモデルの実行許可ではありません。試験用の `obus.maf.synthetic.v1` への自動切替はしません。
 
-上流ではMAF実行拡張と限定した結合試験が実装済みです。[AF2の検証記録](https://github.com/krokharu/ObusSQL/blob/228a86477aa5cee7e651b9fd661b4f4e8c6d2fdc/docs/AF2_LOCAL_POSTGRES_ACCEPTANCE.md)でも本番接続はNOT_READYとされています。これを「MAF未実装」と扱わず、実装済みの拡張・グルモジでの未導入・本番の未接続を区別します。
+上流ではMAF実行拡張と限定した結合試験が実装済みです。[AF2の検証記録](https://github.com/krokharu/ObusSQL/blob/07128acfe13c1162552f7928b5ab0e7c954fac1b/docs/AF2_LOCAL_POSTGRES_ACCEPTANCE.md)でも本番接続はNOT_READYとされています。これを「MAF未実装」と扱わず、実装済みの拡張・グルモジでの未導入・本番の未接続を区別します。
 
 ## 診断と読取プレビュー
 
@@ -60,6 +62,30 @@ IDとhashは、指定データ領域の `obsidian_layout/vaults.json` にある 
 scopeの `app_id` は `gurumoji`、`project_id` は既存SQLiteの `application_metadata.library_id`、sourceはVault種別、resourceは `note_id` です。ファイル名や個人の絶対パスからIDを生成しません。既存のlibrary IDがないDBは作成・補修せず拒否します。検索中のノート・台帳・library IDの変更も返却前に再確認します。
 
 ## 無効化と本接続までの範囲
+
+### 自律分析の入力圧縮
+
+`MOJIOKOSI_OBUSSQL_ENABLED=1` と参照入力・実測コンテキスト制御が有効なローカル自律分析では、ObusSQLの `ResponseCodecAdapter(compact_v2)` でJSONの往復一致を確認し、グルモジが表・共有値として読める配送候補を作ります。同じ値が並ぶラベル、同じ列を持つ報告、繰り返し文字列、文字列化されたJSONを可逆に整理します。切断済みのJSON抜粋は元の切断位置を維持します。
+
+通常形式と配送候補を、同じロード済みモデルのtokenizerとチャットテンプレートで計測します。説明文も含めて候補の入力トークンが小さくなる場合だけ採用し、回答予約と安全余白を含む上限判定を続けます。圧縮前後・削減数・元JSONのhash・往復検証結果はタスクの `context_manifest.budget.context_delivery` に残ります。本文や必須条件を要約して削る処理ではありません。
+
+任意依存の未導入・未対応・codec上限超過では通常形式を使い、復元不一致では送信を停止します。入力契約の版が変わるため、更新後はアプリを再起動して新しい分析を開始してください。保存済みの旧runを新契約として再開しません。
+
+### 統計専用encoder・decoder
+
+ObusSQL有効時の新しい自律分析では、`metric_codec_version=1` を保存し、統計担当レビューに `obusql_agent.metric_codec.MetricEncoder` と `MetricDecoder` を使います。追加の固定依存は `config/requirements-obussql-metric.txt` です。Windowsの `run.bat` は開発版MAFの起動時に専用codecの導入を確認します。直接起動する場合は次を実行します。
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r config/requirements-obussql-metric.txt
+```
+
+既存の参加状況・会話動態・ラベル頻度の計算結果から、発話数、文字数、発話時間、記録済み無音・重複区間の件数と時間、ラベルの母数・観測・欠測・分類別度数を変換します。単位・粒度・母数・欠測・固定入力版・ラベル版・元結果hashを結び付け、元の統計表は保持します。割合や検定値を専用codec向けに推測して補う処理はありません。
+
+AIには公開投影と集計元ごとに必須の選択欄を渡します。モデルはその欄の参照と `value` / `diff` / `ratio` / `max` / `min` を選びます。`value` は参照1件とその元値を生成schemaへ組で束縛し、差・比は参照2件、最大・最小は2件以上、計算結果の値は `null` です。原応答を既存台帳へ保存した後、元統計と対応表を再構築・照合してデコーダーが検証・計算します。統計担当の報告本文はデコーダーが生成し、モデルの自由文は監査用に保持します。数値は発話の根拠付き主張とは区別します。
+
+未発行・別集計元の参照、値の改変、単位・粒度・版の不一致、不正演算、0除算、集計元の回答漏れは受理しません。空・全欠測は `null` と母数・欠測数のまま扱い、暗黙の丸め・単位換算はしません。1レビューは最大4集計元、50指標、公開投影16 KiBまでで、超過時は切り捨てず停止します。
+
+入力対応表は `context_manifest.metric_contract`、受理結果は結果metadataと判断記録の `metric_validation`、検証成功は `metric_codec_validated` イベントに残ります。未導入なら新規分析の事前確認で停止します。既存DBカラムとVault保存先は変更せず、旧runを新契約として再開しません。研究上の尺度妥当性や自由な分析文全体の承認を、数値の検証成功と同一視しません。
 
 ### 開発版のMAF分析
 

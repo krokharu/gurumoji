@@ -1,0 +1,37 @@
+/* 話者名を固定し、アウトラインと全話者を共通の横軸で表示する。 */
+.speaker-timeline { --timeline-label-width: 152px; margin: 0 0 24px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card, #fff); overflow: hidden; }
+.timeline-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 18px 8px; }
+.timeline-header h2 { margin: 0; font-size: 1rem; color: var(--ink); }
+.timeline-header p { margin: 6px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.timeline-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: .78rem; }
+.timeline-tools output { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeline-tools label { display: flex; align-items: center; gap: 6px; }
+.timeline-zoom-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.timeline-tools select { min-height: 36px; padding: 4px 8px; background: var(--card, #fff); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+.timeline-tools .secondary-button { min-height: 36px; padding: 4px 10px; font-size: .78rem; }
+.timeline-seek-label { display: flex; align-items: center; gap: 12px; margin: 4px 18px 12px; color: var(--muted); font-size: .76rem; }
+.timeline-seek-label input { width: 100%; min-width: 0; min-height: 26px; flex: 1; accent-color: var(--green); }
+.timeline-notice { margin: 0 18px 12px; color: var(--muted); font-size: .76rem; line-height: 1.6; }
+.timeline-viewport { max-height: 400px; overflow: auto; border-top: 1px solid var(--line); scrollbar-gutter: stable; overscroll-behavior-x: contain; }
+.timeline-canvas { position: relative; width: calc(var(--timeline-label-width) + var(--timeline-width, 600px)); min-width: 100%; isolation: isolate; }
+.timeline-row { display: grid; grid-template-columns: var(--timeline-label-width) var(--timeline-width, 600px); border-bottom: 1px solid var(--line); }
+.timeline-label { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; padding: 10px 12px; background: var(--card, #fff); color: var(--ink); border-right: 1px solid var(--line); border-left: 4px solid var(--timeline-accent, transparent); font-size: .78rem; font-weight: 700; overflow-wrap: anywhere; }
+.timeline-lane { position: relative; min-width: 0; background: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--timeline-tick) - 1px), var(--line) calc(var(--timeline-tick) - 1px), var(--line) var(--timeline-tick)); }
+.timeline-lane-empty { display: block; padding: 14px 12px; color: var(--muted); font-size: .76rem; }
+.timeline-ruler { position: sticky; top: 0; z-index: 5; background: var(--card, #fff); }
+.timeline-axis { position: relative; min-width: 0; height: 38px; cursor: crosshair; overflow: hidden; }
+.timeline-tick { position: absolute; bottom: 0; padding: 0 0 10px 5px; height: 26px; border-left: 1px solid var(--line); color: var(--muted); font: .72rem Consolas, monospace; white-space: nowrap; pointer-events: none; }
+.timeline-block { position: absolute; min-width: 5px; height: 28px; min-height: 0; padding: 2px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 1px solid var(--timeline-accent); border-left-width: 3px; border-radius: 5px; background: var(--card, #fff); background: color-mix(in srgb, var(--timeline-accent) 17%, var(--card, #fff)); color: var(--ink); font-family: inherit; font-size: .74rem; line-height: 1.5; cursor: pointer; }
+.timeline-block:hover { filter: brightness(.95); }
+.timeline-block.is-selected { outline: 2px solid var(--ink); outline-offset: -2px; }
+.timeline-block.is-playing { background: color-mix(in srgb, var(--timeline-accent) 38%, var(--card, #fff)); box-shadow: inset 0 -3px var(--timeline-accent); }
+.timeline-block:focus-visible, .timeline-viewport:focus-visible { outline: 3px solid var(--green); outline-offset: -3px; }
+.timeline-playhead { position: absolute; z-index: 2; top: 38px; bottom: 0; width: 2px; background: #c34444; pointer-events: none; }
+.timeline-playhead::before { content: ''; position: absolute; top: 0; left: -4px; border: 5px solid transparent; border-top-color: #c34444; }
+@media (max-width: 600px) {
+  .speaker-timeline { --timeline-label-width: 104px; }
+  .timeline-header { padding: 12px; }
+  .timeline-tools { width: 100%; justify-content: space-between; gap: 6px; }
+  .timeline-label { padding: 8px 6px; font-size: .72rem; }
+  .timeline-seek-label { margin-left: 12px; margin-right: 12px; }
+}

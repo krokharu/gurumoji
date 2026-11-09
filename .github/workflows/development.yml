@@ -1,0 +1,24 @@
+name: development
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python構文とバージョン表記を確認
+        run: |
+          python -m compileall -q src/gurumoji
+          python scripts/bump_version.py check

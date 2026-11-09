@@ -2,12 +2,12 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-rem 公開版では任意のObusSQL接続を明示的に有効化する。
-if not defined MOJIOKOSI_OBUSSQL_ENABLED set "MOJIOKOSI_OBUSSQL_ENABLED=0"
+rem Enable the locally installed ObusSQL preview; set 0 explicitly to disable it.
+if not defined MOJIOKOSI_OBUSSQL_ENABLED set "MOJIOKOSI_OBUSSQL_ENABLED=1"
 
-rem 公開版のMAF接続は任意設定。1を指定した場合だけ開発用依存を使う。
+rem 開発版のMAF接続を有効にする。0を指定すると従来の分析実行を使う。
 if not defined MOJIOKOSI_MAF_DEV_ENABLED (
-  set "MOJIOKOSI_MAF_DEV_ENABLED=0"
+  set "MOJIOKOSI_MAF_DEV_ENABLED=1"
   if /I "%MOJIOKOSI_OBUSSQL_ENABLED%"=="0" set "MOJIOKOSI_MAF_DEV_ENABLED=0"
 )
 
@@ -89,6 +89,12 @@ if /I "%MOJIOKOSI_MAF_DEV_ENABLED%"=="1" (
   )
   "%PYTHON%" -c "from importlib.metadata import version; import agent_framework; assert version('agent-framework-core') == '1.22.0'" >nul 2>nul || (
     "%PYTHON%" -m pip install -r "%CD%\config\requirements-gurumoji-maf-dev.txt" || goto :error
+  )
+  rem 統計専用codecの実体を確認し、未導入時は固定した上流版を導入する。
+  if /I "%MOJIOKOSI_OBUSSQL_ENABLED%"=="1" (
+    "%PYTHON%" -c "from importlib.metadata import version; from obusql_agent.metric_codec import MetricEncoder, MetricDecoder; assert version('obusql-agent') == '0.1.0'" >nul 2>nul || (
+      "%PYTHON%" -m pip install -r "%CD%\config\requirements-obussql-metric.txt" || goto :error
+    )
   )
 )
 

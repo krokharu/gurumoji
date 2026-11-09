@@ -56,6 +56,7 @@ class JobRecord:
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     created_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    stage_history: list[dict[str, Any]] = field(default_factory=list)
 
     # Bound once by the composition root (app.py): the lock that guards every
     # job and the current request's local-path policy. The defaults are safe
@@ -77,6 +78,11 @@ class JobRecord:
                 "stage": self.stage,
                 "stage_label": self.stage_label,
                 "stage_progress": self.stage_progress,
+                "stage_history": [
+                    {"key": item["key"], "label": public_diagnostic_text(item["label"], reveal_local_paths=reveal_local_paths),
+                     "progress": item["progress"], "status": item["status"]}
+                    for item in self.stage_history
+                ],
                 "message": public_diagnostic_text(
                     self.message, reveal_local_paths=reveal_local_paths
                 ),

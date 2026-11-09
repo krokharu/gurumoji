@@ -70,6 +70,12 @@ body.boot-skipped .app-main { animation: none; }
 .alert { margin-top: 16px; padding: 13px 16px; border-radius: var(--radius-sm); background: #e6f2e9; color: var(--green-dark); font-size: .85rem; white-space: pre-wrap; }
 .alert.error { background: #f8e5e3; color: #913733; }
 .alert a { color: inherit; font-weight: 800; }
+#setup-readiness-details { white-space: normal; overflow-wrap: anywhere; }
+#setup-readiness-details section + section { margin-top: 16px; }
+#setup-readiness-details .readiness-heading { margin: 0 0 8px; font-weight: 700; }
+#setup-readiness-details ul { margin: 0; padding-left: 1.4em; }
+#setup-readiness-details li { line-height: 1.7; }
+#setup-readiness-details li + li { margin-top: 8px; }
 details { margin: 0; padding: 0; border: 0; }
 summary { color: var(--green); font-size: .82rem; font-weight: 800; cursor: pointer; }
 pre { max-height: 240px; overflow: auto; white-space: pre-wrap; color: #506059; font: .75rem/1.7 Consolas, monospace; }

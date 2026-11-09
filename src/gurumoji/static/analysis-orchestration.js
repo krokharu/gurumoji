@@ -12,6 +12,7 @@ const orchestrationRoles = [
 const orchestrationState = {itemId: '', itemName: '', runId: '', run: null, epoch: 0, poll: null, timer: null,
   operation: '', submission: null, setup: null, setupEpoch: 0, viewerEpoch: 0, fetchedAt: null, error: '', lastSeq: null, resultRequest: 0, taskFingerprint: '', recoveryFingerprint: '', initialFingerprint: '', outputFingerprint: ''};
 const orchestrationStorageKey = 'gurumoji.orchestration.v1';
+const orchestrationTemplateVersion = 'agent-analysis-templates-1';
 const orchestrationNode = id => document.getElementById(`orchestration-${id}`);
 const orchestrationActiveStatuses = ['accepted', 'queued', 'running', 'cancelling', 'stopping'];
 const orchestrationPublicationTargets = ['input', 'orchestrator', 'visualization'];
@@ -55,6 +56,60 @@ function orchestrationCloudProviders() {
   const overrides = orchestrationRoleOverrides();
   return [...new Set(orchestrationRoles.filter(role => role.kind === 'ai').map(role => overrides[role.id]?.provider || common).filter(p => ['openai', 'google'].includes(p)))];
 }
+function orchestrationClearSource(clearPrompt = true) {
+  orchestrationState.sourceRequest = (orchestrationState.sourceRequest || 0) + 1;
+  orchestrationState.reanalysisSource = null;
+  orchestrationNode('source-analysis-id').value = '';
+  if (clearPrompt) orchestrationNode('human-prompt').value = '';
+  orchestrationNode('source-preview').replaceChildren();
+  orchestrationNode('source-preview').hidden = true;
+  orchestrationText('source-status', '');
+  orchestrationSyncForm();
+}
+async function orchestrationLoadSource() {
+  const requestId = orchestrationState.sourceRequest = (orchestrationState.sourceRequest || 0) + 1;
+  const id = orchestrationNode('source-analysis-id').value.trim();
+  const epoch = orchestrationState.setupEpoch, itemId = orchestrationState.setup?.itemId;
+  if (!orchestrationSetupCurrent(epoch) || !itemId) return;
+  orchestrationState.reanalysisSource = null;
+  orchestrationNode('source-preview').hidden = true;
+  if (!/^(run|result)_[A-Za-z0-9_-]{1,200}$/.test(id)) { orchestrationText('source-status', '実行ID（run_…）または結果ID（result_…）を入力してください。'); return; }
+  orchestrationText('source-status', '保存済みの参照結果を確認しています。');
+  try {
+    const response = await analysisExecutionRequestJson(`${orchestrationBase(itemId, '')}/reanalysis/source/${encodeURIComponent(id)}`);
+    if (requestId !== orchestrationState.sourceRequest || !orchestrationSetupCurrent(epoch) || orchestrationNode('source-analysis-id').value.trim() !== id) return;
+    const source = response.source;
+    if (source?.source_analysis_id !== id || !source.source_run_id || !source.source_result_id) throw Error('参照結果のIDが一致しません。');
+    orchestrationState.reanalysisSource = source;
+    const preview = orchestrationNode('source-preview'); preview.replaceChildren();
+    for (const text of [`元の問い: ${source.original_question || '未記録'}`, `実行ID: ${source.source_run_id}`, `結果ID: ${source.source_result_id}`, `入力版: ${source.source_revision ?? '未記録'} / 分析版: ${source.analysis_revision ?? '未記録'}`, source.content?.summary || source.content?.title || '保存済みの結果を参照します。']) preview.appendChild(orchestrationElement('p', text));
+    preview.hidden = false;
+    orchestrationText('source-status', '参照結果を確認しました。追加プロンプトを入力して新しい分析を開始できます。');
+    if (!orchestrationNode('question').value.trim() && source.original_question) orchestrationNode('question').value = source.original_question.slice(0, 2000);
+  } catch (error) {
+    if (requestId === orchestrationState.sourceRequest && orchestrationSetupCurrent(epoch) && orchestrationNode('source-analysis-id').value.trim() === id) orchestrationText('source-status', error.message);
+  }
+}
+async function orchestrationCopyId(id) {
+  if (!id) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw Error('コピー機能を利用できません。表示されたIDを選択してコピーしてください。');
+    await navigator.clipboard.writeText(id);
+    orchestrationText('processing-state', `${id} をコピーしました。`);
+  } catch (error) { orchestrationText('processing-state', error.message); }
+}
+function orchestrationReanalyze() {
+  const run = orchestrationState.run;
+  if (!run || isAnalysisOrchestrationActive() || orchestrationState.operation) return;
+  if (analysisState.itemId !== orchestrationState.itemId) { orchestrationText('processing-state', '先にこの実行と同じ会話を分析画面で開いてください。'); return; }
+  const id = run.analysis_result_id || run.run_id;
+  orchestrationNode('live').close();
+  openAnalysisOrchestrationSettings();
+  orchestrationNode('source-analysis-id').value = id;
+  orchestrationNode('human-prompt').value = '';
+  orchestrationLoadSource();
+  orchestrationNode('human-prompt').focus();
+}
 function orchestrationSyncForm() {
   const mode = orchestrationFormMode();
   orchestrationNode('time-field').hidden = !['time', 'auto'].includes(mode);
@@ -62,6 +117,7 @@ function orchestrationSyncForm() {
   orchestrationNode('importance-field').hidden = !['importance', 'auto'].includes(mode);
   orchestrationNode('time').required = mode === 'time';
   orchestrationNode('iterations').required = mode === 'iterations';
+  if (orchestrationNode('human-prompt')) orchestrationNode('human-prompt').required = Boolean(orchestrationNode('source-analysis-id').value.trim());
   orchestrationText('stop-explanation', {
     time:'開始からの経過時間で新規発注を止めます。進行中の呼出しを必ず期限内に終える保証ではありません。',
     iterations:'Coreの結果統合から次の実行案選択までを1巡と数えます。並列タスク数や再試行回数とは別です。',
@@ -90,7 +146,11 @@ function openAnalysisOrchestrationSettings() {
   // An uncertain submission retains the exact choice needed for an idempotent retry.
   orchestrationNode('publication-all').checked = Boolean(orchestrationState.submission?.itemId === nextContext.itemId && orchestrationState.submission.payload.publication_targets?.length);
   if (!same) {
+    orchestrationClearSource();
+    for (const input of document.querySelectorAll('input[name="orchestration_required_method"]')) input.checked = false;
     orchestrationNode('question').value = String(analysisState.config?.research_question || '').slice(0, 2000);
+    const configuredMethod = analysisState.config?.analysis_method;
+    orchestrationNode('template').value = [...orchestrationNode('template').options].some(option=>option.value===configuredMethod) ? configuredMethod : 'common';
     orchestrationNode('cloud-consent').checked = false;
     orchestrationNode('history-list').replaceChildren();
   }
@@ -106,7 +166,13 @@ function orchestrationPayload() {
   if (hasUnsavedAnalysisChanges()) throw Error('未保存の変更を保存してから開始してください。');
   if (analysisExecutionState.active) throw Error('基礎分析の終了を待ってください。');
   const mode = orchestrationFormMode(), question = orchestrationNode('question').value.trim();
+  const templateId = orchestrationNode('template').value;
   if (!question) throw Error('明らかにしたいことを入力してください。');
+  const sourceId = orchestrationNode('source-analysis-id').value.trim(), humanPrompt = orchestrationNode('human-prompt').value.trim();
+  if (sourceId || humanPrompt) {
+    if (!sourceId || !humanPrompt) throw Error('参照する分析IDと追加プロンプトを両方入力してください。');
+    if (orchestrationState.reanalysisSource?.source_analysis_id !== sourceId) throw Error('「参照結果を確認」で分析IDを確認してください。');
+  }
   const integer = (id, required, max) => {
     const raw = orchestrationNode(id).value.trim();
     if (!raw && !required) return null;
@@ -117,7 +183,12 @@ function orchestrationPayload() {
   const cloud = orchestrationCloudProviders();
   if (cloud.length && !orchestrationNode('cloud-consent').checked) throw Error('クラウドへの会話原文・途中結果の送信に同意するか、全担当をローカルに戻してください。');
   return {source_revision:orchestrationState.setup.sourceRevision, analysis_revision:orchestrationState.setup.analysisRevision,
-    question, provider:orchestrationNode('provider').value, model:orchestrationNode('model').value.trim(), provider_policy:cloud.length ? 'cloud_allowed' : 'local_only', cloud_consent:cloud.length > 0 && orchestrationNode('cloud-consent').checked,
+    question, ...(sourceId ? {source_analysis_id:sourceId, human_prompt:humanPrompt,
+      expected_source_result_id:orchestrationState.reanalysisSource.source_result_id,
+      expected_source_raw_hash:orchestrationState.reanalysisSource.raw_hash} : {}),
+    required_methods:[...document.querySelectorAll('input[name="orchestration_required_method"]:checked')].map(input => input.value),
+    template_version:templateId ? orchestrationTemplateVersion : 'existing-analysis-v1', template_config:templateId ? {id:templateId} : {},
+    provider:orchestrationNode('provider').value, model:orchestrationNode('model').value.trim(), provider_policy:cloud.length ? 'cloud_allowed' : 'local_only', cloud_consent:cloud.length > 0 && orchestrationNode('cloud-consent').checked,
     stop_mode:mode, time_limit_seconds:['time','auto'].includes(mode) ? (integer('time', mode === 'time', 1440) ?? 0) * 60 || null : null,
     max_iterations:['iterations','auto'].includes(mode) ? integer('iterations', mode === 'iterations', 1000) : null,
     importance_threshold:orchestrationNode('importance').value, max_calls:integer('max-calls',true,1000), max_tasks:integer('max-tasks',true,2000),
@@ -167,7 +238,8 @@ function orchestrationAdopt(run, itemId, itemName = '') {
 function orchestrationSchedule() {
   window.clearTimeout(orchestrationState.timer);
   const run=orchestrationState.run, publication=run?.publication;
-  const outputActive=run?.status==='completed' && (publication?.save_status==='saving' || ['pending','publishing'].includes(publication?.publication_status));
+  const saveable = run?.status === 'completed' || run?.analysis_processing_complete === true;
+  const outputActive = saveable && (publication?.save_status === 'saving' || run?.completion_callback_status === 'running' || ['pending','publishing'].includes(publication?.publication_status) || (run?.completion_protocol_version === 1 && publication?.save_status === 'not_started' && !['completed','failed'].includes(run?.completion_callback_status)));
   if (orchestrationActiveStatuses.includes(run?.status) || !run || outputActive || orchestrationPendingCompletion(run)) orchestrationState.timer = window.setTimeout(pollAnalysisOrchestration, 1500);
 }
 async function pollAnalysisOrchestration() {
@@ -220,12 +292,26 @@ function renderAnalysisOrchestration() {
   const draining = !active && orchestrationPendingCompletion(run);
   orchestrationNode('chip').hidden = !state.runId;
   orchestrationNode('chip').classList.toggle('is-active', active || draining);
-  orchestrationText('chip-label', `自律分析 · ${run ? orchestrationLabel(run.status) : '状態確認'}`);
+  orchestrationText('chip-label', `自律分析 · ${run?.analysis_processing_complete ? '処理完了・人の確認待ち' : run ? orchestrationLabel(run.status) : '状態確認'}`);
   if (!run) { orchestrationText('status','保存済みの状態を確認中'); setAlert(orchestrationNode('live-message'),state.error,Boolean(state.error)); return; }
   orchestrationText('live-title',active ? '問いから、次の分析へ' : '保存された分析の状態');
   orchestrationText('live-target',`${run.item_name || run.source_name || state.itemName || state.itemId} · Run ${run.run_id} · 入力版 ${run.source_revision ?? run.config?.source_revision ?? '不明'}`);
   orchestrationText('live-question',run.config?.question || run.question || '分析目的は未取得');
-  orchestrationText('status',`${orchestrationLabel(run.status)}${draining ? ' · 残処理の終了待ち' : ''}${run.phase ? ` · ${{core:'Coreの判断',label_review:'\u5c3a\u5ea6\u306e\u72ec\u7acb\u30ec\u30d3\u30e5\u30fc',specialist_review:'\u5c02\u9580\u5074\u306e\u7d50\u679c\u8a55\u4fa1',specialist_followup:'\u5c02\u9580\u5074\u306e\u8ffd\u52a0\u5206\u6790',specialists:'専門処理',initial_analysis:'全担当の初回分析・尺度要件の報告',initial_routing:'Coreによる専門家への担当指示',initial_labels:'専門家によるラベル・尺度作成',stop_review:'終了前レビュー',stopped:'停止',initial:'初期分析（コード処理）'}[run.phase] || run.phase}` : ''}`);
+  orchestrationText('run-identity', `実行ID: ${run.run_id}`);
+  orchestrationText('result-identity', `分析結果ID: ${run.analysis_result_id || '統合結果の保存後に表示します'}`);
+  orchestrationNode('copy-result').disabled = !run.analysis_result_id;
+  orchestrationNode('reanalyze').disabled = active || Boolean(state.operation) || !run.analysis_result_id;
+  orchestrationText('processing-state', run.analysis_processing_complete ? '分析処理は完了しました。人の確認事項を残したAI下書きとして保存します。Vaultへの自動出力は保留です。' : run.status === 'completed' ? '分析処理は完了しました。結果の確認と追加指示による再分析ができます。' : '処理中・停止中の結果も履歴に保持します。');
+  const requiredList = orchestrationNode('required-progress'); requiredList.replaceChildren();
+  const methodNames = {participation:'発話量・参加バランス', conversation_dynamics:'会話の時間構造', label_frequency:'ラベル度数', cross_tabulation:'クロス集計（話者×コード）'};
+  for (const progress of run.required_methods_progress || []) {
+    const disposition = {adopt:'採用', reject:'不採用', defer:'保留'}[progress.review?.disposition] || '未評価';
+    const calculation = progress.calculation;
+    const calculationText = calculation ? (calculation.availability === 'unavailable' ? '集計不可（有効な組なし）' : `集計値あり・有効${calculation.observed_count}発話`) + `・欠測${calculation.missing_count}/${calculation.denominator}発話` : '';
+    const row = orchestrationElement('li', `${methodNames[progress.id] || progress.id}: ${calculationText || (progress.complete ? '処理済み' : orchestrationLabel(progress.status))} · 担当評価: ${disposition} · Core統合: ${progress.core_integrated ? '済み' : '未了'}${progress.review?.reason ? ` · ${progress.review.reason}` : ''}`);
+    row.dataset.methodId = progress.id; row.dataset.complete = String(progress.complete); requiredList.appendChild(row);
+  }
+  orchestrationText('status',run.analysis_processing_complete ? '分析処理完了 · 人の確認待ち' : `${orchestrationLabel(run.status)}${draining ? ' · 残処理の終了待ち' : ''}${run.phase ? ` · ${{core:'Coreの判断',label_review:'\u5c3a\u5ea6\u306e\u72ec\u7acb\u30ec\u30d3\u30e5\u30fc',specialist_review:'\u5c02\u9580\u5074\u306e\u7d50\u679c\u8a55\u4fa1',specialist_followup:'\u5c02\u9580\u5074\u306e\u8ffd\u52a0\u5206\u6790',specialists:'専門処理',initial_analysis:'全担当の初回分析・尺度要件の報告',initial_routing:'Coreによる専門家への担当指示',initial_labels:'専門家によるラベル・尺度作成',stop_review:'終了前レビュー',stopped:'停止',initial:'初期分析（コード処理）'}[run.phase] || run.phase}` : ''}`);
   orchestrationText('updated',state.fetchedAt ? `最終取得 ${new Date(state.fetchedAt).toLocaleTimeString('ja-JP')}` : '未取得');
   const contextLimit = ['stopped','failed'].includes(run.status) && Array.isArray(run.tasks) && run.tasks.some(task=>task.error==='context_budget_exceeded');
   const notice=[state.error,run.error,contextLimit ? 'ロード済みモデルの入力枠が不足しています。LM Studioでより大きいコンテキスト長に読み込み直し、新しい分析を開始してください。既存の部分結果は履歴に残ります。' : '',run.uncertain_tasks?.length ? `実行結果が不明なタスク: ${run.uncertain_tasks.join(', ')}。二重実行を避けるため、自動再発注・通常の再開はできません。` : ''].filter(Boolean).join('\n');
@@ -257,9 +343,11 @@ function renderAnalysisOrchestration() {
   reasons.initial_labels_missing='初回の専門家によるラベル・尺度出力が未完了';
   reasons.initial_analysis_incomplete='初回の全担当の分析・尺度要件の報告が未完了';
   reasons.initial_routing_invalid='初回のCoreによる担当指示が未完了または不正';
+  reasons.required_methods_incomplete='必須分析の集計・評価・統合が未完了（欠測の状況を確認してください）';
   orchestrationText('stop-reason',run.stop_reason ? `停止理由: ${reasons[run.stop_reason] || run.stop_reason}。保存済みの部分結果・未実施レビューを含めて確認してください。` : '利用者停止と安全上限を最優先します。研究上の結論は未確定の探索的下書きです。');
   const config = run.config || {};
-  orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
+  const templateLabel = [...orchestrationNode('template').options].find(option=>option.value===config.template_config?.id)?.textContent || '指定なし';
+  orchestrationText('config',`実行条件: テンプレート ${templateLabel} / ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
   for (const [id, suffix] of [['export-json','export.json'],['export-md','export.md']]) orchestrationNode(id).href = `${orchestrationBase()}/${suffix}`;
   orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
   orchestrationText('conclusion',run.current_view?.summary || '統合結果はまだ保存されていません。');
@@ -302,7 +390,7 @@ function orchestrationPublicationSelected(publication) {
   return Array.isArray(selected) && selected.length===orchestrationPublicationTargets.length && orchestrationPublicationTargets.every(target=>selected.includes(target));
 }
 function orchestrationOutputLabel(status) {
-  return {not_started:'未保存',saving:'保存中',saved:'保存済み',failed:'失敗',interrupted:'中断・要確認',not_selected:'未選択（OFF）',pending:'待機',publishing:'出力中',published:'出力処理成功',incomplete:'一部未完了',conflict:'競合・要確認',unknown:'結果不明',skipped:'未実施'}[status] || status || '状態未取得';
+  return {not_started:'未保存',saving:'保存中',saved:'保存済み',failed:'失敗',interrupted:'中断・要確認',not_selected:'未選択（OFF）',pending:'待機',publishing:'出力中',published:'出力処理成功',incomplete:'一部未完了',conflict:'競合・要確認',unknown:'結果不明',skipped:'未実施',review_required:'人の確認待ち・出力保留'}[status] || status || '状態未取得';
 }
 function orchestrationArtifactLink(artifact) {
   if(typeof artifact?.url!=='string' || !artifact.url.trim())return null;
@@ -311,7 +399,7 @@ function orchestrationArtifactLink(artifact) {
 }
 function orchestrationRenderOutput(run) {
   const publication=run.publication, selected=orchestrationPublicationSelected(publication), retry=orchestrationNode('publication-retry');
-  retry.hidden=!(run.status==='completed' && publication?.can_retry===true);
+  retry.hidden=!((run.status==='completed' || run.analysis_processing_complete===true) && publication?.can_retry===true);
   retry.disabled=Boolean(orchestrationState.operation);
   retry.textContent=orchestrationState.operation==='publication/retry' ? '保存・出力の応答を待っています' : selected ? '保存・4 Vault出力を再試行' : '固定成果物の保存を再試行';
   const fingerprint=JSON.stringify([run.run_id,run.status,publication]);
@@ -319,7 +407,7 @@ function orchestrationRenderOutput(run) {
   orchestrationState.outputFingerprint=fingerprint;
   orchestrationText('save-status',`アプリ内の固定成果物: ${publication ? orchestrationOutputLabel(publication.save_status) : '保存記録未取得'}${publication?.result_run_id ? ` · ${publication.result_run_id}` : ''}${publication?.stale ? ' · 入力更新前の固定版' : ''}`);
   orchestrationText('publication-status',`Vault出力: ${publication ? orchestrationOutputLabel(publication.publication_status) : '未選択（OFF）'}`);
-  orchestrationText('publication-scope',selected ? '開始時に選択済み: Input／Orchestrator／Visualization／Researchの4つ一式。Researchには保存時点の発話本文を含みます。分析の終了と各保存先の成功は別の状態です。' : 'この実行では4 Vault出力を選択していません。保存・再開・再試行から出力先を追加することはありません。');
+  orchestrationText('publication-scope',publication?.publication_status === 'review_required' ? '分析処理は完了し、要確認の下書きとして保存します。人の確認が必要なため、Vaultへの自動出力を保留しています。' : selected ? '開始時に選択済み: Input／Orchestrator／Visualization／Researchの4つ一式。Researchには保存時点の発話本文を含みます。分析の終了と各保存先の成功は別の状態です。' : 'この実行では4 Vault出力を選択していません。保存・再開・再試行から出力先を追加することはありません。');
   const host=orchestrationNode('publication-outcomes');host.replaceChildren();
   for(const [id,label] of orchestrationVaultWriters){
     const outcome=publication?.outcomes?.[id];
@@ -409,6 +497,42 @@ async function orchestrationAction(action, payload = {}) {
   } catch(error) { refreshNeeded=true; if(epoch===orchestrationState.epoch) orchestrationState.error=`${action==='cancel'?'停止':action==='publication/retry'?'保存・出力の再試行':'再開'}の受付を確認できません: ${error.message}。状態を更新して確認してください。`; }
   finally { if(epoch===orchestrationState.epoch){orchestrationState.operation='';renderAnalysisOrchestration();if(refreshNeeded)pollAnalysisOrchestration();else orchestrationSchedule();} }
 }
+function orchestrationRenderCrosstabs(host, data) {
+  for (const result of data.raw_results || (data.raw ? [data] : [])) {
+    const raw = result.raw;
+    if (result.validation_status !== 'valid' || raw?.method_id !== 'cross_tabulation') continue;
+    const section = orchestrationElement('section', undefined, 'orchestration-crosstab');
+    const labelName = {codes:'コード', code:'コード', theme:'テーマ', sentiment:'感情', dialogue_act:'発話機能', importance:'重要度', review:'確認状態', category:'分類'}[raw.label_field] || raw.label_field;
+    section.append(orchestrationElement('h3', `クロス集計 · 話者 × ${labelName}`),
+      orchestrationElement('p', `結果ID: ${result.result_id} · ラベル版 ${raw.annotation_version}${result.stale ? ' · 旧版' : ''}`),
+      orchestrationElement('p', `対象 ${raw.denominator}発話 · 有効 ${raw.observed_count}発話 · 欠測 ${raw.missing_count}発話（話者欠測 ${raw.missing_speaker_count}・ラベル欠測 ${raw.missing_label_count}、重複を含む）`));
+    if (raw.availability === 'unavailable') {
+      section.append(orchestrationElement('p', '集計不可：話者とラベルがそろった発話がありません。コードを付与して新しい分析を実行してください。'));
+    } else {
+      const scroll = orchestrationElement('div', undefined, 'orchestration-crosstab-scroll'); scroll.tabIndex = 0;
+      const table = orchestrationElement('table');
+      table.append(orchestrationElement('caption', '件数（行内割合）。分母はラベル欠測を含む当該話者の対象発話数です。'));
+      const head = orchestrationElement('thead'), heading = orchestrationElement('tr');
+      for (const label of ['話者', ...(raw.column_totals || []).map(column => column.label), '対象発話数', 'ラベル欠測']) {
+        const cell = orchestrationElement('th', label); cell.scope = 'col'; heading.append(cell);
+      }
+      head.append(heading); table.append(head);
+      const body = orchestrationElement('tbody');
+      for (const group of raw.row_totals || []) {
+        const row = orchestrationElement('tr'), name = orchestrationElement('th', group.speaker); name.scope = 'row'; row.append(name);
+        for (const column of raw.column_totals || []) {
+          const cell = raw.rows.find(item => item.speaker === group.speaker && item.label === column.label);
+          const percent = cell?.row_proportion == null ? '算出不可' : `${(cell.row_proportion * 100).toLocaleString('ja-JP', {maximumFractionDigits:1})}%`;
+          row.append(orchestrationElement('td', cell ? `${cell.count}（${percent}）` : '未取得'));
+        }
+        row.append(orchestrationElement('td', group.denominator), orchestrationElement('td', group.missing_count)); body.append(row);
+      }
+      table.append(body); scroll.append(table); section.append(scroll);
+    }
+    for (const limitation of raw.limitations || []) section.append(orchestrationElement('p', limitation, 'field-note'));
+    host.append(section);
+  }
+}
 async function orchestrationReadResults(resultId = '') {
   const request=++orchestrationState.resultRequest,epoch=orchestrationState.epoch,viewer=orchestrationState.viewerEpoch,runId=orchestrationState.runId;
   const host=orchestrationNode('result-content');host.replaceChildren(orchestrationElement('p','保存済み結果を取得しています…'));orchestrationNode('result-view').hidden=false;
@@ -416,6 +540,7 @@ async function orchestrationReadResults(resultId = '') {
     const data=await analysisExecutionRequestJson(`${orchestrationBase()}/results${resultId ? `/${encodeURIComponent(resultId)}` : ''}`);
     if(request!==orchestrationState.resultRequest || epoch!==orchestrationState.epoch || viewer!==orchestrationState.viewerEpoch || runId!==orchestrationState.runId || !orchestrationNode('live').open) return;
     host.replaceChildren(orchestrationElement('p','固定された保存結果です。初期版・根拠ID・未解決点を含めて確認してください。'));
+    orchestrationRenderCrosstabs(host, data);
     const pre=orchestrationElement('pre',JSON.stringify(data,null,2));pre.tabIndex=0;host.append(pre);
   } catch(error) { if(request===orchestrationState.resultRequest && epoch===orchestrationState.epoch && viewer===orchestrationState.viewerEpoch && orchestrationNode('live').open)host.replaceChildren(orchestrationElement('p',`結果を取得できません: ${error.message}`)); }
 }
@@ -458,6 +583,12 @@ function bindAnalysisOrchestration() {
   listen(orchestrationNode('refresh'),'click',pollAnalysisOrchestration);
   listen(orchestrationNode('results'),'click',()=>orchestrationReadResults());
   listen(orchestrationNode('history'),'click',orchestrationHistory);
+  listen(orchestrationNode('source-load'),'click',orchestrationLoadSource);
+  listen(orchestrationNode('source-clear'),'click',()=>orchestrationClearSource());
+  listen(orchestrationNode('source-analysis-id'),'input',()=>{orchestrationState.sourceRequest=(orchestrationState.sourceRequest||0)+1;orchestrationState.reanalysisSource=null;orchestrationNode('source-preview').hidden=true;orchestrationText('source-status','IDを変更しました。参照結果を確認してください。');});
+  listen(orchestrationNode('copy-run'),'click',()=>orchestrationCopyId(orchestrationState.runId));
+  listen(orchestrationNode('copy-result'),'click',()=>orchestrationCopyId(orchestrationState.run?.analysis_result_id));
+  listen(orchestrationNode('reanalyze'),'click',orchestrationReanalyze);
   listen(orchestrationNode('form'),'input',event=>{if(event.target.matches('select[id^="orchestration-provider"], #orchestration-provider'))orchestrationNode('cloud-consent').checked=false;orchestrationSyncForm();});
   listen(orchestrationNode('form'),'change',event=>{if(event.target.matches('select[id^="orchestration-provider"], #orchestration-provider'))orchestrationNode('cloud-consent').checked=false;orchestrationSyncForm();});
   const motion=window.matchMedia('(prefers-reduced-motion: reduce)');

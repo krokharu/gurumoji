@@ -13,8 +13,8 @@ from .group_analysis import analysis_csv_safe
 
 
 def tables_for_run(store, run_id):
-    snapshot, result, manifest, _ = store.readable_package(run_id)
-    tables = {name: store.read_table(run_id, name) for name in manifest.get('typed_tables', {})}
+    snapshot, result, manifest, content = store.readable_package(run_id)
+    tables = store._read_tables_from_package(run_id, snapshot, manifest, content)
     if not tables:
         raise ValueError('型付き全件表のない旧保存結果には対応していません。')
     provenance = {'run_id': run_id, 'snapshot_id': store.get(run_id)['snapshot_id'],

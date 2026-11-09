@@ -62,6 +62,11 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    @blueprint.get("/api/library/<item_id>/analysis/orchestration/reanalysis/source/<source_analysis_id>")
+    def reanalysis_source(item_id, source_analysis_id):
+        from ..services.analysis_reanalysis import lookup_reanalysis_source
+        return viewer_response({"source": lookup_reanalysis_source(viewer(), item_id, source_analysis_id)})
+
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/viewer")
     def viewer_runs(item_id):
         return viewer_response(viewer().runs(item_id, limit=request.args.get("limit", "20"), offset=request.args.get("offset", "0")))

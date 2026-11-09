@@ -64,6 +64,7 @@ const haasBackendNote = document.querySelector('#haas-backend-note');
 const setupReadyState = document.querySelector('#setup-ready-state');
 const setupSummary = document.querySelector('#setup-summary');
 const createView = document.querySelector('#create-view');
+const runningView = document.querySelector('#running-view');
 const flowStepItems = [...document.querySelectorAll('[data-flow-step]')];
 const flowSections = [...document.querySelectorAll('[data-flow-section]')];
 const settingsPanels = [...document.querySelectorAll('[data-settings-panel]')];
@@ -153,6 +154,7 @@ let thumbnailRequestId = 0;
 let sourceThumbnailController = null;
 let sourceThumbnailObjectUrl = null;
 let jobRunning = false;
+let queuedJobCount = 0;
 let currentJobDirty = false;
 let currentJobMutationGeneration = 0;
 let meetingObsidianStatusGeneration = 0;
@@ -921,7 +923,7 @@ function createReadiness() {
         (audioReadiness.notes || []).forEach(note => notes.push(note));
       }
     }
-    if (backend === 'whisperx' && !tokenConfigSnapshot.huggingface) blockers.push('話者分離に必要なHugging Faceトークンが未設定です');
+    if (backend === 'whisperx' && !tokenConfigSnapshot.huggingface) blockers.push('話者分離に必要なHugging Faceトークンを設定してください。');
     const readiness = tokenConfigSnapshot.transcription_readiness?.[backend];
     if (!readiness) blockers.push('方式・モデルの準備状態を取得できません。設定を再確認してください');
     else {
@@ -968,7 +970,33 @@ function updateCreateSummary() {
     : readiness.requiresModelAcknowledgement ? 'ファイル選択済み・モデルの確認や取得が必要です' : 'ファイル選択済み・開始時にモデルを読み込みます';
   const modelAcknowledgement = document.querySelector('#model-readiness-ack-row');
   if (modelAcknowledgement) modelAcknowledgement.hidden = !readiness.requiresModelAcknowledgement;
-  setAlert(document.querySelector('#setup-readiness-details'), [...readiness.blockers, ...readiness.notes].join('。'), Boolean(readiness.blockers.length));
+  const readinessDetails = document.querySelector('#setup-readiness-details');
+  if (readinessDetails) {
+    setAlert(readinessDetails, [...readiness.blockers, ...readiness.notes].join('\n'), Boolean(readiness.blockers.length));
+    readinessDetails.replaceChildren();
+    for (const [title, messages] of [['設定が必要な項目', readiness.blockers], ['開始時の確認事項', readiness.notes]]) {
+      if (!messages.length) continue;
+      const section = document.createElement('section');
+      const heading = document.createElement('p');
+      heading.className = 'readiness-heading';
+      heading.textContent = title;
+      const list = document.createElement('ul');
+      const grouped = new Map();
+      messages.forEach(message => {
+        const match = message.match(/^([^:]+): (.+)$/s);
+        const detail = match ? match[2] : message;
+        if (!grouped.has(detail)) grouped.set(detail, []);
+        if (match) grouped.get(detail).push(match[1]);
+      });
+      grouped.forEach((labels, detail) => {
+        const item = document.createElement('li');
+        item.textContent = `${labels.length ? `${labels.join('／')}: ` : ''}${detail.replace(/[。\s]+$/u, '')}。`;
+        list.append(item);
+      });
+      section.append(heading, list);
+      readinessDetails.append(section);
+    }
+  }
   const destinations = enabledTextDestinations();
   const destinationText = destinations.length ? destinations.map(item => `${item.label} / ${item.model}`).join('、') : '送信なし';
   document.querySelectorAll('[data-text-destinations]').forEach(element => { element.textContent = `今回のテキスト送信先: ${destinationText}`; });
@@ -1158,7 +1186,7 @@ function hasUnsavedAnalysisChanges() {
 
 // ---- Screens and routes (UX-01). Each screen owns one hash so reloads, the
 // browser's back button and bookmarks return to the same place. ----
-const viewRouteHashes = {new: '#/new', library: '#/data', analysis: '#/analysis', speakers: '#/speakers',
+const viewRouteHashes = {new: '#/new', running: '#/running', library: '#/data', analysis: '#/analysis', speakers: '#/speakers',
   presets: '#/presets', folders: '#/folders', catalog: '#/catalog', internal: '#/internal'};
 
 
@@ -1289,6 +1317,7 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   if (resultVisible && currentJobDirty && target !== 'item') setCurrentJobDirty(false);
   if (target !== 'item' && mediaPlayer) mediaPlayer.pause();
   if (createView) createView.hidden = target !== 'new';
+  if (runningView) runningView.hidden = target !== 'running';
   if (processedDataHub) processedDataHub.hidden = !['library', 'analysis'].includes(target);
   if (libraryCard) libraryCard.hidden = target !== 'library';
   if (analysisCard) analysisCard.hidden = target !== 'analysis';
@@ -1311,6 +1340,7 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
     renderMobileWizard();
     syncCreateViewState();
   }
+  if (target === 'running') syncCreateViewState();
   const hashId = target === 'item'
     ? targetItemId
     : (target === 'analysis' ? (requestedAnalysisId || analysisState.itemId) : '');
@@ -1356,36 +1386,57 @@ function setItemTab(name) {
   });
 }
 
-// The header chip is the only job indicator outside the create screen (UX-16).
+// 実行状況は独立した画面で管理し、ヘッダーから戻れるようにする。
 function updateJobChip(job) {
   if (!jobChip || !jobChipLabel) return;
   const status = job ? String(job.status || '') : '';
-  const active = ['admitting', 'queued', 'running', 'committing'].includes(status);
+  const active = Boolean(progressCard && !progressCard.hidden)
+    && (jobRunning || ['admitting', 'queued', 'running', 'committing'].includes(status));
   const pendingCompleted = Boolean(completedJob && job && completedJob.id === job.id && status === 'completed');
   const failed = ['failed', 'cancelled'].includes(status) && Boolean(progressCard && !progressCard.hidden);
-  jobChip.hidden = !(active || pendingCompleted || failed);
+  jobChip.hidden = !(active || pendingCompleted || failed || queuedJobCount > 0);
   jobChip.classList.toggle('is-active', active);
   jobChip.classList.toggle('is-complete', pendingCompleted);
+  jobChip.setAttribute('aria-controls', pendingCompleted && !queuedJobCount ? 'result-card' : 'running-view');
   jobChip.classList.toggle('has-error', failed);
   const titles = {admitting: '受付中', queued: '開始待ち', running: '文字起こし中', committing: '結果を保存中', failed: 'エラー', cancelled: '中止しました'};
-  if (active) jobChipLabel.textContent = `${titles[status] || '処理中'} ${Number(job.progress || 0)}%`;
+  if (active) jobChipLabel.textContent = `${titles[status] || '処理中'} ${Number(job?.progress || 0)}%`;
+  else if (queuedJobCount > 0) jobChipLabel.textContent = `待機中 ${queuedJobCount}件`;
   else if (pendingCompleted) jobChipLabel.textContent = '文字起こしが完了 — 結果を開く';
   else jobChipLabel.textContent = titles[status] || '処理状況';
+  if (active && queuedJobCount > 0) jobChipLabel.textContent += ` ・待機 ${queuedJobCount}件`;
 }
 
 function syncCreateViewState() {
   const progressVisible = Boolean(progressCard && !progressCard.hidden);
-  if (form) form.hidden = jobRunning && progressVisible;
+  if (form) form.hidden = false;
+  const empty = document.querySelector('#job-empty-state');
+  if (empty) empty.hidden = progressVisible || queuedJobCount > 0;
+  const notice = document.querySelector('#job-resume-notice');
+  if (notice) notice.hidden = !(progressVisible || queuedJobCount > 0);
+  document.querySelectorAll('[data-open-job]').forEach(button => {
+    button.textContent = completedJob && !queuedJobCount ? '結果を開く' : '実行状況を開く';
+    button.setAttribute('aria-controls', completedJob && !queuedJobCount ? 'result-card' : 'running-view');
+  });
+  const message = document.querySelector('#job-resume-message');
+  if (message) message.textContent = jobRunning
+    ? '文字起こしを実行中です。画面を移動しても処理は続きます。追加のファイルは実行状況画面から待機登録できます。'
+    : queuedJobCount > 0 ? `待機中の処理が${queuedJobCount}件あります。実行状況画面から確認できます。`
+    : completedJob ? '文字起こしが完了しました。結果を確認できます。' : '前回の文字起こしの処理状況を確認できます。';
+  const resultButton = document.querySelector('#progress-open-result');
+  if (resultButton) resultButton.hidden = !completedJob || queuedJobCount > 0;
+  if (cancelButton) cancelButton.hidden = !jobRunning;
   const dismiss = document.querySelector('#progress-dismiss');
   if (dismiss) dismiss.hidden = jobRunning || !progressVisible;
   updateJobChip(lastProgressJob);
 }
 
-function showProgressCard({scroll = false} = {}) {
+function showProgressCard({scroll = false, open = false} = {}) {
   if (!progressCard) return;
   progressCard.hidden = false;
   syncCreateViewState();
-  if (scroll && createView && !createView.hidden) {
+  if (open) showView('running');
+  if (scroll && runningView && !runningView.hidden) {
     progressCard.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
   }
 }
@@ -1413,23 +1464,32 @@ listen(document.querySelector('.app-nav'), 'keydown', event => {
   tabs[next].scrollIntoView({block: 'nearest', inline: 'nearest'});
 });
 itemTabButtons.forEach(button => listen(button, 'click', () => setItemTab(button.dataset.itemTab)));
-listen(jobChip, 'click', () => {
-  if (completedJob) {
+function openJobProgress() {
+  if (completedJob && !queuedJobCount) {
     const job = completedJob;
     if (!confirmLeave({target: 'item', itemId: job.id})) return;
     completedJob = null;
     renderResult(job);
     return;
   }
-  if (showView('new') && progressCard && !progressCard.hidden) {
+  if (showView('running') && progressCard && !progressCard.hidden) {
     progressCard.scrollIntoView({behavior: scrollBehavior(), block: 'start'});
   }
+}
+listen(jobChip, 'click', openJobProgress);
+listen(document.querySelector('#progress-open-result'), 'click', openJobProgress);
+document.addEventListener('gurumoji-queue-change', event => {
+  queuedJobCount = Math.max(0, Number(event.detail?.waiting) || 0);
+  syncCreateViewState();
 });
+document.querySelectorAll('[data-open-job]').forEach(button => listen(button, 'click', openJobProgress));
+document.querySelectorAll('[data-job-home]').forEach(button => listen(button, 'click', () => showView('new')));
 listen(document.querySelector('#progress-dismiss'), 'click', () => {
   if (jobRunning || !progressCard) return;
   progressCard.hidden = true;
   lastProgressJob = null;
   syncCreateViewState();
+  if (runningView && !runningView.hidden) showView('new');
 });
 const connectionDialog = document.querySelector('#connection-dialog');
 listen(document.querySelector('#connection-button'), 'click', () => {
@@ -3160,15 +3220,9 @@ function resumeJob(job, {scroll = false} = {}) {
   setRunning(false);
   if (cancelButton) cancelButton.disabled = true;
   if (job.status === 'completed') {
-    // Open the result only while the progress screen is on view. Elsewhere the
-    // header chip offers it, so a record being edited is never replaced (UX-16).
-    if (createView && !createView.hidden) {
-      completedJob = null;
-      renderResult(job);
-    } else {
-      completedJob = job;
-      updateJobChip(job);
-    }
+    // 完了を確認できるよう処理画面を保ち、結果は利用者の操作で開く。
+    completedJob = job;
+    syncCreateViewState();
   }
   return true;
 }
@@ -3312,6 +3366,9 @@ async function recoverSubmittedJob(
         : `${errorMessage} 受付状況を確認できません。前回の送信IDを保護しています。接続回復後にもう一度［文字起こしを開始］を押すか、ページを再読み込みしてください。`,
       true
     );
+    syncCreateViewState();
+    document.dispatchEvent(new CustomEvent('gurumoji-queue-blocked'));
+    if (runningView && !runningView.hidden) showView('new');
     return;
   }
   const delay = Math.min(pollMaxDelayMs, pollBaseDelayMs * (2 ** attempt));
@@ -3333,6 +3390,7 @@ async function recoverSubmittedJob(
 
 listen(form, 'submit', async event => {
   event.preventDefault();
+  const openProgress = event.submitter?.dataset.queueAutoStart !== 'true';
   setAlert(formError, '');
   const unresolvedSubmissionId = storedPendingSubmissionId();
   const retryUnacceptedSubmission = Boolean(
@@ -3341,7 +3399,7 @@ listen(form, 'submit', async event => {
   if (unresolvedSubmissionId && !retryUnacceptedSubmission) {
     const recoveryGeneration = ++jobFlowGeneration;
     setRunning(true);
-    showProgressCard({scroll: true});
+    showProgressCard({scroll: true, open: openProgress});
     if (cancelButton) cancelButton.disabled = true;
     const message = document.querySelector('#progress-message');
     if (message) message.textContent = '前回の送信結果を再確認しています…';
@@ -3386,8 +3444,10 @@ listen(form, 'submit', async event => {
   const submissionGeneration = ++jobFlowGeneration;
   storePendingSubmissionId(submissionId);
   let responseStatus = null;
+  completedJob = null;
+  renderProgress({id: submissionId, status: 'admitting', progress: 0, message: 'ファイルを送信し、処理の開始を待っています。', logs: []});
   setRunning(true);
-  showProgressCard({scroll: true});
+  showProgressCard({scroll: true, open: openProgress});
   try {
     const response = await apiFetch('/api/jobs', {
       method: 'POST',
@@ -3424,6 +3484,9 @@ listen(form, 'submit', async event => {
       setRunning(false);
       if (progressCard) progressCard.hidden = true;
       setAlert(formError, error.message, true);
+      syncCreateViewState();
+      document.dispatchEvent(new CustomEvent('gurumoji-queue-blocked', {detail: {message: error.message}}));
+      if (runningView && !runningView.hidden) showView('new');
       return;
     }
     await recoverSubmittedJob(error.message, submissionId, 0, submissionGeneration);
@@ -3547,10 +3610,11 @@ function renderProgress(job) {
   const stageProgress = Math.max(0, Math.min(100, Number(
     hasCurrentStage ? job.stage_progress : fallbackStage.progress
   ) || 0));
+  if (typeof renderProgressJourney === 'function') renderProgressJourney(job, {label: stageLabel, progress: stageProgress, estimated: !hasCurrentStage});
   const active = ['admitting', 'queued', 'running', 'committing'].includes(job.status);
   const activityLabels = {
-    admitting: 'RECEIVING', queued: 'WAITING', running: 'RUNNING', committing: 'SAVING',
-    completed: 'COMPLETED', failed: 'ERROR', cancelled: 'STOPPED'
+    admitting: '受付中', queued: '開始待ち', running: '処理中', committing: '保存中',
+    completed: '完了', failed: 'エラー', cancelled: '中止'
   };
   progressCard.classList.toggle('is-active', active);
   progressCard.classList.toggle('has-error', ['failed', 'cancelled'].includes(job.status));
@@ -3562,7 +3626,7 @@ function renderProgress(job) {
   document.querySelector('#progress-stage-bar').style.width = `${stageProgress}%`;
   document.querySelector('#progress-stage-track').setAttribute('aria-valuenow', String(stageProgress));
   document.querySelector('#progress-activity-label').textContent = activityLabels[job.status] || 'WORKING';
-  document.querySelector('#progress-message').textContent = job.message || '';
+  document.querySelector('#progress-message').textContent = job.status === 'completed' ? 'すべての処理が完了し、結果を保存しました。' : job.message || '';
   document.querySelector('#progress-log').textContent = (job.logs || []).join('\n');
   renderAiTokenUsage('#progress-ai-usage', job.ai_usage);
   const titles = {admitting: '受付中', queued: '開始待ち', running: '文字起こし中', committing: '結果を保存中', completed: '処理完了', failed: 'エラー', cancelled: '中止しました'};
@@ -5032,9 +5096,54 @@ function renderEmotionSummary(summary) {
   view.hidden = false;
 }
 
+
+let speakerTimelineView = null;
+let mediaPlaybackFromTimeline = false;
+
+function renderSpeakerTimeline() {
+  if (!window.GurumojiTimeline || !currentJob) return;
+  if (!speakerTimelineView) {
+    speakerTimelineView = window.GurumojiTimeline.create(document.querySelector('#speaker-timeline'), {
+      name: displaySpeakerName,
+      color: label => {
+        const profiles = currentJob?.speaker_profiles || {};
+        return Object.hasOwn(profiles, label) ? profiles[label]?.theme_color : '';
+      },
+      follow: () => document.querySelector('#media-autoscroll')?.checked !== false,
+      select: segmentId => {
+        if (!currentJob?.segments.some(segment => segment.id === segmentId)) return;
+        // 絞り込みで隠れた発話も、タイムラインから選んで編集できるようにする。
+        for (const id of ['segment-keyword', 'segment-speaker-filter', 'segment-emotion-filter', 'segment-jev-filter']) {
+          const input = document.getElementById(id);
+          if (input) input.value = '';
+        }
+        selectedSegmentId = segmentId;
+        renderSegments();
+        selectSegmentForEdit(segmentId);
+      },
+      seek: (seconds, play) => {
+        if (!mediaPlayer) return;
+        mediaPlaybackFromTimeline = true;
+        playbackStopAt = null;
+        const limit = Number.isFinite(mediaPlayer.duration) ? mediaPlayer.duration : seconds;
+        mediaPlayer.currentTime = Math.min(seconds, limit);
+        document.querySelector('#media-caption').textContent = '再生位置 ' + formatTime(seconds);
+        syncMediaPlayback(mediaPlayer.currentTime);
+        if (play) {
+          const promise = mediaPlayer.play();
+          if (promise) promise.catch(() => {});
+        }
+      }
+    });
+  }
+  speakerTimelineView?.render(currentJob, selectedSegmentId);
+  if (mediaPlayer) speakerTimelineView?.updateTime(mediaPlayer.currentTime, mediaPlayer.duration);
+}
+
 let activePlaybackSegmentId = null;
 
 function syncMediaPlayback(currentTime) {
+  speakerTimelineView?.updateTime(currentTime, mediaPlayer?.duration, Boolean(mediaPlayer && !mediaPlayer.paused));
   if (!currentJob || !Array.isArray(currentJob.segments)) return;
   const match = currentJob.segments.find(segment => {
     const s = Number(segment.start || 0);
@@ -5054,7 +5163,7 @@ function syncMediaPlayback(currentTime) {
     if (target) {
       target.classList.add('is-active-playback');
       const autoScroll = document.querySelector('#media-autoscroll');
-      if (!autoScroll || autoScroll.checked) {
+      if (!mediaPlaybackFromTimeline && (!autoScroll || autoScroll.checked)) {
         target.scrollIntoView({behavior: 'smooth', block: 'nearest'});
       }
     }
@@ -5062,6 +5171,7 @@ function syncMediaPlayback(currentTime) {
 }
 
 function renderMedia(job) {
+  mediaPlaybackFromTimeline = false;
   mediaPlayerHost.replaceChildren();
   mediaPlayer = null;
   playbackStopAt = null;
@@ -5082,6 +5192,13 @@ function renderMedia(job) {
     }
     syncMediaPlayback(mediaPlayer.currentTime);
   });
+  const player = mediaPlayer;
+  for (const event of ['loadedmetadata', 'durationchange', 'seeking', 'pause', 'play', 'ended']) {
+    player.addEventListener(event, () => {
+      if (mediaPlayer !== player) return;
+      speakerTimelineView?.updateTime(player.currentTime, player.duration, !player.paused);
+    });
+  }
   mediaPlayerHost.append(mediaPlayer);
   mediaReview.hidden = false;
 }
@@ -5880,6 +5997,7 @@ function createField(labelText, control) {
 
 function selectSegmentForEdit(segmentId, {focus = false} = {}) {
   selectedSegmentId = segmentId;
+  speakerTimelineView?.select(segmentId);
   document.querySelectorAll('.segment').forEach(row => {
     const selected = row.dataset.segmentId === segmentId;
     row.classList.toggle('selected', selected);
@@ -5901,6 +6019,7 @@ function undoSegmentDeletion() {
 listen(document.querySelector('#undo-segment-delete'), 'click', undoSegmentDeletion);
 
 function renderSegments() {
+  renderSpeakerTimeline();
   const active = document.activeElement;
   const focusId = active?.closest?.('.segment')?.dataset.segmentId;
   const focusField = active?.dataset.segmentField;
@@ -6046,6 +6165,7 @@ function renderSegments() {
     textarea.addEventListener('input', () => {
       segment.text = textarea.value;
       textPreview.textContent = textarea.value;
+      renderSpeakerTimeline();
       renderConversationParticipation(speakerMetrics());
       setCurrentJobDirty();
     });
@@ -6067,6 +6187,7 @@ function renderSegments() {
         segment.text = segment.ai_review.original_text || '';
         textarea.value = segment.text;
         textPreview.textContent = segment.text;
+        renderSpeakerTimeline();
         renderConversationParticipation(speakerMetrics());
         setCurrentJobDirty();
       });
@@ -6118,6 +6239,7 @@ function renderSegments() {
 }
 
 function updateSpeakerBadges() {
+  renderSpeakerTimeline();
   renderConversationParticipation(speakerMetrics());
   document.querySelectorAll('.segment-speaker').forEach(badge => {
     const label = badge.dataset.label;
@@ -6283,6 +6405,7 @@ listen(document.querySelector('#add-segment-button'), 'click', () => {
 
 function playSegment(segmentId) {
   if (!mediaPlayer || !currentJob) return;
+  mediaPlaybackFromTimeline = false;
   const segment = currentJob.segments.find(item => item.id === segmentId);
   if (!segment) return;
   selectedSegmentId = segmentId;

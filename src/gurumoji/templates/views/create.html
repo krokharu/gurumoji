@@ -14,90 +14,10 @@
         <span class="create-sidebar-version">バージョン {{ app_version }}</span>
       </aside>
       <div id="stitch-backdrop" class="stitch-backdrop stitch-only" hidden></div>
-      <section id="progress-card" class="progress-card" hidden aria-live="polite">
-        <div class="progress-topline">
-          <div><p class="view-kicker">処理状況</p><h2 id="progress-title">文字起こし中</h2></div>
-          <strong id="progress-number">0%</strong>
-        </div>
-        <p id="queue-progress" class="progress-queue" role="status" hidden></p>
-        <div class="progress-overall-heading"><span>全体の進捗</span><small>OVERALL PROGRESS</small></div>
-        <div id="progress-overall-track" class="progress-track" role="progressbar" aria-label="文字起こし全体の進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-bar"></div></div>
-        <div class="current-process-panel">
-          <div class="process-activity" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="current-process-body">
-            <div class="current-process-heading">
-              <div><small id="progress-activity-label">WAITING</small><strong id="progress-stage-label">開始準備</strong></div>
-              <b id="progress-stage-number">0%</b>
-            </div>
-            <div id="progress-stage-track" class="progress-stage-track" role="progressbar" aria-label="現在の処理の進捗" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-stage-bar"></div></div>
-            <p id="progress-message">準備しています…</p>
-            <div id="ai-finishing-activity" class="ai-finishing-activity" role="status" hidden>
-              <div class="finishing-orbit" aria-hidden="true"></div>
-              <div><strong data-finishing-title>AI仕上げ中</strong><p data-finishing-detail></p><p>応答待ちもアニメーションが続きます。進捗は上の工程表示で確認できます。</p></div>
-            </div>
-          </div>
-        </div>
-        <details id="progress-system-details" class="progress-details-accordion">
-          <summary>詳細システム情報とログ（AIトークン使用量 / システム負荷 / 処理ログ）</summary>
-          <div class="progress-details-body">
-<section id="progress-ai-usage" class="ai-token-usage" aria-label="AIトークン使用量" hidden>
-          <div class="ai-token-heading">
-            <div><span class="ai-token-mark" aria-hidden="true">AI</span><div><small>AI TOKEN USAGE</small><strong data-ai-provider>AI</strong></div></div>
-            <span data-ai-model></span>
-          </div>
-          <div class="ai-token-grid">
-            <div><small>入力トークン</small><strong data-ai-input>0</strong></div>
-            <div><small>出力トークン</small><strong data-ai-output>0</strong></div>
-            <div class="total"><small>合計トークン</small><strong data-ai-total>0</strong></div>
-            <div><small>累計API呼び出し</small><strong data-ai-requests>0回</strong></div>
-          </div>
-          <div class="ai-token-details">
-            <span data-ai-cached hidden>キャッシュ済み <b>0</b></span>
-            <span data-ai-reasoning hidden>推論 <b>0</b></span>
-            <span data-ai-unreported hidden>APIから使用量が返されませんでした</span>
-          </div>
-        </section>
-        <section class="resource-monitor" aria-label="処理中のシステム使用状況">
-          <div class="resource-monitor-heading">
-            <div><span class="resource-live-dot" aria-hidden="true"></span><strong>システム使用状況</strong></div>
-            <small>LIVE SYSTEM MONITOR</small>
-          </div>
-          <div class="resource-monitor-grid">
-            <article class="resource-metric" data-resource="cpu">
-              <div class="resource-metric-top"><span>CPU</span><strong id="monitor-cpu-value">--%</strong></div>
-              <div class="resource-meter" aria-hidden="true"><i id="monitor-cpu-bar"></i></div>
-              <small id="monitor-cpu-detail">使用率を取得中</small>
-            </article>
-            <article class="resource-metric" data-resource="gpu">
-              <div class="resource-metric-top"><span>GPU</span><strong id="monitor-gpu-value">--%</strong></div>
-              <div class="resource-meter" aria-hidden="true"><i id="monitor-gpu-bar"></i></div>
-              <small id="monitor-gpu-detail">GPU使用率を取得中</small>
-            </article>
-            <article class="resource-metric" data-resource="memory">
-              <div class="resource-metric-top"><span>メモリ</span><strong id="monitor-memory-value">--%</strong></div>
-              <div class="resource-meter" aria-hidden="true"><i id="monitor-memory-bar"></i></div>
-              <small id="monitor-memory-detail">使用量を取得中</small>
-            </article>
-            <article class="resource-metric io-metric" data-resource="disk">
-              <div class="resource-metric-top"><span>ディスクI/O</span><strong>ACTIVITY</strong></div>
-              <div class="io-lights">
-                <div class="io-status"><i id="monitor-read-light" class="io-light read" aria-hidden="true"></i><span>読み込み</span><small id="monitor-read-rate">0 KB/s</small></div>
-                <div class="io-status"><i id="monitor-write-light" class="io-light write" aria-hidden="true"></i><span>書き込み</span><small id="monitor-write-rate">0 KB/s</small></div>
-              </div>
-            </article>
-          </div>
-        </section>
-        <details class="log-details">
-          <summary>処理ログ</summary>
-          <pre id="progress-log"></pre>
-        </details>
-          </div>
-        </details>
-        <div class="progress-actions">
-          <button id="cancel-button" class="secondary-button danger" type="button">処理を中止</button>
-          <button id="progress-dismiss" class="secondary-button" type="button" hidden>この表示を閉じる</button>
-        </div>
-      </section>
+      <aside id="job-resume-notice" class="job-resume-notice" hidden aria-label="文字起こしの処理状況">
+        <p id="job-resume-message">文字起こしを実行中です。画面を移動しても処理は続きます。</p>
+        <button class="secondary-button" type="button" data-open-job>実行状況を開く</button>
+      </aside>
 
       <form id="job-form" class="workspace-card create-form mobile-step-1">
         <header class="view-header">
@@ -633,7 +553,7 @@
           </div>
           <div class="stitch-confirm">
           <div id="setup-readiness-details" class="alert" role="status" aria-live="polite"></div>
-          <label id="model-readiness-ack-row" class="check-row" hidden><input id="model-readiness-ack" type="checkbox"><span>未取得・未確認のモデルは開始時に取得や接続確認が必要となり、利用許諾・権限・回線によって開始後に失敗する場合があることを確認しました</span></label>
+          <label id="model-readiness-ack-row" class="check-row" hidden><input id="model-readiness-ack" type="checkbox"><span>開始時にモデルのダウンロードや接続確認が必要になる場合があります。利用条件への同意、アクセス権限、通信状況によっては処理を開始できないことを確認しました。</span></label>
           <div class="launch-check-actions">
             <button id="setup-open-connections" class="secondary-button" type="button">接続と処理装置を確認</button>
             <button id="setup-recheck" class="secondary-button" type="button">設定を再確認</button>

@@ -895,6 +895,21 @@ class AnalysisStore:
         if not isinstance(dataset_id, str) or not re.fullmatch(r"[a-z_]+", dataset_id):
             raise StoreConflict("表の識別子が正しくありません。")
         snapshot, _result, manifest, content = self.readable_package(run_id)
+        return self._read_table_from_package(run_id, dataset_id, snapshot, manifest, content)
+
+    def read_tables(self, run_id: str) -> dict[str, dict]:
+        """保存packageを一度検証し、全ての型付き表をmanifest順で取得する。"""
+        snapshot, _result, manifest, content = self.readable_package(run_id)
+        return self._read_tables_from_package(run_id, snapshot, manifest, content)
+
+    def _read_tables_from_package(self, run_id: str, snapshot: dict, manifest: dict,
+                                 content: dict[str, bytes]) -> dict[str, dict]:
+        # 呼出元が検証した同じpackageのbytesを使い、表ごとの全件再検証を避ける。
+        return {name: self._read_table_from_package(run_id, name, snapshot, manifest, content)
+                for name in manifest.get("typed_tables", {})}
+
+    def _read_table_from_package(self, run_id: str, dataset_id: str, snapshot: dict,
+                                manifest: dict, content: dict[str, bytes]) -> dict:
         references = manifest.get("typed_tables", {}).get(dataset_id)
         if references is None:
             raise StoreConflict("型付き全件表は保存されていません。CSVからの型推測は行いません。")

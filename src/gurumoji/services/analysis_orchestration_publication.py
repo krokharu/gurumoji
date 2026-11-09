@@ -18,6 +18,8 @@ from typing import Any, Callable
 from ..analysis_core import (AnalysisContractError, EFFECTIVE_PUBLICATION_WRITERS,
                              canonical, fingerprint, validate_publication_targets)
 from ..analysis_store import StoreConflict
+from .orchestration_required_methods import required_progress
+from .orchestration_task_completion import analysis_processing_tasks_complete
 
 KIND = "autonomous_analysis"
 OUTPUT_VERSION = "autonomous-output-1"
@@ -67,6 +69,15 @@ def _scope(run):
     return validate_publication_targets(run.get("config", {}).get("publication_targets", []))
 
 
+
+def _human_review_draft(run):
+    return (run.get("status") == "stopped" and run.get("stop_reason") == "human_review_required"
+            and run.get("analysis_processing_complete") is True and run.get("human_review_status") == "required")
+
+
+def _saveable(run):
+    return run.get("status") == "completed" or _human_review_draft(run)
+
 def _validate_export(db, item_id, run_id, run, exported):
     """Verify immutable bytes and relational ownership before the one-time seal."""
     initial = db.execute("SELECT * FROM orchestration_initials WHERE initial_id=?", (run["initial_id"],)).fetchone()
@@ -109,6 +120,33 @@ def _validate_export(db, item_id, run_id, run, exported):
     for key, query in (("decisions", "SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid"),):
         if exported.get(key) != [json.loads(row[0]) for row in db.execute(query, (run_id,))]:
             raise StoreConflict("判断履歴の固定出力が一致しません。")
+    if _human_review_draft(run):
+        decisions = exported["decisions"]
+        last = next((d for d in decisions if d.get("decision_id") == run.get("last_decision_id")), None)
+        last_result = next((r for r in results if last and r.get("result_id") == last.get("result_id")), None)
+        reviewed = set(run.get("reviewed_stop_versions", []))
+        reviewed_tasks = [t for t in tasks.values() if t.get("role") == "critic"
+                          and t.get("phase") == "stop_review" and t.get("status") == "succeeded"
+                          and t.get("intent", {}).get("target_version") in reviewed]
+        assessed = {entry.get("result_id") for d in decisions for entry in d.get("result_assessments", [])}
+        outstanding = [r for r in results if r.get("role") not in {"core", "orchestrator"}
+                       and r.get("validation_status") == "valid" and not r.get("stale")
+                       and r.get("result_id") not in assessed]
+        unanswered = db.execute("SELECT 1 FROM orchestration_issues WHERE run_id=? AND issue_id NOT IN "
+                                "(SELECT issue_id FROM orchestration_responses WHERE run_id=?) LIMIT 1",
+                                (run_id, run_id)).fetchone()
+        progress = required_progress(run["config"].get("required_methods", []), list(tasks.values()), results,
+            decisions, dataset_version=run["input_hash"], annotation_version=run["annotation_version"],
+            codebook_version=run["codebook_version"], run_stale=run.get("stale", False))
+        if (run.get("completion_protocol_version") != 1 or not tasks or
+                not analysis_processing_tasks_complete(run, list(tasks.values()), results, decisions) or not reviewed_tasks or
+                not last or last.get("stop", {}).get("reason") not in {"human_review_required", "question_satisfied", "no_more_evidence"} or
+                last.get("stop", {}).get("reason") != run.get("model_stop_reason", "human_review_required") or
+                not last_result or last_result.get("role") != "core" or last_result.get("validation_status") != "valid" or
+                last_result.get("raw", {}).get("stop") != last.get("stop") or
+                last_result.get("raw", {}).get("intents", []) != last.get("intents", []) or
+                last.get("intents") or outstanding or unanswered or any(not p["complete"] for p in progress)):
+            raise StoreConflict("人手確認待ち下書きの分析処理が完了していることを確認できません。")
     labels = [{"annotation_version": row[0], "labels": json.loads(row[1])} for row in db.execute(
         "SELECT annotation_version,payload_json FROM orchestration_label_versions WHERE run_id=? ORDER BY annotation_version", (run_id,))]
     if exported.get("label_versions") != labels:
@@ -149,6 +187,8 @@ def build_orchestration_package(exported, sealed_hash):
                    "全原結果・初期分析・判断履歴・批判・ラベル版は保存パッケージのorchestration文書に保存されています。"]
     if run.get("review_status") != "reviewed":
         limitations.append("終了時の独立批判レビューは完了していません。")
+    if _human_review_draft(run):
+        limitations.append("分析処理は完了しましたが、人手確認が必要なAI下書きです。確認・確定された結果ではありません。")
     unresolved = run.get("unresolved_issues", [])
     limitations += [f"未解決の批判 {issue.get('issue_id', '')}：{issue.get('description', issue.get('message', issue.get('text', issue.get('summary', '原記録を参照'))))}" for issue in unresolved]
     summaries = [{"title": "問い", "text": run["config"]["question"]},
@@ -225,13 +265,13 @@ class AnalysisOrchestrationPublicationService:
 
     def _seal(self, db, item_id, run_id):
         run = self._run(db, item_id, run_id)
-        if run["status"] != "completed" or run.get("cancel_requested"):
+        if not _saveable(run) or run.get("cancel_requested"):
             raise StoreConflict("正常終了した自律分析だけを固定保存・公開できます。")
         row = db.execute("SELECT * FROM orchestration_publications WHERE run_id=?", (run_id,)).fetchone()
         if row:
             self._verify_seal(row, run)
             return dict(row)
-        stale = self._source(db, item_id, run, allow_stale=True)
+        stale = self._source(db, item_id, run, allow_stale=not _human_review_draft(run))
         exported = self.export_locked(db, item_id, run_id)
         initial_hash = _validate_export(db, item_id, run_id, run, exported)
         sealed_hash = fingerprint(exported)
@@ -262,7 +302,7 @@ class AnalysisOrchestrationPublicationService:
         run = self._run(db, item_id, run_id)
         row = db.execute("SELECT * FROM orchestration_publications WHERE run_id=?", (run_id,)).fetchone()
         attempt = db.execute("SELECT * FROM orchestration_publication_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
-        if (not row or not attempt or run["status"] != "completed" or run.get("cancel_requested")
+        if (not row or not attempt or not _saveable(run) or run.get("cancel_requested")
                 or row["active_attempt_id"] != attempt_id or attempt["status"] != "running"
                 or attempt["run_id"] != run_id or attempt["generation"] != run["generation"]
                 or attempt["sealed_hash"] != row["sealed_hash"]):
@@ -274,7 +314,7 @@ class AnalysisOrchestrationPublicationService:
                     or saved["fingerprint"] != row["package_hash"]
                     or saved["input_fingerprint"] != run["input_hash"]):
                 raise StoreConflict("固定packageの保存先またはhash所有権が一致しません。")
-        if source and self._source(db, item_id, run, allow_stale=allow_stale):
+        if source and self._source(db, item_id, run, allow_stale=allow_stale and not _human_review_draft(run)):
             db.execute("UPDATE orchestration_publications SET stale=1 WHERE run_id=?", (run_id,))
             if row["result_run_id"]:
                 db.execute("UPDATE analysis_runs SET stale=1 WHERE id=?", (row["result_run_id"],))
@@ -330,7 +370,9 @@ class AnalysisOrchestrationPublicationService:
                                (saved["id"], saved["fingerprint"], _now(), run_id))
                 save_status = "saved"
                 targets = json.loads(row["targets_json"])
-                if targets:
+                if targets and _human_review_draft(run):
+                    publication_status = "review_required"
+                elif targets:
                     with self._db() as db:
                         self._guard(db, item_id, run_id, attempt_id)
                         db.execute("UPDATE orchestration_publications SET publication_status='publishing',updated_at=? WHERE run_id=?", (_now(), run_id))
@@ -378,8 +420,10 @@ class AnalysisOrchestrationPublicationService:
                       "result_run_id": row["result_run_id"] if row else "", "result_run": None,
                       "sealed_hash": row["sealed_hash"] if row else "", "package_hash": row["package_hash"] if row else "",
                       "stale": stale, "error": row["error"] if row else "", "attempts": attempts,
-                      "can_retry": run["status"] == "completed" and not stale and not (row and row["active_attempt_id"])}
-        selected_status = "pending" if targets else "not_selected"
+                      "can_retry": _saveable(run) and not stale and not (row and row["active_attempt_id"])}
+        selected_status = "review_required" if targets and _human_review_draft(run) else ("pending" if targets else "not_selected")
+        if _human_review_draft(run):
+            result["publication_reason"] = "人手確認が必要なAI下書きのため、Vaultへの自動公開を保留しています。"
         if run["status"] in {"cancelled", "failed", "stopped"} and not row:
             result["publication_status"] = selected_status = "skipped"
         result["outcomes"] = {kind: {"status": selected_status, "error": ""} for kind in EFFECTIVE_PUBLICATION_WRITERS}
@@ -388,8 +432,8 @@ class AnalysisOrchestrationPublicationService:
             saved = store.get(result["result_run_id"])
             if saved:
                 result["result_run"] = store.public(saved)
-                if targets:
+                if targets and not _human_review_draft(run):
                     result["outcomes"] = result["result_run"]["publication_outcomes"]
-        if result["save_status"] == "saved" and result["publication_status"] in {"published", "not_selected"}:
+        if result["save_status"] == "saved" and result["publication_status"] in {"published", "not_selected", "review_required"}:
             result["can_retry"] = False
         return result

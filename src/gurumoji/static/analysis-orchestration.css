@@ -124,3 +124,13 @@
 .orchestration-output > p { font-size:.8rem; line-height:1.7; }
 #orchestration-publication-retry { min-height:42px; font-size:.8rem; }
 @media (max-width:540px) { .orchestration-publication-outcomes { grid-template-columns:1fr; } }
+.orchestration-source-preview { padding:12px; border:1px solid var(--line); border-radius:10px; max-height:220px; overflow:auto; }
+.orchestration-source-preview p, .orchestration-result-identity p { overflow-wrap:anywhere; }
+.orchestration-result-identity { padding:14px; border:1px solid var(--line); border-radius:12px; margin-block:14px; }
+.orchestration-required-progress { padding-left:20px; font-size:.8rem; line-height:1.8; overflow-wrap:anywhere; }
+.orchestration-required-progress [data-complete="false"] { color:var(--text-muted); }
+.orchestration-crosstab-scroll { max-width: 100%; overflow-x: auto; }
+.orchestration-crosstab table { border-collapse: collapse; width: 100%; }
+.orchestration-crosstab th, .orchestration-crosstab td { padding: .5rem; border: 1px solid var(--line); white-space: nowrap; text-align: right; }
+.orchestration-crosstab th:first-child { text-align: left; }
+.orchestration-crosstab caption { text-align: left; padding-block: .5rem; }

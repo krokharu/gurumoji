@@ -1,4 +1,4 @@
-# Optional read-only preview. Keep separate from the normal app requirements.
-# Requires Python >=3.12, private-repository access and the upstream native build
-# toolchain (or a wheel built from this exact revision). No PostgreSQL/MCP extras.
-obsipg @ git+https://github.com/krokharu/ObusSQL.git@5be32120d17a7f07eac7a2c41b0bab1372ae4cdb
+# 任意の読取プレビュー。通常のアプリ依存とは分離する。
+# Python 3.12以上と、上流のネイティブビルド環境または固定版のwheelが必要。
+# PostgreSQLとMCPの追加依存は導入しない。
+obsipg @ git+https://github.com/krokharu/ObusSQL.git@07128acfe13c1162552f7928b5ab0e7c954fac1b

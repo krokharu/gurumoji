@@ -127,7 +127,7 @@ function aiEffortReadiness() {
     if (localEffortState === 'pending' || localEffortModel !== (typeof tokenConfigSnapshot === 'undefined' ? '' : tokenConfigSnapshot.lmstudio_model || '')) {
       blockers.push(`${title}: ローカルモデルの対応設定を確認中です`);
     } else if (localEffortState !== 'loaded' || localEffortSupport(values[key]) === null) {
-      notes.push(key === 'cleanup' ? `${title}: 調整レベルは維持します。追加推論は未確認で、モデル既定になる場合があります` : `${title}: 推論設定は未確認です。モデル既定で実行される場合があり、選択したOFFも有効OFFを保証しません`);
+      notes.push(key === 'cleanup' ? `${title}: 文章の調整レベルは選択どおりに適用します。追加推論はモデルの既定設定で動作する場合があります` : `${title}: 選択した推論設定にモデルが対応しているか確認できていません。${values[key] === 'off' ? 'OFFを選択していても、追加推論が行われる場合があります' : 'モデルの既定設定で動作する場合があります'}`);
     } else if (!localEffortSupport(values[key])) {
       if (key === 'cleanup') notes.push(`${title}: 調整レベルは維持し、追加推論はモデル既定を使います`);
       else blockers.push(`${title}: 選択した設定はこのモデル連携では未対応です。カードを開いて対応する設定を選んでください`);
@@ -204,7 +204,7 @@ function syncAiEffortSettings() {
       if (localEffortState === 'pending') status = '対応設定を確認中です。';
       else if (localEffortState === 'error') status = '対応設定の取得に失敗しました。再確認できます。';
       else if (localEffortState === 'mismatch') status = '応答のモデルが一致しません。再確認してください。';
-      else if (uncertain) status = '対応設定は不明です。モデル既定で動作する場合があり、有効なON/OFFは確認できません。';
+      else if (uncertain) status = 'モデルが対応する推論設定を確認できていません。モデルの既定設定で動作する場合があります。';
       else if (!support) status = cleanup ? '調整の強さは維持します。追加推論はモデル既定を使います。' : '選択値は未対応です。対応する設定へ変更するまで実行できません。';
       else if (binary) status = 'ON/OFF型です。段階差は適用せず、選択した詳しさを保持します。ONはモデル既定がONの場合のみ対応します。';
       else status = 'モデルが対応する推論設定へ割り当てます。選択値は変えません。';
@@ -232,7 +232,7 @@ function syncAiEffortSettings() {
 function renderAiFinishingActivity(job) {
   const panel = document.querySelector('#ai-finishing-activity');
   if (!panel) return;
-  const active = job.status === 'running' && ['finishing', 'speaker_names', 'outline'].includes(job.stage);
+  const active = job.status === 'running' && ['finishing', 'speaker_names', 'outline'].includes(job.stage) && Number(job.stage_progress || 0) < 100;
   panel.hidden = !active;
   panel.setAttribute('aria-busy', String(active));
   if (!active) return;

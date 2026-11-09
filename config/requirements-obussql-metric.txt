@@ -1,0 +1,2 @@
+# 統計専用codecを含む固定版。Python 3.12以上と同commitのobsipgが必要。
+obusql-agent @ git+https://github.com/krokharu/ObusSQL.git@07128acfe13c1162552f7928b5ab0e7c954fac1b#subdirectory=harness

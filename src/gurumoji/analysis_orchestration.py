@@ -25,7 +25,11 @@ from typing import Any, Callable
 
 from .analysis_core import (AnalysisContractError, canonical, fingerprint,
                             validate_publication_targets, validate_label_definitions, EFFECTIVE_PUBLICATION_WRITERS)
+from .analysis_templates import selection_valid
 from .services import artifact_review
+from .services.orchestration_required_methods import (validate_required_methods,
+    required_method_intent, required_progress, LABEL_METHODS)
+from .services.orchestration_task_completion import analysis_processing_tasks_complete
 from .orchestration_initial import (initialize_initial_checkpoints, create_initial_checkpoints,
     read_initial_checkpoints, stage_input_hash, write_stage, initial_progress, recover_initial_checkpoints)
 
@@ -36,7 +40,8 @@ ROLES = {"core": "Core", "handler": "Handler", "interpretation": "会話解釈",
 AI_ROLES = frozenset({"core", "interpretation", "verification", "critic", "orchestrator"})
 INITIAL_SECTIONS = frozenset({"segments", "annotations", "automatic", "manual", "research", "config", "cautions", "classification"})
 LABEL_FIELDS = frozenset({"code", "codes", "theme", "sentiment", "dialogue_act", "importance", "review", "category"})
-METHODS = frozenset({"participation", "conversation_dynamics", "label_frequency"})
+INITIAL_METHODS = frozenset({"participation", "conversation_dynamics", "label_frequency"})
+METHODS = INITIAL_METHODS | {"cross_tabulation"}
 TERMINAL = frozenset({"completed", "stopped", "cancelled", "failed"})
 IMPORTANCE = {"low": 1, "medium": 2, "high": 3}
 
@@ -156,11 +161,13 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "cloud_consent": payload.get("cloud_consent") is True,
               "adapter_version": payload.get("adapter_version", "core-handler-prompts-1"),
               "core_progress_version": payload.get("core_progress_version", 0),
+               "core_control_version": payload.get("core_control_version", 0),
               "initial_label_definitions_version": payload.get("initial_label_definitions_version", 0),
               "initial_specialist_analysis_version": payload.get("initial_specialist_analysis_version", 0),
               "model_context_version": payload.get("model_context_version", 0),
               "context_reference_version": payload.get("context_reference_version", 0),
               "specialist_orchestration_version": payload.get("specialist_orchestration_version", 0),
+              "metric_codec_version": payload.get("metric_codec_version", 0),
               "label_repair_limit": payload.get("label_repair_limit", 0),
               "local_reasoning": payload.get("local_reasoning", "auto"),
               "expert_step_ids": payload.get("expert_step_ids"),
@@ -180,6 +187,22 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "context_text_limit": payload.get("context_text_limit", 60000)}
     config["analysis_interval_version"] = payload.get("analysis_interval_version", 0)
     config["artifact_review_version"] = payload.get("artifact_review_version", 0)
+    if "required_methods" in payload:
+        config["required_methods"] = validate_required_methods(payload["required_methods"])
+        if config["required_methods"] and not (config["specialist_orchestration_version"] and config["core_progress_version"]):
+            raise _error("必須分析には専門担当の評価を有効にしてください。", field="required_methods")
+    source_id, human_prompt = payload.get("source_analysis_id"), payload.get("human_prompt")
+    if source_id is not None or human_prompt is not None:
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise _error("参照する分析IDを指定してください。", field="source_analysis_id")
+        if not isinstance(human_prompt, str) or not human_prompt.strip() or len(human_prompt) > 8000:
+            raise _error("追加プロンプトを8000文字以内で入力してください。", field="human_prompt")
+        config.update(source_analysis_id=source_id.strip(), human_prompt=human_prompt.strip())
+        for key in ("expected_source_result_id", "expected_source_raw_hash"):
+            if key in payload:
+                if not isinstance(payload[key], str) or not payload[key] or len(payload[key]) > 250:
+                    raise _error("確認した参照結果のIDまたはhashが正しくありません。", field=key)
+                config[key] = payload[key]
     if config["artifact_review_version"] and not (config["analysis_interval_version"] == 1
             and config["specialist_orchestration_version"] == 1):
         raise _error("先行所見の点検には固定区間と専門側の判断が必要です。", "artifact_input_invalid")
@@ -190,6 +213,7 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
     config["analysis_interval_seconds"] = payload.get("analysis_interval_seconds", 300)
     for key, low, high in (("max_calls", 1, 10000), ("max_tasks", 1, 20000), ("concurrency", 1, 4),
                            ("core_progress_version", 0, 1),
+                            ("core_control_version", 0, 1),
                            ("analysis_interval_version", 0, 1), ("analysis_interval_seconds", 1, 86400),
                            ("artifact_review_version", 0, 1),
                            ("label_repair_limit", 0, 1),
@@ -198,6 +222,7 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
                             ("model_context_version", 0, 1),
                             ("context_reference_version", 0, 1),
                             ("specialist_orchestration_version", 0, 1),
+                            ("metric_codec_version", 0, 1),
                            ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000),
                            ("context_evidence_limit", 1, 120), ("context_text_limit", 1, 60000)):
         if type(config[key]) is not int or not low <= config[key] <= high:
@@ -223,6 +248,8 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
         raise _error("テンプレート版を指定してください。", field="template_version")
     if not isinstance(config["template_config"], dict) or not isinstance(config["roles"], dict):
         raise _error("テンプレート設定と役割設定はオブジェクトで指定してください。")
+    if not selection_valid(config["template_version"], config["template_config"]):
+        raise _error("分析テンプレートのIDまたは版が正しくありません。", field="template_config")
     if config["max_cost"] is not None and (type(config["max_cost"]) not in {int, float}
             or not math.isfinite(config["max_cost"]) or config["max_cost"] <= 0):
         raise _error("費用上限は正の数です。", field="max_cost")
@@ -353,6 +380,17 @@ class AnalysisOrchestrationService:
             raise _error("request_idが正しくありません。")
         if self.find_item(item_id) is None:
             raise LookupError("会話が見つかりません。")
+        if config.get("source_analysis_id"):
+            from .services.analysis_history import AnalysisHistoryService
+            from .services.analysis_reanalysis import freeze_reanalysis
+            viewer = AnalysisHistoryService(connect=self.connect, find_item=self.find_item)
+            with self._db() as db:
+                config["reanalysis"] = freeze_reanalysis(viewer, item_id, config["source_analysis_id"],
+                    config["human_prompt"], connection=db)
+                for key, actual in (("expected_source_result_id", "source_result_id"), ("expected_source_raw_hash", "raw_hash")):
+                    if key in config and config[key] != config["reanalysis"][actual]:
+                        raise _error("確認後に参照結果が変わりました。参照結果を確認し直してください。",
+                                     "revision_conflict", "source_analysis_id")
         request_hash = fingerprint({"item_id": item_id, "config": config,
                                     "source_revision": payload.get("source_revision"),
                                     "analysis_revision": payload.get("analysis_revision"),
@@ -380,6 +418,9 @@ class AnalysisOrchestrationService:
                 raise _error("確認した入力版が更新されています。", "revision_conflict", supplied)
         # A source fingerprint permits cache lookup before the expensive fixed analysis.
         before = self.source_fingerprint(item) if self.source_fingerprint else None
+        if config.get("reanalysis") and before is not None and config["reanalysis"]["input_hash"] != before:
+            raise _error("参照結果の入力版が現在の会話と異なります。現在の入力で分析してから結果IDを指定してください。",
+                         "revision_conflict", "source_analysis_id")
         if self.initial_builder is not None:
             return self._start_staged(item_id, payload, config, request_id, request_hash, app_url, item, before)
         snapshot = None
@@ -388,6 +429,8 @@ class AnalysisOrchestrationService:
             before = snapshot.get("input_hash")
         if payload.get("input_hash") is not None and payload["input_hash"] != before:
             raise _error("確認した入力hashが更新されています。", "revision_conflict", "input_hash")
+        if config.get("reanalysis") and config["reanalysis"]["input_hash"] != before:
+            raise _error("参照結果の入力版が現在の会話と異なります。", "revision_conflict", "source_analysis_id")
         identity = fingerprint({"item_id": item_id, "dataset_version": before,
                                 "template_version": config["template_version"], "config": config["template_config"]})
         build = False
@@ -423,7 +466,7 @@ class AnalysisOrchestrationService:
                     db.execute("UPDATE orchestration_initials SET status='failed',error=? WHERE initial_id=?", (type(exc).__name__, initial_id))
                 raise
         run_id = _id("run")
-        run = {"schema_version": SCHEMA_VERSION, "label_audit_version": 1, "run_id": run_id, "item_id": item_id, "request_id": request_id,
+        run = {"schema_version": SCHEMA_VERSION, "label_audit_version": 1, "completion_protocol_version": 1 if config.get("core_progress_version") else 0, "run_id": run_id, "item_id": item_id, "request_id": request_id,
                "initial_id": initial_id, "input_hash": snapshot["input_hash"],
                "source_revision": snapshot.get("source_revision", 0), "analysis_revision": snapshot.get("analysis_revision", 0),
                "config": config, "app_url": app_url.rstrip("/"), "status": "queued", "phase": "core",
@@ -492,7 +535,7 @@ class AnalysisOrchestrationService:
                     # deterministic outputs, but it cannot revive the old run.
                     db.execute("UPDATE orchestration_initial_builds SET owner_run_id=? WHERE initial_id=?", (run_id, initial_id))
             row = dict(item)
-            run = {"schema_version": SCHEMA_VERSION, "label_audit_version": 1, "run_id": run_id, "item_id": item_id, "request_id": request_id,
+            run = {"schema_version": SCHEMA_VERSION, "label_audit_version": 1, "completion_protocol_version": 1 if config.get("core_progress_version") else 0, "run_id": run_id, "item_id": item_id, "request_id": request_id,
                    "initial_id": initial_id, "input_hash": before,
                    "source_revision": int(row.get("revision_count", 0) or 0),
                    "analysis_revision": int(row.get("analysis_revision", 0) or 0),
@@ -616,7 +659,7 @@ class AnalysisOrchestrationService:
             return
         with self._db() as db:
             run = self._read_run(db, run_id)
-            if run["status"] != "completed" or run.get("completion_callback_status"):
+            if not (run["status"] == "completed" or (run["status"] == "stopped" and run.get("stop_reason") == "human_review_required" and run.get("analysis_processing_complete") is True)) or run.get("completion_callback_status"):
                 return
             run["completion_callback_status"] = "running"
             self._write_run(db, run)
@@ -684,6 +727,10 @@ class AnalysisOrchestrationService:
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
         result["tasks"] = tasks
+        decision = db.execute("SELECT result_id FROM orchestration_decisions WHERE run_id=? AND decision_id=?",
+                              (run["run_id"], run.get("last_decision_id"))).fetchone()
+        result["analysis_result_id"] = decision[0] if decision else None
+        result["required_methods_progress"] = self._required_methods_progress(db, run, tasks=tasks)
         if run.get("analysis_partition"):
             from .services.analysis_intervals import progress
             result["interval_progress"] = progress(run["analysis_partition"], tasks)
@@ -733,6 +780,40 @@ class AnalysisOrchestrationService:
         result["uncertain_tasks"] = uncertain
         result["in_flight_count"] = sum(t["status"] in {"running", "cancel_requested", "uncertain"} for t in tasks)
         return result
+
+    def _analysis_processing_tasks_complete(self, db, run):
+        tasks = self._tasks(db, run["run_id"])
+        results = [json.loads(row[0]) for row in db.execute(
+            "SELECT state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
+        decisions = [json.loads(row[0]) for row in db.execute(
+            "SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
+        return analysis_processing_tasks_complete(run, tasks, results, decisions)
+
+    def _required_methods_progress(self, db, run, *, tasks=None):
+        methods = run["config"].get("required_methods", [])
+        if not methods:
+            return []
+        results = [json.loads(row[0]) for row in db.execute(
+            "SELECT state_json FROM orchestration_results WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
+        decisions = [json.loads(row[0]) for row in db.execute(
+            "SELECT payload_json FROM orchestration_decisions WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
+        return required_progress(methods, self._tasks(db, run["run_id"]) if tasks is None else tasks,
+            results, decisions, dataset_version=run["input_hash"], annotation_version=run["annotation_version"],
+            codebook_version=run["codebook_version"], run_stale=run.get("stale", False))
+
+    def _schedule_required_methods(self, db, run):
+        registered = False
+        for progress in self._required_methods_progress(db, run):
+            if progress["status"] not in {"not_run", "stale"}:
+                continue
+            intent = required_method_intent(progress["id"], run["config"]["question"])
+            if progress["id"] in LABEL_METHODS:
+                intent["replicate_id"] = f"required-a{run['annotation_version']}-c{run['codebook_version']}"
+            if self._register(db, run, intent, phase="required_methods", automatic=True):
+                registered = True
+            if run["status"] in TERMINAL:
+                break
+        return registered
 
     def status(self, item_id: str, run_id: str) -> dict:
         item = self.find_item(item_id)
@@ -1145,9 +1226,14 @@ class AnalysisOrchestrationService:
         if role not in AI_ROLES | {"statistics"}:
             raise _error("未対応の専門家です。", "invalid_intent")
         method = intent.get("method_id") or ("participation" if role == "statistics" else "agent-v1")
-        if role == "statistics" and method != "label_frequency" and (intent.get("evidence_ids") or intent.get("scope") or intent.get("label_dependent")):
+        if (method == "cross_tabulation" and "cross_tabulation" in run["config"].get("required_methods", [])
+                and intent.get("label_field", "codes") != "codes"):
+            raise _error("必須クロス集計の列はcodesに固定されています。", "required_method_spec_mismatch")
+        if method == "cross_tabulation" and intent.get("scope"):
+            raise _error("クロス集計の部分範囲は根拠IDで指定してください。", "method_scope_unavailable")
+        if role == "statistics" and method not in LABEL_METHODS and (intent.get("evidence_ids") or intent.get("scope") or intent.get("label_dependent")):
             raise _error("既存コード計算は初期版の全範囲専用です。部分範囲・ラベル再計算は未対応です。", "method_scope_unavailable")
-        if method == "label_frequency" and (role != "statistics" or intent.get("label_field", "codes") not in LABEL_FIELDS):
+        if method in LABEL_METHODS and (role != "statistics" or intent.get("label_field", "codes") not in LABEL_FIELDS):
             raise _error("対応するラベル集計列を指定してください。", "label_field_unavailable")
         if role == "statistics" and method not in METHODS:
             raise _error("未対応のコード計算です。", "method_unavailable")
@@ -1180,10 +1266,10 @@ class AnalysisOrchestrationService:
         known = {task["task_id"]: task for task in tasks}
         if not isinstance(dependencies, list) or any(d not in known for d in dependencies):
             raise _error("タスク依存関係が存在しません。", "dependency_missing")
-        label_dependent = bool(intent.get("label_dependent", False)) if role != "statistics" else method == "label_frequency"
+        label_dependent = bool(intent.get("label_dependent", False)) if role != "statistics" else method in LABEL_METHODS
         identity = {"input": run["input_hash"], "annotation_version": run["annotation_version"] if label_dependent else None,
                     "role": role, "method": method, "question": question.strip(), "evidence_ids": sorted(evidence_ids),
-                    "scope": intent.get("scope"), "label_field": intent.get("label_field", "codes") if method == "label_frequency" else None, "target_id": intent.get("target_id"), "target_version": intent.get("target_version"),
+                    "scope": intent.get("scope"), "label_field": intent.get("label_field", "codes") if method in LABEL_METHODS else None, "target_id": intent.get("target_id"), "target_version": intent.get("target_version"),
                     "evidence_version": fingerprint([run["input_hash"], run["annotation_version"]]) if role == "critic" else intent.get("evidence_version", run["input_hash"]), "replicate_id": intent.get("replicate_id") or None,
                     "round": run["iteration"] if role == "core" else None, "options": run["config"]["roles"].get(role), "kind": intent.get("kind", "analysis"), "result_id": intent.get("result_id"), "initial_sections": intent.get("initial_sections", []),
                     "dependencies": sorted(dependencies)}
@@ -1200,6 +1286,18 @@ class AnalysisOrchestrationService:
             reusable = next((t for t in tasks if t["role"] == "statistics" and t["method_id"] == method and t["status"] == "succeeded" and t["dataset_version"] == run["input_hash"]), None)
             if reusable:
                 self._event(db, run["run_id"], "duplicate_suppressed", "固定入力の同じ全件集計は保存済み結果を参照し、再計算しません。", task_id=reusable["task_id"], result_id=reusable["result_id"])
+                return None
+        if role == "statistics" and method == "cross_tabulation" and (not evidence_ids or set(evidence_ids) == valid_evidence):
+            reusable = next((t for t in tasks if t["role"] == "statistics" and t["method_id"] == method
+                and t["status"] == "succeeded" and t.get("validation_status") == "valid" and not t.get("stale")
+                and t["dataset_version"] == run["input_hash"] and t["annotation_version"] == run["annotation_version"]
+                and t["codebook_version"] == run["codebook_version"]
+                and (t["intent"].get("label_field") or "codes") == (intent.get("label_field") or "codes")
+                and not t["intent"].get("scope")
+                and (not t["intent"].get("evidence_ids") or set(t["intent"]["evidence_ids"]) == valid_evidence)), None)
+            if reusable:
+                self._event(db, run["run_id"], "duplicate_suppressed", "同じ対象・列・ラベル版のクロス集計は保存結果を参照します。",
+                            task_id=reusable["task_id"], result_id=reusable["result_id"])
                 return None
         if len(tasks) >= run["config"]["max_tasks"]:
             self._stop(db, run, "task_budget_limit")
@@ -1231,7 +1329,8 @@ class AnalysisOrchestrationService:
         Complete original sections remain available through the owner-only result
         export. This bounded AI view is deliberately allowed to omit more data.
         """
-        excluded = {e["utterance_id"] for e in evidence if e["excluded"]}
+        excluded = {identifier for e in evidence if e["excluded"]
+                    for identifier in (e["utterance_id"], e["evidence_id"])}
         texts = [e["text"] for e in evidence if e["excluded"] and e["text"]]
         omitted = object()
         def clean(node):
@@ -1244,9 +1343,9 @@ class AnalysisOrchestrationService:
                 if node.get("excluded") is True:
                     return omitted
                 for key, child in node.items():
-                    if (key in {"id", "segment_id", "utterance_id"} or key.endswith(("_segment_id", "_utterance_id"))) and str(child) in excluded:
+                    if (key in {"id", "segment_id", "utterance_id", "evidence_id"} or key.endswith(("_segment_id", "_utterance_id", "_evidence_id"))) and str(child) in excluded:
                         return omitted
-                    if key.endswith(("segment_ids", "utterance_ids")) and isinstance(child, list) and any(str(v) in excluded for v in child):
+                    if key.endswith(("segment_ids", "utterance_ids", "evidence_ids")) and isinstance(child, list) and any(str(v) in excluded for v in child):
                         return omitted
                 result = {}
                 for key, child in node.items():
@@ -1293,6 +1392,21 @@ class AnalysisOrchestrationService:
         context = self._base_context(db, run, task)
         if task["intent"].get("kind") == "finding_review":
             context = self.build_review_resources(db, run, task, context)
+        if run["config"].get("reanalysis"):
+            source = run["config"]["reanalysis"]
+            context["human_prompt"] = source["human_prompt"]
+            if task["role"] == "verification" or task["intent"].get("kind") == "finding_review":
+                context["reanalysis_origin"] = {key: source[key] for key in (
+                    "source_analysis_id", "source_run_id", "source_result_id", "input_hash", "raw_hash")}
+            else:
+                delivered = copy.deepcopy(source)
+                delivered["content"] = self._safe_section(source["content"], self._initial(db, run["initial_id"])["evidence"])
+                if delivered["content"] != source["content"]:
+                    delivered["excluded_content_omitted"] = True
+                    delivered["delivery_content_hash"] = fingerprint(delivered["content"])
+                context["reanalysis"] = delivered
+        if run["config"].get("required_methods"):
+            context["required_methods_progress"] = self._required_methods_progress(db, run)
         if run["config"].get("artifact_review_version"):
             context["artifact_review_version"] = artifact_review.VERSION
             if task["role"] == "orchestrator":
@@ -1424,7 +1538,9 @@ class AnalysisOrchestrationService:
                 if result["result_id"] in run.get("initial_label_result_ids", [run.get("initial_label_result_id")]):
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", []),
                                "label_definitions_ref": "initial_label_catalog"}
-                elif len(row[0]) > 16000 and not result.get("derived_from"):
+                elif (len(row[0]) > 16000 and not result.get("derived_from")
+                      and not (run["config"].get("metric_codec_version") == 1 and result.get("role") == "statistics"
+                               and task["role"] == "orchestrator" and scope.get("domain") == "statistics")):
                     content = {"summary": content.get("summary", ""), "claims": content.get("claims", [])[:24], "omitted_full_result": True}
                 accepted.append({**result, "content": content})
         pending_results = self._review_pending(db, run, task) if run["config"].get("core_progress_version") else []
@@ -1753,7 +1869,7 @@ class AnalysisOrchestrationService:
             with self._db() as db:
                 current = json.loads(db.execute("SELECT state_json FROM orchestration_tasks WHERE task_id=?", (task_id,)).fetchone()[0])
                 # Transport errors may have consumed external work. Never retry blind.
-                before_dispatch = getattr(exc, "code", "") in {"context_budget_exceeded", "context_budget_unavailable", "context_manifest_invalid", "expert_knowledge_unavailable", "artifact_input_invalid", "result_integrity_mismatch", "provider_unavailable", "evidence_index_unavailable"}
+                before_dispatch = getattr(exc, "code", "") in {"context_budget_exceeded", "context_budget_unavailable", "context_manifest_invalid", "expert_knowledge_unavailable", "artifact_input_invalid", "result_integrity_mismatch", "provider_unavailable", "evidence_index_unavailable", "template_invalid"}
                 owned = current["intent"].get("scope", {}).get("owned_evidence_ids", []) if isinstance(current["intent"].get("scope"), dict) else []
                 latest = self._read_run(db, run_id)
                 if (getattr(exc, "code", "") == "context_budget_exceeded" and current["phase"] in {"initial_routing", "initial_labels"}
@@ -1848,8 +1964,17 @@ class AnalysisOrchestrationService:
                     raise _error("結果が保存上限を超えています。", "result_size_limit")
                 if run["status"] in TERMINAL:
                     raise _error("停止後の結果は採用しません。", "late_response_after_stop")
-                self._validate_result(db, run, task, raw)
+                metric_validation = self._validate_result(db, run, task, raw)
+                if metric_validation is not None:
+                    meta["metric_validation"] = metric_validation
+                    self._event(db, run_id, "metric_codec_validated", "統計専用デコーダーで参照・演算・集計値を検証しました。",
+                        source="handler", target="orchestrator", task_id=task_id,
+                        profile=metric_validation["profile"], state_sha256=metric_validation["state_sha256"],
+                        decoded_item_count=len(metric_validation["items"]), metric_status=metric_validation["status"])
                 meta.update(validation_status="valid", error="")
+                if task["role"] == "statistics" and task["method_id"] == "cross_tabulation":
+                    meta["calculation"] = {key: raw[key] for key in
+                        ("availability", "denominator", "observed_count", "missing_count")}
                 task.update(status="succeeded", validation_status="valid", error="")
                 if task.get("input_artifacts"):
                     scope = task["input_artifacts"][0]["interval"]
@@ -1922,7 +2047,7 @@ class AnalysisOrchestrationService:
         reports, requirements = [], {}
         tasks = [task for task in self._tasks(db, run["run_id"]) if task["phase"] == "initial_analysis"]
         expected = {("interpretation", "agent-v1"), ("verification", "agent-v1"), ("critic", "agent-v1"),
-                    *(("statistics", method) for method in METHODS)}
+                    *(("statistics", method) for method in INITIAL_METHODS)}
         paged = run["config"].get("model_context_version") or run["config"].get("analysis_interval_version")
         if {(task["role"], task["method_id"]) for task in tasks} != expected or not paged and len(tasks) != len(expected):
             raise _error("初回分析の担当が揃っていません。", "initial_analysis_incomplete")
@@ -2164,11 +2289,14 @@ class AnalysisOrchestrationService:
                     raise _error("追加タスクの役割・問い・理由・採用基準が不足しています。", "invalid_intent")
                 if role == "statistics":
                     method = intent.get("method_id")
-                    if method not in METHODS or (method != "label_frequency" and (intent.get("evidence_ids") or intent.get("scope") or intent.get("label_dependent"))):
+                    if (method == "cross_tabulation" and "cross_tabulation" in run["config"].get("required_methods", [])
+                            and intent.get("label_field", "codes") != "codes"):
+                        raise _error("必須クロス集計の列はcodesに固定されています。", "required_method_spec_mismatch")
+                    if method not in METHODS or (method not in LABEL_METHODS and (intent.get("evidence_ids") or intent.get("scope") or intent.get("label_dependent"))):
                         raise _error("既存コード計算は初期版の全範囲専用です。", "method_scope_unavailable")
-                    if method == "label_frequency" and intent.get("label_field", "codes") not in LABEL_FIELDS:
+                    if method in LABEL_METHODS and intent.get("label_field", "codes") not in LABEL_FIELDS:
                         raise _error("対応するラベル集計列を指定してください。", "label_field_unavailable")
-                elif intent.get("method_id") == "label_frequency":
+                elif intent.get("method_id") in LABEL_METHODS:
                     raise _error("ラベル集計はstatisticsへ指定してください。", "label_field_unavailable")
                 if not isinstance(intent.get("evidence_ids", []), list) or any(ref not in evidence for ref in intent.get("evidence_ids", [])):
                     raise _error("タスクの根拠が存在しません。", "evidence_missing")
@@ -2218,6 +2346,9 @@ class AnalysisOrchestrationService:
                 if not (value is None or type(value) in {str, bool, int, float}
                         or (isinstance(value, list) and all(isinstance(v, str) for v in value))):
                     raise _error("ラベル値は文字列・数値・真偽値・文字列配列で指定してください。", "invalid_label_patch")
+
+        from .services import metric_delivery
+        return metric_delivery.validate(db, run, task, raw)
 
     def _save_issues(self, db, run, task, raw, meta):
         for issue in raw.get("issues", []):
@@ -2352,11 +2483,14 @@ class AnalysisOrchestrationService:
             db.execute("UPDATE orchestration_issues SET payload_json=? WHERE issue_id=?", (_json(issue), issue["issue_id"]))
 
     def _apply_specialist_review(self, db, run, task, raw, meta):
-        self._validate_result(db, run, task, raw)
+        metric_validation = self._validate_result(db, run, task, raw)
         decision = {**copy.deepcopy(raw), "decision_id": _id("decision"), "role": "orchestrator",
             "phase": "specialist_review", "domain": task["intent"]["scope"]["domain"],
             "result_id": meta["result_id"], "task_id": task["task_id"], "iteration": run["iteration"],
             "annotation_version": task["annotation_version"], "created_at": _now()}
+        if metric_validation is not None:
+            decision.update(model_summary=raw["summary"], summary=metric_validation["answer"],
+                            metric_validation=metric_validation)
         if run["config"].get("artifact_review_version"):
             candidates = task["context_manifest"].get("artifact_candidates", [])
             index = {c["result_id"]: c for c in candidates}
@@ -2493,7 +2627,15 @@ class AnalysisOrchestrationService:
             prior_results += [entry["result_id"] for d in previous_sources for entry in d["result_assessments"]]
             current_results = assessments + [rid for report in domain_reports if report["result_id"] not in previous_domain_ids for rid in report["source_result_ids"]]
             new_review_checks = self._new_review_checks(db, run, prior_results, current_results) if run["config"].get("artifact_review_version") else []
-            if repeated and not (fresh_basis or new_responses or new_labels or new_review_checks):
+            reviewed_human_stop = (
+                run.get("completion_protocol_version") and (raw.get("stop") or {}).get("reason") == "human_review_required"
+                and not raw.get("intents") and run["reviewed_stop_versions"]
+                and not self._pending_result_assessments(db, run)
+                and self._analysis_processing_tasks_complete(db, run)
+                and not db.execute("SELECT 1 FROM orchestration_issues WHERE run_id=? AND issue_id NOT IN "
+                                   "(SELECT issue_id FROM orchestration_responses WHERE run_id=?) LIMIT 1",
+                                   (run["run_id"], run["run_id"])).fetchone())
+            if repeated and not reviewed_human_stop and not (fresh_basis or new_responses or new_labels or new_review_checks):
                 meta.update(content_status="no_progress", repeated_decision_id=repeated["decision_id"])
                 db.execute("UPDATE orchestration_results SET state_json=? WHERE result_id=?", (_json(meta), meta["result_id"]))
                 self._event(db, run["run_id"], "core_no_progress",
@@ -2547,7 +2689,14 @@ class AnalysisOrchestrationService:
             self._write_run(db, run)
             return
         intents = raw.get("intents", [])
-        if raw.get("stop"):
+        if raw.get("stop") and any(not p["complete"] for p in self._required_methods_progress(db, run)):
+            if self._schedule_required_methods(db, run):
+                run["phase"] = "specialists"
+                self._write_run(db, run)
+            elif run["status"] not in TERMINAL:
+                self._stop(db, run, "required_methods_incomplete")
+            return
+        if raw.get("stop") and not (intents and run.get("completion_protocol_version")):
             proposal = {**raw["stop"], "target_id": "view:" + run["run_id"], "target_version": run["view_version"],
                         "decision_id": decision["decision_id"], "unexecuted_intents": intents}
             # A reviewer cannot veto indefinitely. A reviewed unchanged view needs
@@ -2555,6 +2704,22 @@ class AnalysisOrchestrationService:
             reviewed = run["view_version"] in run["reviewed_stop_versions"]
             unanswered = db.execute("SELECT issue_id FROM orchestration_issues WHERE run_id=? AND issue_id NOT IN (SELECT issue_id FROM orchestration_responses WHERE run_id=?)",
                                     (run["run_id"], run["run_id"])).fetchall()
+            # 分析処理の完了と、人による改訂版の確認待ちを区別する。
+            # 前版をレビュー済みでも、改訂版を確認済みとは表示しない。
+            tasks_finished = self._analysis_processing_tasks_complete(db, run)
+            if (run.get("completion_protocol_version") and (raw["stop"]["reason"] == "human_review_required" or not reviewed)
+                    and run["reviewed_stop_versions"] and not unanswered and tasks_finished
+                    and not self._pending_result_assessments(db, run)):
+                run["pending_stop"] = proposal
+                if self._continue_minimum_iterations(db, run, raw["stop"]["reason"]):
+                    return
+                run["analysis_processing_complete"] = True
+                run["human_review_status"] = "required"
+                run["model_stop_reason"] = raw["stop"]["reason"]
+                if not reviewed:
+                    run["review_status"] = "incomplete"
+                self._stop(db, run, "human_review_required")
+                return
             if reviewed:
                 run["pending_stop"] = proposal
                 if self._continue_minimum_iterations(db, run, raw["stop"]["reason"]):
@@ -2856,7 +3021,7 @@ class AnalysisOrchestrationService:
                     **({"target_id": run["initial_id"], "target_version": 0} if role == "critic" else {})})
         intents.extend({"role": "statistics", "method_id": method,
                        "question": "初回の数量・統計: " + method, "label_field": "codes"}
-                       for method in sorted(METHODS))
+                       for method in sorted(INITIAL_METHODS))
         return intents
 
     def _run_analysis(self, run_id: str) -> None:
@@ -2904,6 +3069,12 @@ class AnalysisOrchestrationService:
                                 run["phase"] = phase = "initial_labels"
                             self._write_run(db, run)
                     if run["config"].get("specialist_orchestration_version") and phase in {"core", "specialists"}:
+                        if self._schedule_required_methods(db, run):
+                            run["phase"] = phase = "specialists"
+                            self._write_run(db, run)
+                            tasks = self._tasks(db, run_id)
+                        if run["status"] in TERMINAL:
+                            return
                         pending = self._pending_result_assessments(db, run)
                         if pending:
                             queued = [t for t in tasks if t["role"] == "orchestrator" and t["status"] == "queued"]

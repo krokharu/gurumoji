@@ -8,6 +8,51 @@
       <p id="orchestration-settings-target" class="orchestration-target"></p>
       <div id="orchestration-settings-message" class="alert" role="alert" hidden></div>
       <label class="field"><span>明らかにしたいこと</span><textarea id="orchestration-question" rows="3" maxlength="2000" required placeholder="例：意見が変わった場面と、その根拠を確かめたい"></textarea></label>
+      <fieldset class="orchestration-reanalysis-settings">
+        <legend>保存結果を使って再分析</legend>
+        <label class="field"><span>参照する分析ID</span><input id="orchestration-source-analysis-id" maxlength="207" autocomplete="off" placeholder="run_… または result_…"><small>同じ会話の実行ID・結果IDを指定できます。履歴のIDをコピーして入力してください。</small></label>
+        <div class="app-dialog-actions"><button id="orchestration-source-load" class="secondary-button" type="button">参照結果を確認</button><button id="orchestration-source-clear" class="secondary-button" type="button">参照を外す</button></div>
+        <p id="orchestration-source-status" class="field-note" role="status" aria-live="polite"></p>
+        <div id="orchestration-source-preview" class="orchestration-source-preview" hidden></div>
+        <label class="field"><span>今回の追加プロンプト</span><textarea id="orchestration-human-prompt" rows="3" maxlength="8000" placeholder="例：前回の価格に関する解釈を、反例と欠測も含めて再検討してください"></textarea><small>元の問いと追加指示を区別して保存し、参照結果とともに新しい分析へ渡します。元の結果は保持されます。</small></label>
+      </fieldset>
+      <label class="field"><span>分析テンプレート</span><select id="orchestration-template">
+        <option value="">指定しない</option>
+        <optgroup label="共通の入口">
+          <option value="common" selected>共通分析計画</option>
+          <option value="qualitative">質的分析・基本</option>
+          <option value="quantitative">量的分析・基本</option>
+          <option value="joint_display">質・量の統合表示</option>
+        </optgroup>
+        <optgroup label="既存手法に沿った雛形">
+          <option value="qualitative_content">質的内容分析</option>
+          <option value="thematic">テーマ分析</option>
+          <option value="framework">フレームワーク分析</option>
+          <option value="interaction">相互作用分析</option>
+          <option value="quantitative_text">計量テキスト分析</option>
+          <option value="group_statistics">記述統計・群間比較</option>
+          <option value="scat">SCAT</option>
+          <option value="mgta">M-GTA</option>
+          <option value="kj">KJ法</option>
+        </optgroup>
+        <optgroup label="適用条件を確認する雛形">
+          <option value="stc">体系的テキスト凝縮（STC）</option>
+          <option value="template_analysis">テンプレート分析</option>
+          <option value="rapid_qualitative">迅速質的分析</option>
+          <option value="lag_sequential">遅延逐次分析</option>
+          <option value="critical_incident">クリティカル・インシデント法</option>
+          <option value="qca">質的比較分析（QCA）</option>
+        </optgroup>
+      </select><small>選んだ手順をエージェントの確認項目に加えます。手法の自動実行や研究上の結論の確定は行いません。</small></label>
+      <fieldset class="orchestration-required-settings">
+        <legend>必ず実行する分析手法</legend>
+        <p class="field-note">自動処理で実行を保証する手法です。AIの提案にかかわらず実行し、担当の評価と統合まで確認します。</p>
+        <label class="check-row"><input type="checkbox" name="orchestration_required_method" value="participation"><span>発話量・参加バランス</span></label>
+        <label class="check-row"><input type="checkbox" name="orchestration_required_method" value="conversation_dynamics"><span>会話の時間構造（間・重なり・話者交替）</span></label>
+        <label class="check-row"><input type="checkbox" name="orchestration_required_method" value="label_frequency"><span>ラベル度数（codes欄・欠測を別表示）</span></label>
+        <label class="check-row"><input type="checkbox" name="orchestration_required_method" value="cross_tabulation"><span>クロス集計（話者×コード・件数と行内割合）</span></label>
+        <small>コードが付いている発話を話者別に比較します。欠測は別表示し、全件欠測では集計不可と表示します。上の分析テンプレートは、専門家が検討する手順の指定です。</small>
+      </fieldset>
       <div class="orchestration-form-grid">
         <label class="field"><span>AIの実行先（共通）</span><select id="orchestration-provider"><option value="lmstudio">LM Studio（ローカル）</option><option value="openai">OpenAI（クラウド）</option><option value="google">Google Gemini（クラウド）</option></select></label>
         <label class="field"><span>モデルID</span><input id="orchestration-model" maxlength="200" placeholder="空欄なら設定済みモデル"></label>
@@ -47,9 +92,9 @@
       </fieldset>
       <fieldset class="orchestration-output-settings">
         <legend>完了後の保存先</legend>
-        <p class="field-note">正常終了した分析は、入力・全量台帳・初期版・結果を固定成果物としてアプリに保存します。</p>
+        <p class="field-note">分析処理が完了した結果は、入力・全量台帳・初期版とともに固定保存します。人の確認事項が残る場合も、要確認のAI下書きとしてアプリに保存します。</p>
         <label class="check-row"><input id="orchestration-publication-all" type="checkbox" aria-describedby="orchestration-publication-disclosure"><span>この新しい実行が正常終了したら、設定済みの4つのVaultにも出力する</span></label>
-        <p id="orchestration-publication-disclosure" class="field-note">対象はInput／Orchestrator／Visualization／Researchの4つ一式です。Researchには保存時点の発話本文も複製します。生成ノートは既存の履歴保護経路で更新し、手動編集の履歴と削除済みノートの保護を維持します。研究者所有ノートの本文・タグ・別名は変更しません。停止・取消・失敗した分析は自動出力しません。</p>
+        <p id="orchestration-publication-disclosure" class="field-note">対象はInput／Orchestrator／Visualization／Researchの4つ一式です。Researchには保存時点の発話本文も複製します。生成ノートは既存の履歴保護経路で更新し、手動編集の履歴と削除済みノートの保護を維持します。研究者所有ノートの本文・タグ・別名は変更しません。人の確認待ち・処理未完了・取消・失敗の場合、Vaultへの自動出力は保留します。</p>
         <p class="field-note">既定はOFFです。この選択は今回開始する実行だけに保存され、過去の実行の再開・再試行には追加されません。</p>
       </fieldset>
       <p class="orchestration-boundary">探索的なAI下書きです。実行成功・検証済みの表示は、研究上の結論の確定を意味しません。画面の描画・状態取得にAIは使いません。</p>
@@ -72,6 +117,12 @@
       <button id="orchestration-abandon" class="secondary-button danger" type="button" disabled>選択した呼出しを放棄して復旧</button>
     </fieldset>
     <p id="orchestration-live-question" class="orchestration-question"></p>
+    <section class="orchestration-result-identity" aria-label="分析結果のID">
+      <p id="orchestration-run-identity"></p><p id="orchestration-result-identity"></p>
+      <div class="app-dialog-actions"><button id="orchestration-copy-run" class="secondary-button" type="button">実行IDをコピー</button><button id="orchestration-copy-result" class="secondary-button" type="button">結果IDをコピー</button><button id="orchestration-reanalyze" class="secondary-button" type="button">この結果に指示を加えて再分析</button></div>
+      <p id="orchestration-processing-state" class="field-note" role="status"></p>
+      <ul id="orchestration-required-progress" class="orchestration-required-progress" aria-label="必須分析の実施状況"></ul>
+    </section>
     <section id="orchestration-initial" class="orchestration-initial" aria-labelledby="orchestration-initial-title" hidden>
       <h3 id="orchestration-initial-title">初期分析の保存地点 <span class="orchestration-kind">CODE</span></h3>
       <p id="orchestration-initial-summary" class="field-note"></p>

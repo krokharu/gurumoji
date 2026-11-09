@@ -23,9 +23,33 @@ class TranscriptionReporter:
         self.update_job(self.job, progress=value)
 
     def stage(self, key: str, label: str, value: int = 0) -> None:
-        self.update_job(
-            self.job, stage=key, stage_label=label, stage_progress=value,
-        )
+        # 工程の完了は全体の割合から推測せず、工程自身の完了通知を記録する。
+        with self.jobs_lock:
+            history = [dict(item) for item in getattr(self.job, "stage_history", [])]
+            current = next((item for item in history if item["key"] == self.job.stage), None)
+            if key in {"failed", "cancelled"}:
+                if current and current["status"] != "completed":
+                    current["status"] = key
+                else:
+                    history.append({"key": key, "label": label, "progress": max(0, min(100, value)), "status": key})
+            elif key == "completed":
+                for item in history:
+                    if item["status"] not in {"failed", "cancelled"}:
+                        item["progress"] = 100
+                        item["status"] = "completed"
+            else:
+                for item in history:
+                    if item["status"] == "running" and item["key"] != key:
+                        item["status"] = "pending"
+                entry = next((item for item in history if item["key"] == key), None)
+                if entry is None:
+                    entry = {"key": key}
+                    history.append(entry)
+                entry.update(label=label, progress=max(0, min(100, value)), status="completed" if value >= 100 else "running")
+            self.update_job(
+                self.job, stage=key, stage_label=label, stage_progress=value,
+            )
+            self.job.stage_history = history
 
     def record_ai_usage(self, sample: dict[str, Any]) -> None:
         usage = self.normalize_usage(sample)

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from ..analysis_core import AnalysisContractError
 from .ai.client import lmstudio_base_url, json_messages
+from . import context_delivery
 
 CONTEXT_VERSION = 1
 OUTPUT_RESERVE = 1600
@@ -79,7 +80,7 @@ def transform_references(value, mapping, *, restore=False, schema=False):
         if isinstance(node, list):
             return [walk(child, key, field) for child in node]
         if field and (not schema or key == "enum"):
-            return convert(node, field)
+            return None if node is None else convert(node, field)
         return node
     return walk(value)
 
@@ -122,7 +123,7 @@ def reference_messages(context, *, columnar=False, compact_references=False):
     resources, references = [], []
     for field in ("raw_evidence", "labels", "initial", "results", "issues", "label_proposals",
                   "initial_label_catalog", "initial_analysis_report", "domain_reports",
-                  "prior_domain_reports", "current_view", "history", "stop_proposal", "expert_knowledge", "finding_resource"):
+                  "prior_domain_reports", "current_view", "history", "stop_proposal", "expert_knowledge", "finding_resource", "metric_context", "reanalysis"):
         if field not in control or not control[field]:
             continue
         content = control.pop(field)
@@ -158,6 +159,7 @@ def reference_messages(context, *, columnar=False, compact_references=False):
 
 def restored_reference_context(user, data_messages=None):
     """Validate and reconstruct packets for diagnostics/tests; no filesystem read."""
+    user, data_messages = context_delivery.original_messages(user, data_messages)
     control = json.loads(user)
     if control.get("message_kind") != "task_instruction":
         return expanded_evidence(control)
@@ -218,7 +220,7 @@ def compact_context(context):
         value["task"]["intent"].pop("question", None)
     if phase == "initial_routing":
         return {key: value[key] for key in ("task", "question", "data_version",
-                "initial_analysis_report", "research_mode", "execution_allowed", "expert_knowledge", "resources_origin", "analysis_interval_index", "artifact_review_version") if key in value}
+                "initial_analysis_report", "research_mode", "execution_allowed", "expert_knowledge", "resources_origin", "analysis_interval_index", "artifact_review_version", "reanalysis", "reanalysis_origin", "human_prompt", "required_methods_progress") if key in value}
     if task.get("role") in {"core", "orchestrator"}:
         # The original report is already represented by immutable result references.
         value.pop("initial_analysis_report", None)
@@ -348,7 +350,8 @@ def hydrate_core_evidence(context, pool, row_limit, text_limit, *, select=None):
     return value
 
 
-def context_manifest(context, schema, system, user, budget, data_messages=None, *, mapping=None):
+def context_manifest(context, schema, system, user, budget, data_messages=None, *, mapping=None, metric_contract=None):
+    original_user, _ = context_delivery.original_messages(user, data_messages)
     provided = [r["evidence_id"] for r in context.get("raw_evidence", [])]
     citations = set(provided)
     for claim in context.get("current_view", {}).get("claims", []):
@@ -380,10 +383,11 @@ def context_manifest(context, schema, system, user, budget, data_messages=None, 
                 "review_procedure": {k: context["review_procedure"][k] for k in ("procedure_id", "version", "sha256")}
                     if context.get("review_procedure") else None} if context.get("artifact_review_version") else {}),
             "expert_knowledge": copy.deepcopy(context.get("expert_knowledge")), "budget": budget,
+            **({"metric_contract": copy.deepcopy(metric_contract)} if metric_contract is not None else {}),
             **({"reference_map": copy.deepcopy(mapping), "reference_map_sha256": digest(mapping),
                 "evidence_transport_version": 1} if mapping is not None else {}),
             **({"reference_version": 1, "data_messages_sha256": digest(data_messages),
-                "resource_references": json.loads(user)["resource_references"]} if data_messages is not None else {})}
+                "resource_references": json.loads(original_user)["resource_references"]} if data_messages is not None else {})}
 
 
 def measure_local_context(model, base_url, system, user, schema, output_reserve=OUTPUT_RESERVE, *, data_messages=None):

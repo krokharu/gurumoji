@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='ai-effort.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='stitch-theme.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='obussql.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='speaker-timeline.css') }}">
 </head>
 <body class="booting">
   <div id="boot-splash" class="boot-splash" role="status" aria-label="Gurumojiを起動しています">
@@ -36,7 +37,8 @@
 
   <!--
     Screen map (one URL per screen, see docs/program-vault/20-Modules/ui-screens.md):
-      #/new          新しい文字起こし（3ステップ：ファイル → 設定 → 開始）と処理状況
+      #/new          新しい文字起こし（3ステップ：ファイル → 設定 → 開始）
+      #/running      文字起こしの実行状況
       #/data         処理済みデータの一覧
       #/data/<id>    1件の作業画面（発話の編集 / 会話・話者 / 議事録・アウトライン / ファイル・管理）
       #/analysis/<id> 分析・可視化
@@ -64,7 +66,7 @@
         <button id="prior-internal-button" class="view-tab" type="button" role="tab" aria-controls="internal-data-card" aria-selected="false" data-prior-view="internal">内部データ</button>
       </nav>
       <div class="app-bar-tools">
-        <button id="job-chip" class="job-chip" type="button" hidden>
+        <button id="job-chip" class="job-chip" type="button" aria-controls="running-view" hidden>
           <i class="job-chip-dot" aria-hidden="true"></i>
           <span id="job-chip-label">処理中</span>
         </button>
@@ -132,6 +134,7 @@
     </nav>
     <!-- ===== 新規作成：ファイル → 設定 → 開始 ===== -->
 {% include "views/create.html" %}
+{% include "views/running.html" %}
 
     <!-- ===== 処理済みデータ ===== -->
 {% include "views/library.html" %}
@@ -270,6 +273,8 @@
   {% endif %}
   <script src="{{ url_for('static', filename='analysis-visualizations.js') }}" defer></script>
   <script src="{{ url_for('static', filename='analysis-method-view.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='progress-journey.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='speaker-timeline.js') }}" defer></script>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   <script src="{{ url_for('static', filename='data-catalog.js') }}" defer></script>
   <script src="{{ url_for('static', filename='notation.js') }}" defer></script>

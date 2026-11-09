@@ -23,9 +23,9 @@ from ..env_settings import env_enabled
 from .durable_files import path_has_reparse_ancestor
 
 ENV_ENABLED = "MOJIOKOSI_OBUSSQL_ENABLED"
-REFERENCE_COMMIT = "5be32120d17a7f07eac7a2c41b0bab1372ae4cdb"
+REFERENCE_COMMIT = "07128acfe13c1162552f7928b5ab0e7c954fac1b"
 PACKAGE_VERSION = "0.0.1.dev0"
-MAF_REFERENCE_COMMIT = "228a86477aa5cee7e651b9fd661b4f4e8c6d2fdc"
+MAF_REFERENCE_COMMIT = "07128acfe13c1162552f7928b5ab0e7c954fac1b"
 MAF_PACKAGE_VERSION = "0.1.0.dev0"
 MAF_CORE_VERSION = "1.22.0"
 MAF_PROFILE = "obus.maf.pipeline.v1"
@@ -90,12 +90,7 @@ def _load_api():
 
 
 def maf_status() -> dict:
-    """Inspect the existing upstream extension; never run a workflow or callback.
-
-    obussql-maf is a separate distribution on ObusSQL's development branch. Its
-    production profile and Gurumoji's host binding are not ready for execution.
-    The same opt-in controls diagnostics, without coupling MAF to note reads.
-    """
+    """上流mainの独立したMAF拡張を診断し、ワークフローは実行しない。"""
     result = {
         "package": "obussql-maf", "expected_version": MAF_PACKAGE_VERSION,
         "framework": "agent-framework-core", "expected_framework_version": MAF_CORE_VERSION,

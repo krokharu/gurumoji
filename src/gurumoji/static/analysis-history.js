@@ -26,6 +26,7 @@
     return response.json();
   }
   const notice = value => {node('message').textContent=value;};
+  function copyId(id) {return button('IDをコピー',async()=>{try{await navigator.clipboard.writeText(id);notice('IDをコピーしました。');}catch{notice('コピーできませんでした。表示されたIDを選択してコピーしてください。');}});}
   function metadata(entries) {const dl=el('dl',undefined,'analysis-history-metadata');for(const [key,value] of entries){dl.append(el('dt',key),el('dd',value));}return dl;}
   function pageLabel(page, count) {return Number.isInteger(page?.total) ? page.total===0 ? '該当する記録なし' : `${(page.offset||0)+1}〜${(page.offset||0)+count} / ${page.total}件` : `総件数: 未記録 · このページ ${count}件`;}
   function setPagination(prefix, page, count) {node(`${prefix}prev`).disabled=!(page?.offset>0);node(`${prefix}next`).disabled=!page?.has_more;node(`${prefix}page`).textContent=pageLabel(page,count);}
@@ -101,6 +102,7 @@
     node('summary-title').textContent=`最新保存の統合結果 · AI下書き · 作成時ラベル v${text(run.summary_annotation_version)}`;node('summary-links').replaceChildren();
     if(run.summary_entry_id)node('summary-links').append(button('この統合結果の判断・根拠へ',()=>loadEntry(run.summary_entry_id)));
     else node('summary-links').append(el('p','統合結果の出典リンク: 未記録','field-note'));
+    node('summary-links').append(copyId(run.run_id));
     node('audit').textContent=`記録の網羅性: ${data.audit?.status==='complete'?'保存された項目を取得':data.audit?.status==='partial'?'一部未記録':'未記録'} · ${text(data.audit?.message)}${run.truncated_fields?.length ? ` · 表示上限による省略: ${text(run.truncated_fields)}` : ''}`;
     const select=node('version');select.replaceChildren();
     const values=[...new Set([versions.initial,...(Array.isArray(versions.available)?versions.available:[]),versions.latest,versions.selected].filter(Number.isInteger))].sort((a,b)=>a-b);
@@ -143,6 +145,7 @@
       const host=node('detail');host.replaceChildren(el('h3',entry.title),el('p',`${label(entry.kind)} · ${label(entry.disposition||entry.status)} · ${label(entry.operation)}`));
       if(entry.disposition==='proposal'||entry.status==='proposed'||entry.operation==='proposal')host.append(el('p','この記録は提案です。変更案を採用済みのラベルとして扱いません。','analysis-history-audit'));
       host.append(metadata([['記録ID',entry.entry_id],['担当',label(entry.role)],['モデル',entry.model],['日時',entry.created_at],['タスク',entry.task_id],['結果ID',entry.result_id],['判断ID',entry.decision_id],['提案ID',entry.proposal_id],['対象発話',entry.utterance_id],['対象項目',entry.field],['ラベル版',entry.annotation_version],['要約',entry.summary],['理由',entry.reason]]));
+      if(entry.result_id)host.append(copyId(entry.result_id));
       const changes=el('div',undefined,'analysis-history-before-after');for(const which of ['before','after']){const section=el('section');section.append(el('h4',`${which==='before'?'変更前':'変更後'} · v${text(entry[`${which}_annotation_version`])}`),el('pre',valueAt(entry,which)));changes.append(section);}host.append(changes);
       if(Object.hasOwn(entry,'proposed_value')){host.append(el('h4','提案値（採用された値とは別の記録）'),el('pre',entry.proposed_value));}
       if(['label','legacy_label'].includes(entry.kind)&&Object.hasOwn(entry,'stated_old_value'))host.append(el('h4','提案が申告した変更前値（実値とは別）'),el('pre',entry.stated_old_value));

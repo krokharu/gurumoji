@@ -313,8 +313,10 @@ class AnalysisQueries:
             from ..analysis_store import canonical, csv_bytes
             content = dict(content)
             mapping = {}
-            for name in manifest['typed_tables']:
-                table = self._store.read_table(run_id, name)
+            # 既に検証した入力とbytesを共有し、全表の検証を繰り返さない。
+            snapshot = read_saved_json(content['input.json'])
+            tables = self._store._read_tables_from_package(run_id, snapshot, manifest, content)
+            for name, table in tables.items():
                 content[f'tables/{name}.json'] = canonical(table)
                 content[f'tables/{name}.csv'] = csv_bytes(table['fields'], [r['values'] for r in table['rows']])
                 mapping[name] = {**manifest['typed_tables'][name], 'data': f'tables/{name}.json'}
