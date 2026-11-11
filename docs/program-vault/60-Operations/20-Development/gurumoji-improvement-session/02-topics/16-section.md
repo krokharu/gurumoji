@@ -257,3 +257,12 @@ tags:
 - 独立したPython仮想環境とアプリの分離コピーで、Python compileall、ruff 0.8.6、JavaScript 25件の構文検査、スライド関連10試験が成功。スライドカタログと6定義ファイルのSHA-256、版 `2.1.0` を照合した。バージョン書式・README一致の検査は成功し、Coming Soonの残存なしによる案内のみ。
 - 実利用者DB・実Vault・モデル推論・GUI動作・全回帰試験は実行していない。今回は現行内容の保存とブランチ整理を対象とする。
 - main・開発資料の反映とGitHubブランチ削除は、push前の参照再照合後に実施する。公開版のファイル・タグ・Releaseは更新しない。
+
+### 同日：統合・削除の完了確認
+
+- ローカル正本を `main` の `8df5fb4994c78187e892efa4301f8d2ec2b45692` として保存し、GitHubへ通常pushした。アプリ本体は退避時の全ファイルSHA-256と一致し、差分は既存の保護規則を継承した `.gitignore` のみ。作業場所は同じ利用者checkoutで、ブランチはmain、未コミット変更なし。
+- 試験・設計記録の最新版は開発資料ブランチの `9cfe8fbd7399d378ff6dda0932cf124c7673d833` としてGitHubへ保存した。
+- 整理前のSHAと復旧bundle内の参照を照合し、GitHub上の開発用45ブランチをatomic pushで削除した。残存リモートブランチはmain・archive/development-assets-20261016・public/developの3本。public/releaseは元からリモートには存在せず、ローカルの保存用参照を維持した。
+- ローカルの開発用19ブランチと補助作業ツリー12個を削除した。ローカルにはmain・archive/development-assets-20261016・public/develop・public/releaseの4本、作業ツリーは利用者checkoutの1個を残す。旧ブランチの全内容をコードへ再適用したものではなく、利用者指定で現行ソースを最新版として確定し、旧試作の固有履歴・未保存変更を復旧用bundleとtarへ保持した。
+- Orca管理の補助作業ツリーはWindowsのジャンクションを介した配置であり、Orca CLIの削除が登録パス照合で失敗した。Git所属・実体の絶対パス・退避hashを確認してGitで削除し、残った空の実体ディレクトリだけを削除した。Orcaの一覧でもmainのみになったことを確認した。
+- GitHub Actionsの `checks` は成功（run 43024287303）。`version` は意図どおりスキップされ、タグ・Release・公開版の内容には変更なし。全履歴の復旧bundleは独立した完全履歴として検証済みで、補助作業ツリーのファイルは削除直前にも再照合した。
