@@ -8,6 +8,7 @@ diff."""
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 import math
 import sqlite3
 import subprocess
@@ -122,34 +123,79 @@ def normalize_edited_segments(item_id: str, raw_segments: Any) -> list[dict[str,
     ) else normalized
 
 
+@dataclass(frozen=True)
+class LibraryStorePort:
+    database_connection: Any
+    library_public: Any
+    library_row: Any
+    row_segments: Any
+    upsert_library_item: Any
+
+
+@dataclass(frozen=True)
+class LibraryEditFiles:
+    default_output_directory: Callable[[], Any]
+    durable_move: Any
+    edit_journal_secret: Any
+    edit_storage_id: Any
+    manual_output_directory: Any
+    promote_staged_files: Any
+    reconcile_edit_transactions_before_mutation: Any
+    record_output_import_provenance: Any
+    write_edit_preparation_marker: Any
+    write_edit_transaction_manifest: Any
+    write_outputs: Any
+    write_subtitled_video_assets: Any
+
+
+@dataclass(frozen=True)
+class LibraryTrainingPort:
+    insert_training_events: Any
+    prepare_training_corrections: Any
+    row_session_profile: Any
+    training_events_from_connection: Any
+    training_lock: Any
+    write_training_exports: Any
+
+
+@dataclass(frozen=True)
+class LibraryEditJobs:
+    jobs: Any
+    jobs_lock: Any
+
+
 def make_library_update(
     *,
-    default_output_directory: Callable[[], Any],
-    database_connection: Any,
-    durable_move: Any,
-    edit_journal_secret: Any,
-    edit_storage_id: Any,
-    insert_training_events: Any,
-    jobs: Any,
-    jobs_lock: Any,
-    library_public: Any,
-    library_row: Any,
-    manual_output_directory: Any,
-    prepare_training_corrections: Any,
-    promote_staged_files: Any,
-    reconcile_edit_transactions_before_mutation: Any,
-    record_output_import_provenance: Any,
-    row_segments: Any,
-    row_session_profile: Any,
-    training_events_from_connection: Any,
-    training_lock: Any,
-    upsert_library_item: Any,
-    write_edit_preparation_marker: Any,
-    write_edit_transaction_manifest: Any,
-    write_outputs: Any,
-    write_subtitled_video_assets: Any,
-    write_training_exports: Any,
+    store: LibraryStorePort,
+    files: LibraryEditFiles,
+    training: LibraryTrainingPort,
+    job_runtime: LibraryEditJobs,
 ) -> Callable[..., Any]:
+    database_connection = store.database_connection
+    library_public = store.library_public
+    library_row = store.library_row
+    row_segments = store.row_segments
+    upsert_library_item = store.upsert_library_item
+    default_output_directory = files.default_output_directory
+    durable_move = files.durable_move
+    edit_journal_secret = files.edit_journal_secret
+    edit_storage_id = files.edit_storage_id
+    manual_output_directory = files.manual_output_directory
+    promote_staged_files = files.promote_staged_files
+    reconcile_edit_transactions_before_mutation = files.reconcile_edit_transactions_before_mutation
+    record_output_import_provenance = files.record_output_import_provenance
+    write_edit_preparation_marker = files.write_edit_preparation_marker
+    write_edit_transaction_manifest = files.write_edit_transaction_manifest
+    write_outputs = files.write_outputs
+    write_subtitled_video_assets = files.write_subtitled_video_assets
+    insert_training_events = training.insert_training_events
+    prepare_training_corrections = training.prepare_training_corrections
+    row_session_profile = training.row_session_profile
+    training_events_from_connection = training.training_events_from_connection
+    training_lock = training.training_lock
+    write_training_exports = training.write_training_exports
+    jobs = job_runtime.jobs
+    jobs_lock = job_runtime.jobs_lock
     def _update_library_from_payload_locked(
         item_id: str,
         payload: Any,

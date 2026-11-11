@@ -1,6 +1,6 @@
 # 開発・試験・設計書
 
-利用者の指定により、このリポジトリのmainは開発版アプリ、`archive/development-assets-20261016` は開発資料・試験の保存用です。公開・配布用は別リポジトリ [Gurumoji-publicのpublic/release](https://github.com/krokharu/Gurumoji-public/tree/public/release) に分離します。開発版のmainからReleaseを自動公開せず、公開側へ開発版の履歴やファイルを直接移しません。
+利用者の指定により、mainは引渡し用、`archive/development-assets-20261016` は開発資料・試験の保存用です。
 
 | main | 開発資料ブランチ |
 | --- | --- |
@@ -21,9 +21,16 @@ python -m venv .venv
 .venv\Scripts\python.exe scripts/run_tests.py --output output/validation/tests
 ```
 
+Windows Python 3.12の制約は `.venv\Scripts\python.exe -m pip freeze` から再生成します。
+`config/constraints-windows-cp312.txt` には `name==version` のみ残し、直接参照・PyTorch 3製品・任意ObusSQL/MAFを除外してください。
+
 ブラウザー実操作と実モデルは通常の試験とは別に明示実行します。合成試験の成功、実モデルの契約合格、研究上の品質承認を同一視しません。
 
 mainの整理はファイルの配布範囲だけを変え、利用者DB・研究者ノート・モデル・認証設定を移行しません。未実装・品質未承認の機能の状態も変えません。
+
+GitHub ActionsはPythonのコンパイル、ruff、JavaScriptの構文を検査します。
+ローカルのlintは `python -m pip install ruff==0.8.6` の後、`ruff check src scripts --no-cache` で実行します。
+開発資料ブランチの試験ジョブは、GitHub上で確認が済むまで手動実行のみです。
 
 ## バージョンの付け方
 

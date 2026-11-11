@@ -89,7 +89,7 @@
   }
   function render(data) {
     const context = data.context;
-    if (context?.schema_version !== 'bounded-context-v1' || !Array.isArray(context.selection)) {
+    if (!['bounded-context-v1', 'gurumoji-summary-context-v1'].includes(context?.schema_version) || !Array.isArray(context.selection)) {
       throw new Error('ObusSQLの結果形式が確認対象と異なります。接続する版を確認してください。');
     }
     const articles = [];

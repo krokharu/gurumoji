@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from ..text_utils import clean_multiline, clean_single_line, json_load, utc_now_iso
+from ..text_utils import utc_now_iso
 from .durable_files import atomic_write_bytes, atomic_write_text, durable_move, sync_file_data, temporary_output_path
 from .group_analysis import analysis_csv_safe
 

@@ -74,7 +74,9 @@ from .services.analysis_history import AnalysisHistoryService
 from .services.analysis_slides import AnalysisSlidesService
 from .services.analysis_slide_templates import load_slide_templates
 from .web.analysis_slides_routes import register_analysis_slides_routes
-from .handlers.analysis_commands import AnalysisCommands, ComparisonRequestError
+from .handlers.analysis_commands import (
+    AnalysisCommands, ComparisonRequestError, AnalysisArchivePort, AnalysisLibraryPort, AnalysisExecutionPort,
+)
 from .handlers.analysis_queries import AnalysisQueries
 from .handlers.application_lifecycle import ApplicationLifecycle
 from .handlers.jobs import JobHandler
@@ -91,7 +93,7 @@ from .web.obsidian_routes import register_obsidian_routes
 from .web.obussql_routes import register_obussql_routes
 from .services.obussql import ObusSQLService
 from .web.speaker_routes import register_speaker_routes
-from .web.system_routes import register_system_routes
+from .web.system_routes import register_system_routes, SystemIdentity, SystemSettings, SystemStatus
 from .services.obsidian_watcher import ObsidianWatcher, WatcherStatus
 from .services.obsidian_workflows import ObsidianWorkflowService
 from .services.transcription_reporting import TranscriptionReporter
@@ -253,7 +255,9 @@ from .services.media_files import (
     safe_media_filename,
 )
 from .services.media_files import make_media_files
-from .web.library_routes import register_library_routes
+from .web.library_routes import (
+    register_library_routes, LibraryMediaPort, LibraryAnalysisPort, LibraryTrashPort,
+)
 from .diagnostics import (
     HIDDEN_LOCAL_PATH_MESSAGE,
     public_diagnostic_text,
@@ -285,11 +289,15 @@ from .services.transcription.options import (
     CONVERSATION_MODES,
     JobOptions,
 )
-from .handlers.transcription_start import make_transcription_start
+from .handlers.transcription_start import (
+    make_transcription_start, TranscriptionJobs, TranscriptionFiles, TranscriptionSettings,
+)
 from .services.library_edits import (
     normalize_edited_segments,
 )
-from .services.library_edits import make_library_update
+from .services.library_edits import (
+    make_library_update, LibraryStorePort, LibraryEditFiles, LibraryTrainingPort, LibraryEditJobs,
+)
 from .web.library_deletion import make_library_deletion
 from .services.analysis_annotations import make_analysis_annotation_save
 
@@ -1255,31 +1263,39 @@ def whisper_vault_settings(options: JobOptions, language: str | None) -> dict[st
 
 
 _update_library_from_payload_locked = make_library_update(
-    default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
-    database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-    durable_move=lambda *args, **kwargs: durable_move(*args, **kwargs),
-    edit_journal_secret=lambda *args, **kwargs: edit_journal_secret(*args, **kwargs),
-    edit_storage_id=lambda *args, **kwargs: edit_storage_id(*args, **kwargs),
-    insert_training_events=lambda *args, **kwargs: insert_training_events(*args, **kwargs),
-    jobs=jobs,
-    jobs_lock=jobs_lock,
-    library_public=lambda *args, **kwargs: library_public(*args, **kwargs),
-    library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
-    manual_output_directory=lambda *args, **kwargs: manual_output_directory(*args, **kwargs),
-    prepare_training_corrections=lambda *args, **kwargs: prepare_training_corrections(*args, **kwargs),
-    promote_staged_files=lambda *args, **kwargs: promote_staged_files(*args, **kwargs),
-    reconcile_edit_transactions_before_mutation=lambda *args, **kwargs: reconcile_edit_transactions_before_mutation(*args, **kwargs),
-    record_output_import_provenance=lambda *args, **kwargs: record_output_import_provenance(*args, **kwargs),
-    row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
-    row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
-    training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
-    training_lock=training_lock,
-    upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
-    write_edit_preparation_marker=lambda *args, **kwargs: write_edit_preparation_marker(*args, **kwargs),
-    write_edit_transaction_manifest=lambda *args, **kwargs: write_edit_transaction_manifest(*args, **kwargs),
-    write_outputs=lambda *args, **kwargs: write_outputs(*args, **kwargs),
-    write_subtitled_video_assets=lambda *args, **kwargs: write_subtitled_video_assets(*args, **kwargs),
-    write_training_exports=lambda *args, **kwargs: write_training_exports(*args, **kwargs),
+    store=LibraryStorePort(
+        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+        library_public=lambda *args, **kwargs: library_public(*args, **kwargs),
+        library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+        row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+        upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+    ),
+    files=LibraryEditFiles(
+        default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+        durable_move=lambda *args, **kwargs: durable_move(*args, **kwargs),
+        edit_journal_secret=lambda *args, **kwargs: edit_journal_secret(*args, **kwargs),
+        edit_storage_id=lambda *args, **kwargs: edit_storage_id(*args, **kwargs),
+        manual_output_directory=lambda *args, **kwargs: manual_output_directory(*args, **kwargs),
+        promote_staged_files=lambda *args, **kwargs: promote_staged_files(*args, **kwargs),
+        reconcile_edit_transactions_before_mutation=lambda *args, **kwargs: reconcile_edit_transactions_before_mutation(*args, **kwargs),
+        record_output_import_provenance=lambda *args, **kwargs: record_output_import_provenance(*args, **kwargs),
+        write_edit_preparation_marker=lambda *args, **kwargs: write_edit_preparation_marker(*args, **kwargs),
+        write_edit_transaction_manifest=lambda *args, **kwargs: write_edit_transaction_manifest(*args, **kwargs),
+        write_outputs=lambda *args, **kwargs: write_outputs(*args, **kwargs),
+        write_subtitled_video_assets=lambda *args, **kwargs: write_subtitled_video_assets(*args, **kwargs),
+    ),
+    training=LibraryTrainingPort(
+        insert_training_events=lambda *args, **kwargs: insert_training_events(*args, **kwargs),
+        prepare_training_corrections=lambda *args, **kwargs: prepare_training_corrections(*args, **kwargs),
+        row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
+        training_events_from_connection=lambda *args, **kwargs: training_events_from_connection(*args, **kwargs),
+        training_lock=training_lock,
+        write_training_exports=lambda *args, **kwargs: write_training_exports(*args, **kwargs),
+    ),
+    job_runtime=LibraryEditJobs(
+        jobs=jobs,
+        jobs_lock=jobs_lock,
+    ),
 )
 
 
@@ -1850,33 +1866,39 @@ def freeze_comparison_selection(items, payload):
 def analysis_commands() -> AnalysisCommands:
     """Build save dependencies at request time so patched settings stay effective."""
     return AnalysisCommands(
-        store=analysis_archive_store(),
-        find_item=library_row,
-        build_analysis=lambda row: group_analysis_for_row(
+        archive=AnalysisArchivePort(
+            store=analysis_archive_store(),
+            archive_analysis=archive_group_analysis,
+            source_fingerprint=archive_source_stamp,
+            mark_stale=mark_analysis_run_stale,
+            archive_comparison=archive_interview_comparison,
+            refresh_archive_index=refresh_archive_index,
+            publish_input_vault=publish_input_vault,
+        ),
+        library=AnalysisLibraryPort(
+            find_item=library_row,
+            database_connection=database_connection,
+            save_preparation_state=preparation.save,
+            segments_for_item=row_segments,
+            update_library_item_locked=_update_library_from_payload_locked,
+            write_lock=library_write_lock,
+            expose_local_paths=local_path_access_allowed(),
+        ),
+        execution=AnalysisExecutionPort(
+            build_analysis=lambda row: group_analysis_for_row(
             row, include_research_rows=True
         ),
-        search_kwic=search_kwic,
-        archive_analysis=archive_group_analysis,
-        source_fingerprint=archive_source_stamp,
-        mark_stale=mark_analysis_run_stale,
-        load_comparison_items=interview_comparison_request,
-        build_comparison=build_interview_comparison,
-        archive_comparison=archive_interview_comparison,
-        freeze_comparison=freeze_comparison_selection,
-        database_connection=database_connection,
-        save_preparation_state=preparation.save,
-        segments_for_item=row_segments,
-        refresh_archive_index=refresh_archive_index,
-        publish_input_vault=publish_input_vault,
-        update_library_item_locked=_update_library_from_payload_locked,
-        start_insights=start_analysis_insights_command,
-        cancel_insights=cancel_analysis_insights_command,
-        start_transformer=start_transformer_analysis_command,
-        cancel_transformer=cancel_transformer_analysis_command,
-        run_classification=run_segment_classifications_command,
-        write_lock=library_write_lock,
-        expose_local_paths=local_path_access_allowed(),
-        pipeline_service=analysis_pipeline_service(),
+            search_kwic=search_kwic,
+            load_comparison_items=interview_comparison_request,
+            build_comparison=build_interview_comparison,
+            start_insights=start_analysis_insights_command,
+            cancel_insights=cancel_analysis_insights_command,
+            start_transformer=start_transformer_analysis_command,
+            cancel_transformer=cancel_transformer_analysis_command,
+            run_classification=run_segment_classifications_command,
+            pipeline_service=analysis_pipeline_service(),
+            freeze_comparison=freeze_comparison_selection,
+        ),
     )
 
 
@@ -2004,23 +2026,29 @@ _delete_library_item_locked = make_library_deletion(
 
 
 start_transcription_job_command, admission_job_public = make_transcription_start(
-    JobRecord=JobRecord,
-    MAX_MEDIA_UPLOAD_BYTES=MAX_MEDIA_UPLOAD_BYTES,
-    TRANSCRIPT_FINISHING_MODES=TRANSCRIPT_FINISHING_MODES,
-    upload_directory=lambda: UPLOAD_DIRECTORY,
-    configured_ai_credentials=lambda *args, **kwargs: configured_ai_credentials(*args, **kwargs),
-    copy_file_limited=lambda *args, **kwargs: copy_file_limited(*args, **kwargs),
-    get_machine_profile=lambda *args, **kwargs: get_machine_profile(*args, **kwargs),
-    jobs=jobs,
-    jobs_lock=jobs_lock,
-    load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
-    local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
-    prepare_output_root=lambda *args, **kwargs: prepare_output_root(*args, **kwargs),
-    remove_owned_directory=lambda *args, **kwargs: remove_owned_directory(*args, **kwargs),
-    resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
-    run_transcription_job=lambda *args, **kwargs: run_transcription_job(*args, **kwargs),
-    save_custom_vocabulary=lambda *args, **kwargs: save_custom_vocabulary(*args, **kwargs),
-    save_upload_limited=lambda *args, **kwargs: save_upload_limited(*args, **kwargs),
+    job_runtime=TranscriptionJobs(
+        JobRecord=JobRecord,
+        jobs=jobs,
+        jobs_lock=jobs_lock,
+        run_transcription_job=lambda *args, **kwargs: run_transcription_job(*args, **kwargs),
+    ),
+    files=TranscriptionFiles(
+        MAX_MEDIA_UPLOAD_BYTES=MAX_MEDIA_UPLOAD_BYTES,
+        upload_directory=lambda: UPLOAD_DIRECTORY,
+        copy_file_limited=lambda *args, **kwargs: copy_file_limited(*args, **kwargs),
+        local_path_access_allowed=lambda *args, **kwargs: local_path_access_allowed(*args, **kwargs),
+        prepare_output_root=lambda *args, **kwargs: prepare_output_root(*args, **kwargs),
+        remove_owned_directory=lambda *args, **kwargs: remove_owned_directory(*args, **kwargs),
+        resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
+        save_upload_limited=lambda *args, **kwargs: save_upload_limited(*args, **kwargs),
+    ),
+    settings=TranscriptionSettings(
+        TRANSCRIPT_FINISHING_MODES=TRANSCRIPT_FINISHING_MODES,
+        configured_ai_credentials=lambda *args, **kwargs: configured_ai_credentials(*args, **kwargs),
+        get_machine_profile=lambda *args, **kwargs: get_machine_profile(*args, **kwargs),
+        load_token_config=lambda *args, **kwargs: load_token_config(*args, **kwargs),
+        save_custom_vocabulary=lambda *args, **kwargs: save_custom_vocabulary(*args, **kwargs),
+    ),
 )
 
 
@@ -2059,28 +2087,34 @@ def create_app() -> Flask:
 
     register_system_routes(
         flask_app,
-        app_name=APP_NAME,
-        product_name=PRODUCT_NAME,
-        app_version=APP_VERSION,
-        app_creator=APP_CREATOR,
-        token_file=lambda: TOKEN_FILE,
-        default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
-        runtime_info=runtime_info,
-        local_llm_label=local_llm_label,
-        local_llm_short_label=local_llm_short_label,
-        get_machine_profile=lambda: get_machine_profile(),
-        load_token_config=lambda path: load_token_config(path),
-        lmstudio_connection_status=lmstudio_connection_status,
-        local_path_access_allowed=local_path_access_allowed,
-        load_custom_vocabulary=load_custom_vocabulary,
-        save_custom_vocabulary=save_custom_vocabulary,
-        available_ai_models=lambda provider, config: available_ai_models(provider, config),
-        update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
-        system_activity_snapshot=lambda: system_activity_snapshot(),
-        library_diagnostics=library_storage_diagnostics,
-        media_metadata_status=lambda: media_metadata_backfill.snapshot(),
-        obsidian_watcher_status=lambda: {**obsidian_watcher_status.snapshot(), "warnings": _vault_nesting_warnings()},
-        create_backup=lambda include_media: create_data_backup(include_media),
+        identity=SystemIdentity(
+            app_name=APP_NAME,
+            product_name=PRODUCT_NAME,
+            app_version=APP_VERSION,
+            app_creator=APP_CREATOR,
+        ),
+        settings=SystemSettings(
+            token_file=lambda: TOKEN_FILE,
+            default_output_directory=lambda: DEFAULT_OUTPUT_DIRECTORY,
+            local_llm_label=local_llm_label,
+            local_llm_short_label=local_llm_short_label,
+            load_token_config=lambda path: load_token_config(path),
+            lmstudio_connection_status=lmstudio_connection_status,
+            local_path_access_allowed=local_path_access_allowed,
+            load_custom_vocabulary=load_custom_vocabulary,
+            save_custom_vocabulary=save_custom_vocabulary,
+            available_ai_models=lambda provider, config: available_ai_models(provider, config),
+            update_token_model=lambda provider, model, path: update_token_model(provider, model, path),
+        ),
+        status=SystemStatus(
+            runtime_info=runtime_info,
+            get_machine_profile=lambda: get_machine_profile(),
+            system_activity_snapshot=lambda: system_activity_snapshot(),
+            obsidian_watcher_status=lambda: {**obsidian_watcher_status.snapshot(), "warnings": _vault_nesting_warnings()},
+            create_backup=lambda include_media: create_data_backup(include_media),
+            library_diagnostics=library_storage_diagnostics,
+            media_metadata_status=lambda: media_metadata_backfill.snapshot(),
+        ),
     )
 
     register_analysis_routes(
@@ -2177,28 +2211,36 @@ def create_app() -> Flask:
 
     register_library_routes(
         flask_app,
-        media_directory=lambda: MEDIA_DIRECTORY,
-        _delete_library_item_locked=_delete_library_item_locked,
-        analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
-        archive_source_stamp=archive_source_stamp,
-        build_interview_comparison=build_interview_comparison,
-        database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
-        file_dialog_lock=file_dialog_lock,
-        generate_video_thumbnail=lambda *args, **kwargs: generate_video_thumbnail(*args, **kwargs),
-        generate_word_cloud_thumbnail=generate_word_cloud_thumbnail,
-        interview_comparison_request=interview_comparison_request,
-        library_public=library_public,
-        library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
-        library_write_lock=library_write_lock,
-        local_path_access_allowed=local_path_access_allowed,
-        manual_output_directory=manual_output_directory,
-        resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
-        row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
-        runtime_info=runtime_info,
-        upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
-        list_library_trash=lambda: list_library_trash(),
-        restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
-        purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
+        store=LibraryStorePort(
+            database_connection=lambda *args, **kwargs: database_connection(*args, **kwargs),
+            library_public=library_public,
+            library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
+            row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
+            upsert_library_item=lambda *args, **kwargs: upsert_library_item(*args, **kwargs),
+        ),
+        media=LibraryMediaPort(
+            media_directory=lambda: MEDIA_DIRECTORY,
+            file_dialog_lock=file_dialog_lock,
+            generate_video_thumbnail=lambda *args, **kwargs: generate_video_thumbnail(*args, **kwargs),
+            generate_word_cloud_thumbnail=generate_word_cloud_thumbnail,
+            local_path_access_allowed=local_path_access_allowed,
+            manual_output_directory=manual_output_directory,
+            resolve_local_media_path=lambda *args, **kwargs: resolve_local_media_path(*args, **kwargs),
+            runtime_info=runtime_info,
+        ),
+        analysis=LibraryAnalysisPort(
+            analysis_archive_store=lambda *args, **kwargs: analysis_archive_store(*args, **kwargs),
+            archive_source_stamp=archive_source_stamp,
+            build_interview_comparison=build_interview_comparison,
+            interview_comparison_request=interview_comparison_request,
+        ),
+        trash=LibraryTrashPort(
+            _delete_library_item_locked=_delete_library_item_locked,
+            library_write_lock=library_write_lock,
+            list_library_trash=lambda: list_library_trash(),
+            restore_library_trash=lambda entry_id: restore_library_trash(entry_id),
+            purge_library_trash=lambda entry_id: purge_library_trash(entry_id),
+        ),
     )
     from .web.research_workspace_routes import register_research_workspace_routes
     register_research_workspace_routes(flask_app,

@@ -16,7 +16,6 @@ import io
 import json
 import re
 import sqlite3
-import unicodedata
 import uuid
 from typing import Any, Callable
 

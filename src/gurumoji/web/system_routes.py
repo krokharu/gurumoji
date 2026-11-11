@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,32 +12,69 @@ from flask import Flask, jsonify, render_template, request
 from ..services.transcription_readiness import transcription_readiness
 
 
+@dataclass(frozen=True)
+class SystemIdentity:
+    app_name: str
+    product_name: str
+    app_version: str
+    app_creator: str
+
+
+@dataclass(frozen=True)
+class SystemSettings:
+    token_file: Callable[[], Path]
+    default_output_directory: Callable[[], Path]
+    local_llm_label: Callable[[], str]
+    local_llm_short_label: Callable[[], str]
+    load_token_config: Callable[[Path], Any]
+    lmstudio_connection_status: Callable[[Any], dict[str, Any]]
+    local_path_access_allowed: Callable[[], bool]
+    load_custom_vocabulary: Callable[[], tuple[str, ...]]
+    save_custom_vocabulary: Callable[[Any], tuple[str, ...]]
+    available_ai_models: Callable[[str, Any], list[dict[str, Any]]]
+    update_token_model: Callable[[Any, Any, Path], Any]
+
+
+@dataclass(frozen=True)
+class SystemStatus:
+    runtime_info: Callable[[], dict[str, Any]]
+    get_machine_profile: Callable[[], dict[str, Any]]
+    system_activity_snapshot: Callable[[], dict[str, Any]]
+    obsidian_watcher_status: Callable[[], dict[str, Any]]
+    create_backup: Callable[[bool], dict[str, Any]] | None
+    library_diagnostics: Callable[[], dict[str, Any]]
+    media_metadata_status: Callable[[], dict[str, Any]]
+
+
 def register_system_routes(
     app: Flask,
     *,
-    app_name: str,
-    product_name: str,
-    app_version: str,
-    app_creator: str,
-    token_file: Callable[[], Path],
-    default_output_directory: Callable[[], Path],
-    runtime_info: Callable[[], dict[str, Any]],
-    local_llm_label: Callable[[], str],
-    local_llm_short_label: Callable[[], str],
-    get_machine_profile: Callable[[], dict[str, Any]],
-    load_token_config: Callable[[Path], Any],
-    lmstudio_connection_status: Callable[[Any], dict[str, Any]],
-    local_path_access_allowed: Callable[[], bool],
-    load_custom_vocabulary: Callable[[], tuple[str, ...]],
-    save_custom_vocabulary: Callable[[Any], tuple[str, ...]],
-    available_ai_models: Callable[[str, Any], list[dict[str, Any]]],
-    update_token_model: Callable[[Any, Any, Path], Any],
-    system_activity_snapshot: Callable[[], dict[str, Any]],
-    obsidian_watcher_status: Callable[[], dict[str, Any]] = lambda: {},
-    create_backup: Callable[[bool], dict[str, Any]] | None = None,
-    library_diagnostics: Callable[[], dict[str, Any]] = lambda: {},
-    media_metadata_status: Callable[[], dict[str, Any]] = lambda: {},
+    identity: SystemIdentity,
+    settings: SystemSettings,
+    status: SystemStatus,
 ) -> None:
+    app_name = identity.app_name
+    product_name = identity.product_name
+    app_version = identity.app_version
+    app_creator = identity.app_creator
+    token_file = settings.token_file
+    default_output_directory = settings.default_output_directory
+    local_llm_label = settings.local_llm_label
+    local_llm_short_label = settings.local_llm_short_label
+    load_token_config = settings.load_token_config
+    lmstudio_connection_status = settings.lmstudio_connection_status
+    local_path_access_allowed = settings.local_path_access_allowed
+    load_custom_vocabulary = settings.load_custom_vocabulary
+    save_custom_vocabulary = settings.save_custom_vocabulary
+    available_ai_models = settings.available_ai_models
+    update_token_model = settings.update_token_model
+    runtime_info = status.runtime_info
+    get_machine_profile = status.get_machine_profile
+    system_activity_snapshot = status.system_activity_snapshot
+    obsidian_watcher_status = status.obsidian_watcher_status
+    create_backup = status.create_backup
+    library_diagnostics = status.library_diagnostics
+    media_metadata_status = status.media_metadata_status
     def index() -> str:
         runtime = runtime_info()
         return render_template(

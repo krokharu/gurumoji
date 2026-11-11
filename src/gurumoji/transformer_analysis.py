@@ -936,7 +936,6 @@ def _manual_labels(vectors: Any, theme_vectors: Any, min_similarity: float) -> A
 
 def _assignment_silhouette(vectors: Any, labels: Any) -> float | None:
     """Describe how separated the assigned groups are; never a check on their meaning."""
-    import numpy as np
     from sklearn.metrics import silhouette_score
 
     mask = labels >= 0

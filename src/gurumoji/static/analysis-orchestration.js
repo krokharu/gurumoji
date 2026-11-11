@@ -145,6 +145,7 @@ function openAnalysisOrchestrationSettings() {
   // Consent belongs to a new submission, never to a past run or a later opening.
   // An uncertain submission retains the exact choice needed for an idempotent retry.
   orchestrationNode('publication-all').checked = Boolean(orchestrationState.submission?.itemId === nextContext.itemId && orchestrationState.submission.payload.publication_targets?.length);
+  orchestrationNode('evidence-mode').value = orchestrationState.submission?.itemId === nextContext.itemId ? orchestrationState.submission.payload.evidence_mode || 'sql' : 'sql';
   if (!same) {
     orchestrationClearSource();
     for (const input of document.querySelectorAll('input[name="orchestration_required_method"]')) input.checked = false;
@@ -194,6 +195,7 @@ function orchestrationPayload() {
     importance_threshold:orchestrationNode('importance').value, max_calls:integer('max-calls',true,1000), max_tasks:integer('max-tasks',true,2000),
     concurrency:integer('concurrency',true,4), call_timeout_seconds:integer('call-timeout',true,3600), research_mode:'exploratory', roles:orchestrationRoleOverrides(),
     local_reasoning:orchestrationNode('local-reasoning')?.value || 'auto',
+    evidence_mode:orchestrationNode('evidence-mode').value,
     model_context_version:cloud.length ? 0 : 1, context_reference_version:cloud.length ? 0 : 1,
     context_evidence_limit:24, context_text_limit:6000,
     analysis_interval_version:1, analysis_interval_seconds:300,
@@ -248,9 +250,20 @@ async function pollAnalysisOrchestration() {
   const token = {epoch:orchestrationState.epoch,itemId:orchestrationState.itemId,runId:orchestrationState.runId}; orchestrationState.poll = token;
   const owns = () => orchestrationState.epoch === token.epoch && orchestrationState.poll === token;
   try {
-    const response = await analysisExecutionRequestJson(orchestrationBase(token.itemId, token.runId));
+    const prior = orchestrationState.run?.run_id === token.runId ? orchestrationState.run.events : null;
+    const cursor = Array.isArray(prior) && prior.length ? prior.at(-1).seq : 0;
+    const response = await analysisExecutionRequestJson(`${orchestrationBase(token.itemId, token.runId)}?events_after=${cursor}`);
     if (!owns()) return;
     if (response.run?.run_id !== token.runId || response.run.item_id && response.run.item_id !== token.itemId) throw Error('状態の対象IDが一致しません。');
+    const incoming = response.run.events || [];
+    if (prior && !response.run.events_reset && incoming.every((event, index) => Number.isSafeInteger(event.seq) && event.seq > (index ? incoming[index - 1].seq : cursor))) {
+      response.run.events = [...prior, ...incoming];
+    } else if (prior && !response.run.events_reset) {
+      const full = await analysisExecutionRequestJson(orchestrationBase(token.itemId, token.runId));
+      if (!owns()) return;
+      if (full.run?.run_id !== token.runId || full.run.item_id && full.run.item_id !== token.itemId) throw Error('状態の対象IDが一致しません。');
+      response.run = full.run;
+    }
     orchestrationState.run = response.run; orchestrationState.error = ''; orchestrationState.fetchedAt = Date.now();
   } catch (error) { if (owns()) orchestrationState.error = `状態を取得できません: ${error.message}。実行が停止したかは未確認です。`; }
   finally { if (owns()) { orchestrationState.poll = null; renderAnalysisOrchestration(); orchestrationSchedule(); } }
@@ -348,6 +361,7 @@ function renderAnalysisOrchestration() {
   const config = run.config || {};
   const templateLabel = [...orchestrationNode('template').options].find(option=>option.value===config.template_config?.id)?.textContent || '指定なし';
   orchestrationText('config',`実行条件: テンプレート ${templateLabel} / ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
+  orchestrationNode('config').append(document.createTextNode(` / 根拠取得 ${{sql:'SQL',hybrid:'ハイブリッド（AIの引用ID＋SQL）'}[config.evidence_mode] || '従来方式'}`));
   for (const [id, suffix] of [['export-json','export.json'],['export-md','export.md']]) orchestrationNode(id).href = `${orchestrationBase()}/${suffix}`;
   orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
   orchestrationText('conclusion',run.current_view?.summary || '統合結果はまだ保存されていません。');
@@ -541,6 +555,16 @@ async function orchestrationReadResults(resultId = '') {
     if(request!==orchestrationState.resultRequest || epoch!==orchestrationState.epoch || viewer!==orchestrationState.viewerEpoch || runId!==orchestrationState.runId || !orchestrationNode('live').open) return;
     host.replaceChildren(orchestrationElement('p','固定された保存結果です。初期版・根拠ID・未解決点を含めて確認してください。'));
     orchestrationRenderCrosstabs(host, data);
+    for (const result of data.raw_results || [data]) {
+      const resolved = result.evidence_resolution || result.metadata?.evidence_resolution;
+      if (!resolved?.sources?.length) continue;
+      const details = orchestrationElement('details');
+      details.append(orchestrationElement('summary',`SQLで復元した引用原文（${resolved.sources.length}件）`));
+      for (const source of resolved.sources) {
+        details.append(orchestrationElement('p',source.evidence_id),orchestrationElement('pre',source.text));
+      }
+      host.append(details);
+    }
     const pre=orchestrationElement('pre',JSON.stringify(data,null,2));pre.tabIndex=0;host.append(pre);
   } catch(error) { if(request===orchestrationState.resultRequest && epoch===orchestrationState.epoch && viewer===orchestrationState.viewerEpoch && orchestrationNode('live').open)host.replaceChildren(orchestrationElement('p',`結果を取得できません: ${error.message}`)); }
 }

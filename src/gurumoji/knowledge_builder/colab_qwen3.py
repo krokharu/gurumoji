@@ -219,7 +219,7 @@ def load_qwen3_a100(*, deadline: datetime | None = None) -> tuple[Any, Any, dict
         import torch
         import transformers
         from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as exc:
+    except ImportError:
         _fail("Colab runtime requires PyTorch and Transformers >= 4.51.0")
     if _version_tuple(transformers.__version__) < (4, 51, 0):
         _fail("Colab runtime requires Transformers >= 4.51.0")

@@ -60,6 +60,7 @@
       <p class="field-note">Core・会話解釈・独立検証・批判者・専門オーケストレータに適用。Handlerはアプリの処理、数量・統計はPython集計です。全担当がローカルなら、必要な原文とObsidian知識を段階取得し、モデルの入力上限を確認します。</p>
       <details class="orchestration-role-settings"><summary>担当ごとにモデルを変える</summary><div id="orchestration-role-overrides"></div></details>
       <label class="field"><span>ローカルAIの追加推論</span><select id="orchestration-local-reasoning"><option value="off">使わない</option><option value="auto">モデルの既定を使う</option></select><small>LM Studioの対応モデルに適用します。応答が途中で切れる場合は「使わない」を選びます。</small></label>
+      <label class="field"><span>根拠の取得方式</span><select id="orchestration-evidence-mode" aria-describedby="orchestration-evidence-help"><option value="sql" selected>SQL（標準）</option><option value="hybrid">ハイブリッド（AIの引用ID＋SQL）</option></select><small id="orchestration-evidence-help">SQLで固定した原文を取得します。ハイブリッドでは、分析AIが選んだ引用IDからSQLで原文を復元し、結果に添付します。解釈には両方式でAIを使います。</small></label>
       <div id="orchestration-cloud-disclosure" class="orchestration-consent" hidden>
         <strong>会話原文がクラウドへ送信されます</strong>
         <p id="orchestration-cloud-targets"></p>

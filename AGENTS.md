@@ -1,10 +1,6 @@
-# Gurumoji 開発版 main 作業ガイド
+# Gurumoji main 作業ガイド
 
-- このリポジトリ `krokharu/gurumoji` の `main` は開発版。公開・配布用は別リポジトリ `krokharu/Gurumoji-public` の `public/release` とする。
-- 開発版を公開先へ直接push・merge・コピーしない。公開側への変更は公開用ブランチで監査し、開発専用コードを除外する。
-- 開発版のmainからGitHub Releaseや配布タグを自動作成しない。公開先のリモートをこの作業フォルダーへ登録しない。
-
-mainは開発版アプリの正本。テストコード・架空データ・開発用ツール・設計書の全体は `archive/development-assets-20261016` に保持する。今回の利用者指定による分離であり、mainにそれらを再追加しない。
+mainはアプリの引渡し用ブランチ。テストコード・架空データ・開発用ツール・設計書の全体は `archive/development-assets-20261016` に保持する。今回の利用者指定による分離であり、mainにそれらを再追加しない。
 
 - 日本語で簡潔に報告する。最初に実行場所・ブランチ・HEAD・未コミット変更を確認する。
 - 現行コードと設定を実装の正本とする。利用手順はREADMEとdocs、設計根拠・試験は[開発資料ブランチ](https://github.com/krokharu/gurumoji/tree/archive/development-assets-20261016)を参照する。

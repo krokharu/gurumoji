@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from dataclasses import dataclass
 
 from ..analysis_store import StoreConflict
 
@@ -34,10 +35,59 @@ class AnalysisCommandRequestError(RuntimeError):
         self.details = details or {}
 
 
+@dataclass(frozen=True)
+class AnalysisArchivePort:
+    store: Any
+    archive_analysis: Callable[..., dict[str, Any]]
+    source_fingerprint: Callable[[Any], str]
+    mark_stale: Callable[[str], None]
+    archive_comparison: Callable[..., dict[str, Any]]
+    refresh_archive_index: Callable[[str], None]
+    publish_input_vault: Callable[[Any], None]
+
+
+@dataclass(frozen=True)
+class AnalysisLibraryPort:
+    find_item: Callable[[str], Any]
+    database_connection: Callable[[], Any]
+    save_preparation_state: Callable[..., dict[str, Any]]
+    segments_for_item: Callable[[Any], list[dict[str, Any]]]
+    update_library_item_locked: Callable[[str, Any], dict[str, Any]]
+    write_lock: Any
+    expose_local_paths: bool
+
+
+@dataclass(frozen=True)
+class AnalysisExecutionPort:
+    build_analysis: Callable[[Any], dict[str, Any]]
+    search_kwic: Callable[..., dict[str, Any]]
+    load_comparison_items: Callable[[dict[str, Any]], tuple[list[Any], bool]]
+    build_comparison: Callable[..., dict[str, Any]]
+    start_insights: Callable[..., tuple[dict[str, Any], int]]
+    cancel_insights: Callable[[str, str], dict[str, Any]]
+    start_transformer: Callable[..., tuple[dict[str, Any], int]]
+    cancel_transformer: Callable[[str, str], dict[str, Any]]
+    run_classification: Callable[..., dict[str, Any]]
+    pipeline_service: Any | None
+    freeze_comparison: Callable[..., dict[str, Any]] | None
+
+
 class AnalysisCommands:
     """Coordinate fixed-result saves without changing store ownership rules."""
 
-    def __init__(
+    def __init__(self, *, archive: AnalysisArchivePort | None = None,
+                 library: AnalysisLibraryPort | None = None,
+                 execution: AnalysisExecutionPort | None = None, **legacy: Any) -> None:
+        if archive is not None and library is not None and execution is not None:
+            if legacy:
+                raise TypeError("Grouped and legacy dependencies cannot be mixed")
+            self._init_legacy(**vars(archive), **vars(library), **vars(execution))
+        elif archive is None and library is None and execution is None:
+            self._init_legacy(**legacy)
+        else:
+            raise TypeError("All dependency groups are required")
+
+    def _init_legacy(
         self,
         *,
         store: Any,

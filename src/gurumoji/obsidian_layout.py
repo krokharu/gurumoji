@@ -8,7 +8,6 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml

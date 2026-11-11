@@ -1,7 +1,6 @@
 """Local cross-conversation FTS and exact vector-neighbour index, read-only queries."""
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 

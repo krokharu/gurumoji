@@ -27,7 +27,7 @@ from .analysis_insights import (
 )
 
 
-RESEARCH_ALGORITHM_VERSION = "research-ja-5"
+RESEARCH_ALGORITHM_VERSION = "research-ja-6"
 CONTENT_UPOS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV"}
 CONTENT_POS_JA = {"名詞", "動詞", "形容詞", "副詞"}
 DEFAULT_STOP_WORDS = {
@@ -1292,6 +1292,7 @@ def _statistics_analysis(
             kruskal["assumption_note"] += f" SciPyを読み込めません: {scipy_error}"
         tests.append(kruskal)
 
+    contingency_visualizations = []
     for table_id, label, row_values, column_values, matrix in contingency_inputs:
         n = sum(sum(row) for row in matrix)
         chi_square = _test_result_base(
@@ -1342,6 +1343,13 @@ def _statistics_analysis(
             chi_square["status"] = "unavailable"
             chi_square["assumption_note"] += f" SciPyを読み込めません: {scipy_error}"
         tests.append(chi_square)
+        # 描画時に再計算せず、前提の判定と図表の元値を分析結果へ固定する。
+        if 2 <= len(matrix) <= 100 and 2 <= len(column_values) <= 100:
+            from .analysis_contingency import analyze_contingency
+            contingency_visualizations.append(analyze_contingency(
+                matrix, [str(v) for v in row_values], [str(v) for v in column_values],
+                independent=False, analysis_unit="発話", table_id=table_id, label=label,
+            ))
 
     for variable_a, variable_b in combinations(NUMERIC_VARIABLES, 2):
         pairs = [
@@ -1413,6 +1421,7 @@ def _statistics_analysis(
         "descriptives": descriptives,
         "frequencies": frequencies,
         "crosstabs": crosstabs,
+        "contingency_visualizations": contingency_visualizations,
         "tests": tests,
         "correlations": correlations,
         "engine": {

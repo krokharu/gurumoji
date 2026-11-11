@@ -7,6 +7,7 @@ start fails."""
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 import threading
 import uuid
 from pathlib import Path
@@ -50,26 +51,58 @@ from .form_fields import (
 from .jobs import JobRequestError
 
 
+@dataclass(frozen=True)
+class TranscriptionJobs:
+    JobRecord: Any
+    jobs: Any
+    jobs_lock: Any
+    run_transcription_job: Any
+
+
+@dataclass(frozen=True)
+class TranscriptionFiles:
+    MAX_MEDIA_UPLOAD_BYTES: Any
+    upload_directory: Callable[[], Any]
+    copy_file_limited: Any
+    local_path_access_allowed: Any
+    prepare_output_root: Any
+    remove_owned_directory: Any
+    resolve_local_media_path: Any
+    save_upload_limited: Any
+
+
+@dataclass(frozen=True)
+class TranscriptionSettings:
+    TRANSCRIPT_FINISHING_MODES: Any
+    configured_ai_credentials: Any
+    get_machine_profile: Any
+    load_token_config: Any
+    save_custom_vocabulary: Any
+
+
 def make_transcription_start(
     *,
-    JobRecord: Any,
-    MAX_MEDIA_UPLOAD_BYTES: Any,
-    TRANSCRIPT_FINISHING_MODES: Any,
-    upload_directory: Callable[[], Any],
-    configured_ai_credentials: Any,
-    copy_file_limited: Any,
-    get_machine_profile: Any,
-    jobs: Any,
-    jobs_lock: Any,
-    load_token_config: Any,
-    local_path_access_allowed: Any,
-    prepare_output_root: Any,
-    remove_owned_directory: Any,
-    resolve_local_media_path: Any,
-    run_transcription_job: Any,
-    save_custom_vocabulary: Any,
-    save_upload_limited: Any,
+    job_runtime: TranscriptionJobs,
+    files: TranscriptionFiles,
+    settings: TranscriptionSettings,
 ) -> tuple[Callable[..., Any], ...]:
+    JobRecord = job_runtime.JobRecord
+    jobs = job_runtime.jobs
+    jobs_lock = job_runtime.jobs_lock
+    run_transcription_job = job_runtime.run_transcription_job
+    MAX_MEDIA_UPLOAD_BYTES = files.MAX_MEDIA_UPLOAD_BYTES
+    upload_directory = files.upload_directory
+    copy_file_limited = files.copy_file_limited
+    local_path_access_allowed = files.local_path_access_allowed
+    prepare_output_root = files.prepare_output_root
+    remove_owned_directory = files.remove_owned_directory
+    resolve_local_media_path = files.resolve_local_media_path
+    save_upload_limited = files.save_upload_limited
+    TRANSCRIPT_FINISHING_MODES = settings.TRANSCRIPT_FINISHING_MODES
+    configured_ai_credentials = settings.configured_ai_credentials
+    get_machine_profile = settings.get_machine_profile
+    load_token_config = settings.load_token_config
+    save_custom_vocabulary = settings.save_custom_vocabulary
     def start_transcription_job_command(
         form: Any, upload: Any, *, admission_id: str | None
     ) -> tuple[dict[str, Any], int]:

@@ -1,6 +1,4 @@
-# Gurumoji（グルモジ）開発版
-
-このリポジトリの `main` は、ObusSQL・MAF・分析機能を含む開発版です。公開・配布用は別リポジトリの [Gurumoji-public / public/release](https://github.com/krokharu/Gurumoji-public/tree/public/release) を使用してください。開発版からRelease・配布タグを自動作成しません。
+# Gurumoji（グルモジ）
 
 <p align="center">
   <img src="docs/assets/gurumoji-animated.svg" alt="グルモジのアニメーションロゴ" width="640">
@@ -23,6 +21,8 @@ Gurumojiは、動画・音声の**文字起こし → 話者・本文の確認�
 ### 2. アプリを開く
 
 **`run.bat` をダブルクリック**し、起動後にブラウザーで **[http://127.0.0.1:7860](http://127.0.0.1:7860)** を開きます。2回目以降はここから始められます。
+
+Windowsでは64bit Python 3.10〜3.13で起動でき、任意の開発機能は準備できない場合に自動で無効になります。
 
 ### 3. 動画・音声を選んで開始
 

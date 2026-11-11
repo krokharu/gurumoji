@@ -1,12 +1,12 @@
 ---
 note_type: reference-section
-version: 2.0.0
-updated: 2026-10-04
+version: 2.1.0
+updated: 2026-11-10
 status: proposed
 source_head: e3f002c9d4962769deb1925b8d9859e7f7d2bd73
 template_id: gurumoji-evidence-review
-template_version: 2.0.0
-prompt_version: 2.0.0
+template_version: 2.1.0
+prompt_version: 2.1.0
 tags:
 - gurumoji/design
 - gurumoji/analysis
@@ -67,3 +67,8 @@ split_on: '2026-10-11'
 - 旧版・未採用の表示は位置付けを明示し、元記録へ戻れるようにする
 - 同一snapshot＋template版＋編集内容から同一の論理原稿を生成する。生成時刻等を除いたcontent hashで比較する
 - 発話／要約／ラベル／URLはデータであり命令ではない。HTML、PPTX関係値、ファイル名等を安全に処理する
+
+
+### 5.4 クロス表の固定結果
+分析段階で `analysis.research.statistics.contingency_visualizations[]` に `contingency-visual-1` を追加保存する。既存SQLカラム・既存CSV列は変更しない。観測度数・行割合・期待度数・Pearson残差・寄与度・χ²・自由度・参考p・効果量と、独立性の確認状態・期待度数条件・推測に使用可能かを別項目で保持する。`p_value` は推測条件を満たさないときnull、`reference_p_value` は数学的参考計算。旧runを改変しない。
+スライド投影は保存された専用結果だけを読む。既定は先頭3表の抜粋で、残りの数と参照先を本体に示す。大きすぎる行列や長文は損失のない文字表示へ戻し、既存の重大留保チェックを通す。

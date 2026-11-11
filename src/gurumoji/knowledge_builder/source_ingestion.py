@@ -15,7 +15,7 @@ import re
 import shutil
 import tempfile
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 

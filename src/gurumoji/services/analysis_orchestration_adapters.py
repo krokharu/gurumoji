@@ -12,9 +12,9 @@ from typing import Any, Callable
 
 from ..analysis_core import AnalysisContractError
 from ..analysis_templates import agent_guidance
-from . import model_context, metric_delivery, orchestration_core_control
+from . import model_context, metric_delivery, orchestration_core_control, evidence_retrieval
 
-ADAPTER_VERSION = "core-handler-prompts-50-cross-tabulation"
+ADAPTER_VERSION = "core-handler-prompts-52-sql-evidence-hybrid"
 AI_ROLES = ("core", "interpretation", "verification", "critic", "orchestrator")
 PROVIDERS = {"lmstudio", "openai", "google"}
 
@@ -302,6 +302,7 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         if not isinstance(payload, dict):
             raise AnalysisContractError("実行条件をJSONオブジェクトで指定してください。")
         value = copy.deepcopy(payload)
+        value['evidence_mode'] = evidence_retrieval.validate_mode(value.get('evidence_mode', 'sql'))
         provider = value.get("provider", "lmstudio")
         policy = value.get("provider_policy", "local_only")
         if not isinstance(policy, str) or policy not in {"local_only", "cloud_allowed"}:
@@ -366,6 +367,12 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
         if provider != "lmstudio" and (options.get("provider_policy") != "cloud_allowed" or options.get("cloud_consent") is not True):
             raise AnalysisContractError("クラウドAIへの送信は許可されていません。", code="provider_unavailable")
         check_cancelled()
+        mode = evidence_retrieval.validate_mode(options.get('evidence_mode', 'sql'))
+        def select_rows(rows, count, size):
+            question = context.get('task', {}).get('intent', {}).get('question') or context.get('question', '')
+            if evidence_selector is not None:
+                return evidence_selector(options['_run_id'], rows, question, count, size)
+            return evidence_retrieval.select_rows(rows, question, count, size)
         bounded_context = (options.get("model_context_version") == 1
                            or options.get("analysis_interval_version") == 1 and provider == "lmstudio" or finding_review)
         referenced_context = options.get("context_reference_version") == 1 or finding_review
@@ -377,18 +384,16 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
             if options.get("_hydrated_result_ids") != pending:
                 context = model_context.hydrate_core_evidence(context, options.get("_source_evidence"),
                     options.get("context_evidence_limit", 120), options.get("context_text_limit", 60000),
-                    select=(lambda rows, count, size: evidence_selector(options["_run_id"], rows,
-                        context.get("task", {}).get("intent", {}).get("question") or context.get("question", ""),
-                        count, size)) if evidence_selector is not None else None)
+                    select=select_rows, selection_method=evidence_retrieval.VERSION)
                 options = {**options, "_hydrated_result_ids": pending}
-        if evidence_selector is not None and context.get("raw_evidence"):
+        if context.get("raw_evidence"):
             rows = context["raw_evidence"]
-            restored = evidence_selector(options["_run_id"], rows, context.get("question", ""),
-                                         len(rows), sum(len(row["text"]) for row in rows))
+            restored = select_rows(rows, len(rows), sum(len(row['text']) for row in rows))
             if restored != rows:
                 raise AnalysisContractError("選択済み根拠の読取範囲が変わりました。", code="evidence_index_unavailable")
             context = {**context, "raw_evidence": restored,
-                       "coverage": {**context.get("coverage", {}), "retrieval": "obussql_fixed_snapshot_v1"}}
+                       "coverage": {**context.get("coverage", {}), "retrieval": evidence_retrieval.VERSION,
+                                    'evidence_mode': mode}}
         config = load_token_config()
         api_key, _ = configured_ai_credentials(config, provider)
         if provider != "lmstudio" and not api_key:
@@ -701,6 +706,8 @@ def make_orchestration_adapters(*, call_ai_json: Callable[..., Any],
             system += "\n原文はcolumns/rowsです。ref=e1等をevidence_idsとutterance_idへ使い、Handlerが元IDへ戻します。S1等は話者記号、時刻は秒・小数1桁です。未提示の参照や元IDは出力しません。"
         else:
             system += "\n根拠は列形式（columns/rows）です。refのe1/e2等は根拠と発話の共通参照であり、evidence_idsとlabel_patches.utterance_idの両方に使います。話者S1等はこの入力内の記号、時刻は秒（小数1桁）です。対応表はHandlerが保持し、出力の参照を元IDに戻します。未提示の参照や完全な元IDを出力しません。"
+        if mode == 'hybrid':
+            system += '\n引用原文はHandlerが返答中のevidence_idsからSQLで取得します。提示された根拠IDだけを選び、原文・数値を引用用に再生成せず、解釈と原文を区別してください。'
         if context.get("coverage", {}).get("page", {}).get("interval_id"):
             system += "\ncoverage.pageは固定した分析区間です。owned_evidence_idsだけを担当件数・ラベル付与の対象とし、boundary_evidence_idsは前後の文脈専用です。議題名はAI下書きであり、主張の根拠には原文参照だけを使います。親議題・区間IDと限界を保持し、局所の尺度要件を会話全体の確定尺度にしません。"
         if options.get("analysis_interval_version") and role in {"core", "orchestrator"}:

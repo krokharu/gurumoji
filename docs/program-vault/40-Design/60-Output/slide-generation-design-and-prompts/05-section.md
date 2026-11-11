@@ -1,12 +1,12 @@
 ---
 note_type: reference-section
-version: 2.0.0
-updated: 2026-10-04
+version: 2.1.0
+updated: 2026-11-10
 status: proposed
 source_head: e3f002c9d4962769deb1925b8d9859e7f7d2bd73
 template_id: gurumoji-evidence-review
-template_version: 2.0.0
-prompt_version: 2.0.0
+template_version: 2.1.0
+prompt_version: 2.1.0
 tags:
 - gurumoji/design
 - gurumoji/analysis
@@ -116,3 +116,6 @@ split_on: '2026-10-11'
 5. 過長文、未対応表、bool/非有限値、欠落/隔離/旧版、重大指摘で既存gateが維持される
 6. 全枚visual QAと独立レビュー、関連unit/API/DOMテスト。Windows PowerPointと実ブラウザは別項目
 7. source-only archiveとGit bundle/evidenceを20MB以下に分離し、復元チェックを行う
+
+
+量的可視化v2.1の受入：整数度数の検査、ゼロ周辺度数、期待度数と残差・寄与の整合、SciPyとの照合、低期待度数・独立性未確認の判断保留、保存結果のみの投影、ネイティブ表と残差色、原版保護、版・hash照合を隣接試験で確認する。

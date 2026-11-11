@@ -13,7 +13,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Callable
 
 from ..analysis_core import (AnalysisContractError, EFFECTIVE_PUBLICATION_WRITERS,
                              canonical, fingerprint, validate_publication_targets)

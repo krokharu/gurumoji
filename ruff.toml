@@ -1,0 +1,8 @@
+target-version = "py310"
+exclude = ["ObusSQL", "runtime", "output", ".venv*", "tests", "devtools", "scratch", "notebooks"]
+
+[lint]
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+"src/gurumoji/app.py" = ["F401"]

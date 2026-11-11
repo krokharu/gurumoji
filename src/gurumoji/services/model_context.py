@@ -306,7 +306,8 @@ def reduce_context(context):
     return None
 
 
-def hydrate_core_evidence(context, pool, row_limit, text_limit, *, select=None):
+def hydrate_core_evidence(context, pool, row_limit, text_limit, *, select=None,
+                          selection_method='obussql_keywords_surface_v1'):
     """Read actual source rows cited by this result batch, in source order."""
     if not pool:
         return context
@@ -343,7 +344,7 @@ def hydrate_core_evidence(context, pool, row_limit, text_limit, *, select=None):
         omitted_count=len(rows) - len(provided), complete=len(rows) == len(provided),
         scope="result_evidence", dataset_available_count=len(pool))
     if select is not None:
-        value["coverage"]["selection"] = "obussql_literal_v1"
+        value["coverage"]["selection"] = selection_method
     if "labels" in value:
         utterances = {row["utterance_id"] for row in provided}
         value["labels"] = {key: item for key, item in value["labels"].items() if key in utterances}
@@ -443,7 +444,7 @@ def measure_local_context(model, base_url, system, user, schema, output_reserve=
                 "output_reserve": output_reserve, "safety_margin": SAFETY_MARGIN,
                 "output_limit": length - input_tokens - SAFETY_MARGIN if fits else output_reserve,
                 "fits": fits}
-    except Exception as exc:
+    except Exception:
         # SDK/server exceptions may contain source text or credentials.
         raise AnalysisContractError("ロード済みモデルの入力予算を確認できません。モデルと接続を確認してください。",
                                     code="context_budget_unavailable") from None

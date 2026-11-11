@@ -403,12 +403,12 @@ class AnalysisSlidesService:
             warnings.append(f"結果は全{len(raw_results)}件です。版一覧は先頭{MAX_RESULTS}件の抜粋です。")
         slides = []
 
-        def add(section, title, paragraphs, *, result_ids=(), evidence_ids=(), missing=False, max_pages=3):
+        def add(section, title, paragraphs, *, result_ids=(), evidence_ids=(), missing=False, max_pages=3, visual_override=None):
             paragraphs = [_text(p) for p in paragraphs if _text(p)] or ["未実施／未記録"]
             all_lines = []
             for paragraph in paragraphs:
                 all_lines.extend(_wrap(paragraph))
-            visual = build_visual(section, title, exported, result_ids, provenance, [s["key"] for s in template["design"]["sections"]])
+            visual = visual_override if visual_override is not None else build_visual(section, title, exported, result_ids, provenance, [s["key"] for s in template["design"]["sections"]])
             if visual:
                 def sanitize_visual(node):
                     if isinstance(node, dict):
@@ -540,6 +540,12 @@ class AnalysisSlidesService:
             elif key == "specialist_perspectives":
                 for role in ("interpretation", "statistics", "verification"):
                     record_result(key, ROLE_LABELS[role], [r for r in raw_results if r.get("role") == role], role)
+                # スナップショットに固定済みの結果のみ追加し、ここでは検定しない。
+                from .analysis_contingency_projection import contingency_pages
+                statistics = _mapping(_mapping(_mapping(snapshot.get("analysis")).get("research")).get("statistics"))
+                for visual in contingency_pages(statistics, template["design"].get("visualization_policy")):
+                    add(key, visual["title"], [visible_text({k: v for k, v in visual.items() if k != "source_record"})],
+                        visual_override=visual, max_pages=12)
             elif key == "critic":
                 record_result(key, title, [r for r in raw_results if r.get("role") == "critic"], "critic")
                 issues = sorted([i for i in _rows(run.get("issues")) if isinstance(i, dict)],

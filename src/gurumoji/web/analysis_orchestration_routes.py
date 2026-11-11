@@ -96,7 +96,14 @@ def register_orchestration_routes(app: Flask, service: Callable[[], Any],
 
     @blueprint.get("/api/library/<item_id>/analysis/orchestration/<run_id>")
     def status(item_id, run_id):
-        return jsonify(run=public_run(item_id, service().status(item_id, run_id)))
+        raw = request.args.get("events_after")
+        if raw is None:
+            value = service().status(item_id, run_id)
+        else:
+            if not raw.isascii() or not raw.isdecimal() or len(raw) > 18:
+                raise AnalysisContractError("events_afterは0以上の整数で指定してください。")
+            value = service().status(item_id, run_id, events_after=int(raw))
+        return jsonify(run=public_run(item_id, value))
 
     @blueprint.post("/api/library/<item_id>/analysis/orchestration/<run_id>/cancel")
     def cancel(item_id, run_id):

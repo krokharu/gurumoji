@@ -8,7 +8,6 @@ import math
 import sqlite3
 import statistics
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -33,7 +32,6 @@ from .analysis_core import (
     validate_definition,
     validate_definitions,
     validate_publication_targets,
-    PUBLICATION_TARGETS,
     EFFECTIVE_PUBLICATION_WRITERS,
     validate_planning_proposal,
 )

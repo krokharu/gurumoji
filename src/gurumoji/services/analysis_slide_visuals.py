@@ -281,10 +281,46 @@ def _audit(scene, visual):
     scene.text(visual.get("note"), .65, 6.12, 12, .31, 14, "muted")
 
 
+def _contingency(scene, visual):
+    rows = visual.get("grid")
+    if (not isinstance(rows, list) or not 2 <= len(rows) <= 8 or
+            not isinstance(rows[0], list) or not 2 <= len(rows[0]) <= 6 or
+            any(not isinstance(row, list) or len(row) != len(rows[0]) for row in rows)):
+        raise _DoesNotFit("クロス表の大きさが専用レイアウトの範囲外です")
+    residual = visual["kind"] == "chi_square"
+    width = 8.0 if residual else 12.0
+    first = 2.2
+    widths = [first] + [(width-first)/(len(rows[0])-1)]*(len(rows[0])-1)
+    height = min(.46, 2.76/len(rows))
+    prepared = [[_wrapped(v, widths[j]-.14, height-.08, 17) for j, v in enumerate(row)] for row in rows]
+    fills = None
+    if residual:
+        values = visual.get("residuals")
+        if (not isinstance(values, list) or len(values) != len(rows)-1 or
+                any(not isinstance(row, list) or len(row) != len(rows[0])-1 for row in values)):
+            raise _DoesNotFit("残差行列の形が一致しません")
+        fills = [[None]*len(rows[0]) for _ in rows]
+        for i, row in enumerate(values, 1):
+            for j, v in enumerate(row, 1):
+                if v is None:
+                    continue
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise _DoesNotFit("残差は有限数である必要があります")
+                base = (83, 117, 104) if v >= 0 else (179, 77, 61)
+                strength = min(abs(v)/3, 1)*.65
+                fills[i][j] = ''.join(f'{round(255+(channel-255)*strength):02X}' for channel in base)
+    scene.text(visual.get("method"), .65, 1.58, 12, .65, 17, "muted")
+    scene.items.append(("grid", (prepared, widths, .65, 2.40, height, fills)))
+    if residual:
+        scene.text(visual.get("statistics_text"), 9.05, 2.40, 3.6, 2.7, 18)
+    scene.text(visual.get("reading"), .65, 5.28, 12, .63, 17, "accent", True)
+    scene.text(visual.get("footer"), .65, 5.96, 12, .48, 12, "muted")
+
+
 _LAYOUTS = {"hero": _hero, "method": _method, "evidence_chain": _evidence_chain,
             "perspective": _perspective, "statistics": _statistics,
             "critique": _critique, "core": _core, "limitations": _limitations,
-            "audit": _audit}
+            "audit": _audit, "crosstab": _contingency, "chi_square": _contingency}
 
 
 def _set_font(font_object, name, size, color, bold=False):
@@ -440,6 +476,36 @@ def _paint_table(slide, item, font, colors):
                 properties.append(line)
 
 
+def _paint_grid(slide, item, font, colors):
+    """度数表と残差を、編集可能な表として描画する。"""
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import MSO_ANCHOR
+    from pptx.util import Inches, Pt
+
+    rows, widths, x, y, height, fills = item
+    table = slide.shapes.add_table(len(rows), len(widths), Inches(x), Inches(y),
+                                   Inches(sum(widths)), Inches(height*len(rows))).table
+    table.first_row = False
+    table.horz_banding = False
+    for j, width in enumerate(widths):
+        table.columns[j].width = Inches(width)
+    for i, row in enumerate(rows):
+        table.rows[i].height = Inches(height)
+        for j, value in enumerate(row):
+            cell = table.cell(i, j)
+            cell.fill.solid()
+            fill = colors['title'] if i == 0 else (fills[i][j] if fills else None) or colors['background']
+            cell.fill.fore_color.rgb = RGBColor.from_string(fill)
+            cell.margin_left = cell.margin_right = Inches(.06)
+            cell.margin_top = cell.margin_bottom = Inches(.025)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            cell.text = value
+            for paragraph in cell.text_frame.paragraphs:
+                _set_font(paragraph.font, font, 17, 'FFFFFF' if i == 0 else colors['body'], i == 0)
+                paragraph.space_before = paragraph.space_after = Pt(0)
+                paragraph.line_spacing = 1.12
+
+
 def can_render_visual(visual) -> bool:
     """Run the exact lossless-layout preflight without creating a PPTX object."""
     if not isinstance(visual, dict) or not isinstance(visual.get("kind"), str):
@@ -483,4 +549,6 @@ def render_visual_slide(prs, slide, dto, *, font, colors) -> bool:
             _paint_chart(slide, item, font, palette)
         elif kind == "table":
             _paint_table(slide, item, font, palette)
+        elif kind == "grid":
+            _paint_grid(slide, item, font, palette)
     return True

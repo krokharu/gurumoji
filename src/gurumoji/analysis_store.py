@@ -19,7 +19,7 @@ import uuid
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 from .analysis_method_registry import REGISTRY_VERSION, METHOD_GROUPS
 from .analysis_core import PUBLICATION_TARGETS, EFFECTIVE_PUBLICATION_WRITERS, validate_publication_targets

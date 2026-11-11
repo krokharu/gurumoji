@@ -134,7 +134,6 @@ def _fail(reason: str) -> None:
 
 
 def _contains_local_path(value: str) -> bool:
-    lowered = value.casefold()
     if re.search(r"(?i)\bfile:", value):
         return True
     if "\\" in value or value.startswith("//"):
@@ -465,8 +464,6 @@ def _validate_batch(batch: dict, source_texts: list[str], *,
                       request_source.get("extracted_text_sha256")]
     if len(matching_texts) != 1:
         _fail("generation request does not bind one verified source excerpt")
-    descriptor = {key: value for key, value in request_record.items()
-                  if key != "rendered_prompt_sha256"}
     rendered_prompt = _render_generation_prompt(_model_task_context(request_scope), matching_texts[0],
                                                 generation_template)
     expected_rendered_hash = hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest()

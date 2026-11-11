@@ -5,7 +5,6 @@ import difflib
 import hashlib
 import json
 import yaml
-from pathlib import Path
 
 from ..analysis_core import fingerprint
 from ..text_utils import utc_now_iso

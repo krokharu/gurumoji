@@ -3,10 +3,14 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 rem Enable the locally installed ObusSQL preview; set 0 explicitly to disable it.
-if not defined MOJIOKOSI_OBUSSQL_ENABLED set "MOJIOKOSI_OBUSSQL_ENABLED=1"
+if not defined MOJIOKOSI_OBUSSQL_ENABLED (
+  set "MOJIOKOSI_OBUSSQL_DEFAULTED=1"
+  set "MOJIOKOSI_OBUSSQL_ENABLED=1"
+)
 
 rem 開発版のMAF接続を有効にする。0を指定すると従来の分析実行を使う。
 if not defined MOJIOKOSI_MAF_DEV_ENABLED (
+  set "MOJIOKOSI_MAF_DEV_DEFAULTED=1"
   set "MOJIOKOSI_MAF_DEV_ENABLED=1"
   if /I "%MOJIOKOSI_OBUSSQL_ENABLED%"=="0" set "MOJIOKOSI_MAF_DEV_ENABLED=0"
 )
@@ -70,30 +74,59 @@ set "PYTHON=%VENV_DIR%\Scripts\python.exe"
   echo The existing .venv uses an unsupported Python. Run scripts\cleanup_env.bat and try again.
   goto :error
 )
+set "WINDOWS_CONSTRAINTS="
+"%PYTHON%" -c "import sys; assert sys.version_info[:2] == (3, 12)" >nul 2>nul && if exist "%CD%\config\constraints-windows-cp312.txt" set "WINDOWS_CONSTRAINTS=%CD%\config\constraints-windows-cp312.txt"
 if not exist "%SETUP_MARKER%" (
   echo Installing packages into %VENV_DIR% ...
   "%PYTHON%" -m pip install --no-cache-dir torch==2.8.0+cu128 torchvision==0.23.0+cu128 torchaudio==2.8.0+cu128 --index-url https://download.pytorch.org/whl/cu128 || goto :error
-  "%PYTHON%" -m pip install --no-cache-dir -r "%REQUIREMENTS_FILE%" || goto :error
+  call :install_requirements fresh || goto :error
   "%PYTHON%" -m pip check || goto :error
 ) else if /I not "%MOJIOKOSI_SKIP_LIBRARY_UPDATE%"=="1" (
   echo Checking Python libraries for compatible updates ...
-  "%PYTHON%" -m pip install --disable-pip-version-check --upgrade --upgrade-strategy only-if-needed -r "%REQUIREMENTS_FILE%"
+  call :install_requirements update
   if errorlevel 1 echo Library update check failed. Continuing with the installed environment.
 )
 
 rem 開発版MAFの固定依存を確認する。分析処理は既存の台帳と停止制御を使う。
-if /I "%MOJIOKOSI_MAF_DEV_ENABLED%"=="1" (
-  "%PYTHON%" -c "import sys; assert sys.version_info[:2] == (3, 12)" || (
-    echo MAF development analysis requires Python 3.12. Set MOJIOKOSI_MAF_DEV_ENABLED=0 to use the standard driver.
-    goto :error
+if /I "!MOJIOKOSI_MAF_DEV_ENABLED!"=="1" (
+  "%PYTHON%" -c "import sys; assert sys.version_info[:2] == (3, 12)" >nul 2>nul
+  if errorlevel 1 (
+    if not "!MOJIOKOSI_MAF_DEV_DEFAULTED!"=="1" (
+      echo MAF development analysis requires Python 3.12. Set MOJIOKOSI_MAF_DEV_ENABLED=0 to use the standard driver.
+      goto :error
+    )
+    echo Warning: MAF development analysis requires Python 3.12; using the standard driver.
+    set "MOJIOKOSI_MAF_DEV_ENABLED=0"
   )
+)
+if /I "!MOJIOKOSI_MAF_DEV_ENABLED!"=="1" (
   "%PYTHON%" -c "from importlib.metadata import version; import agent_framework; assert version('agent-framework-core') == '1.22.0'" >nul 2>nul || (
-    "%PYTHON%" -m pip install -r "%CD%\config\requirements-gurumoji-maf-dev.txt" || goto :error
+    "%PYTHON%" -m pip install -r "%CD%\config\requirements-gurumoji-maf-dev.txt"
+    if errorlevel 1 (
+      if not "!MOJIOKOSI_MAF_DEV_DEFAULTED!"=="1" goto :error
+      echo Warning: MAF development dependencies could not be installed; using the standard driver.
+      set "MOJIOKOSI_MAF_DEV_ENABLED=0"
+    )
   )
-  rem 統計専用codecの実体を確認し、未導入時は固定した上流版を導入する。
-  if /I "%MOJIOKOSI_OBUSSQL_ENABLED%"=="1" (
-    "%PYTHON%" -c "from importlib.metadata import version; from obusql_agent.metric_codec import MetricEncoder, MetricDecoder; assert version('obusql-agent') == '0.1.0'" >nul 2>nul || (
-      "%PYTHON%" -m pip install -r "%CD%\config\requirements-obussql-metric.txt" || goto :error
+)
+if /I "!MOJIOKOSI_OBUSSQL_ENABLED!"=="1" (
+  call :check_metric_codec
+  if errorlevel 1 (
+    "%PYTHON%" -c "import sys; assert sys.version_info[:2] >= (3, 12)" >nul 2>nul
+    if not errorlevel 1 call :install_metric_codec
+    call :check_metric_codec
+    if errorlevel 1 (
+      if "!MOJIOKOSI_OBUSSQL_DEFAULTED!"=="1" (
+        if "!MOJIOKOSI_MAF_DEV_ENABLED!"=="1" if not "!MOJIOKOSI_MAF_DEV_DEFAULTED!"=="1" (
+          echo MAF development analysis requires ObusSQL with the metric codec.
+          goto :error
+        )
+        echo Warning: metric codec unavailable; disabling ObusSQL and MAF development analysis.
+        set "MOJIOKOSI_OBUSSQL_ENABLED=0"
+        set "MOJIOKOSI_MAF_DEV_ENABLED=0"
+      ) else (
+        echo Warning: metric codec unavailable; new analyses will stop at the pre-check until it is installed.
+      )
     )
   )
 )
@@ -161,6 +194,30 @@ echo Starting Web UI at http://127.0.0.1:7860 ...
 set "PYTHONPATH=%CD%\src;%PYTHONPATH%"
 "%PYTHON%" -u -m gurumoji.app || goto :error
 goto :end
+
+:check_metric_codec
+"%PYTHON%" -c "from importlib.metadata import version; from obusql_agent.metric_codec import MetricEncoder, MetricDecoder; assert version('obusql-agent') == '0.1.0'" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:install_metric_codec
+setlocal
+set "GIT_TERMINAL_PROMPT=0"
+set "GCM_INTERACTIVE=never"
+"%PYTHON%" -m pip install -r "%CD%\config\requirements-obussql-metric.txt"
+endlocal & exit /b %ERRORLEVEL%
+
+
+:install_requirements
+set "INSTALL_OPTIONS=--no-cache-dir"
+if /I "%~1"=="update" set "INSTALL_OPTIONS=--disable-pip-version-check --upgrade --upgrade-strategy only-if-needed"
+if defined WINDOWS_CONSTRAINTS (
+  "%PYTHON%" -m pip install !INSTALL_OPTIONS! -r "%REQUIREMENTS_FILE%" -c "!WINDOWS_CONSTRAINTS!"
+  if not errorlevel 1 exit /b 0
+  echo Warning: Windows constraints failed; retrying without constraints.
+)
+"%PYTHON%" -m pip install !INSTALL_OPTIONS! -r "%REQUIREMENTS_FILE%"
+exit /b !ERRORLEVEL!
+
 
 :error
 set "RUN_RESULT=%ERRORLEVEL%"

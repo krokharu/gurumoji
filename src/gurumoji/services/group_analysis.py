@@ -12,42 +12,29 @@ application globals.
 
 from __future__ import annotations
 
-import csv
-import io
-import json
 import math
 import re
 import sqlite3
-import unicodedata
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
-from ..analysis_insights import KWIC_FIELDS, build_session_outline, input_fingerprint, plan_items
-from ..analysis_method_registry import METHOD_GROUPS, SEPARATE_RUN_METHODS, method_results
+from ..analysis_insights import build_session_outline, input_fingerprint, plan_items
 from ..media_formats import ALLOWED_EXTENSIONS, VIDEO_EXTENSIONS
 from ..research_analysis import (
-    RESEARCH_CSV_FIELDS,
-    build_research_analysis,
     enrich_research_analysis,
     is_research_analysis_cached,
-    research_csv_sources,
 )
 from ..segment_classification import (
-    CLASSIFICATION_FIELDS,
-    CROSSTAB_FIELDS as SEGMENT_CLASSIFICATION_CROSSTAB_FIELDS,
     DIALOGUE_ACTS,
     classification_fingerprint,
-    classification_rows,
-    crosstab_rows as segment_classification_crosstab_rows,
     summary as segment_classification_summary,
 )
 from ..text_utils import clean_multiline, clean_single_line, json_load, normalize_tags, utc_now_iso
 from ..transformer_analysis import (
     DEFAULT_MODEL as DEFAULT_TRANSFORMER_MODEL,
     MAX_MANUAL_TOPICS,
-    transformer_csv_sources,
     transformer_input_fingerprint,
 )
 from .. import method_experts
@@ -58,10 +45,10 @@ from .outputs import SPEAKER_THEME_COLORS
 from .transcription.segments import default_speaker_name
 from .group_analysis_exports import (
     ANALYSIS_CSV_FIELDS,
-    analysis_csv_content,
-    analysis_csv_rows,
-    analysis_csv_safe,
-    focus_group_analysis_report_markdown,
+    analysis_csv_content as analysis_csv_content,
+    analysis_csv_rows as analysis_csv_rows,
+    analysis_csv_safe as analysis_csv_safe,
+    focus_group_analysis_report_markdown as focus_group_analysis_report_markdown,
 )
 
 GROUP_ANALYSIS_ALGORITHM_VERSION = "focus-group-local-7"

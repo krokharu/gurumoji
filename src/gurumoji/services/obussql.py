@@ -7,6 +7,7 @@ No source registration, persistent index, synchronization or model call occurs.
 from __future__ import annotations
 
 from contextlib import closing
+from collections import Counter
 from dataclasses import dataclass, field
 from hashlib import sha256
 from importlib import import_module, metadata
@@ -34,6 +35,7 @@ MAX_LIST_NOTES = 100
 MAX_NOTE_BYTES = 256 * 1024
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_PAYLOAD_BYTES = 16 * 1024
+MAX_RETRIEVAL_BYTES = 8 * 1024 * 1024
 GENERATED_VAULTS = ("input", "visualization", "orchestrator")
 
 
@@ -367,13 +369,14 @@ class ObusSQLService:
                 selected.append((resource, revision))
             pack = api.retrieve_context(
                 backend, context, tuple(selected), query=query,
-                budget=api.PayloadBudget(max_bytes=MAX_PAYLOAD_BYTES), candidate_limit=1024,
+                budget=api.PayloadBudget(max_bytes=MAX_RETRIEVAL_BYTES), candidate_limit=10000,
                 read_limits=api.ReadLimits(max_source_bytes=MAX_SOURCE_BYTES, max_document_bytes=MAX_NOTE_BYTES),
             )
+            bounded = bounded_preview_context(json.loads(pack.serialized_payload))
             result = {"stage": "read_only_preview", "sources": [s.provenance() for s in snapshots],
-                      "context": json.loads(pack.serialized_payload),
-                      "measurement": {"utf8_bytes": pack.measurement.utf8_bytes,
-                                      "token_count": pack.measurement.token_count}}
+                      "context": bounded,
+                      "measurement": {"utf8_bytes": len(_context_json(bounded).encode("utf-8")),
+                                      "token_count": None}}
         except ObusSQLError:
             raise
         except api.SourceVersionChanged:
@@ -386,3 +389,42 @@ class ObusSQLService:
             if source.capture(selections) != snapshots:
                 raise _changed()
         return result
+
+
+def _context_json(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def bounded_preview_context(value):
+    """本文を切断せず、除外情報を集約してホストの配送上限へ収める。"""
+    original_excluded = list(value.get("excluded", []))
+    selected = []
+    for row in value.get("selection", []):
+        if len(_context_json(row).encode("utf-8")) >= MAX_PAYLOAD_BYTES:
+            original_excluded.append({"node_id": row["node"]["id"], "reason": "host_payload_budget"})
+        else:
+            selected.append(row)
+    def candidate(count):
+        excluded = original_excluded + [{"node_id": row["node"]["id"], "reason": "host_payload_budget"}
+                                       for row in selected[count:]]
+        result = {**value, "schema_version": "gurumoji-summary-context-v1",
+                  "selection": selected[:count], "selected_blocks": count, "excluded": excluded[:16],
+                  "exclusion_summary": {"total": len(excluded),
+                      "reasons": dict(Counter(row["reason"] for row in excluded)),
+                      "details_complete": len(excluded) <= 16, "details_sha256": "0" * 64}}
+        return result, excluded
+    # 全件を1件ずつ再直列化せず、上限に収まるスコア順の接頭部を探す。
+    low, high = 0, len(selected)
+    empty, _ = candidate(0)
+    if len(_context_json(empty).encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        raise ObusSQLError("preview_failed", "検索結果の管理情報が配送上限を超えています。", 422)
+    while low < high:
+        middle = (low + high + 1) // 2
+        result, _ = candidate(middle)
+        if len(_context_json(result).encode("utf-8")) <= MAX_PAYLOAD_BYTES:
+            low = middle
+        else:
+            high = middle - 1
+    result, excluded = candidate(low)
+    result["exclusion_summary"]["details_sha256"] = sha256(_context_json(excluded).encode("utf-8")).hexdigest()
+    return result

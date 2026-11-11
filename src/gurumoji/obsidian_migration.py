@@ -12,7 +12,7 @@ from contextlib import closing
 from pathlib import Path
 
 from .analysis_store import safe_path, write_atomic
-from .obsidian_layout import ObsidianLayout, HOME, unpack, pack
+from .obsidian_layout import ObsidianLayout, unpack, pack
 
 
 def rewrite_links(text: str, mapping: dict[str, str]) -> str:

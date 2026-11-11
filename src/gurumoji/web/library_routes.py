@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+from dataclasses import dataclass
 import datetime
 import math
 import sqlite3
@@ -14,6 +15,7 @@ from typing import Any, Callable
 from flask import Flask, jsonify, request, send_file
 
 from ..handlers.analysis_commands import ComparisonRequestError
+from ..services.library_edits import LibraryStorePort
 from ..services.durable_files import path_is_within
 from ..services.library_trash import TrashError
 from ..services.library_rows import emotion_values
@@ -23,32 +25,65 @@ from ..text_utils import json_load
 from ..services import data_catalog
 
 
+@dataclass(frozen=True)
+class LibraryMediaPort:
+    media_directory: Callable[[], Any]
+    file_dialog_lock: Any
+    generate_video_thumbnail: Any
+    generate_word_cloud_thumbnail: Any
+    local_path_access_allowed: Any
+    manual_output_directory: Any
+    resolve_local_media_path: Any
+    runtime_info: Any
+
+
+@dataclass(frozen=True)
+class LibraryAnalysisPort:
+    analysis_archive_store: Any
+    archive_source_stamp: Any
+    build_interview_comparison: Any
+    interview_comparison_request: Any
+
+
+@dataclass(frozen=True)
+class LibraryTrashPort:
+    _delete_library_item_locked: Any
+    library_write_lock: Any
+    list_library_trash: Callable[[], dict[str, Any]]
+    restore_library_trash: Callable[[str], str]
+    purge_library_trash: Callable[[str], None]
+
+
 def register_library_routes(
     app: Flask,
     *,
-    media_directory: Callable[[], Any],
-    _delete_library_item_locked: Any,
-    analysis_archive_store: Any,
-    archive_source_stamp: Any,
-    build_interview_comparison: Any,
-    database_connection: Any,
-    file_dialog_lock: Any,
-    generate_video_thumbnail: Any,
-    generate_word_cloud_thumbnail: Any,
-    interview_comparison_request: Any,
-    library_public: Any,
-    library_row: Any,
-    library_write_lock: Any,
-    local_path_access_allowed: Any,
-    manual_output_directory: Any,
-    resolve_local_media_path: Any,
-    row_segments: Any,
-    runtime_info: Any,
-    upsert_library_item: Any,
-    list_library_trash: Callable[[], dict[str, Any]],
-    restore_library_trash: Callable[[str], str],
-    purge_library_trash: Callable[[str], None],
+    store: LibraryStorePort,
+    media: LibraryMediaPort,
+    analysis: LibraryAnalysisPort,
+    trash: LibraryTrashPort,
 ) -> None:
+    database_connection = store.database_connection
+    library_public = store.library_public
+    library_row = store.library_row
+    row_segments = store.row_segments
+    upsert_library_item = store.upsert_library_item
+    media_directory = media.media_directory
+    file_dialog_lock = media.file_dialog_lock
+    generate_video_thumbnail = media.generate_video_thumbnail
+    generate_word_cloud_thumbnail = media.generate_word_cloud_thumbnail
+    local_path_access_allowed = media.local_path_access_allowed
+    manual_output_directory = media.manual_output_directory
+    resolve_local_media_path = media.resolve_local_media_path
+    runtime_info = media.runtime_info
+    analysis_archive_store = analysis.analysis_archive_store
+    archive_source_stamp = analysis.archive_source_stamp
+    build_interview_comparison = analysis.build_interview_comparison
+    interview_comparison_request = analysis.interview_comparison_request
+    _delete_library_item_locked = trash._delete_library_item_locked
+    library_write_lock = trash.library_write_lock
+    list_library_trash = trash.list_library_trash
+    restore_library_trash = trash.restore_library_trash
+    purge_library_trash = trash.purge_library_trash
     def select_input_file():
         if not local_path_access_allowed():
             return jsonify({"error": "Local filesystem selection is disabled for remote access."}), 403

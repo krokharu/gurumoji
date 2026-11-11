@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 
-TEMPLATE_VERSION = "agent-analysis-templates-1"
+TEMPLATE_VERSION = "agent-analysis-templates-2"
+LEGACY_TEMPLATE_VERSION = "agent-analysis-templates-1"
 
 TEMPLATES = {
     "common": (
@@ -18,7 +19,7 @@ TEMPLATES = {
     "quantitative": (
         "量的分析・基本",
         "指標、分母、集計単位、群、欠測、除外、尺度水準、実行した計算を明示する。",
-        "件数を支持人数や重要性と混同せず、未実行の検定や再計算を数値として出さない。",
+        "件数・言及人数・正規化頻度を区別し、分析区分と知見のタイトル、手法、対応図表、読み取りをそろえる。クロス表は度数と割合、カイ二乗は期待度数・残差・効果量と独立性を示す。未実行を数値にしない。",
     ),
     "qualitative_content": (
         "質的内容分析",
@@ -106,13 +107,13 @@ COMMON_FIELDS = ("研究質問", "対象と入力版", "分析単位", "根拠�
 TEMPLATE_FIELDS = {
     "common": ("比較軸", "除外条件", "手法選定の理由", "必要資料"),
     "qualitative": ("コード候補", "カテゴリー候補", "反例と少数意見", "研究者の判断"),
-    "quantitative": ("指標の定義", "分母", "群と件数", "欠測", "尺度水準"),
+    "quantitative": ("指標の定義", "分母", "群と件数", "欠測", "尺度水準", "分析手法と対応する図表", "図表からの読み取り"),
     "qualitative_content": ("意味単位", "コード定義", "適用規則", "境界例"),
     "thematic": ("初期コード", "テーマ候補", "テーマ間の関係", "反例"),
     "framework": ("ケース", "テーマ", "行列セルの要約", "比較不能な箇所"),
     "interaction": ("応答元と応答先", "関係", "発言順", "意見変化", "音声確認状態"),
     "quantitative_text": ("語の分割・除外規則", "語彙頻度", "共起", "比較群", "原文照合"),
-    "group_statistics": ("群の定義", "観測単位", "分母", "欠測", "計算と前提"),
+    "group_statistics": ("群の定義", "観測単位", "分母", "欠測", "計算と前提", "クロス表と期待度数", "残差とCramérのV", "独立性と検定判断の可否"),
     "scat": ("注目語句", "言い換え候補", "研究上の疑問", "研究者の理論記述"),
     "mgta": ("分析テーマ", "分析焦点者", "概念候補", "対極例", "継続比較"),
     "kj": ("カード", "グループ", "関係づけ", "編成理由"),
@@ -130,20 +131,28 @@ def selection_valid(version: object, config: object) -> bool:
     """既存runを維持しつつ、新しい選択だけを厳密に検査する。"""
     if not isinstance(config, dict):
         return False
-    if version != TEMPLATE_VERSION:
+    if version not in (TEMPLATE_VERSION, LEGACY_TEMPLATE_VERSION):
         return True
-    return (version == TEMPLATE_VERSION and set(config) == {"id"}
+    return (set(config) == {"id"}
             and isinstance(config["id"], str) and config["id"] in TEMPLATES)
 
 
 def agent_guidance(version: object, config: object, role: str) -> str:
     """選択された定義だけを、信頼できるシステム指示として返す。"""
-    if version != TEMPLATE_VERSION:
+    if version not in (TEMPLATE_VERSION, LEGACY_TEMPLATE_VERSION):
         return ""
     if not selection_valid(version, config):
         raise ValueError("保存された分析テンプレートの版またはIDが正しくありません。")
     title, procedure, limitation = TEMPLATES[config["id"]]
-    fields = "、".join((*COMMON_FIELDS, *TEMPLATE_FIELDS[config["id"]]))
+    selected_fields = TEMPLATE_FIELDS[config["id"]]
+    # 保存済みの旧版を再実行する際も、当時の指示を保つ。
+    if version == LEGACY_TEMPLATE_VERSION:
+        if config['id'] == 'quantitative':
+            limitation = "件数を支持人数や重要性と混同せず、未実行の検定や再計算を数値として出さない。"
+            selected_fields = ("指標の定義", "分母", "群と件数", "欠測", "尺度水準")
+        elif config['id'] == 'group_statistics':
+            selected_fields = ("群の定義", "観測単位", "分母", "欠測", "計算と前提")
+    fields = "、".join((*COMMON_FIELDS, *selected_fields))
     role_note = {
         "core": "問いへの適合と資料の充足を判断し、実行可能な担当作業だけを発注する。",
         "interpretation": "提示された原文の範囲で候補と根拠を整理する。",
@@ -151,7 +160,7 @@ def agent_guidance(version: object, config: object, role: str) -> str:
         "critic": "手法の適用条件と飛躍を点検する。",
         "orchestrator": "担当分野の保存結果と限界を照合する。",
     }[role]
-    return (f"\n選択された分析テンプレート: {title}（{config['id']} / {TEMPLATE_VERSION}）。"
+    return (f"\n選択された分析テンプレート: {title}（{config['id']} / {version}）。"
             f"確認項目: {procedure} 確認視点: {fields} 注意: {limitation} 担当: {role_note} "
             "これは手順の雛形であり、未提供の資料、未実行の計算、研究者による確定判断を補完しません。"
             "確認視点は既存の出力項目で表現し、新しいJSONキーを足さないでください。"

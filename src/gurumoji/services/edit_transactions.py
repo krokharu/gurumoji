@@ -14,7 +14,6 @@ factory; nothing else in the module reaches into application state.
 from __future__ import annotations
 
 import ctypes
-import errno
 import hashlib
 import hmac
 import json
@@ -25,7 +24,6 @@ import shutil
 import sqlite3
 import stat
 import sys
-import time
 import uuid
 from pathlib import Path, PurePosixPath
 from collections import Counter
@@ -44,7 +42,6 @@ from .durable_files import (
     path_is_link_or_reparse,
     path_is_within,
     sync_directory_metadata,
-    sync_file_data,
     sync_rename_metadata,
     windows_case_insensitive_text,
     windows_extended_path,

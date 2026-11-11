@@ -1,12 +1,12 @@
 ---
 note_type: reference-section
-version: 2.0.0
-updated: 2026-10-04
+version: 2.1.0
+updated: 2026-11-10
 status: proposed
 source_head: e3f002c9d4962769deb1925b8d9859e7f7d2bd73
 template_id: gurumoji-evidence-review
-template_version: 2.0.0
-prompt_version: 2.0.0
+template_version: 2.1.0
+prompt_version: 2.1.0
 tags:
 - gurumoji/design
 - gurumoji/analysis
