@@ -5,7 +5,7 @@
   'use strict';
   const node = id => document.getElementById(`analysis-history-${id}`);
   const state = {epoch:0, runEpoch:0, listRequest:0, pageRequest:0, detailRequest:0, sourceRequest:0, slidesRequest:0,
-    itemId:'', runId:'', context:null, run:null, version:null, runOffset:0, offset:0, tab:'history', opener:null, slides:null};
+    itemId:'', runId:'', engine:'orchestration', context:null, run:null, version:null, runOffset:0, offset:0, tab:'history', opener:null, slides:null};
   const labels = {initial:'初期版',task:'タスク',result:'分析結果',decision:'判断',label:'ラベル',legacy_label:'ラベル（旧形式）',event:'イベント',
     add:'追加',update:'更新',delete:'削除',proposal:'提案・未採用',proposed:'提案・未採用',adopt:'採用',adopted:'採用',committed:'採用',reject:'却下',rejected:'却下',defer:'保留',deferred:'保留',conflict:'競合',
     core:'Core',handler:'Handler',interpretation:'会話解釈',statistics:'数量・統計',verification:'独立検証',critic:'批判者',
@@ -15,7 +15,7 @@
   const label = value => Object.hasOwn(labels,value) ? labels[value] : text(value);
   const el = (tag, value, className) => {const element=document.createElement(tag);if(value!==undefined)element.textContent=text(value);if(className)element.className=className;return element;};
   const button = (value, action) => {const element=el('button',value,'secondary-button');element.type='button';element.addEventListener('click',action);return element;};
-  const base = () => `/api/library/${encodeURIComponent(state.itemId)}/analysis/orchestration`;
+  const base = () => `/api/library/${encodeURIComponent(state.itemId)}/analysis/${state.engine === 'core_pipeline' ? 'core-pipeline' : 'orchestration'}`;
   const runBase = () => `${base()}/${encodeURIComponent(state.runId)}`;
   const token = () => ({epoch:state.epoch,runEpoch:state.runEpoch,itemId:state.itemId,runId:state.runId});
   const current = stamp => node('dialog').open && stamp.epoch===state.epoch && stamp.runEpoch===state.runEpoch && stamp.itemId===state.itemId && stamp.runId===state.runId && (!state.context || isAnalysisContextCurrent(state.context));
@@ -42,14 +42,16 @@
   }
   async function open(options={}) {
     const context=captureAnalysisContext();
-    close();state.context=context;state.itemId=String(options.itemId||context.itemId||'');state.runId='';state.version=null;state.runOffset=0;state.offset=0;state.tab='history';state.opener=document.activeElement;
+    close();state.engine=options.engine==='core_pipeline'?'core_pipeline':'orchestration';node('tab-slides').hidden=state.engine==='core_pipeline';state.context=context;state.itemId=String(options.itemId||context.itemId||'');state.runId='';state.version=null;state.runOffset=0;state.offset=0;state.tab='history';state.opener=document.activeElement;
     // A live-run entry may refer to a run other than the currently edited item.
     if(options.itemId && options.itemId!==context.itemId)state.context=null;
     node('target').textContent=`会話: ${options.itemName||context.data?.item?.source_name||state.itemId||'未選択'} · 保存された実行を選択`;
     node('selected').hidden=true;node('empty').hidden=false;node('filters').reset();
     node('dialog').showModal();node('close').focus();
     if(!state.itemId){notice('分析対象の会話を選択してください。');return;}
+    const epoch=state.epoch;
     await loadRuns(options.runId||'');
+    if(epoch===state.epoch&&node('dialog').open&&options.runId===state.runId&&typeof options.entryId==='string')await loadEntry(options.entryId);
   }
   async function loadRuns(preferred='') {
     const stamp=token(),request=++state.listRequest;notice('保存済み実行を取得しています…');
@@ -68,6 +70,7 @@
     }catch(error){if(current(stamp)&&request===state.listRequest)notice(error.message);}
   }
   function selectTab(tab) {
+    if(tab==='slides'&&state.engine==='core_pipeline')return;
     state.tab=tab;
     for(const name of ['history','results','labels','slides'])node(`tab-${name}`).setAttribute('aria-pressed',String(tab===name));
     node('records').hidden=tab==='slides';node('slides').hidden=tab!=='slides';
@@ -165,6 +168,14 @@
   }
   async function loadSource(utteranceId,detailRequest=state.detailRequest) {
     const stamp=token(),request=++state.sourceRequest,host=node('source');if(!host)return;
+    const opener=document.activeElement,positions=[node('dialog'),node('detail')].map(element=>({element,top:element.scrollTop,left:element.scrollLeft}));
+    const back=()=>{
+      if(!current(stamp)||detailRequest!==state.detailRequest)return;
+      ++state.sourceRequest;host.hidden=true;host.replaceChildren();
+      if(opener?.isConnected)opener.focus({preventScroll:true});
+      for(const position of positions){position.element.scrollTop=position.top;position.element.scrollLeft=position.left;}
+    };
+    const backButton=()=>button('根拠を閉じて選択位置へ戻る',back);
     host.hidden=false;host.replaceChildren(el('p','固定原文を取得しています…'));
     try {
       const expectedVersion=state.version;
@@ -176,8 +187,8 @@
       for(const [key,title] of [['initial','初期ラベル'],['selected','選択版ラベル'],['latest','最新ラベル']])host.append(el('h4',`${title} · v${text(data.versions?.[key])}`),el('pre',data.labels?.[key]));
       if(source.text_truncated)host.append(el('p','原文は表示上限により一部を省略しています。全文ではありません。','analysis-history-audit'));
       if(data.truncated_fields?.length)host.append(el('p',`表示上限による省略: ${text(data.truncated_fields)}`,'field-note'));
-      host.append(el('p',`記録: ${text(data.audit?.message)}`,'field-note'),button('固定原文を閉じる',()=>{++state.sourceRequest;host.hidden=true;host.replaceChildren();}));host.scrollIntoView({block:'nearest'});
-    }catch(error){if(current(stamp)&&request===state.sourceRequest&&detailRequest===state.detailRequest)host.replaceChildren(el('p',error.message));}
+      host.append(el('p',`記録: ${text(data.audit?.message)}`,'field-note'),backButton());host.scrollIntoView({block:'nearest'});host.querySelector('button').focus({preventScroll:true});
+    }catch(error){if(current(stamp)&&request===state.sourceRequest&&detailRequest===state.detailRequest){host.replaceChildren(el('p',error.message),backButton());host.querySelector('button').focus({preventScroll:true});}}
   }
   function slideCurrent(stamp,request) {return current(stamp)&&request===state.slidesRequest&&state.tab==='slides';}
   async function loadSlideTemplates() {

@@ -9,6 +9,7 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='analysis-orchestration.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='core-pipeline.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='analysis-history.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='ai-effort.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='stitch-theme.css') }}">
@@ -75,6 +76,7 @@
           <span id="analysis-job-chip-label">分析中</span>
         </button>
         <button id="orchestration-chip" class="job-chip" type="button" hidden><i class="job-chip-dot" aria-hidden="true"></i><span id="orchestration-chip-label">自律分析</span></button>
+        <button id="pipeline-chip" class="job-chip" type="button" hidden><i class="job-chip-dot" aria-hidden="true"></i><span id="pipeline-chip-label">全文分割分析</span></button>
         <div class="app-status desktop-only" aria-label="トークン設定状況">
           <span id="status-hf" class="status-pill loading">Hugging Face</span>
           <button id="status-openai" class="status-pill loading" type="button" data-model-provider="openai">OpenAI</button>
@@ -297,7 +299,7 @@
         <h2 id="analysis-run-dialog-title">基礎分析の実行設定</h2>
         <p>発話量・会話の時間構造を集計します。Transformerテーマ分析とAI見解は「内容・文脈検索」から個別に実行します。</p>
       </div>
-      <div class="orchestration-entry"><div><strong>Core / Handler 自律分析</strong><p>問いに合わせて解釈・検証・批判を反復。AIとタスクの動きを確認できます。</p></div><button id="orchestration-open" class="secondary-button" type="button">自律分析を設定</button></div>
+      <div class="orchestration-entry"><div><strong>Core / Handler 自律分析</strong><p>問いに合わせて解釈・検証・批判を反復。AIとタスクの動きを確認できます。</p></div><button id="orchestration-open" class="secondary-button" type="button">自律分析を設定</button><button id="pipeline-open" class="secondary-button" type="button">全文を段階的に分析</button></div>
       <div id="analysis-run-dialog-message" class="alert" hidden></div>
       <div class="analysis-run-mode-picker">
         <label><input name="analysis_run_mode" type="radio" value="automatic" checked><span>自動実行</span></label>
@@ -363,10 +365,13 @@
 
   <script src="{{ url_for('static', filename='analysis-execution.js') }}" defer></script>
   {% include 'views/analysis-orchestration.html' %}
+{% include 'views/core-pipeline.html' %}
   {% include 'views/analysis-history.html' %}
   <script src="{{ url_for('static', filename='analysis-orchestration.js') }}" defer></script>
   <script src="{{ url_for('static', filename='analysis-history.js') }}" defer></script>
   <script src="{{ url_for('static', filename='research-workspace.js') }}" defer></script>
   <script src="{{ url_for('static', filename='obussql.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='core-pipeline.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='ai-data-export.js') }}" defer></script>
 </body>
 </html>

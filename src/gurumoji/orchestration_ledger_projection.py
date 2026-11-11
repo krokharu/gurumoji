@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 
+from .orchestration_initial import validate_ready_initial
 from .analysis_core import (
     EFFECTIVE_PUBLICATION_WRITERS,
     AnalysisContractError,
@@ -58,18 +59,29 @@ class LedgerProjectionMixin:
         def total(key):
             values = [r[key] for r in records if type(r.get(key)) in {int, float}]
             return sum(values) if values else None
+        measured_calls = len({r.get("task_id") for r in records})
+        tokens_complete = bool(records) and measured_calls == run["calls_started"] and all(
+            type(r.get(key)) in {int, float} for r in records
+            for key in ("input_tokens", "output_tokens", "total_tokens"))
         return {"calls": run["calls_started"], "code_executions": run["code_executions"],
                 "input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"),
                 "total_tokens": total("total_tokens"), "cost": total("cost"),
                 "currency": "USD" if any(r.get("currency") == "USD" for r in records) else None,
-                "measured_calls": len({r.get("task_id") for r in records}),
-                "measurement_status": "reported" if records else "unavailable"}
+                "measured_calls": measured_calls, "tokens_complete": tokens_complete,
+                "measurement_status": ("reported" if tokens_complete else "partial") if records else "unavailable"}
 
     def _public(self, db, run, events_after=None):
         result = copy.deepcopy(run)
         result["config"].setdefault("publication_targets", [])
         result["config"]["effective_publication_writers"] = list(EFFECTIVE_PUBLICATION_WRITERS) if result["config"]["publication_targets"] else []
         result["initial"] = initial_progress(db, run["initial_id"])
+        initial_reusable = True
+        if self.initial_builder is not None and result["initial"]["status"] == "ready":
+            try:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
+            except AnalysisContractError as exc:
+                initial_reusable = False
+                result["initial"].update(status="revalidation_required", stored_status="ready", recovery_error=exc.code)
         result["initial_stages"] = result["initial"]["stages"]
         tasks = self._tasks(db, run["run_id"])
         result["tasks"] = tasks
@@ -111,7 +123,7 @@ class LedgerProjectionMixin:
         result["label_proposals"] = [json.loads(r[0]) for r in db.execute("SELECT payload_json FROM orchestration_label_proposals WHERE run_id=? ORDER BY rowid", (run["run_id"],))]
         result["unresolved_issues"] = [issue for issue in result["issues"] if issue.get("status") != "resolved"]
         uncertain = [t["task_id"] for t in tasks if t["status"] in {"running", "uncertain", "cancel_requested"}]
-        result["can_resume"] = run["status"] in {"queued", "recovery_required"} and not uncertain
+        result["can_resume"] = run["status"] in {"queued", "recovery_required"} and not uncertain and initial_reusable
         if run["phase"] == "initial":
             result["can_resume"] = result["can_resume"] and not run["stale"]
             try:
@@ -165,7 +177,7 @@ class LedgerProjectionMixin:
             raise LookupError("会話が見つかりません。")
         with self._db() as db:
             return [self._public(db, json.loads(row[0])) for row in db.execute(
-                "SELECT state_json FROM orchestration_runs WHERE item_id=? ORDER BY rowid DESC", (item_id,)).fetchall()]
+                "SELECT state_json FROM orchestration_runs WHERE item_id=? AND coalesce(json_extract(state_json, '$.config.adapter_version'), '') != 'core-pipeline-1' ORDER BY rowid DESC", (item_id,)).fetchall()]
 
     def result(self, item_id: str, run_id: str, result_id: str | None = None) -> dict:
         if self.find_item(item_id) is None:

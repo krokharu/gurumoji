@@ -13,6 +13,7 @@ from ..handlers.analysis_commands import TranscriptConflictError
 from ..text_utils import clean_outline_refs, json_load, utc_now_iso, validate_json_value
 from .durable_files import path_is_within
 from . import media_assets
+from .outline_tags import outline_assignment
 from .group_analysis import analysis_segment_bounds
 from .library_rows import (
     emotion_values,
@@ -140,6 +141,8 @@ def make_library_store(
                 "session_profile": session_profile,
                 "speaker_profiles": row_speaker_profiles(row, segments, speaker_names),
                 "outline": clean_outline_refs(json_load(row["outline_json"], None)),
+                # 発話ごとの区間タグは、保存内容と一致しなくなった場合に再計算する。
+                "outline_assignment": outline_assignment(json_load(row["outline_json"], None), segments),
                 "session_outline": row_session_outline(row, session_profile),
                 "meeting_minutes": row_meeting_minutes(row),
                 "emotion_analysis": json_load(row["emotion_analysis_json"], None),

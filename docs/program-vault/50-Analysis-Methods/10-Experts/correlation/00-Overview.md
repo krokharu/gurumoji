@@ -37,3 +37,8 @@ tags:
 ## 担当する実装
 
 - `correlation`（[[50-Analysis-Methods/03-Statistics/03-Correlation]]）
+
+
+## スキル対応と知識充足の入口（提案）
+
+[[50-Analysis-Methods/10-Experts/correlation/08-Skill-Hook-Binding|段階別のスキル・hook対応登録案]] と [[50-Analysis-Methods/50-Knowledge-Evaluation/expert-stage-readiness|17専門家の充足・不足表]]。currentPackは暫定維持し、08の実行readerは未接続。研究者の採否は未確認として保持する。

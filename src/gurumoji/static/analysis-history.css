@@ -41,6 +41,7 @@
 .analysis-history-evidence { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
 .analysis-history-source { border-top:2px solid var(--green); margin-top:16px; padding-top:16px; }
 .analysis-history-source blockquote { margin:12px 0; padding:12px; border-left:3px solid var(--green); background:var(--card); white-space:pre-wrap; }
+.analysis-history-dialog :is(button,select,input,a,[tabindex]):focus-visible { outline:var(--focus-ring); outline-offset:2px; }
 .analysis-history-pagination { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
 .analysis-history-pagination button { font-size:.8125rem; }
 .analysis-history-slides-content article { background:var(--paper); padding:16px; border:1px solid var(--line); border-radius:var(--radius-sm); margin:12px 0; }

@@ -92,6 +92,7 @@ async function loadAnalysisItem(itemId, {discardDirty = false, execute = false} 
     invalidateAnalysisMethodOverview();
     analysisState.config = deepCopy(data.config || {});
     analysisState.annotations = deepCopy(data.annotations || {});
+    if (typeof window.cancelAiDataExport === 'function') window.cancelAiDataExport();
     preparationDraft = null;
     preparationDirty = false;
     analysisState.segmentQuery = '';

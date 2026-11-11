@@ -139,3 +139,6 @@ def _cross_tabulation(evidence, labels, field, task, selected):
                             "列内割合の分母は当該ラベルを持つ話者既知の発話数です。全体割合の分母は対象全発話数です。",
                             "複数ラベルは各ラベルへ1発話1回計上するため、行の度数・割合の合計は行の発話数・100%を超える場合があります。",
                             "記述集計です。有意差検定、人物単位の独立性、因果関係は示しません。"]}
+
+# 固定済み専門家readerとの互換性を保つ。
+from .core_pipeline_methods import EXPERT_STATISTICAL_TOOLS  # noqa: F401,E402

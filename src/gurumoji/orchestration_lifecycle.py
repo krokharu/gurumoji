@@ -5,6 +5,7 @@ import json
 import threading
 import time
 
+from .orchestration_initial import validate_ready_initial
 from .analysis_core import fingerprint, validate_publication_targets
 from .orchestration_initial import (
     create_initial_checkpoints,
@@ -89,6 +90,9 @@ class LifecycleMixin:
                 raise _error("同じ初期分析が作成中、または復旧確認待ちです。自動再実行しません。", "initial_recovery_required")
             else:
                 initial_id = initial["initial_id"]
+                if self.initial_builder is not None or db.execute(
+                        "SELECT 1 FROM orchestration_initial_builds WHERE initial_id=?", (initial_id,)).fetchone():
+                    validate_ready_initial(db, initial_id, self.initial_builder)
                 snapshot = self._initial(db, initial_id)
         if build:
             try:
@@ -169,6 +173,7 @@ class LifecycleMixin:
             else:
                 initial_id = initial["initial_id"]
                 if initial["status"] == "ready":
+                    validate_ready_initial(db, initial_id, self.initial_builder)
                     snapshot = self._initial(db, initial_id)
                 else:
                     build, _, states, _, _ = read_initial_checkpoints(db, initial_id, self.initial_builder)
@@ -396,6 +401,8 @@ class LifecycleMixin:
                 if self.initial_builder is None:
                     raise _error("初期分析の実装が利用できません。", "initial_version_conflict")
                 read_initial_checkpoints(db, run["initial_id"], self.initial_builder)
+            elif self.initial_builder is not None:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
             if run["status"] in TERMINAL:
                 raise _error("終了済みrunは再実行しません。新しいrunを開始してください。", "run_terminal")
             uncertain = []

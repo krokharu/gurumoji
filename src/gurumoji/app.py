@@ -1082,11 +1082,24 @@ def create_outline_with_ai(
     usage_callback: Callable[[dict[str, Any]], None] | None = None, base_url: str = "",
     ai_efforts: dict | None = None,
 ) -> dict[str, Any]:
+    prepare = None
+    if provider == "lmstudio" and os.environ.get("GURUMOJI_LMSTUDIO_AUTO_PLACEMENT") == "1":
+        # 明示的に有効化した場合だけ、モデルのコンテキスト長とGPU配置を調整する。
+        def prepare(values):
+            from .ai_finishing import outline_token_need
+            return lmstudio_placement(base_url).ensure(model, *outline_token_need(values, speaker_names))
     return ai_transcript_finishing.create_outline(
         segments, speaker_names, provider, api_key, model, status, check_cancelled,
         call_json=call_ai_json, create=finish_create_outline, now_iso=utc_now_iso,
-        usage_callback=usage_callback, base_url=base_url, ai_efforts=ai_efforts,
+        usage_callback=usage_callback, base_url=base_url, ai_efforts=ai_efforts, prepare_local_model=prepare,
     )
+
+
+def lmstudio_placement(base_url: str = ""):
+    from .services.ai.lmstudio_placement import LMStudioPlacement
+    lms = shutil.which("lms") or str(Path.home() / ".lmstudio" / "bin" / ("lms.exe" if os.name == "nt" else "lms"))
+    endpoint = (base_url or "http://127.0.0.1:1234/v1").rstrip("/").removesuffix("/v1")
+    return LMStudioPlacement(lms=lms, endpoint=endpoint, state_path=DATABASE_FILE.parent / "lmstudio-placement.json")
 
 
 def update_job(job: JobRecord, **changes: Any) -> None:
@@ -1718,6 +1731,7 @@ def call_orchestration_ai_json(
     provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
     check_cancelled=None, usage_callback=None, base_url="", timeout_seconds=240,
     max_output_tokens=None, data_messages=None, local_reasoning_level=None,
+    *, request_budget=None, task_id="", attempt_id="", raw_usage_callback=None, diagnostic_callback=None,
 ):
     """One transport dispatch per Handler task; retries must be ledgered.
 
@@ -1725,11 +1739,19 @@ def call_orchestration_ai_json(
     An ambiguous response in this loop must never silently consume a second call.
     """
     def post_once(url, headers, payload, **kwargs):
-        return ai_client.post_json(
+        if request_budget is not None:
+            kwargs.update(request_budget=request_budget, task_id=task_id, attempt_id=attempt_id)
+        if callable(diagnostic_callback):
+            kwargs["diagnostic_callback"] = diagnostic_callback
+        response = ai_client.post_json(
             url, headers, payload, worker_file=AI_HTTP_WORKER_FILE,
             run_subprocess=run_cancellable_subprocess, retry_delays=(),
             timeout=timeout_seconds, **kwargs,
         )
+        if raw_usage_callback is not None:
+            import copy
+            raw_usage_callback(copy.deepcopy(response.get("usage")) if isinstance(response, dict) else None)
+        return response
     return ai_client.call_ai_json(
         provider, api_key, model, system_prompt, user_prompt, schema_name, schema,
         post=post_once, lmstudio_base=lmstudio_base_url,
@@ -2185,6 +2207,8 @@ def create_app() -> Flask:
         group_analysis_for_row=lambda *args, **kwargs: group_analysis_for_row(*args, **kwargs),
         library_row=lambda *args, **kwargs: library_row(*args, **kwargs),
         list_speaker_registry=list_speaker_registry,
+        media_directory=lambda: MEDIA_DIRECTORY,
+        path_is_within=lambda *args: path_is_within(*args),
         meeting_minutes_export_row=meeting_minutes_export_row,
         row_segments=lambda *args, **kwargs: row_segments(*args, **kwargs),
         row_session_profile=lambda *args, **kwargs: row_session_profile(*args, **kwargs),
@@ -2249,6 +2273,8 @@ def create_app() -> Flask:
         backup=lambda: create_data_backup(False), local_allowed=local_path_access_allowed,
         row_segments=lambda row: row_segments(row),
         row_profiles=lambda *args: row_speaker_profiles(*args), row_session=lambda row: row_session_profile(row))
+    from .services.developed_features import register_developed_features
+    register_developed_features(flask_app, sys.modules[__name__])
     return flask_app
 
 

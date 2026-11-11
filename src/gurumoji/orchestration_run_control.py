@@ -7,6 +7,7 @@ import time
 import unicodedata
 from difflib import SequenceMatcher
 
+from .orchestration_initial import validate_ready_initial
 from .analysis_core import AnalysisContractError, fingerprint
 from .orchestration_shared import (
     IMPORTANCE,
@@ -545,6 +546,8 @@ class RunControlMixin:
                 if run["status"] in TERMINAL or run["status"] == "recovery_required":
                     return
                 self._check_version(run)
+                if self.initial_builder is not None:
+                    validate_ready_initial(db, run["initial_id"], self.initial_builder)
                 if any(t["status"] in {"running", "uncertain"} for t in self._tasks(db, run_id)):
                     run.update(status="recovery_required", error="進行中だった呼出しを照合してから再開してください。")
                     self._write_run(db, run)
@@ -708,5 +711,9 @@ class RunControlMixin:
                 run = self._read_run(db, run_id)
                 if run["status"] not in TERMINAL:
                     run["error"] = getattr(exc, "code", type(exc).__name__)
-                    self._stop(db, run, "execution_failure")
+                    if run["error"] == "initial_revalidation_required":
+                        run["status"] = "recovery_required"
+                        self._write_run(db, run)
+                    else:
+                        self._stop(db, run, "execution_failure")
 

@@ -6,6 +6,7 @@ import math
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+from .orchestration_initial import validate_ready_initial
 from .analysis_core import AnalysisContractError, fingerprint
 from .orchestration_shared import (
     AI_ROLES,
@@ -239,20 +240,32 @@ class ExecutionMixin:
                 self._event(db, run_id, "context_prepared", "入力範囲とモデルの予算を保存しました。",
                             task_id=task_id, context_manifest_hash=task["context_manifest_hash"])
             return
-        if data.get("reported") is False:
-            return
         record = {"task_id": task_id, "reported_at": _now()}
         for key in ("input_tokens", "output_tokens", "total_tokens", "cost"):
             value = data.get(key)
-            if type(value) in {int, float} and math.isfinite(value) and value >= 0:
+            if value is None and key in data:
+                record[key] = None
+            elif type(value) in {int, float} and math.isfinite(value) and value >= 0:
                 record[key] = value
-        if not any(k in record for k in ("input_tokens", "output_tokens", "total_tokens", "cost")):
-            return
         if data.get("currency") == "USD":
             record["currency"] = "USD"
         usage_id = str(data.get("usage_id") or task_id + ":response")
+        # Timestamps are observations of delivery, not part of a call's payload.
+        payload_hash = fingerprint({"task_id": task_id, "usage": {
+            key: value for key, value in data.items() if key not in {"usage_id", "reported_at"}}})
         with self._db() as db:
-            db.execute("INSERT OR IGNORE INTO orchestration_usage VALUES (?,?,?,?)", (run_id + ":" + usage_id, run_id, task_id, _json(record)))
+            identifier = run_id + ":" + usage_id
+            existing = db.execute("SELECT task_id,payload_json FROM orchestration_usage WHERE usage_id=?", (identifier,)).fetchone()
+            if existing:
+                saved = json.loads(existing["payload_json"])
+                if existing["task_id"] == task_id and saved.get("usage_payload_hash") == payload_hash:
+                    return
+                raise _error("同じ利用量IDに異なる記録があります。保存済み記録を保持し、照合が必要です。", "usage_conflict")
+            if data.get("reported") is False or not any(
+                    type(record.get(k)) in {int, float} for k in ("input_tokens", "output_tokens", "total_tokens", "cost")):
+                return
+            record["usage_payload_hash"] = payload_hash
+            db.execute("INSERT INTO orchestration_usage VALUES (?,?,?,?)", (identifier, run_id, task_id, _json(record)))
 
     def _execute(self, run_id: str, task_id: str):
         with self._db() as db:
@@ -262,6 +275,8 @@ class ExecutionMixin:
             if task["status"] != "queued" or run["status"] in TERMINAL:
                 return
             self._check_version(run)
+            if self.initial_builder is not None:
+                validate_ready_initial(db, run["initial_id"], self.initial_builder)
             if task.get("input_artifacts"):
                 try:
                     self._recheck_review_binding(db, run, task)

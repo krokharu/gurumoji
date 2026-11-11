@@ -3,7 +3,7 @@ STAGES = ("outline", "cleanup", "name_extract", "name_verify", "notation")
 # ``auto`` remains valid for records created before the explicit thinking-mode UI.
 # New jobs use either ``off`` or a concrete effort level.
 LEVELS = ("auto", "off", "low", "medium", "high", "ultra")
-SCHEMA_STAGES = {"meeting_outline": "outline", "transcript_outline_context": "outline",
+SCHEMA_STAGES = {"meeting_outline": "outline", "meeting_outline_chapters": "outline", "transcript_outline_context": "outline",
                  # Insights are a long-form, evidence-grounded synthesis.  Reuse
                  # the outline control so local reasoning models can reserve
                  # generation tokens for the JSON findings.

@@ -357,6 +357,7 @@ function analysisExecutionValidatePlan() {
   if (!analysisState.itemId || !analysisState.data) return '先に分析対象を読み込んでください。';
   if (hasUnsavedAnalysisChanges()) return '未保存の分析設定・手動コード・準備記録があります。保存してから実行してください。';
   if (typeof isAnalysisOrchestrationActive === 'function' && isAnalysisOrchestrationActive()) return '自律分析の実行または開始確認中です。保存済み実行の状態を確認してください。';
+  if (window.isCorePipelineActive?.()) return '全文分割分析の実行または開始確認中です。保存済み実行の状態を確認してください。';
   if (analysisExecutionMode() !== 'manual') return '';
   const error = analysisExecutionValidateDefinition();
   if (error) return error;
@@ -402,6 +403,7 @@ function analysisExecutionUpdatePlanSummary(options = {}) {
 
 function openAnalysisExecutionDialog(options = {}) {
   if (!analysisRunDialog || typeof analysisRunDialog.showModal !== 'function') return;
+  if (window.isCorePipelineActive?.()) { window.showCorePipelineAnalysis(); return; }
   if (typeof isAnalysisOrchestrationActive === 'function' && isAnalysisOrchestrationActive()) { showAnalysisOrchestration(); return; }
   if (analysisExecutionState.active) {
     showAnalysisExecutionView();

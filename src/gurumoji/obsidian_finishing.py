@@ -106,11 +106,33 @@ def parse_transcript(note: str, base: list[dict]) -> list[dict]:
 
 
 def outline_note(outline: dict) -> str:
-    lines = ["# 全体アウトライン", "", "<!-- 議題は ## 見出し、要点は - 箇条書きで編集できます。 -->", ""]
-    for section in outline.get("sections", []):
-        lines.append("## " + markdown(section["title"].replace("\n", " ")))
-        lines.extend("- " + markdown(point.replace("\n", " ")) for point in section["bullets"])
+    chapters = outline.get("chapters") or []
+    guide = ("大見出しは # 、小見出しは ## 、要約は > 、要点は - で編集できます。" if chapters
+             else "議題は ## 見出し、要点は - 箇条書きで編集できます。")
+    lines = ["# 全体アウトライン", "", f"<!-- {guide} -->", ""]
+
+    def one_line(value):
+        return markdown(str(value).replace("\n", " "))
+
+    def section_lines(section):
+        lines.append("## " + one_line(section["title"]))
+        if section.get("summary"):
+            lines.append("> " + one_line(section["summary"]))
+        lines.extend("- " + one_line(point) for point in section["bullets"])
         lines.append("")
+    placed = set()
+    for chapter in chapters:
+        lines.append("# " + one_line(chapter["title"]))
+        if chapter.get("summary"):
+            lines.append("> " + one_line(chapter["summary"]))
+        lines.append("")
+        for index, section in enumerate(outline.get("sections", [])):
+            if section.get("chapter") == chapter.get("tag"):
+                placed.add(index)
+                section_lines(section)
+    for index, section in enumerate(outline.get("sections", [])):
+        if index not in placed:
+            section_lines(section)
     return "\n".join(lines)
 
 
@@ -217,23 +239,37 @@ def meeting_minutes_note(title: str, minutes: dict, transcript_path: str,
 
 
 def parse_outline(note: str) -> dict:
+    """# is a large heading (except the note title), ## a small heading, > a summary, other lines points."""
     _, note = split_properties(note)
-    sections = []
+    chapters, sections, current = [], [], None
     for line in re.sub(r"<!--.*?-->", "", note, flags=re.S).splitlines():
         line = line.strip()
-        if not line or line.startswith("# "):
+        if not line or line == "# 全体アウトライン":
             continue
-        if line.startswith("## "):
+        if line.startswith("# "):
+            title = unescape_text(line[2:].strip())
+            if not title or len(title) > 120:
+                raise ValueError("アウトラインの大見出しは1～120文字にしてください。")
+            chapters.append({"tag": f"C{len(chapters) + 1:02d}", "title": title})
+            current = chapters[-1]
+        elif line.startswith("## "):
             title = unescape_text(line[3:].strip())
             if not title or len(title) > 120:
                 raise ValueError("アウトラインの議題名は1～120文字にしてください。")
-            sections.append({"title": title, "bullets": []})
+            sections.append({"title": title, "bullets": [], **({"chapter": chapters[-1]["tag"]} if chapters else {})})
+            current = sections[-1]
+        elif line.startswith("> ") and current is not None:
+            current["summary"] = (current.get("summary", "") + " " + unescape_text(line[2:].strip())).strip()[:800]
         else:
             if not sections:
                 sections.append({"title": "会話全体", "bullets": []})
+                current = sections[-1]
             text = unescape_text(re.sub(r"^[-*] ", "", line))
             sections[-1]["bullets"].extend(text[i:i + 500] for i in range(0, len(text), 500))
-    return {"title": "全体アウトライン", "sections": [s for s in sections if s["bullets"]]}
+    result = {"title": "全体アウトライン", "sections": [s for s in sections if s["bullets"] or s.get("summary")]}
+    if chapters:
+        result["chapters"] = chapters
+    return result
 
 
 def content_fingerprint(note: str, kind: str, ids: list[str] | None = None) -> str:

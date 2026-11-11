@@ -15,3 +15,6 @@ scikit-learn>=1.5,<2
 openpyxl>=3.1,<4
 # Editable saved-run slide export (imported lazily; preview works without it).
 python-pptx>=1.0.2,<2
+
+# 固定した分析結果のPNG描画に使用する。
+matplotlib>=3.10,<4

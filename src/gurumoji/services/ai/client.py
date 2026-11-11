@@ -8,6 +8,7 @@ runner, which keeps cancellation and test doubles at the application edge.
 from __future__ import annotations
 
 import json
+import ipaddress
 import math
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
+from .request_budget import BudgetHold, RequestBudget, exception_cause, safe_cause
 
 from ...ai_effort import (
     SCHEMA_STAGES,
@@ -121,6 +123,10 @@ def post_json(
     check_cancelled: Callable[[], None] | None = None,
     retry_delays: tuple[float, ...] = RETRY_DELAYS_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
+    request_budget: RequestBudget | None = None,
+    task_id: str | None = None,
+    attempt_id: str | None = None,
+    diagnostic_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """POST JSON in an isolated process, retrying rate limits and 5xx replies."""
     attempt = 0
@@ -130,6 +136,8 @@ def post_json(
                 url, headers, payload, worker_file=worker_file,
                 run_subprocess=run_subprocess, timeout=timeout,
                 check_cancelled=check_cancelled,
+                request_budget=request_budget, task_id=task_id, attempt_id=attempt_id,
+                diagnostic_callback=diagnostic_callback, retry_count=attempt,
             )
         except RetryableApiError as exc:
             if attempt >= len(retry_delays):
@@ -150,8 +158,49 @@ def _post_json_once(
     run_subprocess: Callable[..., Any],
     timeout: int,
     check_cancelled: Callable[[], None] | None,
+    request_budget: RequestBudget | None = None,
+    task_id: str | None = None,
+    attempt_id: str | None = None,
+    diagnostic_callback: Callable[[dict[str, Any]], None] | None = None,
+    retry_count: int = 0,
 ) -> dict[str, Any]:
     """POST JSON in an isolated process so cancellation can stop network I/O."""
+    if request_budget is not None:
+        return _post_budgeted_json_once(url, headers, payload, worker_file=worker_file,
+            run_subprocess=run_subprocess, timeout=timeout, check_cancelled=check_cancelled,
+            request_budget=request_budget, task_id=task_id, attempt_id=attempt_id,
+            diagnostic_callback=diagnostic_callback)
+    diagnostic_state = {}
+    try:
+        response = _post_unbudgeted_json_once(url, headers, payload, worker_file=worker_file,
+            run_subprocess=run_subprocess, timeout=timeout, check_cancelled=check_cancelled,
+            diagnostic_callback=diagnostic_callback, diagnostic_state=diagnostic_state,
+            retry_count=retry_count)
+    except BaseException as exc:
+        _transport_diagnostic(diagnostic_callback, "transport_failed", "uncertain", "error", exc,
+            http_status=diagnostic_state.get("http_status"), retry_count=retry_count)
+        raise
+    _transport_diagnostic(diagnostic_callback, "response_returned", "returned", "response", response,
+        http_status=diagnostic_state.get("http_status"), retry_count=retry_count)
+    return response
+
+
+def _transport_diagnostic(callback, phase, status, metadata_kind, value, **extra):
+    """Observe safe metadata without influencing dispatch, accounting or retries."""
+    if not callable(callback):
+        return
+    try:
+        from ..analysis_diagnostics import emit, request_metadata, response_metadata, error_metadata
+        metadata = {"request": request_metadata, "response": response_metadata,
+                    "error": error_metadata}[metadata_kind](value)
+        emit(callback, {"stage": "transport", "phase": phase, "status": status, **metadata, **extra})
+    except Exception:
+        # Diagnostic preparation must be as harmless as a failing observer.
+        pass
+
+
+def _post_unbudgeted_json_once(url, headers, payload, *, worker_file, run_subprocess,
+        timeout, check_cancelled, diagnostic_callback=None, diagnostic_state=None, retry_count=0):
     if not worker_file.is_file():
         raise RuntimeError("AI API 通信ワーカーが見つかりません。")
     timeout_seconds = max(1.0, min(600.0, float(timeout)))
@@ -159,6 +208,8 @@ def _post_json_once(
         {"url": url, "headers": headers, "payload": payload, "timeout": timeout_seconds},
         ensure_ascii=False,
     )
+    _transport_diagnostic(diagnostic_callback, "request_final", "prepared", "request", payload,
+        retry_count=retry_count)
     try:
         completed = run_subprocess(
             [sys.executable, "-I", str(worker_file)], input_text=worker_input,
@@ -174,6 +225,8 @@ def _post_json_once(
         worker_result = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("AI API 通信ワーカーの応答形式が不正です。") from exc
+    if isinstance(worker_result, dict) and isinstance(diagnostic_state, dict):
+        diagnostic_state["http_status"] = worker_result.get("status") if type(worker_result.get("status")) is int else None
     if not isinstance(worker_result, dict) or not worker_result.get("ok"):
         kind = worker_result.get("kind") if isinstance(worker_result, dict) else ""
         if kind == "http":
@@ -200,6 +253,94 @@ def _post_json_once(
     if not isinstance(parsed, dict):
         raise RuntimeError("API 応答の形式が不正です。")
     return parsed
+
+
+def _post_budgeted_json_once(url, headers, payload, *, worker_file, run_subprocess,
+        timeout, check_cancelled, request_budget, task_id, attempt_id, diagnostic_callback=None):
+    """Local-only opt-in path; never leak a worker/body exception into a retry."""
+    if not isinstance(request_budget, RequestBudget):
+        raise BudgetHold("invalid_budget")
+    try:
+        parsed_url = urllib.parse.urlsplit(url)
+        if (parsed_url.scheme not in {"http", "https"}
+                or not ipaddress.ip_address(parsed_url.hostname or "").is_loopback
+                or parsed_url.port is None or not 1 <= parsed_url.port <= 65535
+                or parsed_url.username is not None or parsed_url.password is not None
+                or parsed_url.query or parsed_url.fragment or parsed_url.path != "/v1/chat/completions"):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise BudgetHold("local_endpoint_required") from None
+    if check_cancelled is not None:
+        check_cancelled()
+    try:
+        reserved = request_budget.reserve(payload, task_id=task_id, attempt_id=attempt_id, timeout=timeout)
+    except BudgetHold as exc:
+        _transport_diagnostic(diagnostic_callback, "reservation_rejected", "not_sent_preworker", "error", exc,
+            code=exc.reason, cause=exc.cause, **exc.details)
+        raise
+    ticket, final = reserved["ticket"], reserved["payload"]
+    reservation_id = ticket["reservation_id"]
+    _transport_diagnostic(diagnostic_callback, "request_final", "prepared", "request", final,
+        reservation_id=reservation_id, ticket_hash=ticket["ticket_hash"],
+        budget_payload_hash=ticket["payload_hash"])
+    response, http_status = None, None
+    try:
+        if not worker_file.is_file():
+            raise BudgetHold("transport_unknown", "worker_missing")
+        worker_input = json.dumps({"url": url, "headers": headers, "payload": final,
+            "request_budget": ticket}, ensure_ascii=False, allow_nan=False)
+        remaining_timeout = request_budget.dispatch_timeout(ticket, final)
+        try:
+            completed = run_subprocess([sys.executable, "-I", str(worker_file)],
+                input_text=worker_input, timeout=remaining_timeout, check_cancelled=check_cancelled)
+        except subprocess.TimeoutExpired:
+            raise BudgetHold("transport_unknown", "worker_timeout") from None
+        if completed.returncode != 0:
+            raise BudgetHold("transport_unknown", f"worker_exit:{int(completed.returncode)}")
+        if len(completed.stdout.encode("utf-8")) > 10 * 1024 * 1024:
+            raise BudgetHold("transport_unknown", "worker_output_too_large")
+        try:
+            result = json.loads(completed.stdout)
+        except ValueError:
+            raise BudgetHold("transport_unknown", "worker_output_not_json") from None
+        if not isinstance(result, dict):
+            raise BudgetHold("transport_unknown", "worker_output_not_object")
+        http_status = result.get("status") if type(result.get("status")) is int else None
+        transport_ok = result.get("ok") is True
+        # Only the worker's fixed kind codes are kept, never its other text.
+        transport_cause = None if transport_ok else (safe_cause(f"worker:{result.get('kind')}") or "worker:other")
+        if not transport_ok and result.get("kind") == "guard":
+            transport_cause = safe_cause(result.get("cause")) or transport_cause
+        if transport_ok:
+            try:
+                response = json.loads(result["body"])
+            except (ValueError, TypeError, KeyError):
+                transport_ok, transport_cause = False, "response_body_not_json"
+        if isinstance(response, dict):
+            # A known response is still evidence when usage/length validation holds the budget.
+            _transport_diagnostic(diagnostic_callback, "response_returned", "returned", "response", response,
+                reservation_id=reservation_id, ticket_hash=ticket["ticket_hash"], http_status=http_status)
+        request_budget.finish(ticket, result.get("budget_receipt"), response,
+            transport_ok=transport_ok, http_status=result.get("status"), transport_cause=transport_cause)
+        return response
+    except BaseException as exc:
+        # Cancellation, worker crash, malformed IPC and network failures all
+        # retain the reservation. Unknown delivery must never trigger a retry.
+        # A cancellation callback can raise BudgetHold without settling this
+        # budget. Atomically settle only its still-reserved entry; a concurrent
+        # finish/dispatch may have recorded a receipt or known usage and refund.
+        # The cause records where it failed without any provider or exception text.
+        cause = exception_cause(exc)
+        reason = exc.reason if isinstance(exc, BudgetHold) else "transport_unknown"
+        request_budget.unknown_if_reserved(reservation_id, reason, cause)
+        failure_status = "held_after_response" if isinstance(response, dict) else "uncertain"
+        _transport_diagnostic(diagnostic_callback, "transport_failed", failure_status, "error", exc,
+            reservation_id=reservation_id, ticket_hash=ticket["ticket_hash"],
+            code=reason, cause=cause, http_status=http_status,
+            response_observed=isinstance(response, dict))
+        if not isinstance(exc, BudgetHold):
+            raise BudgetHold("transport_unknown", cause) from None
+        raise
 
 
 def extract_openai_text(response: dict[str, Any]) -> str:
@@ -241,6 +382,21 @@ def safe_token_count(value: Any) -> int:
     return max(0, min(10**12, int(value)))
 
 
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens", "cached_tokens", "reasoning_tokens")
+
+
+def optional_token_count(value: Any) -> int | None:
+    """欠測・不正値は不明とし、明示的なゼロだけを実測値として保持する。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        if not math.isfinite(float(value)) or value < 0 or int(value) != value:
+            return None
+    except (OverflowError, ValueError):
+        return None
+    return safe_token_count(value)
+
+
 def normalize_ai_usage(value: Any, providers: set[str] | frozenset[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -250,11 +406,7 @@ def normalize_ai_usage(value: Any, providers: set[str] | frozenset[str]) -> dict
     return {
         "provider": provider, "model": str(value.get("model") or "").strip()[:200],
         "request_count": safe_token_count(value.get("request_count")),
-        "input_tokens": safe_token_count(value.get("input_tokens")),
-        "output_tokens": safe_token_count(value.get("output_tokens")),
-        "total_tokens": safe_token_count(value.get("total_tokens")),
-        "cached_tokens": safe_token_count(value.get("cached_tokens")),
-        "reasoning_tokens": safe_token_count(value.get("reasoning_tokens")),
+        **{key: optional_token_count(value.get(key)) for key in TOKEN_FIELDS},
         "reported": bool(value.get("reported")),
     }
 
@@ -265,11 +417,14 @@ def merge_ai_usage(current_value: Any, sample_value: Any, providers: set[str] | 
         return current
     if current and current["provider"] != sample["provider"]:
         current = {}
+    if not current:
+        return sample
     return normalize_ai_usage({
         "provider": sample["provider"], "model": sample["model"] or current.get("model", ""),
-        **{key: current.get(key, 0) + sample[key] for key in (
-            "request_count", "input_tokens", "output_tokens", "total_tokens", "cached_tokens", "reasoning_tokens"
-        )}, "reported": bool(current.get("reported") or sample["reported"]),
+        "request_count": current["request_count"] + sample["request_count"],
+        **{key: current[key] + sample[key] if current[key] is not None and sample[key] is not None else None
+           for key in TOKEN_FIELDS},
+        "reported": bool(current.get("reported") or sample["reported"]),
     }, providers)
 
 
@@ -285,18 +440,13 @@ def extract_ai_token_usage(provider: str, model: str, response: dict[str, Any], 
     elif provider == "lmstudio":
         prompt = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
         completion = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
-        values = (usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"), prompt.get("cached_tokens") or prompt.get("cached_tokens_count"), completion.get("reasoning_tokens"))
+        values = (usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"), prompt.get("cached_tokens", prompt.get("cached_tokens_count")), completion.get("reasoning_tokens"))
     else:
         return {}
-    result = normalize_ai_usage({
+    return normalize_ai_usage({
         "provider": provider, "model": model, "request_count": 1,
-        "input_tokens": safe_token_count(values[0]), "output_tokens": safe_token_count(values[1]),
-        "total_tokens": safe_token_count(values[2]), "cached_tokens": safe_token_count(values[3]),
-        "reasoning_tokens": safe_token_count(values[4]), "reported": bool(usage),
+        **dict(zip(TOKEN_FIELDS, values)), "reported": bool(usage),
     }, providers)
-    if result and not result["total_tokens"]:
-        result["total_tokens"] = result["input_tokens"] + result["output_tokens"] + result["reasoning_tokens"]
-    return result
 
 
 def json_messages(system_prompt: str, user_prompt: str, data_messages=None) -> list[dict[str, str]]:
@@ -370,6 +520,15 @@ def _dict_items(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+class ResponseCompletionError(RuntimeError):
+    """JSONとして読めても、正常終了を確認できない応答は採用しない。"""
+
+    def __init__(self, *, unknown: bool = False):
+        self.code = "response_completion_unknown" if unknown else "response_completion_unsupported"
+        super().__init__("AI応答の終了状態が不明です。" if unknown else
+                         "AI応答の終了状態は正常完了として未対応です。結果は採用しません。")
+
+
 def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
     """Explain a truncated, filtered, or refused reply instead of a JSON error.
 
@@ -390,6 +549,11 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
                 if content.get("type") == "refusal":
                     refusal = str(content.get("refusal") or "").strip()[:300]
                     raise RuntimeError("AI が回答を拒否しました" + (f": {refusal}" if refusal else "。"))
+        if response.get("status") != "completed":
+            raise ResponseCompletionError(unknown=not response.get("status"))
+        # 個々の出力メッセージについても正常終了を確認する。
+        if any(item.get("status") not in (None, "completed") for item in _dict_items(response.get("output"))):
+            raise ResponseCompletionError()
     elif provider == "google":
         candidates = _dict_items(response.get("candidates"))
         if not candidates:
@@ -397,7 +561,7 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
             block_reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
             if block_reason:
                 raise RuntimeError(f"入力が Google の安全判定でブロックされました（{str(block_reason)[:80]}）。")
-            return
+            raise ResponseCompletionError(unknown=True)
         finish_reason = str(candidates[0].get("finishReason") or "")
         if finish_reason == "MAX_TOKENS":
             raise RuntimeError(TRUNCATED_MESSAGE)
@@ -405,9 +569,16 @@ def ensure_complete_response(provider: str, response: dict[str, Any]) -> None:
             raise RuntimeError(f"Google の安全判定により応答が止められました（{finish_reason}）。")
         if finish_reason in GOOGLE_INCOMPLETE_FINISH_REASONS:
             raise RuntimeError(f"Google の応答が完了しませんでした（{finish_reason}）。")
+        if finish_reason != "STOP":
+            raise ResponseCompletionError(unknown=not finish_reason or finish_reason == "FINISH_REASON_UNSPECIFIED")
     elif provider == "lmstudio":
-        if any(choice.get("finish_reason") == "length" for choice in _dict_items(response.get("choices"))):
+        choices = _dict_items(response.get("choices"))
+        if any(choice.get("finish_reason") == "length" for choice in choices):
             raise RuntimeError(LMSTUDIO_TRUNCATED_MESSAGE)
+        if not choices or any(choice.get("finish_reason") != "stop" for choice in choices):
+            raise ResponseCompletionError(unknown=not choices or any(not choice.get("finish_reason") for choice in choices))
+    else:
+        raise ResponseCompletionError()
 
 
 def call_ai_json(

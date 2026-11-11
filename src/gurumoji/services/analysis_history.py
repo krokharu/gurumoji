@@ -161,8 +161,8 @@ class AnalysisHistoryService:
         with self._read(item_id) as db:
             if not self._table(db, "orchestration_runs"):
                 return {"runs": [], "pagination": _page(offset, limit, 0)}
-            total = db.execute("SELECT count(*) FROM orchestration_runs WHERE item_id=?", (item_id,)).fetchone()[0]
-            rows = db.execute("SELECT run_id FROM orchestration_runs WHERE item_id=? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+            total = db.execute("SELECT count(*) FROM orchestration_runs WHERE item_id=? AND coalesce(json_extract(state_json, '$.config.adapter_version'), '') != 'core-pipeline-1'", (item_id,)).fetchone()[0]
+            rows = db.execute("SELECT run_id FROM orchestration_runs WHERE item_id=? AND coalesce(json_extract(state_json, '$.config.adapter_version'), '') != 'core-pipeline-1' ORDER BY rowid DESC LIMIT ? OFFSET ?",
                               (item_id, limit, offset)).fetchall()
             return {"runs": [self._public_run(db, self._run(db, item_id, row[0])) for row in rows], "pagination": _page(offset, limit, total)}
 

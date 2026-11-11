@@ -5,7 +5,7 @@ expert_id: exp-group-comparison-statistics
 title: 群間比較の専門家
 role: computational
 status: current
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 analysis_method_ids: []
 registry_method_ids:
@@ -66,7 +66,7 @@ tags:
 
 ```yaml
 expert_id: exp-group-comparison-statistics
-definition_version: 1
+definition_version: 2
 knowledge_verified: 2026-09-15
 title: 群間比較の専門家
 role: computational
@@ -165,6 +165,17 @@ procedure:
       - LIT-aarts-2014-nested-data
       - LIT-benjamini-hochberg-1995-fdr
       - LIT-appelbaum-2018-jars-quant
+  - id: grp-ai-plan
+    title: 専用知識から比較案・前提確認事項を下書きし、Handlerへ計算を提案する
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+  - id: grp-ai-report
+    title: Handlerが検証したクロス集計・検定の結果を参照して説明を下書きする
+    actor: ai_draft
+    basis:
+      - LIT-appelbaum-2018-jars-quant
+      - LIT-aarts-2014-nested-data
 quality_checks:
   - id: grp-q1
     check: chi_square_expected_cells
@@ -200,10 +211,10 @@ output_sections:
   - 前提の確認（期待度数・群の大きさ）
   - 探索的扱いと限界（入れ子・多重比較）
 ai_assist:
-  allowed: false
-  steps: []
-  reason: 群間比較は計算系の専門家で、統計量はコードで計算するため、AI見解を使いません。
-  brief: ""
+  allowed: true
+  steps: [grp-ai-plan, grp-ai-report]
+  reason: 統計量の計算と研究者の確定判断はAIへ委ねない。
+  brief: 専用知識を使って比較案と結果説明を下書きする。数値はHandlerの計算結果だけを参照し、計算前はneeds_calculationを返す。N・効果量・前提・入れ子・多重比較の限界を示す。未実装手法を実行したと書かない。
 literature:
   - LIT-cochran-1952-chi-square
   - LIT-cochran-1954-chi-square

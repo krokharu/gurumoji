@@ -285,6 +285,10 @@ function renderTranscriptPreparation() {
   const panel = analysisCardPanel('文字起こしを分析用データに整える', 'manual', 'prepared_turns', true);
   if (!prepared) return panel.panel;
   const key = `${analysisState.itemId}:${prepared.revision}:${prepared.source_hash}`;
+  if (typeof window.renderAiDataExport === 'function') {
+    panel.body.append(window.renderAiDataExport(prepared, key));
+    queueMicrotask(() => window.syncAiDataExportControls());
+  }
   if (preparationDraft && preparationDirty && preparationDraft.source_hash === prepared.source_hash
       && preparationDraft.key.startsWith(`${analysisState.itemId}:`)) {
     preparationDraft.key = key;

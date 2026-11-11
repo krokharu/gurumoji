@@ -969,6 +969,7 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   const contextChanged = document.body.dataset.view !== target || switchingAnalysisItem;
   const closedFixedViewer = contextChanged && typeof closeFixedAnalysisViewer === 'function' && closeFixedAnalysisViewer();
   const closedAnalysisDialog = contextChanged && typeof closeAnalysisExecutionDialog === 'function' && closeAnalysisExecutionDialog();
+  const closedCorePipelineDialog = contextChanged && Boolean(window.closeCorePipelineDialogs?.());
   const closedOrchestrationDialog = contextChanged && typeof closeAnalysisOrchestrationDialogs === 'function' && closeAnalysisOrchestrationDialogs();
   if (contextChanged) {
     analysisNavigationGeneration += 1;
@@ -991,7 +992,7 @@ function showView(view, {analysisItemId = '', itemId = '', force = false, replac
   priorDataPanels.forEach(panel => { panel.hidden = panel.dataset.priorPanel !== target; });
   document.body.dataset.view = target;
   setActiveNavigation(target);
-  if (closedFixedViewer || closedAnalysisDialog || closedOrchestrationDialog) {
+  if (closedFixedViewer || closedAnalysisDialog || closedOrchestrationDialog || closedCorePipelineDialog) {
     const navigation = target === 'analysis' ? showAnalysisButton : target === 'speakers' ? showSpeakersButton
       : priorDataButtons.find(button => button.dataset.priorView === target)
         || (target === 'new' ? showNewButton : showLibraryButton);
