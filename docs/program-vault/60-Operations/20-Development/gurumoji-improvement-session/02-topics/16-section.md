@@ -355,3 +355,36 @@ GitHubへmainを通常pushし、[checks run 43042588460](https://github.com/krok
 mainは`8da841f99eaad70a65e29f9b5e4ff91c8cec80e5`、保存用試験資材は`568987fe10e50bcab2d1b8db1b16a632cfb57450`としてatomic pushした。GitHub [checks run 43059488015](https://github.com/krokharu/gurumoji/actions/runs/43059488015)のlint（Python compileall、ruff、全JavaScript構文）が成功した。手動専用tests jobは今回GitHub上では未実行で、Linux上の全体試験を通過したという意味ではない。version run 43059488265は意図どおりskipし、表示版β0.46.1・タグ・Releaseを変更していない。ローカルには従来の4branchとmain worktree 1個だけを維持し、独立cloneは検証証跡として残す。
 
 Python XML/log、split収集メタ、defaultのnot_run理由、ブラウザー幅別receipt・画像、カタログ負例、main対象SHA、prepareの2,089ファイル照合、専用Pythonの環境一覧、集計と元走行のsource/runtime差分を上記repair-20261112へ保持する。実モデル証跡は `../gurumoji-fix-pipeline-20261112/output/validation/pipeline-fix/`、再現用cloneの71試験は `../gurumoji-fix-reproduction-20261112/output/validation/reproduction-smoke/` に保持する。アプリの再起動と実Vaultへの反映は実行していない。
+
+## 2026-11-12：通常アプリによる実音声・実モデル・実画面の試験
+
+利用者の「実テストを実行」に対応し、main `8da841f99eaad70a65e29f9b5e4ff91c8cec80e5` と保存資料 `c4ada24a2dc2631a1afb0cd2d42d83d00601402b` を固定した `../gurumoji-live-validation-20261112` を準備した。mainの追跡929ファイルは試験前後とも正本とbytes差0件。本体の修正・表示版変更はしていない。
+
+### 音声認識
+
+Windowsの日本語Haruka音声で13.6369375秒の試験WAVを生成した。参照文は「今日は朝に公園を散歩しました。歩くと気分が良くなります。雨の日には散歩を休みます。明日は晴れたら、もう一度歩きたいです。」。文字誤り率はNFKC後に句読点・空白を除いた55文字に対するLevenshtein距離で計算した。
+
+- OpenAI Whisper tiny / CPU：認識0.984秒、13文字の誤り、CER 23.636％。「散歩→参考」等の誤認識があった。
+- faster-whisper large-v3 / CPU int8：既存モデルの独立コピー、CTranslate2 4.8.1・NumPy 2.2.6・PyAV 18.0.0で12.453秒、CER 0％。この13.6秒の生成音声だけの結果であり、自然会話・長時間音声・話者分離の一般品質は未評価。
+- 追加環境で無制約に入ったPyAV 19.0.2は、faster-whisper 1.2.1のmetadata_errors引数を受け付けず失敗した。ソースにある既存Windows制約の18.0.0へ合わせて認識成功を確認した。最初のlarge認識はCTranslate2 4.9.0・NumPy 2.5.4で13.172秒/CER0％、既存制約に合わせた再試験でもテキスト・時間区間は同じだった。アプリ取込みには最初に得たlargeの実認識結果を使い、元の結果も残した。
+
+音声認識は専用Pythonで実モジュールを推論し、アプリの通常write_outputs/import_existing_outputsで取り込んだ。話者分離付きアップロードジョブ全体、Hugging Face認証、クラウド音声サービスは実行していない。利用者の音声・実DB・実Vault・認証設定は使っていない。
+
+### 通常アプリ経路の結果：自動完了・固定保存は未達
+
+本番のapp.appを127.0.0.1の専用ポートで起動し、実Edge 157で「分析→分析を実行→全文を段階的に分析→自律分析を開始」を操作した。通常の初期分析builder、専門家取得、scheduler、Obsidian管理ON、4 Vault出力の明示指定を通し、AI・DB・保存サービスをMockへ置換していない。起動時のLM Studioはロード中モデル0件だったため、google/gemma-4-12b-qatを試験専用ID・context16,384・GPU全offload・parallel1で一時ロードした。新しいモデルをdownloadせず、ASRのcheckpointも既存cacheから専用環境へコピーした。
+
+- tiny認識のrun：5巡・AI9回、input11,866/output2,371/total14,237 tokens。Coreが開いた問いを残してaction:noneを繰り返し、Handlerのno_progress判定でstopped/human_review_required。固定保存はnot_started、完了後4 Vault出力はskipped。
+- large認識のrun：7巡・AI12回、input11,691/output2,702/total14,393 tokens。原文検証2件・批判2件はsucceededとなったが、主張の根拠と因果関係を問う4つの未解決問いについてCoreが次の操作・終了提案を選べず、no_progressから人確認停止した。review_statusはnot_requested、固定保存はnot_started、完了後4 Vault出力はskipped。自動完了試験は不合格として扱う。
+
+Handlerの安全停止は作動している。短い入力の不確実性と未解決問いを整理して終了提案へ進むCoreの判断を調査対象として残す。停止判定を無効化したり、reviewed/completedへ試験側で書き換えたりしていない。前回の限定的な実モデル接続・保存確認を、今回の通常アプリ全体の完了保証へ転用しない。
+
+### 停止後の実画面・履歴
+
+停止したlarge runの全履歴JSONとMarkdownは実HTTPで200を返し、ダウンロードできた。390pxの実画面で「人の確認待ち」を表示し、reload後も同じrunを復元した。ページJavaScriptエラー0件、HTTP500以上0件。閲覧・export・reload前後でAI利用量とgenerationは不変、管理VaultのMarkdown16ファイルのhash変更は0件だった。部分台帳の出力は固定成果物の正常保存とは別に記録する。
+
+最初のUIドライバーは閉じた設定dialog内のボタンを直接押そうとして120秒timeoutとなった。設定を開く通常の操作へ直して再実行し、その後の開始POSTは2試行とも202だった。この準備失敗と、実モデルが人確認停止した2 runを分けて保持する。
+
+試験サーバー2個とブラウザーは終了し、試験専用LM Studioモデルだけをunloadしてロード中0件へ戻した。専用環境2個のpip checkは成功。mainはクリーンのままで、重要結果は本保存資料ノートだけへ追記する。
+
+証跡は `../gurumoji-live-validation-20261112/output/validation/live/live-summary.json`、`audio-result.json`、`audio-large-before-constraints.json`、`audio-large-result.json`、`browser-result.json`、`large/browser-result.json`、`large/stopped-check.json`、画面PNG、実ダウンロードしたJSON/Markdown、各環境一覧、専用DB/Vaultへ保存した。元のUI timeoutとPyAV19の失敗ログも保持する。
