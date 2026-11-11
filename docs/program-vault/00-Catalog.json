@@ -42,20 +42,60 @@
       }
     },
     {
+      "path": "30-Data/analysis-asset-connection-v1.md",
+      "sha256": "00c42234f95ab433542432cddaf61b29191e0b9f00ae645127d882230bd5e9a5",
+      "chars": 12672,
+      "metadata": {
+        "note_id": "data-analysis-asset-connection-v1",
+        "note_type": "data-contract",
+        "title": "分析資産の最小接続契約 v1（提案）",
+        "summary": "固定参照・候補content・停止を既存保存へ結ぶG2案。",
+        "status": "proposed",
+        "schema_version": 1,
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "source_commit": "e6b2e7e75eb2a8d5ea018e2656d3007e4c881aca",
+        "proposal_revision": 3,
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/program",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
+      "path": "30-Data/transcript-preparation-v1.md",
+      "sha256": "1585793639032f36128ed1b41622df295e43f9a19198bd6e4602deead3995581",
+      "chars": 5821,
+      "metadata": {
+        "note_id": "transcript-preparation-v1",
+        "note_type": "data-contract",
+        "title": "逐語録の分析準備・版と確認状態",
+        "summary": "逐語録を分析用に準備する際の版、確認状態、根拠、匿名化の契約を定める。",
+        "status": "current",
+        "feature": "transcript-preparation",
+        "updated": "2026-10-10",
+        "tags": [
+          "gurumoji/program",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/00-Index.md",
-      "sha256": "76fd57ca16ed86e2bcbc78ca03b7aef8266d3d9d18e59682ed2185ba52ee457c",
+      "sha256": "64a808492625e62460d29f1e0144a741a9aca505bdffc08b67055181c8459448",
       "chars": 1206,
       "metadata": {
         "note_id": "gurumoji-saved-run-slides-design",
         "note_type": "section-index",
         "title": "グルモジ 保存済み分析runのスライド設計と生成プロンプト",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -69,17 +109,17 @@
     },
     {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/01-section.md",
-      "sha256": "0718ab151b3545d7816b110d2d40730bcb6e0f3719eeb8df172566a2875c68b2",
+      "sha256": "eafcb3afe4a5654817307319c3226c3bc7ceddda881fe3435ec3bea7bdc1696b",
       "chars": 3550,
       "metadata": {
         "note_type": "reference-section",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -100,17 +140,17 @@
     },
     {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/02-section.md",
-      "sha256": "f5ca31fdc86592a64fc9600ac96b25489f9c4976ab77de1c7841c80c693f70e5",
-      "chars": 2918,
+      "sha256": "45f14ea155f9d85b4de1167672e3377b87cd46184f082d00fc6f0549a6a6715f",
+      "chars": 3365,
       "metadata": {
         "note_type": "reference-section",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -131,17 +171,17 @@
     },
     {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/03-section.md",
-      "sha256": "35d2ec8d64ca1855e01d3d3d1fdc264363af2596a631ae462dc033852b632cbe",
-      "chars": 3535,
+      "sha256": "48d3e210fd317e5c3057f0cfd0b10a236afe969a204d6f603536aa46dd04c555",
+      "chars": 3912,
       "metadata": {
         "note_type": "reference-section",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -162,17 +202,17 @@
     },
     {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/04-section.md",
-      "sha256": "416153deda2688d3887e5296cd865a397242fe2c8d2a4f08c3e8e252e133f289",
+      "sha256": "6bc9c879f99006cc03eb74d0d738c29ffdb638e410aea655f572844b3630f98f",
       "chars": 4464,
       "metadata": {
         "note_type": "reference-section",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -193,17 +233,17 @@
     },
     {
       "path": "40-Design/60-Output/slide-generation-design-and-prompts/05-section.md",
-      "sha256": "514c648d6ee3eca4c916c419c29ea996cc150515fc4265c497e12f5b5169087b",
-      "chars": 4695,
+      "sha256": "4703002bc35c86a859985a4e0cefdb94ab58555b95161ae652571e2e49495e65",
+      "chars": 4813,
       "metadata": {
         "note_type": "reference-section",
-        "version": "2.0.0",
-        "updated": "2026-10-04",
+        "version": "2.1.0",
+        "updated": "2026-11-10",
         "status": "proposed",
         "source_head": "e3f002c9d4962769deb1925b8d9859e7f7d2bd73",
         "template_id": "gurumoji-evidence-review",
-        "template_version": "2.0.0",
-        "prompt_version": "2.0.0",
+        "template_version": "2.1.0",
+        "prompt_version": "2.1.0",
         "tags": [
           "gurumoji/design",
           "gurumoji/analysis",
@@ -424,8 +464,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/correlation/00-Overview.md",
-      "sha256": "0c592852c3fb55e6a398767f793c25c37747c6563fc298f5c9134da8342de593",
-      "chars": 1105,
+      "sha256": "e736670222904a49d251bf86ff2f04adb0ffa9f478006d4a97b8962bb4dafa5c",
+      "chars": 1355,
       "metadata": {
         "note_id": "expert-correlation-overview",
         "note_type": "expert-overview",
@@ -442,8 +482,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/correlation/01-Expert.md",
-      "sha256": "7afc49dcff57a3a192707d20071fc204db786f889d42b0302fc7f2da0d8845a1",
-      "chars": 5023,
+      "sha256": "5a499ea69a38f176a1212ab52d4fe85b8237aaf80ba6fd1b5deed148a14642bb",
+      "chars": 5465,
       "metadata": {
         "note_id": "expert-correlation-definition",
         "note_type": "expert-definition",
@@ -451,7 +491,7 @@
         "title": "相関の専門家",
         "role": "computational",
         "status": "current",
-        "definition_version": 1,
+        "definition_version": 2,
         "knowledge_verified": "2026-09-15",
         "analysis_method_ids": [],
         "registry_method_ids": [
@@ -551,6 +591,64 @@
           "gurumoji/analysis",
           "gurumoji/expert",
           "gurumoji/statistics"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/correlation/07-Agent-Contract.md",
+      "sha256": "92c02db1e1db0f68ed2ff0febd3b5d5615149a748bf0b2a7a534dc06478bb3d2",
+      "chars": 8942,
+      "metadata": {
+        "note_id": "expert-correlation-agent-contract",
+        "note_type": "expert-agent-contract",
+        "title": "相関専門家の入出力契約",
+        "status": "proposed",
+        "updated": "2026-10-08"
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/correlation/08-Skill-Hook-Binding.md",
+      "sha256": "4834067229ad482d05316df8d504a6cfdc17e8c652b58318801675e9560ffe66",
+      "chars": 11940,
+      "metadata": {
+        "note_id": "expert-correlation-skill-hook-binding",
+        "note_type": "expert-skill-hook-binding",
+        "title": "相関の段階別スキル・hook対応案",
+        "summary": "相関の現行01・07・actor・scopeを固定し、未接続readerと不足を明示する。",
+        "status": "proposed",
+        "schema_version": 1,
+        "binding_version": 6,
+        "expert_ids": [
+          "exp-correlation"
+        ],
+        "stage": "registration",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data",
+          "expert-correlation-overview",
+          "expert-correlation-definition",
+          "expert-correlation-procedure",
+          "expert-correlation-quality",
+          "expert-correlation-limits",
+          "expert-correlation-cases",
+          "expert-correlation-open-issues",
+          "lit-aarts-2014-nested-data",
+          "lit-appelbaum-2018-jars-quant",
+          "lit-benjamini-hochberg-1995-fdr",
+          "lit-bishara-hittner-2012-correlation",
+          "lit-holm-1979-multiple-testing",
+          "lit-spearman-1904-rank",
+          "res-scipy-pearsonr",
+          "expert-correlation-agent-contract"
+        ],
+        "optional_note_ids": [],
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/expert"
         ]
       }
     },
@@ -706,8 +804,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/descriptive-statistics/01-Expert.md",
-      "sha256": "75d957dd89573379befe7b0103876884e1fcbefe709b2cce11ef6b6614ca5129",
-      "chars": 4752,
+      "sha256": "08c12a57476204ac9dad8520427a4268ad67ed8eec6a35d319334f61890cbdc7",
+      "chars": 5173,
       "metadata": {
         "note_id": "expert-descriptive-statistics-definition",
         "note_type": "expert-definition",
@@ -715,7 +813,7 @@
         "title": "記述統計の専門家",
         "role": "computational",
         "status": "current",
-        "definition_version": 1,
+        "definition_version": 2,
         "knowledge_verified": "2026-09-15",
         "analysis_method_ids": [],
         "registry_method_ids": [
@@ -816,6 +914,18 @@
           "gurumoji/expert",
           "gurumoji/statistics"
         ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/descriptive-statistics/07-Agent-Contract.md",
+      "sha256": "97a8dfc961a2c469bd22f76897b790e1bd4a5de0fcf2b6df5a4743b10412ad4a",
+      "chars": 9085,
+      "metadata": {
+        "note_id": "expert-descriptive-statistics-agent-contract",
+        "note_type": "expert-agent-contract",
+        "title": "記述統計・度数専門家の入出力契約",
+        "status": "proposed",
+        "updated": "2026-10-08"
       }
     },
     {
@@ -1083,6 +1193,36 @@
       }
     },
     {
+      "path": "50-Analysis-Methods/10-Experts/focus-group-interaction/07-Agent-Contract.md",
+      "sha256": "18e3f05b356806c9fe2bb625c7e7ae7d5fb20f7cf4ab002926aefe891f5f2942",
+      "chars": 4517,
+      "metadata": {
+        "note_id": "expert-focus-group-interaction-agent-contract",
+        "note_type": "expert-agent-contract",
+        "expert_id": "exp-focus-group-interaction",
+        "title": "FGIエージェントの候補入出力契約",
+        "status": "draft",
+        "schema_version": 1,
+        "contract_version": 2,
+        "updated": "2026-10-09"
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/focus-group-interaction/08-Skill-Hook-Binding.md",
+      "sha256": "1eb5e6ef2fe06f4a264ace022b53ec44522f9abfba68f4798ad177bbff998c37",
+      "chars": 2059,
+      "metadata": {
+        "note_id": "expert-focus-group-interaction-skill-hook-binding",
+        "note_type": "expert-skill-hook-binding",
+        "expert_id": "exp-focus-group-interaction",
+        "title": "FGI候補の固定skillとHandler接続",
+        "status": "draft",
+        "schema_version": 1,
+        "binding_version": 1,
+        "updated": "2026-10-09"
+      }
+    },
+    {
       "path": "50-Analysis-Methods/10-Experts/framework-method/00-Overview.md",
       "sha256": "7f8b8a8517527950be216b40de2dfc78f3805407b144ea66fec5b5190120c5fd",
       "chars": 1377,
@@ -1216,8 +1356,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/group-comparison-statistics/00-Overview.md",
-      "sha256": "3935b906f4adb384b2997daf4a52a740bb1974bd310ccccb564cec227dc9d844",
-      "chars": 1365,
+      "sha256": "41cfa9360bf94f9713a415cc58a769f3a5c36d71f1a1cfcdffb71c0c456c1fea",
+      "chars": 1631,
       "metadata": {
         "note_id": "expert-group-comparison-statistics-overview",
         "note_type": "expert-overview",
@@ -1234,8 +1374,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/group-comparison-statistics/01-Expert.md",
-      "sha256": "18859ea5f449fec61020e40d79121574c2a0438439c6e7c730498dc706442cad",
-      "chars": 6483,
+      "sha256": "15ac2cd8ffd7c02a9ffd8d99215a6a2a31fc1b776d3702da23e73b05f3fc9906",
+      "chars": 6912,
       "metadata": {
         "note_id": "expert-group-comparison-statistics-definition",
         "note_type": "expert-definition",
@@ -1243,7 +1383,7 @@
         "title": "群間比較の専門家",
         "role": "computational",
         "status": "current",
-        "definition_version": 1,
+        "definition_version": 2,
         "knowledge_verified": "2026-09-15",
         "analysis_method_ids": [],
         "registry_method_ids": [
@@ -1343,6 +1483,69 @@
           "gurumoji/analysis",
           "gurumoji/expert",
           "gurumoji/statistics"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/group-comparison-statistics/07-Agent-Contract.md",
+      "sha256": "a1ed398b0e6f759448fd4b327eccb1d672f5bada923a4f377e82f98a16ed0c5a",
+      "chars": 9237,
+      "metadata": {
+        "note_id": "expert-group-comparison-statistics-agent-contract",
+        "note_type": "expert-agent-contract",
+        "title": "群間比較専門家の入出力契約",
+        "status": "proposed",
+        "updated": "2026-10-08"
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/group-comparison-statistics/08-Skill-Hook-Binding.md",
+      "sha256": "5080fbf445fc4668ca803ffa0cfe4ef5ad00f302786dc3644bb1d9c24f903be4",
+      "chars": 12408,
+      "metadata": {
+        "note_id": "expert-group-comparison-statistics-skill-hook-binding",
+        "note_type": "expert-skill-hook-binding",
+        "title": "群間比較の段階別スキル・hook対応案",
+        "summary": "群間比較の現行01・07・actor・scopeを固定し、未接続readerと不足を明示する。",
+        "status": "proposed",
+        "schema_version": 1,
+        "binding_version": 6,
+        "expert_ids": [
+          "exp-group-comparison-statistics"
+        ],
+        "stage": "registration",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data",
+          "expert-group-comparison-statistics-overview",
+          "expert-group-comparison-statistics-definition",
+          "expert-group-comparison-statistics-procedure",
+          "expert-group-comparison-statistics-quality",
+          "expert-group-comparison-statistics-limits",
+          "expert-group-comparison-statistics-cases",
+          "expert-group-comparison-statistics-open-issues",
+          "lit-aarts-2014-nested-data",
+          "lit-appelbaum-2018-jars-quant",
+          "lit-benjamini-hochberg-1995-fdr",
+          "lit-cochran-1952-chi-square",
+          "lit-cochran-1954-chi-square",
+          "lit-delacre-2017-welch",
+          "lit-delacre-2022-correction",
+          "lit-holm-1979-multiple-testing",
+          "lit-jaeger-2008-logit-mixed",
+          "lit-kruskal-wallis-1952",
+          "lit-park-2022-diarization-review",
+          "lit-rasch-2011-pretest",
+          "expert-group-comparison-statistics-agent-contract"
+        ],
+        "optional_note_ids": [],
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/expert"
         ]
       }
     },
@@ -2410,8 +2613,8 @@
     },
     {
       "path": "50-Analysis-Methods/10-Experts/thematic-analysis/00-Overview.md",
-      "sha256": "fa9245feadbc1945bbf796902eb5f97cc61ca0ad2e90edebff2cab5fec6a34cd",
-      "chars": 1728,
+      "sha256": "4548d75bff05a16c6fa2f71638108dac3d7e1226402d381da6639d4797b84c19",
+      "chars": 1984,
       "metadata": {
         "note_id": "expert-thematic-analysis-overview",
         "note_type": "expert-overview",
@@ -2537,6 +2740,70 @@
           "gurumoji/analysis",
           "gurumoji/expert",
           "gurumoji/qualitative"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/thematic-analysis/07-Agent-Contract.md",
+      "sha256": "09f3742811e56c187427ec5b7899d8f7fb9cc576f6ec36ffb26f538069aa3beb",
+      "chars": 3350,
+      "metadata": {
+        "note_id": "expert-thematic-analysis-agent-contract",
+        "note_type": "expert-agent-contract",
+        "expert_id": "exp-thematic-analysis",
+        "title": "テーマ分析エージェントの入出力契約",
+        "summary": "Handlerが渡す分野別入力と、テーマ分析のAI下書きが返すJSON項目・型を指定する。",
+        "status": "current",
+        "updated": "2026-10-06",
+        "tags": [
+          "gurumoji/expert",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/10-Experts/thematic-analysis/08-Skill-Hook-Binding.md",
+      "sha256": "e4677c2271ff95ccdbd053119420d20c44ac1049b3c372e30c24b747037816ef",
+      "chars": 9798,
+      "metadata": {
+        "note_id": "expert-thematic-analysis-skill-hook-binding",
+        "note_type": "expert-skill-hook-binding",
+        "title": "テーマ分析の段階別スキル・hook対応案",
+        "summary": "テーマ分析の現行01・07・actor・scopeを固定し、未接続readerと不足を明示する。",
+        "status": "proposed",
+        "schema_version": 1,
+        "binding_version": 2,
+        "expert_ids": [
+          "exp-thematic-analysis"
+        ],
+        "stage": "registration",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data",
+          "analysis-common-ai-assistance-boundaries",
+          "expert-thematic-analysis-overview",
+          "expert-thematic-analysis-definition",
+          "expert-thematic-analysis-procedure",
+          "expert-thematic-analysis-quality",
+          "expert-thematic-analysis-limits",
+          "expert-thematic-analysis-cases",
+          "expert-thematic-analysis-open-issues",
+          "lit-braun-clarke-2006-thematic",
+          "lit-braun-clarke-2021-one-size",
+          "lit-byrne-2022-reflexive-ta",
+          "lit-gilardi-2023-llm-annotation",
+          "lit-hermann-2024-fg-interaction-coding",
+          "lit-oka-2022-reflexive-ta-ja",
+          "expert-thematic-analysis-agent-contract"
+        ],
+        "optional_note_ids": [],
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/expert"
         ]
       }
     },
@@ -5730,6 +5997,191 @@
         "tags": [
           "gurumoji/literature",
           "gurumoji/statistics"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/40-Skills/00-Index.md",
+      "sha256": "e569ef34c22279c72d80cc5732a48598d42617268207b1aaf39b08470ef00364",
+      "chars": 4208,
+      "metadata": {
+        "note_id": "analysis-skills-index",
+        "note_type": "method-group",
+        "title": "分析スキルの入口",
+        "summary": "作業段階から必要な知識と登録書式へ進む。実行接続の状態は別に確認する。",
+        "status": "proposed",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/analysis",
+          "gurumoji/skill"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/40-Skills/correlation-exploratory-evidence.md",
+      "sha256": "3d29a901c8fc64c7d0822310bb8e97e7137e661431dcd0851e25a766eb7eb2ec",
+      "chars": 6303,
+      "metadata": {
+        "note_id": "skill-correlation-exploratory-evidence",
+        "note_type": "executable-skill",
+        "title": "探索的相関と固定根拠の手順（提案）",
+        "summary": "初期発話の相関計画・正式計算表・人の確認待ちを結ぶ。",
+        "status": "proposed",
+        "schema_version": 1,
+        "skill_id": "correlation-exploratory-evidence",
+        "skill_version": 1,
+        "proposal_revision": 3,
+        "expert_ids": [
+          "exp-correlation"
+        ],
+        "stage": "analysis_plan_and_result_explanation",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "data-analysis-asset-connection-v1",
+          "expert-correlation-definition",
+          "expert-correlation-procedure",
+          "expert-correlation-quality",
+          "expert-correlation-limits",
+          "expert-correlation-agent-contract",
+          "expert-correlation-skill-hook-binding",
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data"
+        ],
+        "optional_note_ids": [],
+        "guards_block_id": "cee-guards",
+        "procedure_block_id": "cee-procedure",
+        "output_block_id": "cee-output",
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/40-Skills/group-comparison-exploratory-evidence.md",
+      "sha256": "eb1475f67af863bd232ef3b0701c7bea71c7405c7ce95b8a0fa854544574729d",
+      "chars": 7135,
+      "metadata": {
+        "note_id": "skill-group-comparison-exploratory-evidence",
+        "note_type": "executable-skill",
+        "title": "探索的群間比較と固定根拠の手順（提案）",
+        "summary": "初期発話の比較計画・正式表・本人の前提確認を結ぶ。",
+        "status": "proposed",
+        "schema_version": 1,
+        "skill_id": "group-comparison-exploratory-evidence",
+        "skill_version": 1,
+        "proposal_revision": 3,
+        "expert_ids": [
+          "exp-group-comparison-statistics"
+        ],
+        "stage": "analysis_plan_and_result_explanation",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "data-analysis-asset-connection-v1",
+          "expert-group-comparison-statistics-definition",
+          "expert-group-comparison-statistics-procedure",
+          "expert-group-comparison-statistics-quality",
+          "expert-group-comparison-statistics-limits",
+          "expert-group-comparison-statistics-agent-contract",
+          "expert-group-comparison-statistics-skill-hook-binding",
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data"
+        ],
+        "optional_note_ids": [],
+        "guards_block_id": "gcee-guards",
+        "procedure_block_id": "gcee-procedure",
+        "output_block_id": "gcee-output",
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/40-Skills/group-interview-evidence-workflow.md",
+      "sha256": "1a8ed0b31076f5ade8ddb30ca953ac00debf022a3b08b20b4544221a096a2a32",
+      "chars": 8646,
+      "metadata": {
+        "note_id": "workflow-group-interview-evidence",
+        "note_type": "workflow-proposal",
+        "title": "グループインタビューの根拠接続手順（提案）",
+        "summary": "目的・準備・内容候補・人の相互作用・比較・反例・報告を結ぶ。",
+        "status": "proposed",
+        "schema_version": 1,
+        "workflow_version": 1,
+        "proposal_revision": 3,
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "data-analysis-asset-connection-v1",
+          "skill-thematic-candidate-evidence",
+          "transcript-preparation-v1",
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data",
+          "expert-focus-group-interaction-definition",
+          "expert-focus-group-interaction-procedure",
+          "expert-focus-group-interaction-quality",
+          "expert-focus-group-interaction-limits"
+        ],
+        "optional_note_ids": [
+          "expert-correlation-skill-hook-binding",
+          "expert-group-comparison-statistics-skill-hook-binding"
+        ],
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/workflow",
+          "gurumoji/analysis"
+        ]
+      }
+    },
+    {
+      "path": "50-Analysis-Methods/40-Skills/thematic-candidate-evidence.md",
+      "sha256": "8f7860af502ba9dd6e33da259309284bd53f2fa64c9d91a5d0754c66c82b5527",
+      "chars": 7881,
+      "metadata": {
+        "note_id": "skill-thematic-candidate-evidence",
+        "note_type": "executable-skill",
+        "title": "テーマ候補と固定根拠の整理手順（提案）",
+        "summary": "ta-p2/p3の根拠・履歴・未読と人待ちを固定する。",
+        "status": "proposed",
+        "schema_version": 1,
+        "skill_id": "thematic-candidate-evidence",
+        "skill_version": 1,
+        "proposal_revision": 3,
+        "expert_ids": [
+          "exp-thematic-analysis"
+        ],
+        "stage": "candidate_generation",
+        "review_state": "draft",
+        "runtime_state": "planned",
+        "required_note_ids": [
+          "data-analysis-asset-connection-v1",
+          "expert-thematic-analysis-definition",
+          "expert-thematic-analysis-procedure",
+          "expert-thematic-analysis-quality",
+          "expert-thematic-analysis-agent-contract",
+          "expert-thematic-analysis-skill-hook-binding",
+          "analysis-common-evidence-and-claims",
+          "analysis-common-source-classification",
+          "analysis-common-group-interview-data"
+        ],
+        "optional_note_ids": [],
+        "guards_block_id": "tce-guards",
+        "procedure_block_id": "tce-procedure",
+        "output_block_id": "tce-output",
+        "updated": "2026-10-08",
+        "tags": [
+          "gurumoji/skill",
+          "gurumoji/analysis"
         ]
       }
     }

@@ -19,10 +19,16 @@ def call_pipeline(request, *, role, provider, model, api_key, base_url, options,
     system_prompt = request["system"]
     user_prompt = json.dumps(request["packet"], ensure_ascii=False, separators=(",", ":"))
     private = {}
+    # 保存済みの旧実行はモデル既定のまま、新規実行は明示した条件で送信する。
+    if provider == "lmstudio":
+        if "local_reasoning" in options:
+            private["local_reasoning_level"] = options["local_reasoning"]
+        if "local_max_output_tokens" in options:
+            private["max_output_tokens"] = options["local_max_output_tokens"]
     if options.get("_request_budget") is not None:
-        private = {"request_budget": options["_request_budget"], "task_id": request.get("task_id", ""),
+        private.update({"request_budget": options["_request_budget"], "task_id": request.get("task_id", ""),
                    "attempt_id": options["_budget_attempt_id"] + ":0",
-                   "raw_usage_callback": options.get("_raw_usage_callback")}
+                   "raw_usage_callback": options.get("_raw_usage_callback")})
     if transport_diagnostics and callable(trace):
         private["diagnostic_callback"] = lambda event: trace({**event, "call": 1})
     if callable(trace):

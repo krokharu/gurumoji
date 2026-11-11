@@ -148,6 +148,7 @@ PAYLOAD_FIELDS = frozenset({
     "provider_policy", "cloud_consent", "stop_mode", "time_limit_seconds", "max_iterations",
     "importance_threshold", "max_calls", "max_tasks", "concurrency", "research_mode", "roles",
     "publication_targets", "obsidian_management", "expert_ids", "research_question",
+    "local_reasoning", "local_max_output_tokens",
 })
 
 
@@ -179,6 +180,8 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
               "max_calls": payload.get("max_calls"), "max_tasks": payload.get("max_tasks"),
               "concurrency": payload.get("concurrency", 2),
               "call_timeout_seconds": 120,
+              "local_reasoning": payload.get("local_reasoning", "off"),
+              "local_max_output_tokens": payload.get("local_max_output_tokens", 4096),
               "max_result_bytes": 2_000_000,
               "obsidian_management": payload.get("obsidian_management", True)}
     if "research_question" in payload:
@@ -197,6 +200,11 @@ def validate_orchestration_payload(payload: Any) -> dict[str, Any]:
         raise _error("専門家IDは重複なく1〜6件指定してください。", "expert_selection_invalid")
     if type(config["obsidian_management"]) is not bool:
         raise _error("Obsidian管理はtrueまたはfalseです。", field="obsidian_management")
+    if not isinstance(config["local_reasoning"], str) or config["local_reasoning"] not in {"auto", "off"}:
+        raise _error("ローカルAIの追加推論はautoまたはoffです。", field="local_reasoning")
+    if (type(config["local_max_output_tokens"]) is not int
+            or not 128 <= config["local_max_output_tokens"] <= 16384):
+        raise _error("ローカルAIの出力上限は128〜16384の整数です。", field="local_max_output_tokens")
     for key, low, high in (("concurrency", 1, 4),
                            ("call_timeout_seconds", 1, 3600), ("max_result_bytes", 1000, 20_000_000)):
         if type(config[key]) is not int or not low <= config[key] <= high:
@@ -571,19 +579,27 @@ class AnalysisOrchestrationService:
             raise _error("request_idが正しくありません。")
         if self.find_item(item_id) is None:
             raise LookupError("会話が見つかりません。")
-        request_hash = fingerprint({"item_id": item_id, "config": config,
-                                    "source_revision": payload.get("source_revision"),
-                                    "analysis_revision": payload.get("analysis_revision"),
-                                    "input_hash": None})
+        request_identity = {"item_id": item_id, "config": config,
+                            "source_revision": payload.get("source_revision"),
+                            "analysis_revision": payload.get("analysis_revision"),
+                            "input_hash": None}
+        request_hash = fingerprint(request_identity)
         with self._db() as db:
             existing = db.execute("SELECT * FROM orchestration_runs WHERE request_id=? AND json_extract(state_json, '$.config.adapter_version')=?", (request_id, ADAPTER_VERSION)).fetchone()
             if existing is None and db.execute("SELECT 1 FROM orchestration_runs WHERE request_id=?", (request_id,)).fetchone():
                 raise _error("旧版の依頼IDは再利用できません。", "adapter_version_conflict")
             if existing:
+                existing_run = json.loads(existing["state_json"])
                 matches = existing["request_hash"] == request_hash
+                generation_fields = {"local_reasoning", "local_max_output_tokens"}
+                if (not matches and not generation_fields.intersection(payload)
+                        and not generation_fields.intersection(existing_run["config"])):
+                    # 更新前の応答不明POSTだけを旧条件で照合し、保存済み条件は変更しない。
+                    legacy_config = {key: value for key, value in config.items() if key not in generation_fields}
+                    matches = existing["request_hash"] == fingerprint({**request_identity, "config": legacy_config})
                 if existing["item_id"] != item_id or not matches:
                     raise _error("同じrequest_idに異なる設定は使えません。", "request_conflict")
-                return self._public(db, json.loads(existing["state_json"]))
+                return self._public(db, existing_run)
         run_id = _id("run")
         factory = budget_factory if budget_factory is not None else self._budget_factory
         if factory is not None:

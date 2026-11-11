@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Lightweight Linux cloud environment for the original Flask UI, local storage,
 # non-neural analysis, PDF reading, and spreadsheet exports.
 # Speech/transformer models and GPU dependencies are intentionally not installed.

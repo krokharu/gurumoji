@@ -13,6 +13,11 @@
         <label class="field"><span>モデルID</span><input id="pipeline-model" maxlength="200" placeholder="空欄なら設定済みモデル"></label>
       </div>
       <p class="field-note">Core・会話解釈・独立検証・批判者に適用。Handlerはアプリの処理、数量・統計はPython集計です。</p>
+      <div class="pipeline-form-grid">
+        <label class="field"><span>ローカルAIの追加推論</span><select id="pipeline-local-reasoning"><option value="off">OFF（既定・JSONの分析結果を直接生成）</option><option value="auto">モデルの既定設定を使う</option></select></label>
+        <label class="field"><span>ローカルAIの1回の出力上限（トークン）</span><input id="pipeline-local-max-output" type="number" min="128" max="16384" value="4096" required></label>
+      </div>
+      <p class="field-note">ローカルAIの全担当に適用し、実行条件として保存します。追加推論ONのモデルは時間上限に達する場合があります。出力が上限で途切れた応答は採用しません。クラウドAIには適用しません。</p>
       <details class="pipeline-role-settings"><summary>担当ごとにモデルを変える</summary><div id="pipeline-role-overrides"></div></details>
       <div id="pipeline-cloud-disclosure" class="pipeline-consent" hidden>
         <strong>会話原文がクラウドへ送信されます</strong>
@@ -209,7 +214,7 @@
     <section aria-labelledby="pipeline-conclusion-title"><h3 id="pipeline-conclusion-title">現在の統合結果 · AI下書き</h3><p id="pipeline-conclusion" class="pipeline-conclusion"></p><ul id="pipeline-conclusion-notes" class="pipeline-conclusion-notes"></ul><p id="pipeline-review-state" class="field-note"></p></section>
     <section id="pipeline-review" aria-labelledby="pipeline-review-title"><h3 id="pipeline-review-title">未解決点とCoreの判断</h3><div id="pipeline-review-content"></div></section>
     <details class="pipeline-details" open><summary>タスク台帳 <span id="pipeline-task-count"></span></summary><div class="pipeline-table-wrap"><table class="analysis-table"><thead><tr><th scope="col">タスク</th><th scope="col">担当 / モデル</th><th scope="col">状態</th><th scope="col">結果</th></tr></thead><tbody id="pipeline-tasks"></tbody></table></div></details>
-    <details class="pipeline-details"><summary>イベント履歴・実行条件</summary><p id="pipeline-config"></p><ol id="pipeline-events"></ol></details>
+    <details class="pipeline-details"><summary>イベント履歴・実行条件</summary><p id="pipeline-config"></p><p id="pipeline-local-generation"></p><ol id="pipeline-events"></ol></details>
     <p class="pipeline-exports"><a id="pipeline-export-json" href="#" download>全履歴JSON</a> · <a id="pipeline-export-md" href="#" download>Obsidian用ノート</a> <span>（閲覧端末へのダウンロード。上の固定成果物・Vault出力とは別です）</span></p>
     <section id="pipeline-result-view" hidden aria-labelledby="pipeline-result-title"><h3 id="pipeline-result-title">保存済み結果</h3><div id="pipeline-result-content"></div></section>
   </dialog>

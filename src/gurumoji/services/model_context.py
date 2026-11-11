@@ -80,7 +80,7 @@ def transform_references(value, mapping, *, restore=False, schema=False):
         if isinstance(node, list):
             return [walk(child, key, field) for child in node]
         if field and (not schema or key == "enum"):
-            return None if node is None else convert(node, field)
+            return None if node is None and not restore else convert(node, field)
         return node
     return walk(value)
 

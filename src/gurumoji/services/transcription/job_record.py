@@ -76,7 +76,9 @@ class JobRecord:
                 "status": self.status,
                 "progress": self.progress,
                 "stage": self.stage,
-                "stage_label": self.stage_label,
+                "stage_label": public_diagnostic_text(
+                    self.stage_label, reveal_local_paths=reveal_local_paths
+                ),
                 "stage_progress": self.stage_progress,
                 "stage_history": [
                     {"key": item["key"], "label": public_diagnostic_text(item["label"], reveal_local_paths=reveal_local_paths),

@@ -24,13 +24,14 @@ jobs:
       - run: |
           for file in src/gurumoji/static/*.js; do node --check "$file"; done
 
-  # GitHub上ではまだ実行・確認していない。
+  # 保存資料の試験は、明示実行時だけ現在のmainと組み合わせる。
   tests:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           path: app
       - uses: actions/checkout@v4
         with:
@@ -42,27 +43,40 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: 検証用の分離コピーを作成
+      - name: 現行mainと保存資料から隔離した検証cloneを準備
         run: |
-          root="$GITHUB_WORKSPACE/app/.verification"
-          dev="$GITHUB_WORKSPACE/development-assets"
-          app="$GITHUB_WORKSPACE/app"
-          mkdir -p "$root"
-          for dir in tests scripts docs config devtools notebooks; do
-            if [ -d "$dev/$dir" ]; then rsync -a --exclude=node_modules --exclude=__pycache__ --exclude=.pytest_cache --exclude=.env --exclude=tokens.json --exclude='*.pyc' "$dev/$dir/" "$root/$dir/"; fi
-          done
-          find "$dev" -maxdepth 1 -type f ! -name .env -exec cp -t "$root" {} +
-          rsync -a --exclude=__pycache__ --exclude='*.pyc' "$app/src/" "$root/src/"
-          for dir in scripts docs config notebooks .github; do
-            if [ -d "$app/$dir" ]; then rsync -a --exclude=__pycache__ --exclude=.env --exclude=tokens.json --exclude='*.pyc' "$app/$dir/" "$root/$dir/"; fi
-          done
-          find "$app" -maxdepth 1 -type f ! -name .env ! -name '*.lnk' -exec cp -t "$root" {} +
-          cp "$dev/pytest.ini" "$root/pytest.ini"
-      - name: 依存関係を導入
-        working-directory: app/.verification
+          git -C app switch -c main
+          archive=$(git -C development-assets rev-parse HEAD)
+          python development-assets/scripts/prepare_main_validation.py --source app --target verification --archive-repository development-assets --archive-ref "$archive"
+      - name: 専用Pythonと試験依存を導入
+        id: dependencies
+        working-directory: verification
         run: |
-          python -m pip install -r config/requirements-cloud-cpu.lock.txt -r config/requirements-dev.txt
+          python -m venv .venv
+          .venv/bin/python -m pip install -r config/requirements-cloud-core.txt -r config/requirements-dev.txt
+          .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/python -m pip install soundfile jsonschema requests 'lmstudio>=1.5,<2'
           npm ci --prefix tests/dom
-      - name: 試験を実行
-        working-directory: app/.verification
-        run: python scripts/run_tests.py
+      - name: 通常試験を実行
+        working-directory: verification
+        env:
+          PYTHONUTF8: "1"
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          HF_HOME: ${{ github.workspace }}/verification/output/validation/hf-cache
+          GURUMOJI_TEST_PYTHON: ${{ github.workspace }}/verification/.venv/bin/python
+        run: |
+          .venv/bin/python scripts/run_tests.py --scope main --jobs 2 --split-module test_developed_analysis_unit_pool_independent --timeout-seconds 600 --output output/validation/tests
+      - name: DOM試験を実行
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        working-directory: verification
+        env:
+          PYTHONUTF8: "1"
+          GURUMOJI_TEST_PYTHON: ${{ github.workspace }}/verification/.venv/bin/python
+          GURUMOJI_REUSE_SOURCE_ROOT: ${{ github.workspace }}/verification
+        run: npm test --prefix tests/dom > output/validation/dom-tests.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: main-validation-evidence
+          path: verification/output/validation

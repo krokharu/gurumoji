@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ObusSQL mainに含まれる任意のMAF実行拡張。
 # Python 3.12専用。上流の定義でagent-framework-core==1.22.0に依存する。
 # 読取プレビューとは別で、導入だけではワークフローを有効にしない。

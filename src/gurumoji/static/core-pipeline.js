@@ -118,6 +118,7 @@ function orchestrationPayload() {
     if (!raw && !required) return null;
     const number = Number(raw);
     if (!Number.isInteger(number) || number < 1 || number > max) throw Error(`${orchestrationNode(id).closest('label').querySelector('span').textContent}を1〜${max}の整数で指定してください。`);
+    if (id === 'local-max-output' && number < 128) throw Error('ローカルAIの出力上限は128トークン以上にしてください。');
     if (id === 'iterations' && mode === 'auto' && number < 3) throw Error('AIお任せの回数上限は最低3回以上にしてください。');
     return number;
   };
@@ -129,6 +130,7 @@ function orchestrationPayload() {
     max_iterations:['iterations','auto'].includes(mode) ? integer('iterations', mode === 'iterations', 1000) : null,
     importance_threshold:orchestrationNode('importance').value, max_calls:integer('max-calls',false,1000), max_tasks:integer('max-tasks',false,2000),
     concurrency:integer('concurrency',true,4), research_mode:'exploratory', roles:orchestrationRoleOverrides(),
+    local_reasoning:orchestrationNode('local-reasoning').value, local_max_output_tokens:integer('local-max-output',true,16384),
     publication_targets:orchestrationNode('publication-all').checked ? [...orchestrationPublicationTargets] : [],
     obsidian_management:orchestrationNode('memory-enabled').checked};
 }
@@ -269,6 +271,7 @@ function renderAnalysisOrchestration() {
   const reasons = {question_satisfied:'問いを充足',human_review_required:'人の確認待ち',no_new_tasks:'追加タスクなし',importance_threshold:'重要度しきい値',execution_failure:'実行障害',review_incomplete:'レビュー未完了',call_timeout:'呼出し時間上限',call_budget_limit:'AI呼出し上限',task_budget_limit:'タスク上限',source_deleted:'入力データの削除',user_cancelled:'利用者停止',user_stop:'利用者停止',time_limit:'時間上限',iteration_limit:'回数上限',call_budget:'AI呼出し上限',task_budget:'タスク上限',budget_limit:'予算上限',completed:'問いを充足',no_more_evidence:'追加の証拠なし',error:'実行障害',human_review:'人の確認待ち'};
   orchestrationText('stop-reason',run.stop_reason ? `停止理由: ${reasons[run.stop_reason] || run.stop_reason}。保存済みの部分結果・未実施レビューを含めて確認してください。` : '利用者停止と安全上限を最優先します。研究上の結論は未確定の探索的下書きです。');
   const config = run.config || {};
+  orchestrationText('local-generation',`ローカルAI: 追加推論 ${config.local_reasoning === 'off' ? 'OFF' : 'モデル既定'} / 1回の出力上限 ${config.local_max_output_tokens ?? 'モデル既定'}トークン`);
   orchestrationText('config',`実行条件: ${config.stop_mode || '未取得'} / 最低 ${config.min_iterations ?? '未取得'}回 / 時間 ${config.time_limit_seconds ?? '無上限'}${config.time_limit_seconds ? '秒' : ''} / 回数上限 ${config.max_iterations ?? '無上限'} / 呼出し上限 ${config.max_calls === null ? '無上限' : config.max_calls ?? '不明'} / タスク上限 ${config.max_tasks === null ? '無上限' : config.max_tasks ?? '不明'} / 外部送信 ${config.provider_policy === 'local_only' ? 'なし（ローカル限定）' : config.provider_policy === 'cloud_allowed' ? '同意済みクラウドを許可' : '未取得'}`);
   for (const [id, suffix] of [['export-json','export.json'],['export-md','export.md']]) orchestrationNode(id).href = `${orchestrationBase()}/${suffix}`;
   orchestrationText('usage-note',`利用量の計測: ${{reported:'一部計測（全量未保証）',unavailable:'未計測'}[usage.measurement_status] || usage.measurement_status || '未取得'} · 計測済み呼出し ${orchestrationNumber(usage.measured_calls)} / ${orchestrationNumber(usage.calls)} · 費用 ${usage.cost == null ? '未計測' : `${String(usage.cost)} ${usage.currency || '通貨未取得'}`}。未計測分を0として補完しません。`);
