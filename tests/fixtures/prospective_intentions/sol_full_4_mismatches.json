@@ -1,0 +1,7 @@
+{
+  "source": "core-pipeline-redesign-plan.md §9 sol-full-4の記述を合成データで再現（実ログの転載ではない）",
+  "cases": [
+    {"id": "revised_without_change", "text": "主張の本文に対象の説明が残る", "status": "open", "resolution": "revised", "reason": "修正した"},
+    {"id": "limit_without_status", "text": "主張の本文に対象の説明が残る", "status": "open", "resolution": "accepted_limit", "reason": "除外または限定した"}
+  ]
+}

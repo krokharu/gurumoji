@@ -274,17 +274,16 @@ class InitialRecoveryTests(unittest.TestCase):
             self.f.start(request_id="other-initial")
         self.assertFalse(self.builder.counts)
 
-    def test_legacy_completed_initial_is_reused_without_stages_or_freeze(self):
+    def test_legacy_completed_initial_requires_revalidation_without_freeze(self):
         self.f.service = self.f.make_service()
         legacy = self.f.start(request_id="legacy")
         expected = self.f.service.result("conversation", legacy["run_id"])["initial"]
         self.f.service = self.f.make_service(initial_builder=self.builder)
-        new = self.f.start(request_id="reuse-legacy")
-        self.assertEqual(new["phase"], "core")
-        self.assertEqual(new["initial_id"], legacy["initial_id"])
-        self.assertEqual(new["initial_stages"], [])
+        with self.assertRaises(AnalysisContractError) as error:
+            self.f.start(request_id="reuse-legacy")
+        self.assertEqual(error.exception.code, "initial_revalidation_required")
         self.assertEqual(self.builder.freeze_count, 0)
-        self.assertEqual(self.f.service.result("conversation", new["run_id"])["initial"], expected)
+        self.assertEqual(self.f.service.result("conversation", legacy["run_id"])["initial"], expected)
 
     def test_completed_callback_runs_outside_transaction_once_and_failure_is_separate(self):
         callback_calls = []

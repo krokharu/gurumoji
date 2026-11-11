@@ -4,12 +4,12 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createHarness}=require('./harness.cjs');
 const node=(h,id)=>h.document.getElementById(`orchestration-${id}`);
-const pending=(h,suffix,method='GET')=>{const r=h.requests.findLast(x=>!x.settled&&x.url.endsWith(suffix)&&(x.options.method||'GET')===method);assert(r,`${method} ${suffix}`);return r;};
+const pending=(h,suffix,method='GET')=>{const r=h.requests.findLast(x=>!x.settled&&new URL(x.url,"https://gurumoji.invalid").pathname.endsWith(suffix)&&(x.options.method||'GET')===method);assert(r,`${method} ${suffix}`);return r;};
 const source=(id,summary='保存済みの所見')=>({source:{source_analysis_id:id,source_run_id:'run_original',source_result_id:id.startsWith('result_')?id:'result_original',original_question:'元の問い',source_revision:2,analysis_revision:3,input_hash:'input_hash',raw_hash:'raw_hash',content:{summary}}});
 const run=(overrides={})=>({run_id:'run_original',analysis_result_id:'result_original',item_id:'A',status:'completed',phase:'completed',iteration:1,source_revision:2,config:{question:'元の問い'},usage:{calls:1},allowed_actions:[],roles:[],tasks:[],results:[],events:[],...overrides});
 function input(h,id,value){node(h,id).value=value;node(h,id).dispatchEvent(new h.w.Event('input',{bubbles:true}));}
 async function setup(t){
- const h=await createHarness();t.after(()=>h.close());
+ const h=await createHarness();const originalReply=h.reply;h.reply=(request,data,status=200)=>{const cursor=new URL(request.url,"https://gurumoji.invalid").searchParams.get("events_after");if(cursor!==null&&data.run&&!data.run.events_reset)data={...data,run:{...data.run,events:(data.run.events||[]).filter(event=>event.seq>Number(cursor))}};return originalReply(request,data,status);};t.after(()=>h.close());
  h.fixture({itemId:'A',data:{item:{id:'A',source_name:'合成会話A',revision_count:2,analysis_revision:3},segments:[]},config:{},annotations:{},dirty:false});
  h.evaluate('Object.assign(analysisState,window.fixture);analysisCard.hidden=false;document.body.dataset.view="analysis"');
  h.click('#analysis-run-settings-button');h.click('#orchestration-open');input(h,'question','新しい問い');return h;

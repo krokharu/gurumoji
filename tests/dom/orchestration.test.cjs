@@ -4,7 +4,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createHarness}=require('./harness.cjs');
 const node=(h,id)=>h.document.getElementById(`orchestration-${id}`);
-const pending=(h,suffix,method='GET')=>{const request=h.requests.findLast(r=>!r.settled&&r.url.endsWith(suffix)&&(r.options.method||'GET')===method);assert(request,`${method} ${suffix}`);return request;};
+const pending=(h,suffix,method='GET')=>{const request=h.requests.findLast(r=>!r.settled&&new URL(r.url,"https://gurumoji.invalid").pathname.endsWith(suffix)&&(r.options.method||'GET')===method);assert(request,`${method} ${suffix}`);return request;};
 const plain=value=>JSON.parse(JSON.stringify(value));
 function input(h,id,value){node(h,id).value=value;node(h,id).dispatchEvent(new h.w.Event('input',{bubbles:true}));}
 function snapshot(overrides={}) {
@@ -16,7 +16,7 @@ function snapshot(overrides={}) {
   events:[{seq:1,type:'task_started',from:'handler',to:'interpretation',message:'Synthetic task registered'}],results:[],...overrides};
 }
 async function setup(t) {
- const h=await createHarness();t.after(()=>h.close());
+ const h=await createHarness();const originalReply=h.reply;h.reply=(request,data,status=200)=>{const cursor=new URL(request.url,"https://gurumoji.invalid").searchParams.get("events_after");if(cursor!==null&&data.run&&!data.run.events_reset)data={...data,run:{...data.run,events:(data.run.events||[]).filter(event=>event.seq>Number(cursor))}};return originalReply(request,data,status);};t.after(()=>h.close());
  h.fixture({itemId:'A',data:{item:{id:'A',source_name:'Synthetic A',revision_count:2,analysis_revision:3},segments:[]},config:{},annotations:{},dirty:false});
  h.evaluate('Object.assign(analysisState,window.fixture);analysisCard.hidden=false;document.body.dataset.view="analysis"');
  h.click('#analysis-run-settings-button');h.click('#orchestration-open');input(h,'question','Synthetic research question');
