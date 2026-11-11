@@ -31,6 +31,27 @@ def load_entrypoint(relative_path):
 
 
 class BrowserEntrypointTests(unittest.TestCase):
+    def test_pool_browser_opt_out_skips_before_fixtures_or_processes(self):
+        # 試験モジュールを読み直し、通常実行では合成DBの準備も起動しないことを確認する。
+        with patch.dict(os.environ, {browser_support.OPT_IN_ENV: "0"}):
+            module = load_entrypoint("tests/test_developed_analysis_unit_pool_independent.py")
+        case = module.BrowserFixedCandidateAcceptanceTests
+        self.assertIn("browser", [mark.name for mark in case.pytestmark])
+        with patch.object(module.FixedCandidateAcceptanceTests, "setUp", side_effect=AssertionError("Unexpected fixture")) as fixture, \
+                patch.object(module, "IndependentPoolFixture", side_effect=AssertionError("Unexpected DB")) as database, \
+                patch.object(subprocess, "Popen", side_effect=AssertionError("Unexpected spawn")) as spawn, \
+                patch.object(browser_support, "sandboxed_playwright_browser", side_effect=AssertionError("Unexpected browser")) as launch:
+            suite = unittest.defaultTestLoader.loadTestsFromTestCase(case)
+            result = unittest.TestResult()
+            suite.run(result)
+        self.assertEqual(result.testsRun, 2)
+        self.assertEqual(len(result.skipped), 2)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.failures, [])
+        self.assertTrue(all(reason.startswith("not-run:") for _, reason in result.skipped))
+        for mocked in (fixture, database, spawn, launch):
+            mocked.assert_not_called()
+
     def test_import_and_default_opt_out_have_no_process_server_or_file_side_effects(self):
         for relative_path in ENTRYPOINTS:
             with self.subTest(path=relative_path), ExitStack() as cleanup:

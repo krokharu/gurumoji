@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const {createHarness}=require('./harness.cjs');
 const stages=['outline','cleanup','name_extract','name_verify'];
 const plain=value=>JSON.parse(JSON.stringify(value));
-async function setup(t){const h=await createHarness();t.after(()=>h.close());return h;}
+async function setup(t,options){const h=await createHarness(options);t.after(()=>h.close());return h;}
 function job(id='A',text='Synthetic transcript') {return {id,source_name:`Synthetic ${id}`,revision_count:1,files:[],segments:[{id:'s1',speaker:'A',start:0,end:1,text},{id:'s2',speaker:'B',start:1,end:2,text:'Synthetic second'}],speaker_names:{},speaker_profiles:{A:{display_name:'Synthetic A',session_role:'participant',session_role_source:'default'},B:{display_name:'Synthetic B',session_role:'observer',session_role_source:'registry'}},session_profile:{session_type:'focus_group'}};}
 function render(h,data=job()){h.fixture(data);h.evaluate('renderResult(window.fixture)');}
 function latest(h,url,method='GET'){const request=h.requests.findLast(r=>r.url===url&&(r.options.method||'GET')===method);assert(request,`${method} ${url}`);return request;}
@@ -27,7 +27,8 @@ test('real mode handler preserves four independent efforts and FormData across s
  const assertValues=()=>{assert.deepEqual(plain(h.evaluate('readAiEfforts()')),{notation:'off',...expected});const data=new h.w.FormData(h.document.querySelector('#job-form'));for(const key of stages){assert.equal(data.get(`ai_effort_${key}`),expected[key]);assert.equal(h.document.querySelector(`#effort-select-${key}`).value,expected[key]);}};
  assertValues();h.click('#effort-detail-toggle');assertValues();h.click('#effort-detail-toggle');
  for(const value of ['advanced','off','recommended','advanced','recommended']){const mode=h.document.querySelector(`input[name="transcript_finishing_mode"][value="${value}"]`);h.click(mode);assertValues();assert.equal(mode.checked,true);}
- for(const key of stages){const on=h.document.querySelector(`[name="ai_thinking_mode_${key}"][value="on"]`);if(on)h.click(on);const radio=h.document.querySelector(`[name="ai_effort_choice_${key}"][value="medium"]`);h.click(radio);expected[key]='medium';assertValues();}
+ h.click('input[name="transcript_finishing_mode"][value="advanced"]');h.click('#effort-detail-toggle');
+ for(const key of stages){const on=h.document.querySelector(`[name="ai_thinking_mode_${key}"][value="on"]`);if(on){assert.equal(on.disabled,false);h.click(on);}const radio=h.document.querySelector(`[name="ai_effort_choice_${key}"][value="medium"]`);assert.equal(radio.disabled,false);h.click(radio);expected[key]='medium';assertValues();}
  h.evaluate('setRunning(true); setRunning(false)');assertValues();
  assert.equal(h.requests.filter(r=>r.options.method && r.options.method!=='GET').length,0);
 });
@@ -104,9 +105,10 @@ test('Save cannot commit an old result while a newer navigation request is still
  const h=await setup(t);render(h);h.click('#save-button');const save=latest(h,'/api/library/A','PUT');h.evaluate('openLibraryItem("B")');const opening=latest(h,'/api/library/B');h.reply(save,{...job(),revision_count:2,source_name:'Old response'});await h.flush();assert.equal(h.document.querySelector('#result-title').textContent,'Synthetic A');assert.equal(h.evaluate('currentJob.revision_count'),1);h.reply(opening,job('B'));await h.flush();assert.equal(h.evaluate('currentJobId'),'B');assert.equal(h.document.querySelector('#save-button').disabled,false);
 });
 
-test('actual mode changes restore optional choices and serialize each effort exactly once',async t=>{
- const h=await setup(t);h.change(h.document.querySelector('#ai-provider'),'openai');const cleanup=h.document.querySelector('#clean-transcript'),outline=h.document.querySelector('#create-outline');if(!cleanup.checked)h.click(cleanup);if(outline.checked)h.click(outline);
- const before={cleanup:cleanup.checked,outline:outline.checked,finish:h.document.querySelector('#finish-in-obsidian').checked};h.click('input[name=transcript_finishing_mode][value=advanced]');h.click('input[name=transcript_finishing_mode][value=recommended]');assert.deepEqual({cleanup:cleanup.checked,outline:outline.checked,finish:h.document.querySelector('#finish-in-obsidian').checked},before);
+for(const obsidianEnabled of [false,true])test(`actual mode changes restore optional choices and serialize each effort exactly once (Obsidian ${obsidianEnabled})`,async t=>{
+ const h=await setup(t,{obsidianEnabled});h.change(h.document.querySelector('#ai-provider'),'openai');const cleanup=h.document.querySelector('#clean-transcript'),outline=h.document.querySelector('#create-outline');if(!cleanup.checked)h.click(cleanup);if(outline.checked)h.click(outline);
+ const finish=h.document.querySelector('#finish-in-obsidian');assert.equal(Boolean(finish),obsidianEnabled);
+ const before={cleanup:cleanup.checked,outline:outline.checked,finish:finish?.checked};h.click('input[name=transcript_finishing_mode][value=advanced]');h.click('input[name=transcript_finishing_mode][value=recommended]');assert.deepEqual({cleanup:cleanup.checked,outline:outline.checked,finish:finish?.checked},before);
  for(const mode of ['recommended','advanced','off']){h.click(`input[name=transcript_finishing_mode][value=${mode}]`);const form=new h.w.FormData(h.document.querySelector('#job-form'));assert.equal(form.get('transcript_finishing_mode'),mode);for(const key of stages){assert.equal(form.getAll(`ai_effort_${key}`).length,1);assert.equal(form.get(`ai_effort_${key}`),h.evaluate('readAiEfforts()')[key]);}assert.equal(h.document.querySelector('#jev-compare').checked,false);}
 });
 

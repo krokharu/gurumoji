@@ -355,9 +355,13 @@ class ObsidianAppIntegrationTests(unittest.TestCase):
                                  provider='lmstudio', detect_names=False, create_outline=True)
         context = {'sections': [{'title': '編集した全体像', 'bullets': ['合意は未確定']} ]}
         revised = [{**s, 'text': s['text'] + '修正'} for s in segments]
-        final_outline = ai_finishing.create_outline(revised, {}, lambda *_: {'sections': [
-            {'title': '仕上げ後の議題', 'bullets': [{'text': '修正後の要点', 'segment_ids': [revised[0]['id']]}]}]},
-            lambda *_: None, lambda: None)
+        def respond(_system, _user, name, _schema):
+            if name == 'meeting_overall_summary':
+                return {'summary': '修正後の会話全体の要約'}
+            return {'sections': [{'title': '仕上げ後の議題', 'bullets': [
+                {'text': '修正後の要点', 'segment_ids': [revised[0]['id']]}]}]}
+        final_outline = ai_finishing.create_outline(revised, {}, respond, lambda *_: None, lambda: None)
+        self.assertEqual(final_outline['summary'], '修正後の会話全体の要約')
         with patch.object(app, 'load_token_config', return_value=app.TokenConfig(lmstudio_model='test-model')), \
                 patch.object(app, 'clean_segments_with_ai', return_value=revised) as clean, \
                 patch.object(app, 'create_outline_with_ai', return_value=final_outline) as outline:

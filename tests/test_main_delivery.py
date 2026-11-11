@@ -66,12 +66,48 @@ class MainDeliveryTests(unittest.TestCase):
         self.assertGreater(len(methods.get_json()['methods']),15)
 
     def test_runtime_catalogue_hashes_are_current(self):
+        import hashlib
+        import yaml
+        from gurumoji.method_experts import SKILL_NOTE_REFS
+
         vault=self.main/'docs/program-vault'
         manifest=json.loads((vault/'00-Catalog.json').read_text(encoding='utf-8'))
-        import hashlib
-        self.assertEqual(len(manifest['notes']),215)
-        for note in manifest['notes']:
-            self.assertEqual(hashlib.sha256((vault/note['path']).read_bytes()).hexdigest(),note['sha256'])
+        self.assertEqual(manifest['schema_version'],1)
+        notes=manifest['notes']
+        paths=[note['path'] for note in notes]
+        actual={path.relative_to(vault).as_posix() for path in vault.rglob('*.md')
+                if not any(part.startswith('.') for part in path.relative_to(vault).parts)}
+        snapshot_path=self.main/'output/validation/prepare-manifest.json'
+        if snapshot_path.is_file():
+            snapshot=json.loads(snapshot_path.read_text(encoding='utf-8'))
+            self.assertEqual(snapshot['schema_version'],1)
+            self.assertEqual(snapshot['source_branch'],'main')
+            head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=self.main,text=True).strip()
+            self.assertEqual(snapshot['source_head'],head)
+            prefix='docs/program-vault/'
+            main_notes=[record for record in snapshot['files']
+                        if record['origin'] in {'main','main-explicit'}
+                        and record['path'].startswith(prefix) and record['path'].endswith('.md')]
+            actual={record['path'][len(prefix):] for record in main_notes}
+            for record in main_notes:
+                self.assertEqual(hashlib.sha256((self.main/record['path']).read_bytes()).hexdigest(),record['sha256'])
+        self.assertEqual(len(paths),len(set(paths)))
+        self.assertEqual(set(paths),actual)
+        self.assertTrue({note['path'] for note in SKILL_NOTE_REFS.values()} <= set(paths))
+        identifiers=[]
+        for note in notes:
+            with self.subTest(path=note['path']):
+                data=(vault/note['path']).read_bytes()
+                text=data.decode('utf-8-sig')
+                self.assertEqual(hashlib.sha256(data).hexdigest(),note['sha256'])
+                self.assertEqual(len(text),note['chars'])
+                front=re.match(r'\A---[^\S\n]*\r?\n(.*?)\r?\n---[^\S\n]*(?:\r?\n|$)',text,re.S)
+                self.assertIsNotNone(front)
+                metadata=json.loads(json.dumps(yaml.safe_load(front[1]),default=str))
+                self.assertEqual(metadata,note['metadata'])
+                self.assertTrue(metadata.get('note_id'))
+                identifiers.append(metadata['note_id'])
+        self.assertEqual(len(identifiers),len(set(identifiers)))
 
     def test_user_guide_local_links_resolve(self):
         guides=[self.main/'README.md',self.main/'AGENTS.md',*(self.main/'docs').glob('*.md')]

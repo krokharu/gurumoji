@@ -789,7 +789,7 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
             def clean(segments, *_args, **_kwargs):
                 return [{**segment, "text": "校正後の文"} for segment in segments]
 
-            def identify(segments, *_args):
+            def identify(segments, *_args, **_kwargs):
                 identity_inputs.extend(segments)
                 return {"SPEAKER_00": "話者名"}
 
@@ -799,7 +799,9 @@ class TranscriptionJobRegressionTests(unittest.TestCase):
                 app.run_transcription_job(job, options)
 
             self.assertEqual(job.status, "completed")
-            self.assertEqual(identity_inputs[0]["text"], "元の文字起こし")
+            self.assertEqual([item["text"] for item in identity_inputs], ["元の文字起こし"])
+            self.assertEqual(calls["write_outputs"].call_args.args[2][0]["text"], "校正後の文")
+            self.assertNotIn("AI話者名推定を省略", job.output_warning)
             self.assertEqual(calls["register_speakers"].call_count, 1)
 
     def test_ai_usage_is_accumulated_and_saved_with_the_job(self):

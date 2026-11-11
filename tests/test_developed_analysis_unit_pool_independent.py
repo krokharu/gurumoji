@@ -12,6 +12,9 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+
+import pytest
+import browser_support
 from pipeline_fixtures import start as fixture_start
 from contextlib import contextmanager
 from pathlib import Path
@@ -1040,10 +1043,11 @@ class FixedCandidateAcceptanceTests(unittest.TestCase):
             if row["participant_id"] == "TEST-P-SILENT":
                 self.assertIsNone(row["value"])
 
+@pytest.mark.browser
+@browser_support.ui_browser_test
 class BrowserFixedCandidateAcceptanceTests(unittest.TestCase):
-    """Explicit final-only Edge operation with real APIs and manual Handler driver."""
+    """明示したときだけ起動する、実APIと手動Handlerのブラウザー受入試験。"""
     def test_normal_screen_pool_without_primary_anchor_is_disabled(self):
-        from playwright.sync_api import sync_playwright
         from werkzeug.serving import make_server, WSGIRequestHandler
         class Quiet(WSGIRequestHandler):
             def log(self, *args, **kwargs):
@@ -1056,53 +1060,51 @@ class BrowserFixedCandidateAcceptanceTests(unittest.TestCase):
         helper.addCleanup(f.close)
         helper.revoke_source(0)
         server = make_server("127.0.0.1", 0, independent_browser_app(f), threaded=True, request_handler=Quiet)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
         origin = "http://127.0.0.1:" + str(server.server_port)
         evidence = Path(os.environ.get("GURUMOJI_INDEPENDENT_EVIDENCE_DIR") or tempfile.mkdtemp(prefix="gurumoji-independent-permit-"))
         evidence.mkdir(parents=True, exist_ok=True)
         try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(channel="msedge", headless=True)
-                try:
-                    page = browser.new_page(viewport={"width": 390, "height": 844})
-                    page.set_default_timeout(120000)
-                    errors, posts = [], []
-                    page.on("pageerror", lambda error: errors.append(str(error)))
-                    page.on("request", lambda request: posts.append(request.url) if request.method == "POST" else None)
-                    page.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin + "/") else r.abort())
-                    stored = json.dumps({"itemId": f.owner, "runId": f.run["run_id"]})
-                    page.add_init_script("sessionStorage.setItem('gurumoji.bootSplashSeen','1');sessionStorage.setItem('gurumoji.corePipeline.v1'," + json.dumps(stored) + ");")
-                    page.goto(origin)
-                    page.locator("#pipeline-chip").click()
-                    with page.expect_response(lambda r: "/asset-plans/options" in r.url) as response:
-                        page.locator("#pipeline-asset-load").click()
-                    self.assertEqual(response.value.status, 200)
-                    pool = response.value.json()["unit_pool"]
-                    self.assertEqual(len(pool["sources"]), 2)
-                    self.assertFalse(pool["enabled"])
-                    self.assertEqual(pool["reason_code"], "pool_anchor_unavailable")
-                    page.locator("#pipeline-asset-method").select_option("unit_pool")
-                    choices = page.locator("#pipeline-asset-inputs input[data-choice]")
-                    self.assertEqual(choices.count(), 2)
-                    for index in range(2):
-                        self.assertTrue(choices.nth(index).is_disabled())
-                    self.assertTrue(page.locator("#pipeline-asset-add").is_disabled())
-                    self.assertIn("この実行の会話", page.locator("#pipeline-asset-availability").inner_text())
-                    self.assertEqual(posts, [])
-                    self.assertEqual(errors, [])
-                    page.screenshot(path=str(evidence / "pool-anchor-disabled-390.png"))
-                    (evidence / "browser-permit-receipt.json").write_text(json.dumps(
-                        {"status": "PASS", "width": 390, "sources": 2, "pool_enabled": False,
-                         "reason_code": pool["reason_code"], "posts": posts, "errors": errors,
-                         "browser": browser.version}, indent=2), encoding="utf-8")
-                finally:
-                    browser.close()
+            with browser_support.sandboxed_playwright_browser() as browser:
+                page = browser.new_page(viewport={"width": 390, "height": 844})
+                page.set_default_timeout(120000)
+                errors, posts = [], []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("request", lambda request: posts.append(request.url) if request.method == "POST" else None)
+                page.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin + "/") else r.abort())
+                stored = json.dumps({"itemId": f.owner, "runId": f.run["run_id"]})
+                page.add_init_script("sessionStorage.setItem('gurumoji.bootSplashSeen','1');sessionStorage.setItem('gurumoji.corePipeline.v1'," + json.dumps(stored) + ");")
+                page.goto(origin)
+                page.locator("#pipeline-chip").click()
+                with page.expect_response(lambda r: "/asset-plans/options" in r.url) as response:
+                    page.locator("#pipeline-asset-load").click()
+                self.assertEqual(response.value.status, 200)
+                pool = response.value.json()["unit_pool"]
+                self.assertEqual(len(pool["sources"]), 2)
+                self.assertFalse(pool["enabled"])
+                self.assertEqual(pool["reason_code"], "pool_anchor_unavailable")
+                page.locator("#pipeline-asset-method").select_option("unit_pool")
+                choices = page.locator("#pipeline-asset-inputs input[data-choice]")
+                self.assertEqual(choices.count(), 2)
+                for index in range(2):
+                    self.assertTrue(choices.nth(index).is_disabled())
+                self.assertTrue(page.locator("#pipeline-asset-add").is_disabled())
+                self.assertIn("この実行の会話", page.locator("#pipeline-asset-availability").inner_text())
+                self.assertEqual(posts, [])
+                self.assertEqual(errors, [])
+                page.screenshot(path=str(evidence / "pool-anchor-disabled-390.png"))
+                (evidence / "browser-permit-receipt.json").write_text(json.dumps(
+                    {"status": "PASS", "width": 390, "sources": 2, "pool_enabled": False,
+                     "reason_code": pool["reason_code"], "posts": posts, "errors": errors,
+                     "browser": browser.version}, indent=2), encoding="utf-8")
         finally:
             server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=5)
             helper.doCleanups()
 
     def test_normal_screen_pool_group_HC_mean_sum_save_fresh_1440_390(self):
-        from playwright.sync_api import sync_playwright
         from werkzeug.serving import make_server, WSGIRequestHandler
 
         class Quiet(WSGIRequestHandler):
@@ -1113,156 +1115,155 @@ class BrowserFixedCandidateAcceptanceTests(unittest.TestCase):
                         tempfile.mkdtemp(prefix="gurumoji-independent-browser-evidence-"))
         evidence.mkdir(parents=True, exist_ok=True)
         receipts = []
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel="msedge", headless=True)
-            try:
-                requested_width = os.environ.get("GURUMOJI_INDEPENDENT_BROWSER_WIDTH")
-                widths = (int(requested_width),) if requested_width else (1440, 390)
-                self.assertTrue(all(width in (1440, 390) for width in widths))
-                for width in widths:
-                    helper = FixedCandidateAcceptanceTests()
-                    helper.setUp()
-                    f = helper.f
-                    server = make_server("127.0.0.1", 0, independent_browser_app(f), threaded=True, request_handler=Quiet)
-                    threading.Thread(target=server.serve_forever, daemon=True).start()
-                    origin = "http://127.0.0.1:" + str(server.server_port)
-                    context = browser.new_context(viewport={"width": width, "height": 900 if width == 1440 else 844})
-                    page = context.new_page()
-                    # Fixed group descendants are fully verified on every GET;
-                    # allow that real work to finish instead of mocking it.
-                    page.set_default_timeout(120000)
-                    errors, blocked, posts = [], [], []
-                    page.on("pageerror", lambda error: errors.append(str(error)))
-                    page.on("request", lambda request: posts.append(request.post_data_json) if request.method == "POST" and
-                            request.url.endswith(("/asset-plans", "/human-records")) else None)
-                    def route(request_route):
-                        if request_route.request.url.startswith(origin + "/"):
-                            request_route.continue_()
-                        else:
-                            blocked.append(request_route.request.url)
-                            request_route.abort()
-                    context.route("**/*", route)
-                    receipt = {"phase": "fixed_candidate_browser", "browser": browser.version, "channel": "msedge",
-                               "width": width, "origin": origin, "driver": "explicit _execute/_validate_received; scheduler disabled",
-                               "shell": "production templates/scripts; invented empty unrelated bootstrap GETs",
-                               "source_hashes": {name: hashlib.sha256((Path(__file__).resolve().parents[1] / name).read_bytes()).hexdigest()
-                                   for name in ("src/gurumoji/static/core-pipeline.js",
-                                                "src/gurumoji/templates/views/core-pipeline.html")}, "status": "FAIL"}
-                    try:
-                        # Standard persisted-run restoration, then only visible controls.
-                        stored = json.dumps({"itemId": f.owner, "runId": f.run["run_id"]})
-                        page.add_init_script("sessionStorage.setItem('gurumoji.bootSplashSeen','1');" +
-                                             "sessionStorage.setItem('gurumoji.corePipeline.v1'," + json.dumps(stored) + ");")
-                        page.goto(origin)
-                        page.locator("#pipeline-chip").wait_for(state="visible")
-                        page.locator("#pipeline-chip").click()
-                        with page.expect_response(lambda r: "/asset-plans/options" in r.url) as options_response:
-                            page.locator("#pipeline-asset-load").click()
-                        self.assertEqual(options_response.value.status, 200)
-                        options = options_response.value.json()
-                        page.locator("#pipeline-asset-form").wait_for(state="visible")
-                        page.locator("#pipeline-asset-method").select_option("unit_pool")
-                        choices = page.locator("#pipeline-asset-inputs input[data-choice]")
-                        self.assertEqual(choices.count(), 2)
-                        choices.nth(0).check()
-                        page.locator("#pipeline-asset-add").click()
-                        self.assertIn("2〜16", page.locator("#pipeline-asset-message").inner_text())
-                        self.assertEqual(posts, [])
-                        self.assertTrue(page.locator("#pipeline-asset-inputs").evaluate("n => n === document.activeElement"))
-                        choices.nth(1).check()
-                        page.locator("input[name='asset-columns'][value='n']").check()
-                        page.locator("#pipeline-asset-add").click()
-                        page.locator("#pipeline-asset-review").click()
-                        self.assertTrue(page.locator("#pipeline-asset-execute").evaluate("n => n === document.activeElement"))
-                        page.screenshot(path=str(evidence / ("pool-confirm-" + str(width) + ".png")))
-                        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/asset-plans")) as response:
-                            page.keyboard.press("Enter")
-                        self.assertEqual(response.value.status, 202)
-                        pool_post = posts[-1]
-                        self.assertEqual(set(pool_post), {"version", "plan_id", "plan_version", "source_ids", "columns"})
-                        self.assertEqual(pool_post["version"], "unit-pool-request-1")
-                        self.assertEqual(len(pool_post["source_ids"]), 2)
-                        pooled = helper.execute(response.value.json())
-                        sid = pooled["table_store_run_id"]
-                        before = f.fresh().verified_package(sid)[3]
-                        page.locator("#pipeline-asset-clear").click()
+        with browser_support.sandboxed_playwright_browser() as browser:
+            requested_width = os.environ.get("GURUMOJI_INDEPENDENT_BROWSER_WIDTH")
+            widths = (int(requested_width),) if requested_width else (1440, 390)
+            self.assertTrue(all(width in (1440, 390) for width in widths))
+            for width in widths:
+                helper = FixedCandidateAcceptanceTests()
+                helper.setUp()
+                f = helper.f
+                server = make_server("127.0.0.1", 0, independent_browser_app(f), threaded=True, request_handler=Quiet)
+                server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+                server_thread.start()
+                origin = "http://127.0.0.1:" + str(server.server_port)
+                context = browser.new_context(viewport={"width": width, "height": 900 if width == 1440 else 844})
+                page = context.new_page()
+                # Fixed group descendants are fully verified on every GET;
+                # allow that real work to finish instead of mocking it.
+                page.set_default_timeout(120000)
+                errors, blocked, posts = [], [], []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("request", lambda request: posts.append(request.post_data_json) if request.method == "POST" and
+                        request.url.endswith(("/asset-plans", "/human-records")) else None)
+                def route(request_route):
+                    if request_route.request.url.startswith(origin + "/"):
+                        request_route.continue_()
+                    else:
+                        blocked.append(request_route.request.url)
+                        request_route.abort()
+                context.route("**/*", route)
+                receipt = {"phase": "fixed_candidate_browser", "browser": browser.version, "launcher": "browser_support.sandboxed_playwright_browser",
+                           "width": width, "origin": origin, "driver": "explicit _execute/_validate_received; scheduler disabled",
+                           "shell": "production templates/scripts; invented empty unrelated bootstrap GETs",
+                           "source_hashes": {name: hashlib.sha256((Path(__file__).resolve().parents[1] / name).read_bytes()).hexdigest()
+                               for name in ("src/gurumoji/static/core-pipeline.js",
+                                            "src/gurumoji/templates/views/core-pipeline.html")}, "status": "FAIL"}
+                try:
+                    # Standard persisted-run restoration, then only visible controls.
+                    stored = json.dumps({"itemId": f.owner, "runId": f.run["run_id"]})
+                    page.add_init_script("sessionStorage.setItem('gurumoji.bootSplashSeen','1');" +
+                                         "sessionStorage.setItem('gurumoji.corePipeline.v1'," + json.dumps(stored) + ");")
+                    page.goto(origin)
+                    page.locator("#pipeline-chip").wait_for(state="visible")
+                    page.locator("#pipeline-chip").click()
+                    with page.expect_response(lambda r: "/asset-plans/options" in r.url) as options_response:
+                        page.locator("#pipeline-asset-load").click()
+                    self.assertEqual(options_response.value.status, 200)
+                    options = options_response.value.json()
+                    page.locator("#pipeline-asset-form").wait_for(state="visible")
+                    page.locator("#pipeline-asset-method").select_option("unit_pool")
+                    choices = page.locator("#pipeline-asset-inputs input[data-choice]")
+                    self.assertEqual(choices.count(), 2)
+                    choices.nth(0).check()
+                    page.locator("#pipeline-asset-add").click()
+                    self.assertIn("2〜16", page.locator("#pipeline-asset-message").inner_text())
+                    self.assertEqual(posts, [])
+                    self.assertTrue(page.locator("#pipeline-asset-inputs").evaluate("n => n === document.activeElement"))
+                    choices.nth(1).check()
+                    page.locator("input[name='asset-columns'][value='n']").check()
+                    page.locator("#pipeline-asset-add").click()
+                    page.locator("#pipeline-asset-review").click()
+                    self.assertTrue(page.locator("#pipeline-asset-execute").evaluate("n => n === document.activeElement"))
+                    page.screenshot(path=str(evidence / ("pool-confirm-" + str(width) + ".png")))
+                    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/asset-plans")) as response:
+                        page.keyboard.press("Enter")
+                    self.assertEqual(response.value.status, 202)
+                    pool_post = posts[-1]
+                    self.assertEqual(set(pool_post), {"version", "plan_id", "plan_version", "source_ids", "columns"})
+                    self.assertEqual(pool_post["version"], "unit-pool-request-1")
+                    self.assertEqual(len(pool_post["source_ids"]), 2)
+                    pooled = helper.execute(response.value.json())
+                    sid = pooled["table_store_run_id"]
+                    before = f.fresh().verified_package(sid)[3]
+                    page.locator("#pipeline-asset-clear").click()
+                    with page.expect_response(lambda r: "/asset-plans/options" in r.url) as response:
+                        page.locator("#pipeline-asset-load").click()
+                    options = response.value.json()
+                    page.locator("#pipeline-participant > summary").click()
+                    selector = page.locator("#pipeline-participant-context")
+                    values = selector.locator("option").evaluate_all("nodes => nodes.map(n => n.value)")
+                    selected = [v for v in values if v and json.loads(v)[2]["store_run_id"] == sid]
+                    self.assertEqual(len(selected), 1)
+                    selector.select_option(selected[0])
+                    page.locator("#pipeline-participant-form").wait_for(state="visible")
+                    page.locator("#pipeline-participant-target > summary").click()
+                    target_text = page.locator("#pipeline-participant-target-meta").inner_text()
+                    self.assertIn(sid, target_text)
+                    for cid in f.snapshots:
+                        self.assertIn(cid, target_text)
+                    assignments = page.locator("#pipeline-participant-assignments input")
+                    self.assertEqual(assignments.count(), 2)
+                    for i in range(assignments.count()):
+                        assignments.nth(i).fill("TEST-P1")
+                    page.locator("#pipeline-participant-actor").fill("TEST-independent-browser-researcher")
+                    page.locator("#pipeline-participant-decision").select_option("adopt")
+                    page.locator("#pipeline-participant-reason").fill("TEST 合成の両会話・話者と固定対象を明示確認")
+                    page.locator("#pipeline-participant-reason").focus()
+                    page.keyboard.press("Tab")
+                    self.assertTrue(page.locator("#pipeline-participant-review").evaluate("n => n === document.activeElement"))
+                    page.keyboard.press("Enter")
+                    page.locator("#pipeline-participant-confirmation").wait_for(state="visible")
+                    page.locator("#pipeline-participant-save").scroll_into_view_if_needed()
+                    page.screenshot(path=str(evidence / ("group-HC-confirm-" + str(width) + ".png")))
+                    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/human-records")) as response:
+                        page.locator("#pipeline-participant-save").click()
+                    self.assertEqual(response.value.status, 201)
+                    self.assertEqual(posts[-1]["asset_key"]["store_run_id"], sid)
+                    self.assertEqual(set(posts[-1]["record"]["scope"]["conversation_ids"]), set(f.snapshots))
+                    self.assertEqual(len(f.fresh()._human_packages()[0]), 1)
+                    outcomes = []
+                    for operation, expected in (("mean", 2), ("sum", 6)):
                         with page.expect_response(lambda r: "/asset-plans/options" in r.url) as response:
                             page.locator("#pipeline-asset-load").click()
                         options = response.value.json()
-                        page.locator("#pipeline-participant > summary").click()
-                        selector = page.locator("#pipeline-participant-context")
-                        values = selector.locator("option").evaluate_all("nodes => nodes.map(n => n.value)")
-                        selected = [v for v in values if v and json.loads(v)[2]["store_run_id"] == sid]
-                        self.assertEqual(len(selected), 1)
-                        selector.select_option(selected[0])
-                        page.locator("#pipeline-participant-form").wait_for(state="visible")
-                        page.locator("#pipeline-participant-target > summary").click()
-                        target_text = page.locator("#pipeline-participant-target-meta").inner_text()
-                        self.assertIn(sid, target_text)
-                        for cid in f.snapshots:
-                            self.assertIn(cid, target_text)
-                        assignments = page.locator("#pipeline-participant-assignments input")
-                        self.assertEqual(assignments.count(), 2)
-                        for i in range(assignments.count()):
-                            assignments.nth(i).fill("TEST-P1")
-                        page.locator("#pipeline-participant-actor").fill("TEST-independent-browser-researcher")
-                        page.locator("#pipeline-participant-decision").select_option("adopt")
-                        page.locator("#pipeline-participant-reason").fill("TEST 合成の両会話・話者と固定対象を明示確認")
-                        page.locator("#pipeline-participant-reason").focus()
-                        page.keyboard.press("Tab")
-                        self.assertTrue(page.locator("#pipeline-participant-review").evaluate("n => n === document.activeElement"))
-                        page.keyboard.press("Enter")
-                        page.locator("#pipeline-participant-confirmation").wait_for(state="visible")
-                        page.locator("#pipeline-participant-save").scroll_into_view_if_needed()
-                        page.screenshot(path=str(evidence / ("group-HC-confirm-" + str(width) + ".png")))
-                        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/human-records")) as response:
-                            page.locator("#pipeline-participant-save").click()
-                        self.assertEqual(response.value.status, 201)
-                        self.assertEqual(posts[-1]["asset_key"]["store_run_id"], sid)
-                        self.assertEqual(set(posts[-1]["record"]["scope"]["conversation_ids"]), set(f.snapshots))
-                        self.assertEqual(len(f.fresh()._human_packages()[0]), 1)
-                        outcomes = []
-                        for operation, expected in (("mean", 2), ("sum", 6)):
-                            with page.expect_response(lambda r: "/asset-plans/options" in r.url) as response:
-                                page.locator("#pipeline-asset-load").click()
-                            options = response.value.json()
-                            page.locator("#pipeline-asset-method").select_option("unit_aggregate")
-                            index = next(i for i, c in enumerate(options["inputs"]) if c["source"].get("asset_key", {}).get("store_run_id") == sid)
-                            page.locator("#pipeline-asset-choice-" + str(index)).check()
-                            page.locator("#pipeline-asset-param-operation").select_option(operation)
-                            page.locator("#pipeline-asset-param-unit").select_option("participant")
-                            page.locator("#pipeline-asset-param-value_column").select_option("n")
-                            page.locator("#pipeline-asset-add").click()
-                            page.locator("#pipeline-asset-review").click()
-                            with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/asset-plans")) as response:
-                                page.keyboard.press("Enter")
-                            self.assertEqual(response.value.status, 202)
-                            task = helper.execute(response.value.json())
-                            result = f.fresh().verified_package(task["table_store_run_id"])[1]
-                            self.assertEqual(result["datasets"]["table"]["rows"][0]["value"], expected)
-                            self.assertEqual(next(iter(result["unit_contract"]["denominators"].values()))["observed"], 3)
-                            f.fresh().connected_output_descriptor(task["table_store_run_id"])
-                            outcomes.append({"operation": operation, "value": expected, "store_run_id": task["table_store_run_id"]})
-                            page.locator("#pipeline-asset-clear").click()
-                        self.assertEqual(before, f.fresh().verified_package(sid)[3])
-                        self.assertEqual(errors, [])
-                        self.assertEqual(blocked, [])
-                        self.assertEqual(len(posts), 4)
-                        page.screenshot(path=str(evidence / ("saved-fresh-" + str(width) + ".png")))
-                        receipt.update(status="PASS", posts=posts, outcomes=outcomes, errors=errors, blocked=blocked,
-                                       scope=f.fresh().verified_package(sid)[1]["unit_contract"]["scope"])
-                    except Exception as exc:
-                        receipt.update(error=str(exc), posts=posts, errors=errors, blocked=blocked)
-                        page.screenshot(path=str(evidence / ("failure-" + str(width) + ".png")))
-                        raise
-                    finally:
-                        (evidence / ("browser-receipt-" + str(width) + ".json")).write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf8")
-                        receipts.append(receipt)
-                        context.close()
-                        server.shutdown()
-                        helper.doCleanups()
-            finally:
-                browser.close()
+                        page.locator("#pipeline-asset-method").select_option("unit_aggregate")
+                        index = next(i for i, c in enumerate(options["inputs"]) if c["source"].get("asset_key", {}).get("store_run_id") == sid)
+                        page.locator("#pipeline-asset-choice-" + str(index)).check()
+                        page.locator("#pipeline-asset-param-operation").select_option(operation)
+                        page.locator("#pipeline-asset-param-unit").select_option("participant")
+                        page.locator("#pipeline-asset-param-value_column").select_option("n")
+                        page.locator("#pipeline-asset-add").click()
+                        page.locator("#pipeline-asset-review").click()
+                        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/asset-plans")) as response:
+                            page.keyboard.press("Enter")
+                        self.assertEqual(response.value.status, 202)
+                        task = helper.execute(response.value.json())
+                        result = f.fresh().verified_package(task["table_store_run_id"])[1]
+                        self.assertEqual(result["datasets"]["table"]["rows"][0]["value"], expected)
+                        self.assertEqual(next(iter(result["unit_contract"]["denominators"].values()))["observed"], 3)
+                        f.fresh().connected_output_descriptor(task["table_store_run_id"])
+                        outcomes.append({"operation": operation, "value": expected, "store_run_id": task["table_store_run_id"]})
+                        page.locator("#pipeline-asset-clear").click()
+                    self.assertEqual(before, f.fresh().verified_package(sid)[3])
+                    self.assertEqual(errors, [])
+                    self.assertEqual(blocked, [])
+                    self.assertEqual(len(posts), 4)
+                    page.screenshot(path=str(evidence / ("saved-fresh-" + str(width) + ".png")))
+                    receipt.update(status="PASS", posts=posts, outcomes=outcomes, errors=errors, blocked=blocked,
+                                   scope=f.fresh().verified_package(sid)[1]["unit_contract"]["scope"])
+                except Exception as exc:
+                    receipt.update(error=str(exc), posts=posts, errors=errors, blocked=blocked)
+                    page.screenshot(path=str(evidence / ("failure-" + str(width) + ".png")))
+                    raise
+                finally:
+                    (evidence / ("browser-receipt-" + str(width) + ".json")).write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf8")
+                    receipts.append(receipt)
+                    context.close()
+                    server.shutdown()
+                    server.server_close()
+                    server_thread.join(timeout=5)
+                    helper.doCleanups()
         print("Independent browser evidence:", evidence)
 
 if __name__ == "__main__":

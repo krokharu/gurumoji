@@ -11,7 +11,9 @@ import unittest
 from unittest.mock import Mock
 
 
-SOURCE = Path(os.environ["GURUMOJI_COLAB_SOURCE"])
+from public_colab_source import public_source
+
+SOURCE = public_source("notebooks/Gurumoji_Colab.ipynb")
 NOTEBOOK = json.loads((SOURCE / "notebooks/Gurumoji_Colab.ipynb").read_text(encoding="utf-8"))
 
 

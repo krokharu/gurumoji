@@ -435,8 +435,14 @@ class OutlineBoundaryTests(unittest.TestCase):
         reply = self.response()
         reply["sections"][0].pop("start_segment_id")
         reply["sections"][0].pop("end_segment_id")
-        result = create_outline(self.segments(), {}, lambda *_: reply, lambda _: None, lambda: None)
+        calls = []
+        def respond(_system, _user, name, _schema):
+            calls.append(name)
+            return {"summary": "架空の会話全体の要約"} if name == "meeting_overall_summary" else reply
+        result = create_outline(self.segments(), {}, respond, lambda _: None, lambda: None)
         self.assertNotIn("end_segment_id", result["sections"][0])
+        self.assertEqual(result["summary"], "架空の会話全体の要約")
+        self.assertEqual(calls[-1], "meeting_overall_summary")
 
     def test_provider_preflight_failure_never_dispatches_outline(self):
         sent = []
@@ -504,7 +510,8 @@ class IntervalAdapterTests(unittest.TestCase):
         schemas = []
         def reply(*args, **_):
             schemas.append(args[6])
-            return {"summary": "架空の統合", "claims": []}
+            return {"summary": "架空の統合", "claims": [], "next_step": {"kind": "finish", "intents": [],
+                "stop": {"reason": "no_more_evidence", "summary": "架空の終了", "unresolved": []}}}
         resolve, runner = make_orchestration_adapters(call_ai_json=reply,
             load_token_config=lambda: SimpleNamespace(lmstudio_base_url=""),
             configured_ai_credentials=lambda *_: ("synthetic-key", "synthetic-model"))
@@ -512,7 +519,9 @@ class IntervalAdapterTests(unittest.TestCase):
                    "analysis_interval_index": [{"interval_id": "interval-neutral"}], "coverage": {}}
         runner("core", context, resolve({"provider": "openai", "provider_policy": "cloud_allowed", "cloud_consent": True,
                                        "analysis_interval_version": 1}), lambda: None, lambda _: None)
-        branches = schemas[0]["properties"]["intents"]["items"]["anyOf"]
+        controls = schemas[0]["properties"]["next_step"]["anyOf"]
+        analyze = next(branch for branch in controls if branch["properties"]["kind"]["enum"] == ["analyze"])
+        branches = analyze["properties"]["intents"]["items"]["anyOf"]
         branch = next(b for b in branches if "interpretation" in b["properties"]["role"]["enum"])
         self.assertEqual(branch["properties"]["interval_ids"]["items"]["enum"], ["interval-neutral"])
 

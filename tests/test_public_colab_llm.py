@@ -11,10 +11,12 @@ import unittest
 from unittest.mock import Mock, patch
 import urllib.error
 
-SOURCE = Path(os.environ["GURUMOJI_COLAB_SOURCE"])
-sys.path.insert(0, str(SOURCE / "src"))
-from gurumoji import colab_llm
-from gurumoji.colab_support import ColabSetupError, colab_step
+from public_colab_source import public_source, load_public_module
+
+SOURCE = public_source("src/gurumoji/colab_llm.py", "src/gurumoji/colab_support.py", "notebooks/Gurumoji_Colab.ipynb")
+colab_llm = load_public_module(SOURCE, "colab_llm")
+_support = load_public_module(SOURCE, "colab_support")
+ColabSetupError, colab_step = _support.ColabSetupError, _support.colab_step
 
 
 def runtime(free=15, total=16, ram=12, cores=4):

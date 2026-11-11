@@ -3,7 +3,9 @@ import os
 import sys
 import unittest
 from pathlib import Path
-sys.path.insert(0,str(Path(os.environ['GURUMOJI_STAGE_SOURCE_ROOT'])/'src'))
+from unittest.mock import patch
+source_root = Path(os.environ.get('GURUMOJI_STAGE_SOURCE_ROOT') or Path(__file__).resolve().parents[1])
+sys.path.insert(0, str(source_root / 'src'))
 from gurumoji.runtime_state import RuntimeState
 from functools import partial
 from gurumoji.services.transcription_reporting import TranscriptionReporter
@@ -36,11 +38,25 @@ class StageHistoryTests(unittest.TestCase):
         self.assertEqual([x['key'] for x in job.stage_history],['transcription','output'])
         self.assertTrue(all(x['status']=='completed' for x in job.stage_history))
     def test_public_snapshot_is_independent_and_sanitized(self):
-        job,r=self.reporter();r.stage('transcription','合成の工程',10)
-        public=job.public();public['stage_history'][0]['status']='completed'
-        self.assertEqual(job.stage_history[0]['status'],'running')
-        r.stage('transcription',r'C:\synthetic\private.wav',30)
-        self.assertNotIn('private.wav',job.public()['stage_history'][0]['label'])
+        job, reporter = self.reporter()
+        reporter.stage('transcription', '合成の工程', 10)
+        with patch.object(JobRecord, 'reveal_local_paths', return_value=False):
+            public = job.public()
+            public['stage_history'][0]['status'] = 'completed'
+            self.assertEqual(job.stage_history[0]['status'], 'running')
+            self.assertEqual(public['stage_label'], '合成の工程')
+            self.assertEqual(public['stage_history'][0]['label'], '合成の工程')
+            for label in (r'C:\synthetic\private.wav', r'\\server\share\private.wav', '/synthetic/private.wav',
+                          r'処理中 C:\synthetic\private.wav と /synthetic/private.wav'):
+                with self.subTest(label=label):
+                    reporter.stage('transcription', label, 30)
+                    public = job.public()
+                    self.assertEqual(public['stage_label'], '[local path hidden]')
+                    self.assertEqual(public['stage_history'][0]['label'], '[local path hidden]')
+                    self.assertEqual(job.stage_label, label)
+        with patch.object(JobRecord, 'reveal_local_paths', return_value=True):
+            self.assertEqual(job.public()['stage_label'], label)
+            self.assertEqual(job.public()['stage_history'][0]['label'], label)
     def test_jobs_do_not_share_history(self):
         first,r=self.reporter();second,_=self.reporter();r.stage('output','保存',10)
         self.assertEqual(second.stage_history,[])

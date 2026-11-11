@@ -7,7 +7,7 @@ root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).reso
 env = Environment(loader=FileSystemLoader(root / 'src/gurumoji/templates'), undefined=StrictUndefined,
                   autoescape=select_autoescape(['html']))
 print(env.get_template('index.html').render(
-    app_name='Gurumoji synthetic DOM fixture', app_version='test', obsidian_enabled=False,
+    app_name='Gurumoji synthetic DOM fixture', app_version='test', obsidian_enabled='--obsidian-enabled' in sys.argv[2:],
     local_llm_label='Synthetic local LLM', local_llm_short_label='Local',
     runtime=dict(label='synthetic runtime', native_file_dialog=False, colab=False,
                  source_path_example='/synthetic/input.wav', qwen_setup_note='Synthetic', haas_setup_note='Synthetic'),

@@ -132,6 +132,9 @@ class RequestSecurityTests(unittest.TestCase):
             write_srt=False,
             write_json=True,
             status="failed",
+            stage_label=r"Reading C:\Users\alice\secret.wav",
+            stage_history=[{"key": "transcription", "label": r"Reading C:\Users\alice\secret.wav",
+                            "progress": 40, "status": "failed"}],
             message=r"Reading C:\Users\alice\secret.wav",
             logs=["safe status", "Failed at /home/alice/private/input.wav"],
             error=r"Cannot open \\server\private\secret.wav",
@@ -153,6 +156,8 @@ class RequestSecurityTests(unittest.TestCase):
         hidden = hidden_response.get_json()
         self.assertEqual(hidden_response.status_code, 200)
         self.assertEqual(hidden["output_dir"], "")
+        self.assertEqual(hidden["stage_label"], app.HIDDEN_LOCAL_PATH_MESSAGE)
+        self.assertEqual(hidden["stage_history"][0]["label"], app.HIDDEN_LOCAL_PATH_MESSAGE)
         self.assertEqual(hidden["message"], app.HIDDEN_LOCAL_PATH_MESSAGE)
         self.assertEqual(hidden["logs"], ["safe status", app.HIDDEN_LOCAL_PATH_MESSAGE])
         self.assertEqual(hidden["error"], app.HIDDEN_LOCAL_PATH_MESSAGE)
@@ -168,6 +173,8 @@ class RequestSecurityTests(unittest.TestCase):
             revealed_response = self.client.get(f"/api/jobs/{job.id}", **request_args)
         revealed = revealed_response.get_json()
         self.assertEqual(revealed_response.status_code, 200)
+        self.assertEqual(revealed["stage_label"], job.stage_label)
+        self.assertEqual(revealed["stage_history"][0]["label"], job.stage_history[0]["label"])
         self.assertIn("alice", revealed["message"])
         self.assertIn("server", revealed["error"])
 

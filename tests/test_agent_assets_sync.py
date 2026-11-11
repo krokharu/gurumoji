@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "sync_agent_assets.py"
@@ -19,22 +20,83 @@ def write(root: Path, relative: str, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def agent_assets_source() -> Path:
+    selected = os.environ.get("GURUMOJI_AGENT_ASSETS_SOURCE")
+    if selected is None:
+        raise unittest.SkipTest("not-run: GURUMOJI_AGENT_ASSETS_SOURCEで保存資料の別rootを指定してください")
+    if not selected.strip():
+        raise ValueError("GURUMOJI_AGENT_ASSETS_SOURCEが空です")
+    root = Path(selected).expanduser().resolve()
+    if not root.is_dir() or not (root / "AGENTS.md").is_file():
+        raise ValueError(f"保存資料のrootではありません: {root}")
+    if not (root / ".agents").is_dir() or not (root / ".claude").is_dir() or not sync.source_map(root):
+        raise ValueError(f"保存資料の.agents/.claudeと同期元が必要です: {root}")
+    return root
+
+
 class RepositoryCopiesTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.source = agent_assets_source()
+
     def test_claude_copies_match_agents_sources(self):
-        self.assertEqual(sync.differences(ROOT), [],
-                         "run: python scripts/sync_agent_assets.py apply")
+        self.assertEqual(sync.differences(self.source), [],
+                         "指定した保存資料rootで scripts/sync_agent_assets.py check を確認してください")
 
     def test_links_in_claude_copies_resolve(self):
-        for copy in sync.expected(ROOT):
+        for copy in sync.expected(self.source):
             if copy.suffix != ".md":
                 continue
-            text = (ROOT / copy).read_text(encoding="utf-8")
+            text = (self.source / copy).read_text(encoding="utf-8")
             for link in sync.LINK.findall(text):
                 path = link.partition("#")[0]
                 if not path or "://" in path:
                     continue
                 with self.subTest(copy=str(copy), link=link):
-                    self.assertTrue((ROOT / copy).parent.joinpath(path).exists())
+                    self.assertTrue((self.source / copy).parent.joinpath(path).exists())
+
+
+class AgentAssetsSourceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="gurumoji-agent-assets-source-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def test_unspecified_source_is_not_run_without_falling_back_to_main(self):
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(unittest.SkipTest):
+            agent_assets_source()
+
+    def test_explicit_empty_missing_or_incomplete_source_is_an_error(self):
+        for value in ("", str(self.root / "missing"), str(self.root)):
+            with self.subTest(source=value), patch.dict(os.environ, {"GURUMOJI_AGENT_ASSETS_SOURCE": value}):
+                with self.assertRaises(ValueError):
+                    agent_assets_source()
+        write(self.root, "AGENTS.md", "# 合成資料\n")
+        (self.root / ".agents").mkdir()
+        (self.root / ".claude").mkdir()
+        with patch.dict(os.environ, {"GURUMOJI_AGENT_ASSETS_SOURCE": str(self.root)}):
+            with self.assertRaises(ValueError):
+                agent_assets_source()
+
+    def test_explicit_source_is_used_for_copy_and_link_checks(self):
+        write(self.root, "AGENTS.md", "# 合成資料\n")
+        write(self.root, ".agents/skills/demo/SKILL.md", "[root](../../../AGENTS.md)\n")
+        sync.apply(self.root)
+        with patch.dict(os.environ, {"GURUMOJI_AGENT_ASSETS_SOURCE": str(self.root)}):
+            selected = agent_assets_source()
+        self.assertEqual(selected, self.root.resolve())
+        case = RepositoryCopiesTests()
+        case.source = selected
+        case.test_claude_copies_match_agents_sources()
+        case.test_links_in_claude_copies_resolve()
+        write(self.root, ".claude/skills/demo/SKILL.md", "changed\n")
+        with self.assertRaises(AssertionError):
+            case.test_claude_copies_match_agents_sources()
+        write(self.root, ".agents/skills/demo/SKILL.md", "[missing](../../../missing.md)\n")
+        sync.apply(self.root)
+        case.test_claude_copies_match_agents_sources()
+        with self.assertRaises(AssertionError):
+            case.test_links_in_claude_copies_resolve()
 
 
 class SyncBehaviourTests(unittest.TestCase):

@@ -230,8 +230,11 @@ class UiDefaultsTests(unittest.TestCase):
         page = response.data.decode("utf-8")
         self.assertEqual(
             len(re.findall(r'class="[^"]*\bview-tab\b[^"]*"', page)),
-            4,
+            8,
         )
+        for tab in ('show-new-button', 'show-library-button', 'show-analysis-button', 'show-speakers-button',
+                    'prior-presets-button', 'prior-folders-button', 'prior-catalog-button', 'prior-internal-button'):
+            self.assertEqual(page.count(f'id="{tab}"'), 1)
         self.assertIn('id="show-analysis-button"', page)
         self.assertIn('id="processed-data-hub"', page)
         self.assertIn('id="show-library-list-button"', page)
@@ -484,8 +487,8 @@ class UiDefaultsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         page = response.data.decode("utf-8")
-        self.assertEqual(app.APP_CREATOR, "Kurokawa")
-        self.assertIn('class="boot-credit">CREATED BY KUROKAWA</p>', page)
+        self.assertEqual(app.APP_CREATOR, "Re.kloc")
+        self.assertIn('class="boot-credit">CREATED BY Re.kloc</p>', page)
         self.assertIn("STARTING · LOADING WORKSPACE", page)
         self.assertIn('id="progress-overall-track"', page)
         self.assertIn('id="progress-stage-track"', page)
@@ -504,7 +507,7 @@ class UiDefaultsTests(unittest.TestCase):
 
         script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("bootSplash.classList.add('show-main')", script)
-        self.assertIn("}, 200);", script)
+        self.assertIn("}, reducedMotion ? 200 : 1200);", script)
         self.assertIn("function fallbackProgressStage(", script)
         self.assertIn("job.stage_progress", script)
         self.assertIn("progress-stage-bar", script)

@@ -13,9 +13,10 @@ import unittest
 from unittest.mock import Mock, patch
 import urllib.error
 
-SOURCE = Path(os.environ["GURUMOJI_COLAB_SOURCE"])
-sys.path.insert(0, str(SOURCE / "src"))
-from gurumoji import colab_support as support
+from public_colab_source import public_source, load_public_module
+
+SOURCE = public_source("src/gurumoji/colab_support.py", "notebooks/Gurumoji_Colab.ipynb")
+support = load_public_module(SOURCE, "colab_support")
 
 
 class SecretNotFoundError(Exception):

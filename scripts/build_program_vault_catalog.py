@@ -33,7 +33,7 @@ def main():
             raise SystemExit('Catalogue stale: regenerate with scripts/build_program_vault_catalog.py')
         print(f'Catalogue current: {len(catalog["notes"])} notes')
     else:
-        p.write_text(json.dumps(catalog,ensure_ascii=False,indent=2,default=str)+'\n',encoding='utf-8')
+        p.write_text(json.dumps(catalog,ensure_ascii=False,indent=2,default=str)+'\n',encoding='utf-8',newline='\n')
         print(f'Catalogued {len(catalog["notes"])} notes')
 
 if __name__=='__main__':main()

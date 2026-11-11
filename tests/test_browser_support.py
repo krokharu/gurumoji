@@ -337,6 +337,7 @@ class BrowserCollectionContracts(unittest.TestCase):
             "test_browser_e2e.py", "test_analysis_method_view.py", "test_content_browser.py",
             "test_qualitative_visualization.py", "test_transcript_preparation.py",
             "test_transformer_content_browser.py", "test_ui_safety_browser.py",
+            "test_developed_analysis_unit_pool_independent.py",
         )
         forbidden = (
             "--no-sandbox", "--disable-setuid-sandbox", "--disable-web-security",
@@ -365,6 +366,7 @@ class BrowserCollectionContracts(unittest.TestCase):
             "test_transcript_preparation.py": {"test_browser_preparation_save_desktop_and_mobile"},
             "test_transformer_content_browser.py": {"TransformerContentBrowserTests"},
             "test_ui_safety_browser.py": {"UiSafetyBrowser"},
+            "test_developed_analysis_unit_pool_independent.py": {"BrowserFixedCandidateAcceptanceTests"},
         }
         for filename, names in expected.items():
             with self.subTest(filename=filename):

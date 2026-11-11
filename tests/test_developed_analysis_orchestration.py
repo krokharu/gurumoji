@@ -286,7 +286,8 @@ class RuntimeTests(unittest.TestCase):
         expected = {"source_revision", "analysis_revision", "request_id", "question", "provider", "model", "provider_policy",
                     "cloud_consent", "stop_mode", "time_limit_seconds", "max_iterations", "importance_threshold",
                     "max_calls", "max_tasks", "concurrency", "research_mode", "roles", "publication_targets",
-                    "obsidian_management", "expert_ids", "research_question"}
+                    "obsidian_management", "expert_ids", "research_question", "local_reasoning",
+                    "local_max_output_tokens"}
         self.assertEqual(PAYLOAD_FIELDS, expected)
         for field in ("full_text", "partial_expert_reports", "output_contract", "harness_context", "full_text_review_policy",
                       "context_index_limit", "context_evidence_limits_by_role", "dependency_candidate_version", "expert_hooks",

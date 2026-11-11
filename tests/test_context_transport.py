@@ -62,11 +62,24 @@ class TransportTests(unittest.TestCase):
 
     def test_unknown_and_full_original_response_references_are_rejected(self):
         mapping = model_context.reference_map(self.context())
-        for ref in ("e99", "ev_" + "1" * 24, "utterance_1", None):
+        for ref in ("e99", "ev_" + "1" * 24, "utterance_1", None, "", 1, False):
             for response in ({"claims": [{"evidence_ids": [ref]}]}, {"label_patches": [{"utterance_id": ref}]}):
                 with self.subTest(response=response), self.assertRaises(AnalysisContractError) as caught:
                     model_context.transform_references(response, mapping, restore=True)
                 self.assertEqual(caught.exception.code, "evidence_missing")
+
+    def test_nullable_metadata_and_missing_source_utterance_are_preserved(self):
+        mapping = {"e1": {"evidence_id": "ev1", "utterance_id": None}}
+        metadata = {"summary": None, "stop": None, "claims": [{"evidence_ids": ["e1"], "confidence": None}]}
+        restored = model_context.transform_references(metadata, mapping, restore=True)
+        self.assertIsNone(restored["summary"])
+        self.assertIsNone(restored["claims"][0]["confidence"])
+        self.assertEqual(restored["claims"][0]["evidence_ids"], ["ev1"])
+        source = {"raw_evidence": [{"evidence_id": "ev1", "utterance_id": None, "text": "架空"}]}
+        self.assertIsNone(model_context.transform_references(source, mapping)["raw_evidence"][0]["utterance_id"])
+        for response in ({"utterance_id": None}, {"utterance_id": "e1"}):
+            with self.assertRaises(AnalysisContractError):
+                model_context.transform_references(response, mapping, restore=True)
 
     def test_mapping_rejects_ambiguous_identity(self):
         for rows in ([{"evidence_id": "ev1", "utterance_id": "u"}, {"evidence_id": "ev2", "utterance_id": "u"}],
@@ -107,10 +120,12 @@ class TransportTests(unittest.TestCase):
                 self.assertNotIn("utterance_1", rendered)
 
     def test_unknown_reference_from_mock_provider_is_rejected_before_adoption(self):
-        resolve, runner = self.adapter(lambda *a, **k: {"claims": [{"evidence_ids": ["e404"]}]})
-        with self.assertRaises(AnalysisContractError) as caught:
-            runner("interpretation", self.context(), resolve({}), lambda: None, lambda _: None)
-        self.assertEqual(caught.exception.code, "evidence_missing")
+        for ref in ("e404", None):
+            with self.subTest(ref=ref):
+                resolve, runner = self.adapter(lambda *a, **k: {"claims": [{"evidence_ids": [ref]}]})
+                with self.assertRaises(AnalysisContractError) as caught:
+                    runner("interpretation", self.context(), resolve({}), lambda: None, lambda _: None)
+                self.assertEqual(caught.exception.code, "evidence_missing")
 
     def test_synthetic_context_becomes_smaller_without_dropping_rows(self):
         context = self.context()

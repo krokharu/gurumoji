@@ -10,9 +10,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-SOURCE = Path(os.environ["GURUMOJI_COLAB_SOURCE"])
-sys.path.insert(0, str(SOURCE / "src"))
-from gurumoji import colab_monitor as monitor
+from public_colab_source import public_source, load_public_module
+
+SOURCE = public_source("src/gurumoji/colab_monitor.py", "notebooks/Gurumoji_Colab.ipynb")
+monitor = load_public_module(SOURCE, "colab_monitor")
 
 
 def statistics():

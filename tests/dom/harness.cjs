@@ -8,11 +8,12 @@ const {JSDOM, VirtualConsole} = require('jsdom');
 const root = path.resolve(process.env.GURUMOJI_DOM_SOURCE_ROOT || path.join(__dirname, '../..'));
 const html = execFileSync(process.env.GURUMOJI_TEST_PYTHON || 'python3', [path.join(__dirname, 'render_fixture.py'), root], {encoding:'utf8'});
 const flush = async () => { for (let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve)); };
-async function createHarness() {
+async function createHarness({obsidianEnabled = false} = {}) {
   const errors=[], requests=[], blocked=[], timers=[];
   const console = new VirtualConsole(); console.on('jsdomError', error=>errors.push(error));
   // No resources option: jsdom never loads script/style/image/frame subresources.
-  const dom = new JSDOM(html, {url:'https://gurumoji.invalid/', runScripts:'outside-only', virtualConsole:console});
+  const source = obsidianEnabled ? execFileSync(process.env.GURUMOJI_TEST_PYTHON || 'python3', [path.join(__dirname, 'render_fixture.py'), root, '--obsidian-enabled'], {encoding:'utf8'}) : html;
+  const dom = new JSDOM(source, {url:'https://gurumoji.invalid/', runScripts:'outside-only', virtualConsole:console});
   const w=dom.window, context=dom.getInternalVMContext();
   const evaluate=source=>new vm.Script(source).runInContext(context);
   w.matchMedia=query=>({matches:false,media:query,addEventListener(){},removeEventListener(){}});
