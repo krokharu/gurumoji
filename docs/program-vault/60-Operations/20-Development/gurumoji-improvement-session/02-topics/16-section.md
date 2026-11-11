@@ -1,7 +1,7 @@
 ---
 note_type: reference-section
 status: current
-updated: 2026-11-11
+updated: 2026-11-12
 note_id: ops-gurumoji-improvement-session-20261003-section-16
 title: Gurumoji 改善セッション：同日：マーラータン実データで尺度出力・反復を試験
 summary: マーラータン実データの尺度・反復試験とObusSQL接続。2026-11-10に配送5候補の比較・混合方式の採用、検索・配送予算の改善、速度未改善と残る品質制約を記録。
@@ -326,3 +326,32 @@ GitHubへmainを通常pushし、[checks run 43042588460](https://github.com/krok
 ### 証跡
 
 ローカルの `../gurumoji-validation-20261112/output/validation/20261112/` に `verification-summary.json`、初回Python XML/log、DOM XML、`pool-split/results.json`、`browser/` の幅別receipt/画像、カタログ比較、実モデル結果、環境一覧を保存した。再試験の証跡は `../gurumoji-validation-complete-20261112/output/validation/20261112/`、統合前との比較は `../gurumoji-validation-baseline-20261112/output/validation/20261112/` に保存した。これらのcloneでは検証用資材が未追跡で存在する。利用中mainの作業ツリーはクリーンのままである。
+
+## 2026-11-12：修正計画の並列実装と再検証
+
+利用者の「修正案を作成しタスク化・並列で修正」に対応した。開始時はmain `3abd719697c137755c5f3f7b9f373b43f0a8bf02`、未コミット変更なし。3担当と統合担当に分け、独立cloneと専用Python、一時DB・一時Vaultで作業した。mainには本体・実行設定・開発入口・CI入口の16ファイルだけを反映し、試験と開発ツールは保存用ブランチに分離する。
+
+### 修正計画と実装
+
+- 資料索引担当：runtimeのMarkdown 231件を列挙し、未登録16件とhash不一致12件をカタログへ反映した。frontmatter・文字数・一意ID・技能定義参照も照合した。Markdown本文・ID・版・保存ポリシーの変更は0件。古い215固定の試験を実資料集合に基づく完全性試験へ更新し、欠落・重複・hash・metadata・文字数の改変を検出する負例も確認した。
+- 全文分析担当：新規実行のローカル追加推論OFF・出力上限4096を明示して保存し、実際のLM Studio呼出しへ転送する。画面でモデル既定への切替と128〜16384の上限指定、保存済み条件の確認ができる。120秒の呼出し上限、不完全応答の拒否、人確認停止、原文検証・批判・固定保存の安全条件は維持した。旧runの生成条件を上書きせず、更新前の応答不明POSTを同一request_idで再照合できる互換処理も追加した。終了理由の共通プロンプト説明は旧runの再開時にも適用される。旧指示のbytes完全固定は今回の対象ではない。
+- 回帰担当：AI応答から復元する型付き根拠IDのnullを拒否し、送信時の未対応発話や一般metadataのnullableは維持した。進捗のstage_labelを既存の診断公開ポリシーへ統一し、公開側ではWindows・UNC・POSIXパスを秘匿、明示したローカル表示は保持した。旧outline/Core応答、speaker identity引数、現行8タブ・作者・版、正当な終了と無進捗停止、無効操作・Obsidian無効時のDOM fixtureを現行契約へ合わせた。停止・原票照合等の本体検査を緩和していない。
+- 統合担当：Windowsのpipが日本語をcp932で復号して失敗する問題を再現し、mainのrequirements 6ファイルにUTF-8宣言を追加した。実pipの復号器と宣言除去の負例を検証した。実ブラウザーを明示opt-in・共通sandboxランチャーへ統一し、通常試験で自動起動しないことを検査した。公開版専用4試験は明示ソースを要求し、main packageと別名で読み込む。保存資料のコピー試験2件も別rootを明示する。未指定・全skip・marker除外を成功へ読み替えず、収集失敗・timeoutと区別して記録する。baselineの解消は実行したcase IDだけで判定する。
+
+保存用のprepare_main_validationは、local mainの追跡中の現行bytes・削除・明示した新規ファイルを保持し、固定したarchive commitから不足資材だけを補う。archiveのsrcを重ねず、runtime・output・.env・tokensを持ち込まない。既存target、sourceとの重複、symlink/junction、未解決index等を拒否する。検証に必要なretrieve_memory.pyはexact pathだけ補完する。mainの開発入口と手動CIをこの準備方式へ更新した。DOM用undiciのlockを8.12.4へ更新し、npm auditは0件だった。
+
+### 検証結果
+
+最終集計はローカルの `../gurumoji-fix-integration-20261112/output/validation/repair-20261112/repair-summary.json` を正本とする。全体走行中に更新した保存用試験2ファイルと、配布用構成7試験は再試験を優先し、同一ケースを重複加算しない。全体の元ログと再試験は別に保持する。実行対象外の公開版・実ブラウザー・実モデル等は別記録とする。
+
+最終の重複なし集計は2,805件、成功2,741件、skip64件、失敗0件。収集失敗・timeout・runtime変更は0件。公開版4モジュールのnot_runは実行済みケースへ加算していない。DOM 241件中241件、実Edgeの2件中2件（423.89秒、1440px/390px）、配布用構成7件と880 subtestsが成功した。分割した複数会話の通常37ケースも全件成功し、16会話の実POST・Handler・固定保存・fresh読戻しは311.05秒だった。別rootの保存資料コピー試験は9件成功。検証を手順から作り直したcloneは全2,089ファイルのSHA一致、srcへのarchive混入0件、71件中成功68件・skip3件で、source/runtime変更と依存関係の破損は0件だった。
+
+元の全体走行は2,802件、skip69件、保存資料コピー2件の失敗を記録した。初期の手動補完で.agentsだけを持ち込み、.claudeを補わなかった試験準備の差が原因だった。保存資料を明示した別rootで照合する方式へ修正してから、対象の全9試験を再実行した。全体走行中に更新したtest_agent_assets_sync.pyとtest_test_runner.pyの2ファイルはsource_changesにも記録されたため、元コマンドの終了値は1であり、これを0へ書き換えていない。main本体の変更は全体走行中0件。修正した2ファイルはsource_changes/runtime_changesが空の最終再試験で合格し、配布構成7試験も専用Pythonで再実行した。最終集計はこれらの新しい証跡を優先し、元ログを残したままcaseの二重計上を避けている。
+
+起動済みLM Studioのgoogle/gemma-4-12b-qatは再ロードせず、合成2発話で実登録APIから抽出、Core反復5回、原文検証2件・批判2件、completed/question_satisfied/reviewed、AnalysisStore v2への固定保存・検証読戻しまで成功した。分析のAI呼出し10回、input 8,820 / output 2,689 / total 11,509 tokens。別のtransport確認1回も成功した。各呼出しは約2.3〜16.3秒で、時間上限を増やしていない。最終主張に批判が残っており、研究上の内容品質・研究者承認を保証する結果ではない。
+
+実利用者の本文・タグ・別名・実DB・実Vault・資格情報、公開版branch・タグ・Releaseは変更しない。実音声の認識品質、クラウド実AI、GPU再配置、実MAF連携は未検証。統合試験環境のobusql-agentは統計codecだけをno-depsで導入し、4つの任意MAF依存不足をenvironment-check.txtへ記録した。別に作り直した通常環境のpip checkは成功した。
+
+mainは`8da841f99eaad70a65e29f9b5e4ff91c8cec80e5`、保存用試験資材は`568987fe10e50bcab2d1b8db1b16a632cfb57450`としてatomic pushした。GitHub [checks run 43059488015](https://github.com/krokharu/gurumoji/actions/runs/43059488015)のlint（Python compileall、ruff、全JavaScript構文）が成功した。手動専用tests jobは今回GitHub上では未実行で、Linux上の全体試験を通過したという意味ではない。version run 43059488265は意図どおりskipし、表示版β0.46.1・タグ・Releaseを変更していない。ローカルには従来の4branchとmain worktree 1個だけを維持し、独立cloneは検証証跡として残す。
+
+Python XML/log、split収集メタ、defaultのnot_run理由、ブラウザー幅別receipt・画像、カタログ負例、main対象SHA、prepareの2,089ファイル照合、専用Pythonの環境一覧、集計と元走行のsource/runtime差分を上記repair-20261112へ保持する。実モデル証跡は `../gurumoji-fix-pipeline-20261112/output/validation/pipeline-fix/`、再現用cloneの71試験は `../gurumoji-fix-reproduction-20261112/output/validation/reproduction-smoke/` に保持する。アプリの再起動と実Vaultへの反映は実行していない。
