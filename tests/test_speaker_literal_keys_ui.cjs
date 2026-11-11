@@ -1,7 +1,7 @@
 // Original source functions with synthetic inputs. DOM integration is a separate suite.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const assert = require('node:assert/strict');
-const app = fs.readFileSync(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
+const app = require('./app_source.cjs')(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const storage = fs.readFileSync(path.join(__dirname, '../src/gurumoji/static/analysis-storage.js'), 'utf8');
 function extract(name) {
   const start = app.indexOf(`function ${name}(`), end = app.indexOf('\n}', start);

@@ -106,6 +106,24 @@ class OrchestrationAdapterTests(unittest.TestCase):
         self.assertEqual(self.calls[-1][6]["properties"]["result_assessments"]["maxItems"], 0)
         self.assertEqual(CORE_SCHEMA["properties"]["result_assessments"]["maxItems"], 20)
 
+    def test_specialist_requires_a_response_to_each_presented_issue(self):
+        self.run("orchestrator", {"issues": [{"issue_id": "i1"}, {"issue_id": "i2"}], "review_domain": "critic"},
+                 self.resolve({}), lambda: None, lambda _: None)
+        values = self.calls[-1][6]["properties"]["critique_responses"]
+        self.assertEqual((values["minItems"], values["maxItems"]), (2, 2))
+
+    def test_issue_response_capacity_splits_results_without_truncating_issues(self):
+        context = {"task": {"role": "orchestrator", "phase": "specialist_review"}, "review_domain": "critic",
+            "iteration_review": {"pending_result_ids": ["r1", "r2"], "omitted_pending_result_count": 0},
+            "results": [{"result_id": rid, "content": {}} for rid in ("r1", "r2")],
+            "issues": [{"issue_id": f"i{index}", "result_id": "r1" if index < 15 else "r2"} for index in range(30)]}
+        self.run("orchestrator", context, self.resolve({}), lambda: None, lambda _: None)
+        self.assertEqual(len(self.calls), 1)
+        packet = json.loads(self.calls[0][4])
+        self.assertEqual(len(packet["issues"]), 15)
+        self.assertEqual(packet["iteration_review"]["omitted_pending_result_count"], 1)
+        self.assertEqual(self.calls[0][6]["properties"]["critique_responses"]["minItems"], 15)
+
     def test_handler_timeout_is_forwarded_to_the_transport(self):
         options = self.resolve({})
         options["timeout_seconds"] = 420
@@ -135,7 +153,7 @@ class OrchestrationAdapterTests(unittest.TestCase):
         self.assertEqual(stats["properties"]["evidence_ids"]["maxItems"], 0)
         self.assertEqual(stats["properties"]["label_dependent"]["enum"], [False])
         self.assertEqual(stats["properties"]["label_field"]["enum"], [""])
-        self.assertEqual(label_stats["properties"]["method_id"]["enum"], ["label_frequency"])
+        self.assertEqual(label_stats["properties"]["method_id"]["enum"], ["label_frequency", "cross_tabulation"])
         self.assertEqual(label_stats["properties"]["label_dependent"]["enum"], [True])
         self.assertNotIn("", label_stats["properties"]["label_field"]["enum"])
         self.assertEqual(CORE_SCHEMA["properties"]["claims"]["items"]["properties"]["evidence_ids"]["items"], {"type": "string"})

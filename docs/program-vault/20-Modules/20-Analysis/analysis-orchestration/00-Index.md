@@ -28,3 +28,4 @@ source_path: 20-Modules/analysis-orchestration.md
 - [[20-Modules/20-Analysis/analysis-orchestration/03-section|API]] — 本文 1,517字
 - [[20-Modules/20-Analysis/analysis-orchestration/04-section|機密性・限界]] — 本文 3,380字
 - [[20-Modules/20-Analysis/analysis-orchestration/05-section|固定成果物と4先一式の公開]] — 本文 3,219字
+- [[20-Modules/20-Analysis/analysis-orchestration/06-section|結果IDによる再分析・分析処理の完了・必須手法]] — 2026-11-09の追加要件と受け入れ条件

@@ -166,9 +166,7 @@ class AiModelSettingsTests(unittest.TestCase):
 
     def test_page_exposes_clickable_model_picker(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
-        script = (Path(app.__file__).resolve().parent / "static" / "app.js").read_text(
-            encoding="utf-8"
-        )
+        script = __import__("app_source").read_app_source(Path(app.__file__).resolve().parent / "static")
 
         self.assertIn('data-model-provider="openai"', page)
         self.assertIn('data-model-provider="google"', page)

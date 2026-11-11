@@ -448,7 +448,10 @@ class ArtifactReviewTests(unittest.TestCase):
             if ctx.get("input_artifacts"):
                 return self.verdicts(ctx)
             if role == "core" and ctx.get("task", {}).get("phase") == "core":
-                return f.stop(alternatives=["Evidence-limited alternative"])
+                raw = f.stop(alternatives=["Evidence-limited alternative"])
+                if "next_step" in args[6].get("properties", {}):
+                    raw["next_step"] = {"kind": "finish", "intents": raw.pop("intents"), "stop": raw.pop("stop")}
+                return raw
             if role == "orchestrator":
                 candidates = ctx.get("artifact_candidates", [])
                 decisions = self.choices(candidates, ("skip",))

@@ -239,6 +239,118 @@ class PackageV2Tests(unittest.TestCase):
                 self.assertEqual(archive.read(f'tables/{name}.csv'),csv_bytes(fields,rows))
         self.assertFalse(list(self.store.root.rglob('*.csv')))
 
+    def bulk_datasets(self):
+        datasets, _ = self.lexical()
+        datasets.update({
+            'values': (['label', 'value', 'optional'], [
+                {'label': '先頭', 'value': None, 'optional': ''},
+                {'label': '中央', 'value': 0, 'optional': False},
+                {'label': '末尾', 'value': -2.5}]),
+            'segment_classifications': (['segment_id', 'label', 'score'], [
+                {'segment_id': 'u1', 'label': 'synthetic', 'score': .7}]),
+        })
+        return datasets
+
+    def test_bulk_read_matches_single_tables_and_verifies_once_for_v1_and_v2(self):
+        from test_segment_embeddings import result_for
+        datasets = self.bulk_datasets()
+        transformer = result_for({'item': {'id': 'synthetic'}, 'segments': self.snapshot['segments']})
+        for version in (1, 2):
+            with self.subTest(version=version):
+                run = self.save(f'bulk-v{version}', version=version, datasets=datasets,
+                    result={'parameters': {}, 'analysis': {'transformer': {'result': transformer}}})
+                original = self.store.verified_package(run['id'])
+                expected = {name: self.store.read_table(run['id'], name)
+                            for name in original[2]['typed_tables']}
+                with patch.object(self.store, 'readable_package', wraps=self.store.readable_package) as readable, \
+                     patch.object(self.store, 'read_table', side_effect=AssertionError('単表の反復取得は禁止')):
+                    tables = self.store.read_tables(run['id'])
+                    readable.assert_called_once_with(run['id'])
+                self.assertEqual(list(tables), list(expected))
+                self.assertEqual(canonical(tables), canonical(expected))
+                for name, (fields, rows) in datasets.items():
+                    self.assertEqual(tables[name]['fields'], fields)
+                    self.assertEqual(canonical([r['values'] for r in tables[name]['rows']]), canonical(rows))
+                if version == 2:
+                    self.assertEqual(set(original[2]['references']),
+                        {'morphemes', 'dependencies', 'segment_classifications', 'segment_embeddings'})
+                    self.assertIn('segment_embeddings', tables)
+                self.assertEqual(self.store.verified_package(run['id']), original)
+
+    def test_bulk_read_rejects_tampered_artifact_and_missing_reference(self):
+        for corruption, exception in (('artifact', StoreConflict), ('reference', MissingReference)):
+            with self.subTest(corruption=corruption):
+                run = self.save('bulk-corruption-' + corruption, datasets=self.bulk_datasets())
+                if corruption == 'artifact':
+                    artifact = next(a for a in self.store.artifacts(run['id']) if a['name'] == 'tables/values.json')
+                    path = self.store.root / artifact['path']
+                    table = json.loads(path.read_bytes())
+                    table['rows'][0]['values']['value'] = 'tampered'
+                    path.write_bytes(canonical(table))
+                else:
+                    with self.connect() as connection:
+                        connection.execute("DELETE FROM segment_labels WHERE run_id=?", (run['id'],))
+                before = {a['name']: (self.store.root / a['path']).read_bytes()
+                          for a in self.store.artifacts(run['id'])}
+                with self.assertRaises(exception):
+                    self.store.read_tables(run['id'])
+                after = {a['name']: (self.store.root / a['path']).read_bytes()
+                         for a in self.store.artifacts(run['id'])}
+                self.assertEqual(after, before)
+
+    def test_xlsx_and_bundle_restore_every_typed_table_with_one_verification(self):
+        from openpyxl import load_workbook
+        from gurumoji.services.fixed_exports import export_fixed
+        run = self.save('bulk-exports', datasets=self.bulk_datasets())
+        original = self.store.verified_package(run['id'])
+        tables = self.store.read_tables(run['id'])
+        with patch.object(self.store, 'readable_package', wraps=self.store.readable_package) as readable, \
+             patch.object(self.store, 'read_table', side_effect=AssertionError('単表の反復取得は禁止')):
+            data, _, extension = export_fixed(self.store, run['id'], 'xlsx')
+            readable.assert_called_once_with(run['id'])
+        self.assertEqual(extension, 'xlsx')
+        book = load_workbook(io.BytesIO(data))
+        self.addCleanup(book.close)
+        self.assertEqual(set(book.sheetnames), {'README', '_missing', *tables})
+        missing = {(dataset, row_id, field): state for dataset, row_id, field, state
+                   in book['_missing'].iter_rows(min_row=2, values_only=True)}
+        for name, table in tables.items():
+            with self.subTest(format='xlsx', dataset=name):
+                cells = list(book[name].iter_rows(values_only=True))
+                self.assertEqual(list(cells[0]), table['fields'])
+                self.assertEqual(len(cells) - 1, len(table['rows']))
+                restored = []
+                for row, values in zip(table['rows'], cells[1:]):
+                    values = dict(zip(table['fields'], values))
+                    for field in table['fields']:
+                        state = missing.get((name, row['row_id'], field))
+                        if state == 'absent':
+                            values.pop(field)
+                        elif state == 'empty_string':
+                            values[field] = ''
+                        elif state == 'null':
+                            values[field] = None
+                        if type(row['values'].get(field)) is bool:
+                            self.assertIs(type(values[field]), bool)
+                    restored.append(values)
+                self.assertEqual(restored, [r['values'] for r in table['rows']])
+        with patch.object(self.store, 'readable_package', wraps=self.store.readable_package) as readable, \
+             patch.object(self.store, 'read_table', side_effect=AssertionError('単表の反復取得は禁止')):
+            bundle = self.queries().run_bundle(run['id'])
+            readable.assert_called_once_with(run['id'])
+        with zipfile.ZipFile(io.BytesIO(bundle.data)) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            self.assertEqual(manifest['references'], {})
+            self.assertEqual(list(manifest['typed_tables']), list(tables))
+            for name, table in tables.items():
+                with self.subTest(format='zip', dataset=name):
+                    entry = manifest['typed_tables'][name]
+                    self.assertNotIn('reference', entry)
+                    self.assertEqual(canonical(json.loads(archive.read(entry['data']))), canonical(table))
+                    self.assertEqual(archive.read(f'tables/{name}.csv'),
+                        csv_bytes(table['fields'], [r['values'] for r in table['rows']]))
+        self.assertEqual(self.store.verified_package(run['id']), original)
+
     def test_all_v1_readers_keep_original_bytes_and_publication_works(self):
         run = self.save('legacy',version=1)
         original = self.store.verified_package(run['id'])
@@ -335,6 +447,55 @@ class PackageV2Tests(unittest.TestCase):
             connection.execute("UPDATE segment_labels SET model_revision='tampered'")
         with self.assertRaises(MissingReference):
             self.store.readable_package(run['id'])
+
+
+    def test_trash_restore_preserves_fixed_labels_and_vector_bytes(self):
+        from gurumoji.services import library_trash
+        from test_segment_embeddings import result_for
+        data = {'segment_classifications': (['segment_id', 'label'],
+                [{'segment_id': 'u1', 'label': 'synthetic'}])}
+        transformer = result_for({'item': {'id': 'synthetic'}, 'segments': self.snapshot['segments']})
+        result = {'parameters': {}, 'analysis': {'transformer': {'result': transformer}}}
+        run = self.save(datasets=data, result=result)
+        before = self.store.verified_package(run['id'])
+        with self.connect() as connection:
+            vector = connection.execute('SELECT vector FROM segment_embeddings').fetchone()[0]
+            rows = library_trash.snapshot_rows(connection, 'synthetic')
+            library_trash.delete_disposable_rows(connection, 'synthetic')
+            connection.execute("DELETE FROM library_items WHERE id='synthetic'")
+        with self.assertRaises(MissingReference):
+            self.store.verified_package(run['id'])
+        root = self.root / 'trash'
+        entry = library_trash.begin(root, item_id='synthetic', source_name='synthetic',
+            rows=rows, tombstones_added=[], tombstones_replaced=[], assets=[])
+        self.assertEqual(library_trash.finish(entry, lambda a, b: None), [])
+        self.assertEqual(library_trash.restore(root, entry.name, connect=self.connect,
+            targets={}, move=lambda a, b: None), 'synthetic')
+        self.assertEqual(self.store.verified_package(run['id']), before)
+        with self.connect() as connection:
+            self.assertEqual(connection.execute('SELECT vector FROM segment_embeddings').fetchone()[0], vector)
+
+
+    def test_trash_restore_label_conflict_rolls_back_and_keeps_entry(self):
+        from gurumoji.services import library_trash
+        data = {'segment_classifications': (['segment_id', 'label'],
+                [{'segment_id': 'u1', 'label': 'synthetic'}])}
+        self.save(datasets=data)
+        with self.connect() as connection:
+            rows = library_trash.snapshot_rows(connection, 'synthetic')
+            library_trash.delete_disposable_rows(connection, 'synthetic')
+            connection.execute("DELETE FROM library_items WHERE id='synthetic'")
+            library_trash._insert(connection, 'segment_labels', rows['segment_labels'])
+        root = self.root / 'trash'
+        entry = library_trash.begin(root, item_id='synthetic', source_name='synthetic',
+            rows=rows, tombstones_added=[], tombstones_replaced=[], assets=[])
+        library_trash.finish(entry, lambda a, b: None)
+        with self.assertRaises(sqlite3.IntegrityError):
+            library_trash.restore(root, entry.name, connect=self.connect,
+                targets={}, move=lambda a, b: None)
+        with self.connect() as connection:
+            self.assertIsNone(connection.execute("SELECT id FROM library_items WHERE id='synthetic'").fetchone())
+        self.assertTrue((entry / library_trash.MANIFEST).is_file())
 
 
 if __name__ == '__main__':

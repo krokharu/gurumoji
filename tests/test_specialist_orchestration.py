@@ -44,7 +44,11 @@ class SpecialistOrchestrationTests(unittest.TestCase):
                 raw["claims"] = [{"claim_id": "local", "text": "A scoped source contains a reason", "kind": "observation", "evidence_ids": [context["raw_evidence"][0]["evidence_id"]]}]
             return raw
         if role == "core" and context["task"]["phase"] == "core":
-            return f.stop(alternatives=["Bounded alternative"])
+            raw = f.stop(alternatives=["Bounded alternative"])
+            if "next_step" in schema.get("properties", {}):
+                # この模擬応答は追加発注せず終了を選ぶ。
+                raw["next_step"] = {"kind": "finish", "intents": raw.pop("intents"), "stop": raw.pop("stop")}
+            return raw
         return f.InitialSpecialistTests.valid_agent(self, role, context)
 
     def begin(self, **options):
@@ -261,6 +265,49 @@ class SpecialistOrchestrationTests(unittest.TestCase):
         self.assertFalse(issue["stale"])
         self.assertEqual(issue["status"], "defer")
         self.assertIn(issue["issue_id"], {i["issue_id"] for i in run["unresolved_issues"]})
+
+    def initial_critique_run(self, response_mode="all"):
+        actual = self.transport
+        def transport(*args, **kwargs):
+            raw = actual(*args, **kwargs)
+            context = restored_reference_context(args[4])
+            if args[5].endswith("_critic") and context.get("task", {}).get("phase") == "initial_analysis":
+                target = context["review_target"]
+                raw.update(review_status="issues", issues=[{"issue_key": f"missing-{index}",
+                    "target_id": target["target_id"], "target_version": target["target_version"], "severity": "high",
+                    "reason": "合成の不足条件", "evidence_ids": [], "missing_evidence": "独立した裏付け"} for index in range(2)])
+            if args[5].endswith("_orchestrator") and context.get("issues"):
+                expected = len(context["issues"])
+                values = args[6]["properties"]["critique_responses"]
+                self.assertEqual((values["minItems"], values["maxItems"]), (expected, expected))
+                if response_mode == "missing":
+                    raw["critique_responses"] = raw["critique_responses"][:-1]
+                elif response_mode == "duplicate":
+                    raw["critique_responses"] = [raw["critique_responses"][0]] * expected
+            return raw
+        self.resolve, self.adapter = make_orchestration_adapters(call_ai_json=transport,
+            load_token_config=lambda: SimpleNamespace(lmstudio_base_url=""),
+            configured_ai_credentials=lambda *_: ("", "synthetic"),
+            context_meter=lambda *a: {"fits": True, "output_reserve": 3200})
+        return self.drive(self.begin(context_evidence_limit=48))
+
+    def test_initial_plan_issues_receive_explicit_responses_before_completion(self):
+        run = self.initial_critique_run()
+        self.assertEqual(run["status"], "completed", run.get("error"))
+        issues = [i for i in run["issues"] if i["issue_key"].startswith("missing-")]
+        self.assertTrue(issues)
+        self.assertTrue(all(i["status"] == "defer" and i.get("latest_response") for i in issues))
+        self.assertTrue(run["unresolved_issues"])
+
+    def test_missing_specialist_response_is_quarantined(self):
+        run = self.initial_critique_run("missing")
+        self.assertNotEqual(run["status"], "completed")
+        self.assertTrue(any(t.get("error") == "critique_response_missing" for t in run["tasks"]))
+
+    def test_duplicate_specialist_responses_do_not_cover_an_unanswered_issue(self):
+        run = self.initial_critique_run("duplicate")
+        self.assertNotEqual(run["status"], "completed")
+        self.assertTrue(any(t.get("error") == "critique_response_missing" for t in run["tasks"]))
 
     def test_failed_domain_followup_prevents_silent_success(self):
         actual = self.transport

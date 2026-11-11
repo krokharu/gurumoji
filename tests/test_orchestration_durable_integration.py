@@ -12,8 +12,16 @@ import test_analysis_orchestration_integration as support
 class DurableOutputIntegrationTests(unittest.TestCase):
     setUp = support.OrchestrationIntegrationTests.setUp
     payload = support.OrchestrationIntegrationTests.payload
-    response = support.OrchestrationIntegrationTests.response
     start = support.OrchestrationIntegrationTests.start
+
+    def response(self, *args):
+        value = support.OrchestrationIntegrationTests.response(self, *args)
+        if "next_step" in args[6].get("properties", {}):
+            intents = value.pop("intents")
+            stop = value.pop("stop")
+            value["next_step"] = {"kind": "analyze" if intents else "finish",
+                                  "intents": intents, "stop": None if intents else stop}
+        return value
 
     def state(self, rid):
         return self.client.get(self.url + "/" + rid).get_json()["run"]
@@ -57,7 +65,8 @@ class DurableOutputIntegrationTests(unittest.TestCase):
         def repeated(*args):
             result = self.response(*args)
             if args[5] == 'analysis_orchestration_core' and json.loads(args[4])["task"]["phase"] != 'initial_routing':
-                result.update(intents=[], stop={'reason': 'question_satisfied', 'summary': 'Same bounded finding', 'unresolved': []})
+                result['next_step'] = {'kind': 'finish', 'intents': [], 'stop':
+                    {'reason': 'question_satisfied', 'summary': 'Same bounded finding', 'unresolved': []}}
             return result
         publisher = app.analysis_orchestration_publication_service()
         with patch.object(app, 'call_orchestration_ai_json', side_effect=repeated), \

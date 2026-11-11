@@ -1,7 +1,7 @@
 // Original metric/insight functions; synthetic timing fixtures, no data mutation or browser.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const root=path.join(__dirname,'../src/gurumoji/static');
-function extract(file,name){const s=fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');const start=s.indexOf(`function ${name}(`);assert(start>=0);return s.slice(start,s.indexOf('\n}',start)+2);}
+function extract(file,name){const s=require('./app_source.cjs')(path.join(root,file),'utf8').replace(/\r\n/g,'\n');const start=s.indexOf(`function ${name}(`);assert(start>=0);return s.slice(start,s.indexOf('\n}',start)+2);}
 const insights={children:[],replaceChildren(){this.children=[];},append(n){this.children.push(n);}};
 const ctx={currentJob:{segments:[],speaker_profiles:{},session_profile:{session_type:'focus_group'}},document:{querySelector:s=>s==='#speaker-insights'?insights:null,createElement:()=>({})}};
 vm.createContext(ctx);

@@ -18,6 +18,11 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         self.url = self.fixture.url + "/orchestration"
         self.config_patch = patch.object(app, "load_token_config", return_value=app.TokenConfig(lmstudio_model="synthetic-local"))
         self.config_patch.start(); self.addCleanup(self.config_patch.stop)
+        # この結合fixtureは旧Core形式の合成応答を使う。新形式は専用契約試験で検証する。
+        prepare = app._prepare_orchestration
+        legacy = patch.object(app, '_prepare_orchestration', side_effect=lambda payload: {
+            **prepare(payload), 'core_control_version': 0})
+        legacy.start(); self.addCleanup(legacy.stop)
         self.service = app.analysis_orchestration_service()
         self.service.schedule = False
         self.calls = []
@@ -86,6 +91,7 @@ class OrchestrationIntegrationTests(unittest.TestCase):
             self.service.run(rid)
             value = self.client.get(self.url + "/" + rid).get_json()["run"]
             self.assertEqual(value["status"], "completed", value)
+            self.assertEqual(value['config']['evidence_mode'], 'sql')
             self.assertEqual(value["review_status"], "reviewed")
             self.assertEqual(set(c[0] for c in self.calls), {"core", "interpretation", "verification", "critic"})
             self.assertTrue(all(e["utterance_id"] != "x1" for c in self.calls for e in c[1].get("raw_evidence", [])))
@@ -119,6 +125,25 @@ class OrchestrationIntegrationTests(unittest.TestCase):
         with patch.object(app, "call_orchestration_ai_json") as model:
             self.service.run(rid)
         model.assert_not_called()
+
+    def test_hybrid_http_run_retains_raw_and_attaches_sql_source_after_validation(self):
+        payload = self.payload('hybrid-http-synthetic-0001')
+        payload['evidence_mode'] = 'hybrid'
+        with patch.object(app, 'call_orchestration_ai_json', side_effect=self.response):
+            rid = self.start(payload)
+            self.service.run(rid)
+        exported = self.client.get(self.url + '/' + rid + '/export.json').get_json()
+        self.assertEqual(exported['run']['status'], 'completed', exported['run'].get('error'))
+        self.assertEqual(exported['run']['config']['evidence_mode'], 'hybrid')
+        rows = {e['evidence_id']: e for e in exported['initial']['snapshot']['evidence']}
+        cited = [r for r in exported['raw_results'] if r['validation_status'] == 'valid' and r.get('evidence_resolution', {}).get('sources')]
+        self.assertTrue(cited)
+        for result in cited:
+            self.assertNotIn('evidence_resolution', result['raw'])
+            self.assertEqual(result['evidence_resolution']['dataset_version'], exported['run']['input_hash'])
+            for source in result['evidence_resolution']['sources']:
+                self.assertEqual(source['text'], rows[source['evidence_id']]['text'])
+        self.assertEqual(exported['run']['usage']['calls'], len(self.calls))
 
     def test_new_http_runs_delegate_reviews_and_keep_owned_exports_read_only(self):
         def response(*args, **kwargs):

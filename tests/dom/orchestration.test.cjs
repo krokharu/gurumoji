@@ -26,6 +26,31 @@ async function started(h,run=snapshot()) {
  h.click('#orchestration-start');const request=pending(h,'/analysis/orchestration','POST');h.reply(request,{run});await h.flush();return request;
 }
 function posts(h){return h.requests.filter(r=>r.options.method==='POST');}
+
+test('根拠取得はSQLが既定で、ハイブリッドの選択が開始要求と履歴へ渡る',async t=>{
+ const h=await setup(t);
+ assert.equal(node(h,'evidence-mode').value,'sql');
+ assert.equal(h.evaluate('orchestrationPayload().evidence_mode'),'sql');
+ input(h,'evidence-mode','hybrid');
+ const request=await started(h,snapshot({config:{...snapshot().config,evidence_mode:'hybrid'}}));
+ assert.equal(JSON.parse(request.options.body).evidence_mode,'hybrid');
+ assert.match(node(h,'config').textContent,/根拠取得 ハイブリッド/);
+ assert.equal(posts(h).length,1);
+});
+
+test('SQLで復元した引用原文を文字列として表示し、新しいAI要求を送らない',async t=>{
+ const h=await setup(t);await started(h);
+ h.evaluate('void orchestrationReadResults("result-sql")');
+ const text='<img src=x onerror="window.syntheticInjected=true"> 条件13、例外は撤回。';
+ h.reply(pending(h,'/results/result-sql'),{validation_status:'valid',raw:{claims:[]},
+  evidence_resolution:{mode:'hybrid',sources:[{evidence_id:'ev-synthetic',text}]}});
+ await h.flush();
+ assert.match(node(h,'result-content').textContent,/SQLで復元した引用原文（1件）/);
+ assert.ok(node(h,'result-content').textContent.includes(text));
+ assert.equal(node(h,'result-content').querySelector('img'),null);
+ assert.equal(h.w.syntheticInjected,undefined);
+ assert.equal(posts(h).length,1);
+});
 function publication(overrides={}) {
  return {save_status:'saved',publication_status:'incomplete',publication_targets:['input','orchestrator','visualization'],effective_writers:['research','input','orchestrator','visualization'],
   result_run_id:'fixed-R1',result_run:{id:'fixed-R1',artifacts:[{name:'result.json',url:'/api/analysis/artifacts/fixed-artifact-1'}]},can_retry:true,

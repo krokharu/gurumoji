@@ -1,7 +1,7 @@
 // Real display helpers with synthetic nodes; native layout/browser/AT are separate.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const root=path.join(__dirname,'../src/gurumoji/static');
-const files=Object.fromEntries(['app.js','analysis-visualizations.js'].map(name=>[name,fs.readFileSync(path.join(root,name),'utf8').replace(/\r\n/g,'\n')]));
+const files=Object.fromEntries(['app.js','analysis-visualizations.js'].map(name=>[name,require('./app_source.cjs')(path.join(root,name),'utf8').replace(/\r\n/g,'\n')]));
 function extract(file,name){const source=files[file],start=source.indexOf(`function ${name}(`);assert(start>=0,name);return source.slice(start,source.indexOf('\n}',start)+2);}
 function node(tag='div',cls='',text=''){return {tag,className:cls,children:[],attributes:{},style:{},textContent:text,
  append(...items){this.children.push(...items);},setAttribute(k,v){this.attributes[k]=String(v);}};}

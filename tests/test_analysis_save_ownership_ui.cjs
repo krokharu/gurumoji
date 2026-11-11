@@ -1,7 +1,7 @@
 // Real analysis save/load handlers with synthetic deferred API responses.
 // Pure Node contract test; no browser, server, network, model, or user data.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync(path.join(__dirname,'../src/gurumoji/static/app.js'),'utf8').replace(/\r\n/g,'\n');
+const source=require('./app_source.cjs')(path.join(__dirname,'../src/gurumoji/static/app.js'),'utf8').replace(/\r\n/g,'\n');
 function extract(name){const match=new RegExp(`^(?:async )?function ${name}\\(`,'m').exec(source);assert(match,name);return source.slice(match.index,source.indexOf('\n}',match.index)+2);}
 const data=(id,revision=1,question=id)=>({item:{id,revision_count:revision,analysis_revision:revision},config:{research_question:question},annotations:{}});
 function fixture(){

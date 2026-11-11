@@ -11,7 +11,49 @@ from gurumoji.services.analysis_orchestration_adapters import make_orchestration
 import test_analysis_orchestration as fixtures
 
 
+def wire_response(schema, response):
+    if "next_step" not in schema.get("properties", {}):
+        return response
+    result = copy.deepcopy(response)
+    intents, stop = result.pop("intents"), result.pop("stop")
+    if intents and stop is None:
+        kind = "analyze"
+    elif not intents and isinstance(stop, dict):
+        kind = "finish"
+    else:
+        raise AssertionError("合成Core応答は追加依頼または終了のどちらかを選ぶ必要があります。")
+    result["next_step"] = {"kind": kind, "intents": intents, "stop": stop}
+    return result
+
+
 class ContextTests(unittest.TestCase):
+    def test_delegated_core_gets_an_explicit_unread_catalog_index(self):
+        context = {"question": "合成の問い", "task": {"role": "core", "phase": "core",
+            "intent": {"role": "core", "question": "合成の問い"}},
+            "review_scope": "specialist_reports_not_full_raw_results",
+            "initial_label_catalog": {"status": "ai_draft", "result_id": "r1", "result_ids": ["r1"],
+                "definitions": [{"definition_id": "d1", "condition": "必須条件"}],
+                "definition_conflicts": [{"definition_id": "d1", "reason": "未解決の競合"}]}}
+        original = copy.deepcopy(context)
+        reduced = model_context.compact_context(context)
+        index = reduced["initial_label_catalog"]
+        self.assertEqual(index["read_scope"], "index_only")
+        self.assertEqual(index["definition_count"], 1)
+        self.assertEqual(index["result_ids"], ["r1"])
+        self.assertEqual(index["full_catalog_sha256"], model_context.digest(original["initial_label_catalog"]))
+        self.assertEqual(index["definition_conflicts"], original["initial_label_catalog"]["definition_conflicts"])
+        self.assertNotIn("definitions", index)
+        self.assertNotIn("question", reduced["task"]["intent"])
+        self.assertEqual(reduced["question"], original["question"])
+        index["result_ids"].append("別の参照")
+        self.assertEqual(context, original)
+
+    def test_distinct_task_question_is_preserved(self):
+        context = {"question": "全体の問い", "task": {"role": "core", "phase": "core",
+            "intent": {"question": "別の検査条件を含む問い"}}}
+        self.assertEqual(model_context.compact_context(context)["task"]["intent"]["question"],
+                         "別の検査条件を含む問い")
+
     def adapter(self, meter, reply=lambda *_: {"summary": "synthetic"}):
         resolve, runner = make_orchestration_adapters(call_ai_json=reply,
             load_token_config=lambda: SimpleNamespace(lmstudio_base_url="http://127.0.0.1:1234/v1"),
@@ -35,7 +77,10 @@ class ContextTests(unittest.TestCase):
         def meter(model, base, system, user, schema):
             count = len(json.loads(user)["results"])
             return {"fits": count <= 1, "output_reserve": 1600}
-        resolve, runner = self.adapter(meter, lambda *a, **k: calls.append((a, k)))
+        def reply(*a, **k):
+            calls.append((a, k))
+            return wire_response(a[6], fixtures.stop())
+        resolve, runner = self.adapter(meter, reply)
         context = {"task": {"phase": "core", "role": "core"}, "data_version": "v",
             "results": [{"result_id": str(i), "content": {"claims": []}} for i in range(4)],
             "issues": [{"issue_id": "i0", "result_id": "0"}, {"issue_id": "i3", "result_id": "3"}],
@@ -117,7 +162,8 @@ class ContextTests(unittest.TestCase):
                     "properties": {"result_assessments": {"minItems": 3},
                                    "critique_responses": {"maxItems": 2}}})
             self.assertEqual(measured["loaded_context_length"], length)
-            self.assertEqual(measured["fits"], length > 8192)
+            self.assertTrue(measured["fits"])
+            self.assertEqual(measured["schema_accounting"], "grammar_outside_context")
             self.assertEqual(integration["output_reserve"], 4096)
             self.assertEqual(integration["fits"], length > 8192)
         with patch.object(lmstudio, "Client", side_effect=RuntimeError("SECRET")):
@@ -144,7 +190,7 @@ class DurableContextTests(unittest.TestCase):
             role = args[5].removeprefix("analysis_orchestration_")
             context = model_context.restored_reference_context(args[4])
             self.sent.append((role, context))
-            return fixtures.InitialSpecialistTests.valid_agent(self, role, context)
+            return wire_response(args[6], fixtures.InitialSpecialistTests.valid_agent(self, role, context))
         self.sent = []
         def meter(model, base, system, user, schema):
             value = json.loads(user)
@@ -200,7 +246,7 @@ class DurableContextTests(unittest.TestCase):
             role = args[5].removeprefix("analysis_orchestration_")
             context = model_context.restored_reference_context(args[4])
             self.sent.append((role, context))
-            return fixtures.InitialSpecialistTests.valid_agent(self, role, context)
+            return wire_response(args[6], fixtures.InitialSpecialistTests.valid_agent(self, role, context))
         def meter(model, base, system, user, schema):
             context = json.loads(user)
             phase = context.get("task", {}).get("phase")
@@ -222,6 +268,37 @@ class DurableContextTests(unittest.TestCase):
         self.assertTrue(all(c["initial_analysis_report"]["label_requirements"] for role, c in self.sent if c["task"]["phase"] == "initial_labels"))
         self.assertEqual(len(run["initial_label_catalog"]["result_ids"]), len(run["initial_analysis_report"]["label_requirements"]))
         self.assertTrue(all(t["status"] == "succeeded" for t in run["tasks"] if not t["phase"].endswith("_split")))
+        with self.service._db() as db:
+            self.assertTrue(self.service._analysis_processing_tasks_complete(db, self.service._read_run(db, run["run_id"])))
+
+    def test_split_work_reaches_human_review_draft(self):
+        self.snapshot["analysis"]["segments"] = self.snapshot["analysis"]["segments"][:11]
+        def reply(*args, **kwargs):
+            role = args[5].removeprefix("analysis_orchestration_")
+            context = model_context.restored_reference_context(args[4])
+            result = fixtures.InitialSpecialistTests.valid_agent(self, role, context)
+            if role == "core" and context["task"].get("phase") == "core":
+                result["stop"]["reason"] = "human_review_required"
+            return wire_response(args[6], result)
+        def meter(model, base, system, user, schema):
+            context = json.loads(user)
+            phase = context.get("task", {}).get("phase")
+            fits = (len(context["coverage"]["page"]["owned_evidence_ids"]) <= 4 if phase == "initial_analysis"
+                    else len(context["initial_analysis_report"]["label_requirements"]) <= 1
+                    if phase in {"initial_routing", "initial_labels"} else True)
+            return {"fits": fits, "output_reserve": 1600}
+        self.resolve, self.agent = make_orchestration_adapters(call_ai_json=reply,
+            load_token_config=lambda: SimpleNamespace(lmstudio_base_url=""),
+            configured_ai_credentials=lambda *_: ("", "synthetic"), context_meter=meter)
+        run = self.drive(self.begin(max_iterations=50))
+        self.assertTrue(any(t["phase"].endswith("_split") for t in run["tasks"]))
+        self.assertEqual(run["stop_reason"], "human_review_required", run)
+        self.assertTrue(run["analysis_processing_complete"])
+        from gurumoji.services.analysis_orchestration_publication import _validate_export
+        with self.service._db() as db:
+            stored = self.service._read_run(db, run["run_id"])
+            exported = self.service.result_locked(db, "conversation", run["run_id"])
+            self.assertTrue(_validate_export(db, "conversation", run["run_id"], stored, exported))
 
 
 if __name__ == "__main__":

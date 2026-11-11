@@ -35,3 +35,7 @@ Workerは入力hash・発話ID・次元・符号化を検査し、結果JSON・�
 節点は`utt:<item_id>:<segment_id>`、台帳に登録された話者は`spk:<participant_code>`、未登録話者は`spk:<item_id>:<speaker>`、語は`term:<lemma>:<pos>`、定義は`def:<definition_hash>`、主張は`clm:<claim_id>`。呼出元が台帳の解決を担い、コアは純粋な生成・検証だけを行う。各要素の`%`・`:`を`%25`・`%3A`へ符号化して衝突を防ぐ。
 
 辺の必須項目は`source, target, relation, weight, provenance, method, method_version, input_hash, evidence_segment_ids`。重みは有限数、出所は`rule / ai_draft / researcher`、hashは小文字SHA-256。根拠は会話付き`utt:`IDで、対象集合を渡すと集合内かも照合する。根拠IDは重複を除き整列する。`edge_id=edge:<fingerprint(必須項目)>`とし、入力・手法版・出所が変われば別ID。AI下書きと研究者の確定解釈を同一の辺にしない。
+
+## 2026-10-27 ゴミ箱の復元対象
+
+版2の固定分析は `segment_embeddings` と `segment_labels` を参照するため、新たな会話削除では両テーブルの対象行をゴミ箱manifestに保存し、会話復元時に戻す。DB行とBLOBの値は変更せず、競合は既存トランザクションで失敗させる。上記のベクトルをゴミ箱の復元対象から除外する旧方針は、この変更により置き換える。変更前に削除され、行が既に失われた履歴は再推論せず、復元できない。旧manifestは引き続き読めるが、含まれていない行は戻らない。

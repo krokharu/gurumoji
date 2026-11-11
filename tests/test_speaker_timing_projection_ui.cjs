@@ -1,7 +1,7 @@
 // Derived timing is usable only while its raw per-row and collection binding still matches.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const root=path.join(__dirname,'../src/gurumoji/static');
-function extract(file,name){const source=fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');const start=source.indexOf(`function ${name}(`);assert(start>=0);return source.slice(start,source.indexOf('\n}',start)+2);}
+function extract(file,name){const source=require('./app_source.cjs')(path.join(root,file),'utf8').replace(/\r\n/g,'\n');const start=source.indexOf(`function ${name}(`);assert(start>=0);return source.slice(start,source.indexOf('\n}',start)+2);}
 const ctx={currentJob:null};vm.createContext(ctx);vm.runInContext(extract('analysis-content.js','analysisEvidenceTimeValid'),ctx);vm.runInContext(extract('app.js','speakerMetrics'),ctx);
 function job(start='0',end='10'){
  const segments=[{id:'a',speaker:'A',text:'synthetic',start,end},{id:'b',speaker:'B',text:'synthetic',start,end}];

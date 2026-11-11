@@ -115,13 +115,14 @@ class SegmentEmbeddingTests(unittest.TestCase):
                 store.prepare_rows(self.analysis, result)
         self.assertEqual(self.connection.execute('SELECT count(*) FROM segment_embeddings').fetchone()[0], 0)
 
-    def test_delete_cleans_same_transaction_and_trash_does_not_restore_vectors(self):
+    def test_delete_snapshots_vectors_and_cleans_same_transaction(self):
         store.write_rows(self.connection, store.prepare_rows(self.analysis, self.result))
         another = copy.deepcopy(self.analysis)
         another['item']['id'] = 'another'
         store.write_rows(self.connection, store.prepare_rows(another, result_for(another)))
         self.connection.commit()
-        self.assertNotIn('segment_embeddings', snapshot_rows(self.connection, self.analysis['item']['id']))
+        rows = snapshot_rows(self.connection, self.analysis['item']['id'])
+        self.assertEqual(len(rows['segment_embeddings']), 2)
         delete_disposable_rows(self.connection, self.analysis['item']['id'])
         self.connection.rollback()
         self.assertEqual(self.connection.execute('SELECT count(*) FROM segment_embeddings').fetchone()[0], 4)

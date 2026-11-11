@@ -61,7 +61,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('id="conversation-mode-hint"', page)
         self.assertIn('<option value="chat">雑談</option>', page)
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("const conversationModePresets", script)
         self.assertIn("function applyConversationMode", script)
         self.assertIn("group_interview", script)
@@ -91,7 +91,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn('id="meeting-obsidian-open"', page)
         self.assertIn('id="meeting-obsidian-status"', page)
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("function renderMeetingMinutes", script)
         self.assertIn("meeting-tasks.csv", script)
         self.assertIn("gurumoji.meeting.v1", script)
@@ -118,7 +118,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     def test_ai_provider_selection_applies_finishing_mode_and_json_downloads_are_hidden(self):
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         effort_script = (app.APP_DIRECTORY / "static" / "ai-effort.js").read_text(encoding="utf-8")
 
         self.assertIn("listen(aiProvider, 'change', () => {", script)
@@ -173,7 +173,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertNotIn("研究同意", page)
         self.assertNotIn("録音同意", page)
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("function renderSpeakerRegistryTable(", script)
         self.assertIn("function renderSpeakerRegistryCards(", script)
         self.assertIn("function setSpeakerRegistryDirty(", script)
@@ -272,7 +272,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("analysis-method-view.js", page)
         self.assertLess(page.index("analysis-method-view.js"), page.index("app.js"))
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         script += (app.APP_DIRECTORY / "static" / "analysis-visualizations.js").read_text(encoding="utf-8")
         script += (app.APP_DIRECTORY / "static" / "analysis-method-view.js").read_text(encoding="utf-8")
         self.assertIn("async function loadAnalysisCatalog(", script)
@@ -364,7 +364,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertNotIn("audio/*", page)
         self.assertNotIn("video/*", page)
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("let currentJobDirty = false;", script)
         self.assertIn("let currentJobMutationGeneration = 0;", script)
         self.assertIn("let jobFlowGeneration = 0;", script)
@@ -428,9 +428,10 @@ class UiDefaultsTests(unittest.TestCase):
             "      unresolvedSubmissionId,",
             script[unresolved_check:new_submission_id],
         )
+        # アプリのソース分割により、送信リスナーの次の登録を終端にする。
         self.assertIn(
             "if (submissionGeneration !== jobFlowGeneration) return;",
-            script[submit_start:script.index("async function pollJob()")],
+            script[submit_start:script.index("listen(cancelButton, 'click'", submit_start)],
         )
         self.assertIn("async function fetchPersistedJob(jobId)", script)
         self.assertIn("await fetchPersistedJob(storedId)", script)
@@ -501,7 +502,7 @@ class UiDefaultsTests(unittest.TestCase):
         self.assertIn("入力トークン", page)
         self.assertIn("合計トークン", page)
 
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         self.assertIn("bootSplash.classList.add('show-main')", script)
         self.assertIn("}, 200);", script)
         self.assertIn("function fallbackProgressStage(", script)
@@ -552,7 +553,7 @@ class UiDefaultsTests(unittest.TestCase):
 
     def test_processed_item_opens_with_the_plan_and_result_outline(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
 
         # The block comes before the workspace tabs, so it is the first thing in view.
         self.assertLess(page.index('id="session-outline"'), page.index('class="item-tabs"'))
@@ -583,7 +584,7 @@ class UiDefaultsTests(unittest.TestCase):
 
     def test_registered_ui_ux_fixes_stay_in_place(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
 
         # UX-11: deleting lives in its own zone, outside the sticky save bar.
@@ -628,7 +629,7 @@ class UiDefaultsTests(unittest.TestCase):
 
     def test_redesigned_navigation_routes_and_item_workspace(self):
         page = app.app.test_client().get("/").data.decode("utf-8")
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         styles = (app.APP_DIRECTORY / "static" / "style.css").read_text(encoding="utf-8")
 
         # UX-01: every screen has a hash route and the back button works.

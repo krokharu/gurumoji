@@ -106,7 +106,7 @@ class MethodOverviewApiTests(MethodViewFixture):
 
     def test_the_interface_offers_the_method_tab_and_tags_every_result_panel(self):
         html = self.client.get("/").get_data(as_text=True)
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         script += (app.APP_DIRECTORY / "static" / "analysis-method-view.js").read_text(encoding="utf-8")
         content = (app.APP_DIRECTORY / "static" / "analysis-content.js").read_text(encoding="utf-8")
         self.assertEqual(html.count('data-analysis-mode="methods"'), 2)

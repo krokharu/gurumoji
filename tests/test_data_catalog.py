@@ -98,6 +98,64 @@ class DataCatalogTests(unittest.TestCase):
             self.assertEqual(self.attributes('a', {key: value}).status_code, 400)
         self.assertEqual(self.attributes('a', {'得点': None}).status_code, 200)
 
+    def test_numeric_conditions_compare_int_and_real_without_coercing_boolean(self):
+        for op, value, expected in [('eq', 2, True), ('in', [2], True),
+                                    ('ne', 2, False), ('gte', 2, True), ('lte', 2, True),
+                                    ('eq', True, False), ('ne', True, True)]:
+            condition = {'scope': 'segment', 'key': 'end', 'op': op, 'value': value}
+            with app.database_connection() as db:
+                self.assertEqual(catalog.matches(db, 'a', condition), expected, (op, value))
+        self.assertTrue(catalog.valid_value({'data_type': 'number', 'allowed_values_json': '[2]'}, 2.0))
+        self.assertFalse(catalog.valid_value({'data_type': 'number', 'allowed_values_json': '[1]'}, True))
+
+    def test_conversation_definition_rejects_incompatible_existing_values_atomically(self):
+        self.define('age', data_type='string')
+        self.assertEqual(self.attributes('a', {'age': '20'}).status_code, 200)
+        def change(**fields):
+            return self.client.put('/api/library/attribute-definitions', json={
+                'key': 'age', 'scope': 'conversation', 'version': 1, **fields})
+        for fields in ({'data_type': 'integer'},
+                       {'data_type': 'string', 'allowed_values': ['21']}):
+            response = change(**fields)
+            self.assertEqual(response.status_code, 400, response.get_json())
+            with app.database_connection() as db:
+                row = db.execute("SELECT data_type,version,allowed_values_json FROM attribute_definitions WHERE key='age'").fetchone()
+                self.assertEqual(tuple(row), ('string', 1, '[]'))
+                self.assertEqual(catalog.attribute_values(db, 'a'), {'age': '20'})
+        self.assertEqual(change(data_type='string', allowed_values=['20']).status_code, 200)
+        self.assertEqual(self.attributes('a', {'age': '20'}).status_code, 200)
+
+    def test_legacy_mismatch_allows_metadata_and_equivalent_allowed_values(self):
+        self.define('region')
+        self.assertEqual(self.attributes('a', {'region': 'A'}).status_code, 200)
+        with app.database_connection() as db:
+            with catalog.change_log.tracking(db, [('attribute_definitions', 'global')], process='legacy_definition'):
+                db.execute("UPDATE attribute_definitions SET allowed_values_json=? WHERE key=? AND scope='conversation'",
+                           (json.dumps(['B', 'C']), 'region'))
+        response = self.client.put('/api/library/attribute-definitions', json={
+            'key': 'region', 'scope': 'conversation', 'version': 1, 'data_type': 'string',
+            'measurement_level': 'ordinal', 'description': 'Updated', 'allowed_values': ['C', 'B', 'B']})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['version'], 2)
+        with app.database_connection() as db:
+            self.assertEqual(catalog.attribute_values(db, 'a'), {'region': 'A'})
+            self.assertIn('attribute_value_mismatch', [issue['reason'] for issue in catalog.check(db)['issues']])
+        response = self.client.put('/api/library/attribute-definitions', json={
+            'key': 'region', 'scope': 'conversation', 'version': 2, 'data_type': 'string',
+            'allowed_values': ['C', 'D']})
+        self.assertEqual(response.status_code, 400, response.get_json())
+        with app.database_connection() as db:
+            self.assertEqual(db.execute("SELECT version FROM attribute_definitions WHERE key='region' AND scope='conversation'").fetchone()[0], 2)
+
+    def test_speaker_definition_remains_permissive_for_existing_mismatch(self):
+        app.save_speaker_registry_records([{'id': 'speaker01', 'display_name': 'Synthetic',
+            'attributes': {'age': '20'}}], expected_revision=0)
+        response = self.client.put('/api/library/attribute-definitions', json={
+            'key': 'age', 'scope': 'speaker', 'version': 1, 'data_type': 'integer'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with app.database_connection() as db:
+            self.assertIn('attribute_value_mismatch', [issue['reason'] for issue in catalog.check(db)['issues']])
+
     def test_existing_speaker_keys_are_discovered_once_and_deletion_cleans_projection(self):
         with app.database_connection() as db:
             db.execute("DROP TRIGGER speaker_attributes_insert_v1")
@@ -131,15 +189,17 @@ class DataCatalogTests(unittest.TestCase):
             self.assertEqual(catalog.check(db)['issues'][0]['reason'], 'attribute_value_mismatch')
         self.assertEqual(self.client.put('/api/library/attribute-definitions', json={**definition, 'version': 1}).status_code, 400)
 
-    def test_changed_conversation_definition_reports_existing_value_without_mutating_it(self):
-        definition = self.define()
-        self.attributes('a', {'地域': 'A'})
-        self.define(version=definition['version'], allowed_values=['B'])
+    def test_legacy_conversation_definition_mismatch_is_reported_without_mutating_data(self):
+        self.define('region')
+        self.attributes('a', {'region': 'A'})
         with app.database_connection() as db:
+            # Model an older database whose definition was changed before validation.
+            db.execute("UPDATE attribute_definitions SET allowed_values_json=? WHERE key=? AND scope='conversation'",
+                       (json.dumps(['B']), 'region'))
             before = list(db.iterdump())
-            self.assertEqual(catalog.check(db)['issues'], [{'item_id': 'a', 'key': '地域', 'reason': 'attribute_value_mismatch'}])
+            self.assertEqual(catalog.check(db)['issues'], [{'item_id': 'a', 'key': 'region', 'reason': 'attribute_value_mismatch'}])
             self.assertEqual(list(db.iterdump()), before)
-            self.assertEqual(catalog.attribute_values(db, 'a'), {'地域': 'A'})
+            self.assertEqual(catalog.attribute_values(db, 'a'), {'region': 'A'})
 
     def test_malformed_speaker_json_does_not_block_source_update(self):
         app.save_speaker_registry_records([{'id': 'speaker01', 'display_name': '架空話者', 'attributes': {'地域': 'A'}}], expected_revision=0)

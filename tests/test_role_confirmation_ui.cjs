@@ -1,7 +1,7 @@
 // Original editor + save handlers in a synthetic DOM. No browser/network/user data.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const assert = require('node:assert/strict');
-const source = fs.readFileSync(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
+const source = require('./app_source.cjs')(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
 function extract(name) {
   const start = source.indexOf(`function ${name}(`), end = source.indexOf('\n}', start);
   assert(start >= 0 && end > start); return source.slice(start, end + 2);

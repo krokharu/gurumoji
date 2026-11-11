@@ -2,7 +2,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
+const source = require('./app_source.cjs')(require('node:path').join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('async function rerunSpeakerIdentification(');
 const fn = source.slice(start, source.indexOf('\n}', start) + 2);
 

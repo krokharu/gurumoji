@@ -325,7 +325,7 @@ class AiFinishingTests(unittest.TestCase):
 
     def test_outline_evidence_and_times_come_from_saved_source(self):
         result = finishing.create_outline(self.segments, {}, lambda *_: {'sections': [
-            {'title': '検討', 'bullets': [{'text': '検討する', 'segment_ids': ['b', 'a']}]}]}, lambda *_: None, lambda: None)
+            {'title': '検討', 'bullets': [{'text': '検討する', 'segment_ids': ['b', 'a']}]}]}, lambda *_: None, lambda: None, summarize=False)
         section = result['sections'][0]
         self.assertEqual((section['start'], section['end']), (2, 10))
         self.assertEqual(section['bullets'], ['検討する'])
@@ -344,7 +344,7 @@ class AiFinishingTests(unittest.TestCase):
             calls.append(1)
             refs = ['not-in-input'] if len(calls) == 1 else ['a']
             return {'sections': [{'title': '議題', 'bullets': [{'text': '要点', 'segment_ids': refs}]}]}
-        result = finishing.create_outline(self.segments, {}, call, lambda *_: None, lambda: None)
+        result = finishing.create_outline(self.segments, {}, call, lambda *_: None, lambda: None, summarize=False)
         self.assertEqual(len(calls), 2)
         self.assertEqual(result['sections'][0]['segment_ids'], ['a'])
 

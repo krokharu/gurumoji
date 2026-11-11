@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const source = fs.readFileSync(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
+const source = require('./app_source.cjs')(path.join(__dirname, '../src/gurumoji/static/app.js'), 'utf8').replace(/\r\n/g, '\n');
 const context = {profile: {session_role: 'participant', session_role_source: 'default'},
   globalSelect: {value: 'registry-id'}, speakerRegistry: [{id: 'registry-id', default_role: 'observer', pseudonym: 'Synthetic'}],
   label: 'A', currentJob: {speaker_names: {}, speaker_profiles: {}}, metrics: {},

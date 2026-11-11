@@ -1,6 +1,6 @@
 // Original editor summary renderer; synthetic provenance, no persistence or browser.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync(path.join(__dirname,'../src/gurumoji/static/app.js'),'utf8').replace(/\r\n/g,'\n');
+const source=require('./app_source.cjs')(path.join(__dirname,'../src/gurumoji/static/app.js'),'utf8').replace(/\r\n/g,'\n');
 function extract(name){const start=source.indexOf(`function ${name}(`);assert(start>=0);return source.slice(start,source.indexOf('\n}',start)+2);}
 const host={children:[],replaceChildren(){this.children=[];},append(child){this.children.push(child);}};
 const ctx={currentJob:{speaker_profiles:{},session_profile:{session_type:'focus_group'}},document:{querySelector:selector=>selector==='#speaker-insights'?host:null,createElement:()=>({})}};

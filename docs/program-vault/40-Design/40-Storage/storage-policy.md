@@ -130,3 +130,84 @@ $env:PYTHONPATH = "$appRoot/src;$devRoot/tests"
 アプリ側 `5f113448ef38293995ebee5cb61e3a5c3db97bfc` で固定commit・subdirectory指定の任意requirementsと、既存診断APIの `maf` 項目を追加。上流の `RuntimeConfig/create_runtime/readiness` を使い、MAFを再実装しない。既定OFFは依存の調査・importを行わない。ON時も本番用 `obus.maf.pipeline.v1` のreadinessだけを確認し、workflow.run・callback・モデル・DB操作を起動しない。拡張の確認と `execution_ready` を区別し、上流の現在の `NOT_READY / HOST_BINDING_UNAVAILABLE` を維持する。未知の版・契約変更は拒否し、試験用プロファイルへ自動切替しない。MAF未導入でも既存の読取プレビューは利用できる。
 
 同じ専用venv・一時データで `test_obussql_integration.py` **47 PASS / 2 SKIP**（4.07秒、今回12件追加）。Python版・依存欠落／不一致、readiness確認時の実行禁止、上流の状態変更の拒否、例外内容の非公開、読取機能との独立を確認。HTTP応答とPython 3.10文法も確認。実MAF・実ObusSQLのインストール／実行と本番host接続は未実施。既存Vault側24件は直前変更の成功記録を維持し、今回そのコードは変更していない。実利用者データ・認証設定の変更なし。
+
+
+### ?????????????2026-10-27?
+
+???????????????main????????? `krokharu/ObusSQL??` ????????????????????????????????Input?Visualization?Orchestrator ? current ?????????????????????????hash???????????????100??????16??Windows `run.bat` ???????????????????? `0` ????????SQLite?Vault????????????????????????
+
+ObusSQL?????? `5be32120d17a7f07eac7a2c41b0bab1372ae4cdb` ????????MSVC?CPython 3.12?Windows wheel???????????venv????wheel SHA-256 `2823798425eb067f0384bddd3db5b713fcdb88c6c9a98d8b3adf5c519b6a1c2e`???????checkout?HEAD `69728a6` ???????????????????commit???????????????????
+
+??DB?Vault??wheel???? `test_obussql_integration.py`?`test_four_vaults.py`?`test_vault_note_policy.py` ?72 PASS?1 SKIP?2 subtests PASS?SKIP?Windows????????????????????2??pytest??????pythonpath?Windows???????collection error???????????????DB??wheel?????????????????????????????????JS?????????????????PostgreSQL???????MAF???????????????????
+
+## 2026-11-02 Claude計画に基づく開発版MAF分析接続
+
+Claude Code 2.1.310に読み取り専用で実装計画を依頼した。上流obussql-mafの本番プロファイルはHOST_BINDING_UNAVAILABLEであり、そのガードを解除したりsyntheticプロファイルで実利用を偽装したりしない。Microsoft Agent Framework 1.22.0の公開Workflow/Executor APIを使うGurumoji開発版ブリッジを別に構成する方針を採用した。
+
+採用した実装は、初期分析、固定根拠索引、自律分析の3段階をMAFで接続し、既存AnalysisOrchestrationServiceへ実行ドライバーを注入する。既存の開始・停止・再開API、台帳、世代番号による失効、原応答の保存と隔離、終了判定、完了後の成果物保存・公開を使う。新たな実行APIやSQLカラムの変更は不要と判断した。MAFのメッセージはrun IDだけとし、本文・モデル応答は渡さない。
+
+ObusSQLは当該runの固定済み・除外されていない発話だけをMemoryBackendに登録する。モデルへ配送する本文を版付きで取得し、元の根拠IDと本文を検証する。Coreの参照根拠の選択は指定済みの部分集合だけで行い、省略と実配送範囲を既存manifestへ残す。Vaultの自動探索、同期、研究者ノートの変更、新規の永続索引は行わない。日本語のUnicode行区切りとMarkdownフェンスも損失なく復元する。
+
+MOJIOKOSI_MAF_DEV_ENABLEDとMOJIOKOSI_OBUSSQL_ENABLEDを明示的な有効化条件とし、Windowsの開発版run.batでは未指定時に有効化する。無効時は従来ドライバーを使い、依存不足時はモデル送信前に停止する。通常版と開発版ではadapter_versionを分け、既存runを異なる指示で再開しない。
+
+実モデルの合成会話試験から、8,192トークンのロード済みモデルでは初回批判と尺度設計の指示重複が停止原因となることを確認した。安全余白と必須の尺度条件を維持して段階別の指示を整理し、1概念の尺度タスクには1定義用の出力枠を使う。名義尺度に2値以上を要求する受理契約と生成用JSONスキーマの差も修正した。最終の実行結果・検証件数は後続の検証記録に追記する。
+### 実機検証から追加した判断（2026-11-02、adapter 42）
+
+返却済みで来歴が一致する尺度案が受理条件に違反した場合だけ、開発版はlabel_repair_limit=1として修正タスクを1回登録する。不正案は隔離したまま、別task/attempt/resultとし、元の呼出し・時間・登録数上限を継承する。通信不明、途中終了、停止後の応答、来歴不一致はこの修正の対象にしない。通常版の設定は0であり、既存の無再送契約を維持する。1回で有効にならなければ停止する。
+
+追加推論はlocal_reasoning=off/autoとして実行設定に保存する。LM StudioがOFFを広告するモデルだけ、該当要求のreasoning_effort=noneへ変換する。モデル全体の推論既定値や他の文字起こし・仕上げジョブの設定は変更しない。実機Gemmaの短い合成応答でreasoning_tokens=0を確認した。画面にも分析単位の選択を追加した。
+
+LM Studioの構造化応答は生成制約を使う（公式: https://lmstudio.ai/docs/developer/openai-compat/structured-output ）。当日の実API記録では、入力usageはSDKテンプレート計測値+約12〜16であり、338〜1058 tokensのJSONスキーマは入力へ加算されていなかった。従来のconservative_additionは枠を二重計上するため、schema_tokensを診断記録として残しつつ、grammar_outside_contextとして計算する。安全余白512は保持し、生成上限は実測した残り枠内で決める。
+
+制御文とデータは分離し、開発版のhandler_preloaded_compact_v1では完全な参照のパス・版・本文hashを制御側へ保持し、データ側はresource_idと参照全体のhashで結合する。パス・版の差し替え、resource_idの差し替え、本文の差し替えは検出する。単一尺度だけ他分野へ全文再送される投影の不整合も修正した。専門家の必須知識本文と適用条件は削らない。
+
+標準プロファイルの固定区間分析を有効にし、一時DB・一時Vault・価格と操作性に関する合成会話で実モデルを手動実行している。質問は食事選択であり、原文では裏付けられない対象を含む限界条件である。Gemma追加推論OFFでは議題・全初回担当・尺度設計・尺度レビュー・最初の専門側評価まで実行できた。8K枠では同分野の過去報告を含む次の評価が予算不足となり、実モデルの全体完了・成果物保存・4Vault公開はまだ合格していない。合成応答による実MAF/実ObusSQLの完了・保存・公開と、実モデルの全体完了を区別する。
+
+GPUはRTX 5070 12GBで空き約350MB、RAM空き約4GB。既存のGemma/Qwenはいずれも8Kで、新しいモデルインスタンスを同時に追加する余裕がない。共有Gemmaの16K/GPU比率0.8への再ロードは他のGemma処理を中断するため利用者へ確認中で、承認前の再ロードは行っていない。
+
+### 専門側の批判応答の取りこぼし（2026-11-02、adapter 43）
+
+その後RAM空きが約18GBへ回復したため、共有モデルの再ロードを行わず、Gemma 4 12B QATを専用の16,384 context / GPU比率0 / KVキャッシュCPUの別インスタンスで検証した。1呼出し360秒、全体3,600秒、追加推論OFF、並列1、呼出し160、タスク400、区間300秒の構成である。専用モデルは試験のfinallyで解放し、共有モデルの設定は変更していない。
+
+最初の16K実機run_05e2d2f9a94843b485f1adbbf0927c5cは21呼出し・23タスクが全件成功し、入力予算不足を解消できた。ただし最終状態はhuman_review_requiredで、成果物保存・公開は未実施。原文で裏付けられない食事選択の質問を使った限界ケースである。この結果を分析完了・公開成功とは扱わない。出力はoutput/validation/maf-dev-real-model-20261102-gurumoji-maf-validation-20261102.jsonと同名の合成DBバックアップへ保持した。
+
+取りこぼしは、専門orchestratorのcritique_responsesが任意件数で、提示された指摘に応答しない結果も受理された一方、Coreは個別応答を禁止される責務分離にあった。ラベルの2指摘にはdefer応答があったが、初回の指摘と古い見解への指摘は未回答のまま残った。終了時の未回答検査は維持する。
+
+adapter 43では専門側のJSONスキーマに提示issue_id数と同じminItems/maxItemsを指定し、採否・理由・影響を各指摘へ1件ずつ返す。受理時も配送manifestのprovided_issue_idsと応答ID集合の一致・重複を検査し、省略や重複はcritique_response_missingで隔離する。deferは未解決点として保持し、合意や解決への変換はしない。上限24件を超える指摘は、既存reduce_contextで結果単位を分割し、指摘本文を切り詰めず後続バッチへ残す。原応答の自動再送や終了条件の緩和は追加していない。
+
+初回の根拠IDなしの指摘でも専門側が明示的にdeferを返して完了できること、省略・重複を隔離すること、30指摘を結果単位で15件ずつ処理することを追加検証した。関連2ファイルは32 PASS / 12 subtests PASS。UIの既存DOM 28件もPASS。起動時ObusSQL診断の合成応答が従来harnessに不足していたため、外部接続せずdisabledを返すfixtureを補完した。入力枠不足の案内、追加推論OFF、1呼出し120/360秒の設定を画面で確認した。通常のAPI既定値は120秒を維持する。
+
+原文に沿う比較・改善基準の質問を既定とし、実モデルの通常ケースを再実行する。実行ごとのJSON名にはrun IDを加え、失敗記録を上書きしない。全orchestration系とMAF・ObusSQL・入力計測・AI transportを含めた拡大回帰は293 PASS / 1 SKIP / 75 subtests PASS（154.31秒）。SKIPはWindowsの非特権シンボリックリンク作成制約。最終実機結果は後続へ記録する。
+
+### 実モデルでの完了・保存・公開の確認（2026-11-02）
+
+run_bd5638a58bf94ab2bcf86bba6562244a、adapter core-handler-prompts-43-required-critique-responses:gurumoji-maf-dev-v1で、合成の価格・操作性の会話に対し「この会話で比較や改善の基準として何が述べられているか、原文の根拠付きで比較する。」を実行した。実MAF 1.22.0と実obsipgの固定版を使い、実モデルGemma 4 12B QATの専用CPU/16K/追加推論OFFで、19呼出し・21タスクすべてsucceeded、2回のCore判断を経てstatus=completed / stop_reason=question_satisfiedとなった。所要2,341秒（約39分）。最大の実測テンプレート入力は11,520 tokensで、8Kでは出力予約と安全余白を確保できない。
+
+completion_callback_status=completed、save_status=saved、publication_status=publishedを個別に照合した。Input・Research・Orchestrator・Visualizationの4 outcomesがすべてpublishedであり、保存だけ・一部公開・人の確認待ちを完了へ読み替えた結果ではない。出力はoutput/validation/maf-dev-real-model-20261102-gurumoji-maf-validation-20261102-run_bd5638a58bf94ab2bcf86bba6562244a.jsonに保持する。一時DB・一時Vaultの内容を既存AnalysisStoreと4writerが実際に作成し、検証終了後に一時領域を解放した。実利用者の本文・タグ・別名、runtime、.env、tokens.jsonには反映していない。
+
+この通常ケースでは6回の専門レビューに提示された指摘はすべて0件だった。manifestと応答ID集合の一致は全件確認したが、非空の批判応答を実モデルが生成する分岐の確認ではない。非空の初回指摘、未解決deferでの完了、応答省略・重複の隔離、件数上限の分割は前記の合成回帰試験で確認している。実研究データ、大規模データ、研究結論の妥当性、実ブラウザーの視覚・キーボード操作、上流の本番用obussql-maf host、PostgreSQL・双方向同期は未検証／未接続のままである。
+
+最後に依存整合性pip check、2つの変更JSの構文、対象差分の空白を再確認した。DOMは28 PASSで、入力枠不足の案内が完了後には残らないこと、追加推論OFF、呼出し上限120/360秒と不正値拒否を別途確認した。run.batの未指定=両方ON、ObusSQL=0かつMAF未指定=両方OFF、明示的なMAF指定の優先を4組合せで確認した。共有Gemmaの8K設定は変更しておらず、専用CPUモデルはfinallyでunloadし、共有モデルが残ることを確認した。共有モデルの再読込は本検証には不要となり、承認待ちの操作は実行していない。
+
+作業元はkrokharu/transcription-finish-20261102 / d8707f2e02e4e1a74a5d3cb4d6c728e3f5691486。既存の未コミット変更を保持し、コミット・push・ブランチ切替は行っていない。利用手順はmain側docs/OBUSSQL.mdに追記し、通常利用では16Kでロードしたモデルを選択して新しい分析を開始する。
+
+### 利用者承認後の共有Gemma再ロードと再検証（2026-11-02、adapter 44）
+
+利用者が共有Gemmaの「16K・GPU使用率80%」への再ロードを明示的に承認したため実施した。実際に設定した値はLM StudioのGPUオフロード率gpu.ratio=0.8とcontextLength=16384であり、ハードウェアの演算使用率を80%へ制限する操作ではない。元の8K/gpu.ratio=1.0/flashAttention=trueはoutput/validation/maf-shared-model-before-20261102.jsonへ保持し、ロード失敗時には元の設定へ戻す処理を先に用意した。対象モデルIDだけをunload/loadし、flashAttention=trueを維持して指定値で読み込めた。Qwenは確認時点でロードされておらず操作していない。保存済みのモデルファイル・利用者データ・認証設定を変更する操作は行わない。
+
+adapter 43の最初のGPU試験run_3868ca051ffe4cbcb215960c90764c61では、追加分析後の最後のCore入力が12,894 tokensとなり、出力予約3,200と安全余白512を加えると16Kを222 tokens超過した。既存の根拠部分集合への縮小後も12,859で不足し、context_budget_exceededで送信前に停止した。この失敗結果・合成DBを同run ID付きのJSON/SQLiteとして保持する。停止済みrunを改変して完了扱いにしたり、予約・安全余白を削ったりしない。
+
+adapter 44では、専門側へ個別尺度判断を委譲済みのCoreへ、未読の尺度定義の空の配送オブジェクトではなく、AI下書きであること・全体hash・result IDs・定義数・競合・read_scope=index_onlyを持つ索引を渡す。実際の尺度定義・判断条件・全専門家報告・専門家の必須知識は保存し、個別尺度を読了扱いにしない。全体欄と完全に同じタスク内の問いの重複も除いた。索引の可変リストを変更しても元カタログへ波及しないこと、異なるタスクの問いは残ること、問い・intentがない入力でも壊れないことを検証した。既存の空配列を読むconsumer契約は維持する。旧失敗DBの複製を現行モデルで推論せず再計測し、既存の根拠部分集合の配送後に12,661 + 3,200 + 512で予算内となることを確認した。保存形式・SQLカラムやソース定義の変更はない。
+
+共有Gemmaの同じ16K/gpu.ratio=0.8で、新しいrun_3bb692dcbd914292a41e821db998c269を実行した。1呼出し120秒、追加推論OFF、並列1、区間300秒、呼出し160・タスク400の構成で、20呼出し・23タスクすべてsucceeded、status=completed / question_satisfied、completion_callback_status=completed、save_status=saved、publication_status=publishedとなった。Input・Research・Orchestrator・Visualizationの4 outcomesを個別に照合し全件published。所要782秒（約13分）。今回は実モデルで指摘1件と対応する応答1件も発生し、7回の専門レビューすべてでprovided_issue_idsと応答ID集合の一致・重複なしを照合した。前のCPU通常ケースで未実行だった非空の批判応答も、今回の実機で確認できた。
+
+結果はoutput/validation/maf-dev-real-model-20261102-google_gemma-4-12b-qat-run_3bb692dcbd914292a41e821db998c269.jsonへ保持する。拡大回帰は295 PASS / 1 SKIP / 75 subtests PASS（141.96秒）。共有Gemmaを16K/gpu.ratio=0.8でロード済みのままとし、最終のSDK照合でも指定値を確認した。GPUメモリ使用9,666 MiB、空き2,278 MiB。Qwenや実runtime・研究者ノートへの変更はなく、公開は引き続き一時Vaultだけで検証している。アプリは新しいadapter版を読み込むため再起動し、新しい分析を開始する。
+
+### ObusSQL main e371ae3への追従（2026-11-05）
+
+上流 `krokharu/ObusSQL` の `origin/main` を2026-11-05に取得し、最新HEAD `e371ae3cab2b07cb527bc960a650502692982b63`（2026-10-29）を確認した。手元の同梱checkout `69728a6` は未変更を確認してからfast-forwardした。11月4日の `prepare/external-context-clean-20261104` は未統合の別ブランチなので、本接続の固定対象には含めない。
+
+アプリの `config/requirements-obussql.txt`、`config/requirements-obussql-maf.txt` と `services/obussql.py` の両参照commitを `e371ae3` に統一した。上流の `obsipg` は `0.0.1.dev0`、`obussql-maf` は `0.1.0.dev0` のまま。上流mainにはMAF拡張が統合済みであり、読取の `MemoryBackend`、`retrieve_context`、`ReadLimits`、`PayloadBudget` と本番MAFの `NOT_READY / HOST_BINDING_UNAVAILABLE` 契約をソースで照合した。版番号だけでは旧コミットを検出できないため、利用手順に強制再導入を明記した。SQLiteカラム、Vault正本・台帳、研究者本文・タグ・別名、保存・同期・移行形式は変更していない。
+
+隔離したWindows CPython 3.12の一時venvで同HEADのネイティブ `obsipg` wheelをビルド・導入した。一時DBと一時InputVaultの1管理ノートで候補一覧1件、検索一致1件、出典IDと読取量を確認した。開発資料ブランチの `tests/test_obussql_integration.py` を現行アプリの `src` を指定して実行し、48 PASS / 1 SKIP（3.81秒）。SKIPはWindowsのシンボリックリンク制限。MAF拡張と `agent-framework-core==1.22.0` も同じ一時venvへ導入し、診断が `available_for_preview`、MAFが `host_binding_unavailable`、`package_available=true`、`execution_ready=false` と返ることを確認した。PostgreSQL、MCP、実モデル、研究データ、本番hostでの実行は未実施。実runtime、実Vault、認証設定、待受ポートは使用していない。
+現行アプリの `.venv`（CPython 3.12.9）にも同じcheckoutから `obsipg` と `obussql-maf` をwheelとして再導入した。診断は `available_for_preview` と `host_binding_unavailable`、`pip check` は依存不整合なし。起動中プロセスがあれば新コードの反映にはアプリの再起動が必要。pipの旧版退避フォルダー `.venv/Lib/site-packages/~bsipg` が残った。安全なパス確認を付けて削除を試みたが、自動承認レビューが再帰削除コマンドを拒否したため、退避フォルダーは保持している。新しいwheelの導入と診断は成功している。

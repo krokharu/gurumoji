@@ -1500,7 +1500,7 @@ class AnalysisApiTests(unittest.TestCase):
 class AnalysisDisplayHelperTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for the display-helper regression")
     def test_duration_distribution_ignores_missing_times(self):
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         functions = []
         for name in ("analysisNumberText", "analysisMedian", "analysisDurationSummary"):
             function = re.search(rf"^function {name}\([^\n]+\n.*?^}}", script, re.M | re.S)
@@ -1524,7 +1524,7 @@ console.log(JSON.stringify(scenarios.map(rows => {
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for the display-helper regression")
     def test_missing_numbers_render_as_missing_not_zero(self):
-        script = (app.APP_DIRECTORY / "static" / "app.js").read_text(encoding="utf-8")
+        script = __import__("app_source").read_app_source(app.APP_DIRECTORY / "static")
         function = re.search(r"^function analysisNumberText\([^\n]+\n.*?^}", script, re.M | re.S)
         self.assertIsNotNone(function)
         code = function.group(0) + "\nconsole.log(JSON.stringify([null, undefined, '', 0, 10].map(v => analysisNumberText(v))));"

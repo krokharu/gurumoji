@@ -307,7 +307,8 @@ def api_double(callback=lambda: None):
 
     def retrieve(backend, context, selections, **options):
         assert context == ReadContext("gurumoji-local-user", "obussql-preview", Scope("gurumoji", "a" * 32))
-        assert options["budget"].max_bytes == bridge.MAX_PAYLOAD_BYTES
+        assert options["budget"].max_bytes == bridge.MAX_RETRIEVAL_BYTES
+        assert options["candidate_limit"] == 10000
         assert options["read_limits"].max_source_bytes == bridge.MAX_SOURCE_BYTES
         for resource, revision in selections:
             assert (context, resource) in backend.grants
@@ -420,8 +421,30 @@ def test_real_optional_package_preview(notes, monkeypatch, tmp_path):
     monkeypatch.setenv(bridge.ENV_ENABLED, "1")
     before = files_under(tmp_path)
     result = notes.service.preview(request_for(notes))
-    assert result["context"]["schema_version"] == "bounded-context-v1"
+    assert result["context"]["schema_version"] == "gurumoji-summary-context-v1"
     assert result["context"]["scope"]["project_id"] == "a" * 32
     assert result["context"]["selected_blocks"] > 0
     assert result["measurement"]["utf8_bytes"] <= bridge.MAX_PAYLOAD_BYTES
+    assert files_under(tmp_path) == before
+
+
+@pytest.mark.parametrize('query', ['存在しない検索語', '末尾の重要根拠'])
+def test_real_preview_large_note_keeps_bounded_context_without_losing_tail(notes, monkeypatch, tmp_path, query):
+    monkeypatch.setenv(bridge.ENV_ENABLED, '1')
+    catalog = notes.registry.load()
+    entry = catalog['notes'][notes.selection.note_id]
+    body = '\n\n'.join(f'合成の段落{i}。' for i in range(1200)) + '\n\n末尾の重要根拠。\n'
+    notes.registry._write(catalog, entry['vault'], entry['path'], notes.selection.note_id,
+        {'title': '大きな合成ノート', 'status': 'current', 'revision': 1, 'source_hash': ''}, body)
+    notes.registry.save(catalog)
+    current = catalog['notes'][notes.selection.note_id]
+    before = files_under(tmp_path)
+    result = notes.service.preview({'notes': [{'note_id': notes.selection.note_id, 'sha256': current['sha256']}], 'query': query})
+    assert result['measurement']['utf8_bytes'] <= bridge.MAX_PAYLOAD_BYTES
+    assert result['context']['examined_blocks'] > 1024
+    assert result['context']['exclusion_summary']['total'] > 1000
+    if query == '末尾の重要根拠':
+        assert any('末尾の重要根拠' in r['node']['original']['quote']['text'] for r in result['context']['selection'])
+    else:
+        assert result['context']['selection'] == []
     assert files_under(tmp_path) == before

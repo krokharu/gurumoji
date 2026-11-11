@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const crypto = require('node:crypto');
 const app = path.resolve(__dirname, '..');
 const files = Object.fromEntries(['analysis-method-view.js', 'analysis-execution.js', 'analysis-content.js', 'app.js', 'style.css'].map(name =>
-  [name, fs.readFileSync(path.join(app, 'src/gurumoji/static', name), 'utf8')]));
+  [name, require('./app_source.cjs')(path.join(app, 'src/gurumoji/static', name), 'utf8')]));
 function extract(file, name) {
   const src = files[file];
   const match = new RegExp(`^(?:async )?function ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\(`, 'm').exec(src);

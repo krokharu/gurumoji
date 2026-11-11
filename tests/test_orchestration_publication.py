@@ -76,6 +76,257 @@ class OrchestrationPublicationTests(unittest.TestCase):
         self.assertEqual(value["save_status"], "saved", value)
         return value
 
+    def test_human_review_draft_saved_without_vault_publication(self):
+        from test_analysis_orchestration import assess_pending_results
+        calls = []
+        def agent(role, context, *args):
+            calls.append(role)
+            if role == "critic":
+                return critic(context)
+            if role == "verification":
+                return {"summary": "Independent check", "claims": []}
+            return {"summary": "Revised draft " + str(len(calls)), "claims": [], "intents": [],
+                    "critique_responses": [], "label_decisions": [],
+                    "result_assessments": assess_pending_results(context), "alternatives": ["Alternative " + str(len(calls))],
+                    "stop": {"reason": "human_review_required", "summary": "Needs review", "unresolved": []}}
+        self.runtime.agent_runner = agent
+        self.runtime.on_complete = self.publisher.finalize
+        run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+            "max_iterations": 6, "time_limit_seconds": None, "core_progress_version": 1,
+            "publication_targets": TARGETS})
+        with patch.object(VaultRegistry, "publish_analysis") as vault:
+            self.runtime.run(run["run_id"])
+            state = self.runtime.status("content", run["run_id"])
+            self.assertEqual(state["status"], "stopped", state)
+            self.assertEqual(state["stop_reason"], "human_review_required", state)
+            self.assertTrue(state["analysis_processing_complete"])
+            self.assertEqual(state["human_review_status"], "required")
+            self.assertEqual(state["review_status"], "incomplete")
+            self.assertLess(state["iteration"], 6)
+            published = self.publisher.status("content", run["run_id"])
+            self.assertEqual(published["save_status"], "saved", published)
+            self.assertEqual(published["publication_status"], "review_required")
+            self.assertIn("人手確認", published["publication_reason"])
+            vault.assert_not_called()
+
+    def test_unchanged_reviewed_human_draft_does_not_stop_as_no_progress(self):
+        from test_analysis_orchestration import assess_pending_results
+        def agent(role, context, *args):
+            if role == "critic":
+                return critic(context)
+            return {"summary": "Same draft", "claims": [], "intents": [],
+                    "critique_responses": [], "label_decisions": [],
+                    "result_assessments": assess_pending_results(context),
+                    "stop": {"reason": "human_review_required", "summary": "Needs review", "unresolved": []}}
+        self.runtime.agent_runner = agent
+        self.runtime.on_complete = self.publisher.finalize
+        run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+            "max_iterations": 6, "time_limit_seconds": None, "core_progress_version": 1})
+        self.runtime.run(run["run_id"])
+        state = self.runtime.status("content", run["run_id"])
+        self.assertEqual(state["stop_reason"], "human_review_required", state)
+        self.assertTrue(state["analysis_processing_complete"])
+        self.assertEqual(self.publisher.status("content", run["run_id"])["save_status"], "saved")
+
+    def test_revised_normal_stops_are_preserved_as_unreviewed_drafts(self):
+        from test_analysis_orchestration import assess_pending_results
+        for reason in ("question_satisfied", "no_more_evidence"):
+            with self.subTest(reason=reason):
+                calls = []
+                def agent(role, context, *args):
+                    calls.append(role)
+                    if role == "critic":
+                        return critic(context)
+                    return {"summary": "Revised draft", "claims": [], "intents": [],
+                            "critique_responses": [], "label_decisions": [],
+                            "result_assessments": assess_pending_results(context),
+                            "alternatives": ["Alternative " + str(len(calls))],
+                            "stop": {"reason": reason, "summary": "Bounded", "unresolved": []}}
+                self.runtime.agent_runner = agent
+                self.runtime.on_complete = self.publisher.finalize
+                run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+                    "max_iterations": 6, "time_limit_seconds": None, "core_progress_version": 1,
+                    "publication_targets": TARGETS})
+                with patch.object(VaultRegistry, "publish_analysis") as vault:
+                    self.runtime.run(run["run_id"])
+                    state = self.runtime.status("content", run["run_id"])
+                    self.assertEqual(state["status"], "stopped", state)
+                    self.assertEqual(state["stop_reason"], "human_review_required")
+                    self.assertEqual(state["model_stop_reason"], reason)
+                    self.assertTrue(state["analysis_processing_complete"])
+                    self.assertEqual(state["human_review_status"], "required")
+                    self.assertEqual(state["review_status"], "incomplete")
+                    self.assertLess(state["iteration"], 6)
+                    raw_results = self.runtime.result("content", run["run_id"])["raw_results"]
+                    self.assertTrue(all(result["raw"]["stop"]["reason"] == reason
+                                        for result in raw_results if result["role"] == "core"))
+                    publication = self.publisher.status("content", run["run_id"])
+                    self.assertEqual(publication["save_status"], "saved", publication)
+                    self.assertEqual(publication["publication_status"], "review_required")
+                    vault.assert_not_called()
+
+    def test_null_stop_with_work_does_not_fail(self):
+        from test_analysis_orchestration import assess_pending_results, core, intent
+        calls = []
+        def agent(role, context, *args):
+            if role == "critic":
+                return critic(context)
+            if role != "core":
+                return {"summary": "Specialist result", "claims": []}
+            calls.append(role)
+            if len(calls) == 1:
+                return core(stop=None, intents=[intent("interpretation")],
+                            result_assessments=assess_pending_results(context))
+            return stop(result_assessments=assess_pending_results(context),
+                        alternatives=["Alternative " + str(len(calls))])
+        self.runtime.agent_runner = agent
+        run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+            "max_iterations": 6, "time_limit_seconds": None, "core_progress_version": 1})
+        self.runtime.run(run["run_id"])
+        state = self.runtime.status("content", run["run_id"])
+        self.assertNotEqual(state["stop_reason"], "execution_failure", state)
+        self.assertTrue(any(task["role"] == "interpretation" and task["status"] == "succeeded" for task in state["tasks"]))
+
+    def test_saved_reanalysis_keeps_frozen_provenance_and_source_unchanged(self):
+        original_id = self.start(question="Synthetic original question")
+        original_publication = self.finalize(original_id)
+        saved_id = original_publication["result_run_id"]
+        before_package = self.store.verified_package(saved_id)[3]["documents/result.json"]
+        with app.database_connection() as db:
+            original_state = db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?", (original_id,)).fetchone()[0]
+            original_results = [tuple(row) for row in db.execute(
+                "SELECT * FROM orchestration_results WHERE run_id=? ORDER BY result_id", (original_id,))]
+            original_item = tuple(db.execute("SELECT * FROM library_items WHERE id=?", ("content",)).fetchone())
+            run_state = json.loads(original_state)
+            row = db.execute("SELECT result_id FROM orchestration_decisions WHERE run_id=? AND decision_id=?",
+                             (original_id, run_state["last_decision_id"])).fetchone()
+            original_result_id = row[0]
+            result_meta = json.loads(db.execute("SELECT state_json FROM orchestration_results WHERE result_id=?",
+                                                (original_result_id,)).fetchone()[0])
+        before_calls = self.calls
+        response = self.fixture.client.get("/api/library/content/analysis/orchestration/reanalysis/source/" + original_result_id)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()["source"]["source_result_id"], original_result_id)
+        self.assertEqual(self.calls, before_calls)
+        new_run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+            "max_iterations": None, "time_limit_seconds": None, "question": "Synthetic follow-up",
+            "source_analysis_id": original_result_id, "human_prompt": "Inspect this alternative",
+            "publication_targets": []})
+        self.runtime.run(new_run["run_id"])
+        self.assertEqual(self.runtime.status("content", new_run["run_id"])["status"], "completed")
+        second = self.finalize(new_run["run_id"])
+        second_id = second["result_run_id"]
+        _, saved_result, _, files = self.store.verified_package(second_id)
+        frozen = saved_result["orchestration"]["run"]["config"]["reanalysis"]
+        self.assertEqual(frozen["original_question"], "Synthetic original question")
+        self.assertEqual(frozen["source_analysis_id"], original_result_id)
+        self.assertEqual(frozen["source_run_id"], original_id)
+        self.assertEqual(frozen["source_result_id"], original_result_id)
+        self.assertEqual(frozen["raw_hash"], result_meta["raw_hash"])
+        self.assertEqual(frozen["human_prompt"], "Inspect this alternative")
+        self.assertEqual(json.loads(files["documents/result.json"])["orchestration"]["run"]["config"]["reanalysis"], frozen)
+        self.assertEqual(self.store.verified_package(second_id)[1]["orchestration"]["run"]["config"]["reanalysis"], frozen)
+        self.assertEqual(self.store.verified_package(saved_id)[3]["documents/result.json"], before_package)
+        with app.database_connection() as db:
+            self.assertEqual(db.execute("SELECT state_json FROM orchestration_runs WHERE run_id=?", (original_id,)).fetchone()[0], original_state)
+            self.assertEqual([tuple(row) for row in db.execute(
+                "SELECT * FROM orchestration_results WHERE run_id=? ORDER BY result_id", (original_id,))], original_results)
+            self.assertEqual(tuple(db.execute("SELECT * FROM library_items WHERE id=?", ("content",)).fetchone()), original_item)
+
+    def test_next_step_wire_response_runs_tasks_and_preserves_raw_decision(self):
+        from types import SimpleNamespace
+        from test_analysis_orchestration import assess_pending_results, core, intent
+        from gurumoji.services.analysis_orchestration_adapters import make_orchestration_adapters, ADAPTER_VERSION
+        from gurumoji.services.orchestration_core_control import project_response
+        from gurumoji.services.model_context import restored_reference_context
+
+        provider_responses = []
+        core_calls = []
+        def provider(*args, **kwargs):
+            role = args[5].removeprefix("analysis_orchestration_")
+            context = restored_reference_context(args[4], kwargs.get("data_messages"))
+            if role == "critic":
+                return critic(context)
+            if role != "core":
+                return {"summary": "Synthetic independent analysis", "claims": []}
+            core_calls.append(1)
+            if len(core_calls) == 1:
+                next_step = {"kind": "analyze", "intents": [intent("interpretation"), intent("verification")], "stop": None}
+            else:
+                next_step = {"kind": "finish", "intents": [], "stop": {
+                    "reason": "question_satisfied", "summary": "Synthetic bounded conclusion", "unresolved": []}}
+            response = core(alternatives=["Alternative " + str(len(core_calls))],
+                            result_assessments=assess_pending_results(context), next_step=next_step)
+            response.pop("intents")
+            provider_responses.append(copy.deepcopy(response))
+            return response
+        resolve, runner = make_orchestration_adapters(call_ai_json=provider,
+            load_token_config=lambda: SimpleNamespace(lmstudio_base_url=""),
+            configured_ai_credentials=lambda *_: ("", "synthetic"))
+        self.runtime.agent_runner = runner
+        self.runtime.adapter_version = ADAPTER_VERSION
+        self.runtime.on_complete = self.publisher.finalize
+        payload = resolve({"model": "synthetic-model", "stop_mode": "auto", "max_iterations": 6,
+                           "time_limit_seconds": None, "core_progress_version": 1,
+                           "core_control_version": 1, "publication_targets": TARGETS})
+        payload.update(initial_label_definitions_version=0, initial_specialist_analysis_version=0,
+                       specialist_orchestration_version=0)
+        run = self.runtime.start("content", payload)
+        with patch.object(VaultRegistry, "publish_analysis") as vault:
+            self.runtime.run(run["run_id"])
+            state = self.runtime.status("content", run["run_id"])
+            self.assertEqual(state["status"], "stopped", state)
+            self.assertEqual(state["stop_reason"], "human_review_required", state)
+            self.assertEqual(state["model_stop_reason"], "question_satisfied")
+            self.assertTrue(state["analysis_processing_complete"])
+            self.assertLess(state["iteration"], 6)
+            for role in ("interpretation", "verification"):
+                self.assertTrue(any(t["role"] == role and t["status"] == "succeeded" for t in state["tasks"]))
+            publication = self.publisher.status("content", run["run_id"])
+            self.assertEqual(publication["save_status"], "saved", publication)
+            self.assertEqual(publication["publication_status"], "review_required")
+            vault.assert_not_called()
+        saved = self.store.verified_package(publication["result_run_id"])[1]
+        raws = [row["raw"] for row in saved["orchestration"]["raw_results"] if row["role"] == "core"]
+        self.assertEqual([raw["next_step"] for raw in raws], [raw["next_step"] for raw in provider_responses])
+        for raw, provider_raw in zip(raws, provider_responses):
+            self.assertEqual(raw, project_response(provider_raw))
+
+    def test_draft_rejects_incomplete_tasks_and_retries_failed_save(self):
+        from test_analysis_orchestration import assess_pending_results
+        def agent(role, context, *args):
+            if role == "critic":
+                return critic(context)
+            return {"summary": "Same draft", "claims": [], "intents": [],
+                    "critique_responses": [], "label_decisions": [],
+                    "result_assessments": assess_pending_results(context),
+                    "stop": {"reason": "human_review_required", "summary": "Needs review", "unresolved": []}}
+        self.runtime.agent_runner = agent
+        run = self.runtime.start("content", {"model": "synthetic-model", "stop_mode": "auto",
+            "max_iterations": 6, "time_limit_seconds": None, "core_progress_version": 1,
+            "publication_targets": TARGETS})
+        self.runtime.run(run["run_id"])
+        with app.database_connection() as db:
+            row = db.execute("SELECT task_id,state_json FROM orchestration_tasks WHERE run_id=? LIMIT 1", (run["run_id"],)).fetchone()
+            original = row["state_json"]
+            task = json.loads(original)
+            task["status"] = "failed"
+            db.execute("UPDATE orchestration_tasks SET state_json=? WHERE task_id=?", (json.dumps(task), row["task_id"]))
+        with self.assertRaises(StoreConflict):
+            self.publisher.finalize("content", run["run_id"])
+        with app.database_connection() as db:
+            db.execute("UPDATE orchestration_tasks SET state_json=? WHERE task_id=?", (original, row["task_id"]))
+        with patch.object(self.store, "save", side_effect=OSError("synthetic save failure")):
+            failed = self.publisher.finalize("content", run["run_id"])
+        self.assertEqual(failed["save_status"], "failed")
+        self.assertTrue(failed["can_retry"])
+        with patch.object(VaultRegistry, "publish_analysis") as vault:
+            recovered = self.publisher.retry("content", run["run_id"])
+            self.assertEqual(recovered["save_status"], "saved")
+            self.assertEqual(recovered["publication_status"], "review_required")
+            self.assertFalse(recovered["can_retry"])
+            vault.assert_not_called()
+
     def test_default_off_scope_direct_publish_retry_refresh_never_write(self):
         self.assertEqual(validate_orchestration_payload({"model": "synthetic"})["publication_targets"], [])
         rid = self.start()

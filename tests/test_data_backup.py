@@ -75,6 +75,19 @@ class DataBackupTests(unittest.TestCase):
         result = create_backup(self.data, self.root / "backups", include_media=True)
         self.assertTrue({"media/a/meeting.wav", "kushinada_training/audio/a.wav"} <= self.listed(result["path"]))
 
+    def test_knowledge_builder_exclusion_is_reported_in_manifest_and_restore(self):
+        source = self.data / "knowledge_builder/private/source_extractions/example.txt"
+        source.parent.mkdir(parents=True)
+        source.write_text("synthetic local excerpt", encoding="utf-8")
+        result = create_backup(self.data, self.root / "backups")
+        manifest = json.loads((result["path"] / "manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(any("knowledge_builder" in note for note in manifest["excluded"]))
+        self.assertEqual(result["excluded"], manifest["excluded"])
+        self.assertFalse(any(path.startswith("knowledge_builder/") for path in self.listed(result["path"])))
+        self.assertEqual(verify_backup(result["path"]), [])
+        restore_backup(result["path"], self.root / "restored")
+        self.assertFalse((self.root / "restored/knowledge_builder").exists())
+
     def test_verify_reports_changed_missing_and_extra_files(self):
         backup = create_backup(self.data, self.root / "backups")["path"]
         (backup / "data/custom_vocabulary.json").write_text("[\"changed\"]", encoding="utf-8")
@@ -132,6 +145,7 @@ class BackupRouteTests(unittest.TestCase):
     def test_local_browser_creates_a_backup(self):
         response = self.client.post("/api/system/backup", json={"include_media": False})
         self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(any("knowledge_builder" in note for note in response.get_json()["excluded"]))
         backup = Path(response.get_json()["path"])
         self.assertEqual(backup.parent, self.root / "backups")
         self.assertEqual(verify_backup(backup), [])

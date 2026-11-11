@@ -4,7 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../../src/gurumoji/static/ai-effort.js'), 'utf8');
+const sourceRoot = process.env.GURUMOJI_EFFORT_SOURCE_ROOT || path.join(__dirname, '../..');
+const appSource = require('../app_source.cjs')(path.join(sourceRoot, 'src/gurumoji/static/app.js'), 'utf8');
+const planStart = appSource.indexOf('function transcriptFinishingPlan() {');
+const planSource = planStart < 0 ? '' : appSource.slice(planStart, appSource.indexOf('\nfunction ', planStart + 1));
+const source = planSource + '\n' + fs.readFileSync(path.join(sourceRoot, 'src/gurumoji/static/ai-effort.js'), 'utf8');
 class Element {
   constructor(tag, doc) { this.tagName = tag; this.doc = doc; this.children = []; this.attrs = {}; this.dataset = {}; this.listeners = {}; this.disabled = false; this.hidden = false; this.open = false; this._checked = false; this.value = ''; }
   append(child) { this.children.push(child); child.parentElement = this; }
@@ -21,7 +25,7 @@ class Element {
       const child = new Element(item[1], this.doc);
       for (const a of item[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g)) child.setAttribute(a[1], a[2] ?? '');
       stack.at(-1).append(child);
-      if (!['input', 'path', 'circle', 'rect'].includes(child.tagName) && !item[0].endsWith('/>')) stack.push(child);
+      if (!['input', 'img', 'path', 'circle', 'rect'].includes(child.tagName) && !item[0].endsWith('/>')) stack.push(child);
     }
   }
   matches(selector) {
@@ -55,7 +59,13 @@ function setup(saved, storageFails=false) {
 const keys=['outline','cleanup','name_extract','name_verify'];
 const snapshot={outline:'high',cleanup:'low',name_extract:'off',name_verify:'medium'};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function capability(s, cap, model='A') { s.doc.getElementById('ai-provider').value='lmstudio'; s.ctx.tokenConfigSnapshot.lmstudio_model=model; s.sync(); s.calls.at(-1).resolve({ok:true,json:async()=>({model,reasoning:cap})});await flush(); }
+async function capability(s, cap, model='A') {
+ s.doc.getElementById('ai-provider').value='lmstudio';s.ctx.tokenConfigSnapshot.lmstudio_model=model;
+ const names=s.doc.getElementById('detect-names'),saved=names.checked;
+ // 未使用時に照会しないため、能力確認は話者処理が有効な状態で行ってから戻す。
+ if(!Object.values(s.ctx.aiEffortStagePlan().requested).some(Boolean))names.checked=true;
+ s.sync();s.calls.at(-1).resolve({ok:true,json:async()=>({model,reasoning:cap})});await flush();names.checked=saved;s.sync();
+}
 function assertState(s,expected) { assert.deepEqual(s.values(),{notation:'off',...expected});keys.forEach(key=>{assert.equal(s.card(key).querySelector('input[type="hidden"]').value,expected[key]);assert.equal(s.card(key).dataset.effort,expected[key]);}); }
 test('E01 storage absent/corrupt/null/unknown/unavailable/legacy auto retains independent defaults',()=>{
   for(const saved of [null,'broken','null','[]','{"outline":"unknown"}','{"outline":"\"]"}']) {const s=setup(saved); assertState(s,Object.fromEntries(keys.map(k=>[k,'medium'])));assert.equal(s.writes.length,0);}
@@ -110,7 +120,7 @@ test('E08 no proxy submit name, unique original hidden fields, simple/detail pro
  const s=setup(JSON.stringify(snapshot));const payload=()=>s.doc.querySelectorAll('input[type="hidden"]').map(n=>[n.name,n.value]);const first=payload();assert.equal(first.length,4);assert.equal(new Set(first.map(([n])=>n)).size,4);keys.forEach(k=>assert.equal(s.card(k).querySelector('select').name,undefined));s.doc.getElementById('effort-detail-toggle').dispatchEvent(new SyntheticEvent('click'));assert.deepEqual(payload(),first);
 });
 test('readiness hook included and inner disclosure barrier removed; CSS responsive, no fixed card height',()=>{
- const base=path.join(__dirname,'../../src/gurumoji');const app=fs.readFileSync(path.join(base,'static/app.js'),'utf8');const template=fs.readFileSync(path.join(base,'templates/views/create.html'),'utf8');const css=fs.readFileSync(path.join(base,'static/ai-effort.css'),'utf8');assert.ok(app.includes('const effortReadiness = aiEffortReadiness();'));assert.ok(template.includes('<section class="effort-details"'));assert.ok(!template.includes('<details class="effort-details"'));assert.ok(css.includes('@media (max-width: 600px)'));assert.ok(css.includes(':focus-visible'));assert.ok(css.includes('min-height: 44px'));
+ const base=path.join(sourceRoot,'src/gurumoji');const app=require('../app_source.cjs')(path.join(base,'static/app.js'),'utf8');const template=fs.readFileSync(path.join(base,'templates/views/create.html'),'utf8');const css=fs.readFileSync(path.join(base,'static/ai-effort.css'),'utf8');assert.ok(app.includes('const effortReadiness = aiEffortReadiness();'));assert.ok(template.includes('<section class="effort-details"'));assert.ok(!template.includes('<details class="effort-details"'));assert.ok(css.includes('@media (max-width: 600px)'));assert.ok(css.includes(':focus-visible'));assert.ok(css.includes('min-height: 44px'));
 });
 test('recommended high/MAX require outline support; cleanup OFF does not activate its context outline',async()=>{
  const s=setup();s.doc.getElementById('create-outline').checked=false;s.doc.getElementById('clean-transcript').checked=false;s.ctx.tokenConfigSnapshot.typesafe=true;
@@ -150,11 +160,13 @@ test('custom checked full cleanup/Jev requires outline; recommended ignores stal
  s.doc.getElementById('clean-transcript').checked=true;s.doc.getElementById('create-outline').checked=true;s.doc.getElementById('jev-compare').checked=true;setMode(s,'recommended');assert.equal(s.ctx.aiEffortStageEnabled('outline'),false);assert.equal(s.ctx.aiEffortReadiness().blockers.length,0);
 });
 function installActualModeHandler(s) {
- const app=fs.readFileSync(path.join(__dirname,'../../src/gurumoji/static/app.js'),'utf8');
+ const app=appSource;
  const presets=app.slice(app.indexOf('function selectedTranscriptFinishingMode('),app.indexOf('function selectDefaultAiOptions('));
  const event=app.slice(app.indexOf("transcriptFinishingModeInputs.forEach(input => listen(input, 'change'"),app.indexOf('[modelName, languageSelect, audioPreprocess, writeSrt, burnSubtitledVideo].forEach'));
  Object.assign(s.ctx,{transcriptFinishingModeInputs:s.doc.querySelectorAll('[name="transcript_finishing_mode"]'),aiProvider:s.doc.getElementById('ai-provider'),cleanTranscript:s.doc.getElementById('clean-transcript'),detectNames:s.doc.getElementById('detect-names'),createOutline:s.doc.getElementById('create-outline'),jevCompare:s.doc.getElementById('jev-compare'),finishInObsidian:s.doc.getElementById('finish-in-obsidian'),finishingModeHint:null,listen(node,event,callback){node.addEventListener(event,callback);},syncAiFields(){s.sync();}});
- vm.runInContext(presets+event,s.ctx);s.ctx.applyTranscriptFinishingPreset();
+ // アプリのソース分割により、状態宣言を関数と別に取得する。
+ const state=app.match(/const transcriptFinishingPreferences = new Map\(\);[\s\S]*?let lastTranscriptFinishingMode = selectedTranscriptFinishingMode\(\);/)[0];
+ vm.runInContext(presets+state+event,s.ctx);s.ctx.applyTranscriptFinishingPreset();
  return mode=>{const input=s.doc.querySelector(`[name="transcript_finishing_mode"][value="${mode}"]`);input.checked=true;input.dispatchEvent(new SyntheticEvent('change',{bubbles:true}));};
 }
 test('P18 actual app mode-change handler restores recommended name opt-out and all per-mode preferences',()=>{
@@ -171,4 +183,60 @@ test('actual handler applies defaults only to new modes, keeps repeated events i
  change('recommended');assert.equal(s.doc.getElementById('detect-names').checked,false);assert.equal(s.doc.getElementById('jev-compare').checked,false);
  for(const mode of ['advanced','recommended','off','advanced','recommended']){change(mode);assert.equal(s.doc.getElementById('jev-compare').checked,false);}
  assert.equal(s.doc.getElementById('detect-names').checked,false);
+});
+
+// 実際の送信先表示と推論設定確認が同じ実行対象を参照することを確認する。
+const currentPlanTest = planStart < 0 ? test.skip : test;
+function installDestinations(s) {
+ const begin=appSource.indexOf('function enabledTextDestinations() {');
+ // アプリのソース分割により、移動した関数の終端を使う。
+ const end=appSource.indexOf('\n}',begin)+2;
+ Object.assign(s.ctx,{aiProvider:s.doc.getElementById('ai-provider'),selectedTranscriptFinishingMode:()=>s.doc.querySelector('input[name="transcript_finishing_mode"]:checked').value,selectedOptionText:()=> 'LM Studio（ローカル）'});
+ vm.runInContext(appSource.slice(begin,end),s.ctx);
+ return ()=>JSON.parse(JSON.stringify(s.ctx.enabledTextDestinations()));
+}
+
+currentPlanTest('未使用のLM Studioは対応設定を取得せず、注意文と送信先にも含めない',()=>{
+ const s=setup();deactivate(s);setMode(s,'off');s.doc.getElementById('ai-provider').value='lmstudio';
+ for(const id of ['clean-transcript','detect-names','create-outline','jev-compare'])s.doc.getElementById(id).checked=true;
+ s.sync();const destinations=installDestinations(s);
+ assert.equal(s.calls.length,0);assert.deepEqual(destinations(),[]);assert.equal(s.ctx.aiEffortReadiness().notes.length,0);assert.equal(s.ctx.aiEffortReadiness().blockers.length,0);
+ for(const key of keys)assert.doesNotMatch(s.card(key).querySelector('.effort-capability').textContent,/未確認|モデル既定|取得に失敗/);
+ s.doc.getElementById('ai-provider').value='none';setMode(s,'advanced');assert.deepEqual(destinations(),[]);
+ assert.equal(s.ctx.aiEffortStageEnabled('name_extract'),false);
+});
+
+currentPlanTest('後処理へ送る校正・アウトラインの注意と送信先は今回表示しない',()=>{
+ const s=setup();deactivate(s);s.doc.getElementById('finish-in-obsidian').checked=true;s.doc.getElementById('create-outline').checked=true;
+ s.doc.getElementById('ai-provider').value='lmstudio';s.ctx.tokenConfigSnapshot.typesafe=true;s.sync();
+ assert.equal(s.calls.length,0);assert.deepEqual(installDestinations(s)(),[]);assert.equal(s.ctx.aiEffortReadiness().notes.length,0);
+ assert.equal(s.ctx.aiEffortStageEnabled('cleanup'),true);assert.equal(s.ctx.aiEffortStagePlan().requested.cleanup,false);
+ s.doc.getElementById('detect-names').checked=true;s.sync();assert.equal(s.calls.length,1);
+ assert.deepEqual(installDestinations(s)().map(d=>d.provider),['lmstudio']);
+});
+
+currentPlanTest('おすすめは残った詳細設定を無視し、校正なし・話者なしなら送信しない',()=>{
+ const s=setup();deactivate(s);s.ctx.tokenConfigSnapshot.typesafe=true;
+ for(const id of ['clean-transcript','create-outline','jev-compare'])s.doc.getElementById(id).checked=true;
+ s.change('cleanup','off');s.doc.getElementById('ai-provider').value='lmstudio';s.sync();
+ assert.deepEqual(installDestinations(s)(),[]);assert.equal(s.calls.length,0);
+ s.change('cleanup','medium');assert.deepEqual(installDestinations(s)().map(d=>d.provider),['lmstudio','typesafe']);
+});
+
+currentPlanTest('話者確認を外すとその注意だけ消え、推論OFFは処理OFFとして扱わない',async()=>{
+ const s=setup();deactivate(s);s.ctx.tokenConfigSnapshot.typesafe=true;s.doc.getElementById('ai-provider').value='lmstudio';s.sync();
+ s.calls[0].resolve({ok:true,json:async()=>({model:'A',reasoning:{}})});await flush();
+ assert.equal(s.ctx.aiEffortReadiness().notes.length,1);
+ s.doc.getElementById('detect-names').checked=true;s.change('name_extract','off');s.change('name_verify','off');
+ assert.equal(s.ctx.aiEffortReadiness().notes.length,3);assert.match(s.ctx.aiEffortReadiness().notes.join(' '),/OFFを選択していても、追加推論が行われる場合があります/);
+ s.doc.getElementById('detect-names').checked=false;s.sync();assert.equal(s.ctx.aiEffortReadiness().notes.length,1);
+ s.change('cleanup','off');assert.equal(s.ctx.aiEffortReadiness().notes.length,0);assert.deepEqual(installDestinations(s)(),[]);
+});
+
+currentPlanTest('校正なしではJev比較を送信先に含めず、表記統一のみの送信先を表示する',()=>{
+ const s=setup();deactivate(s);setMode(s,'custom');s.doc.getElementById('jev-compare').checked=true;s.change('cleanup','off');
+ assert.deepEqual(installDestinations(s)(),[]);
+ const notation=s.doc.createElement('select');notation.setAttribute('name','ai_effort_notation');notation.value='medium';s.doc.append(notation);
+ s.sync();assert.deepEqual(installDestinations(s)().map(d=>d.provider),['openai']);
+ s.change('cleanup','medium');assert.deepEqual(installDestinations(s)().map(d=>d.provider),['openai','typesafe']);
 });
