@@ -189,6 +189,13 @@
     "analysis_queries.update_library_item"
   ],
   [
+    "/api/library/<item_id>/ai-export.zip",
+    [
+      "POST"
+    ],
+    "export_ai_data_bundle"
+  ],
+  [
     "/api/library/<item_id>/analysis",
     [
       "GET"
@@ -215,6 +222,167 @@
       "POST"
     ],
     "analysis_queries.run_segment_classifications"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline",
+    [
+      "GET"
+    ],
+    "core_pipeline.history"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline",
+    [
+      "POST"
+    ],
+    "core_pipeline.start"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>",
+    [
+      "GET"
+    ],
+    "core_pipeline.status"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/asset-plans",
+    [
+      "POST"
+    ],
+    "core_pipeline.asset_plan_register"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/asset-plans/notifications/<producer_task_id>",
+    [
+      "POST"
+    ],
+    "core_pipeline.asset_plan_notification"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/asset-plans/options",
+    [
+      "GET"
+    ],
+    "core_pipeline.asset_plan_options"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/cancel",
+    [
+      "POST"
+    ],
+    "core_pipeline.cancel"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/export.json",
+    [
+      "GET"
+    ],
+    "core_pipeline.export_json"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/export.md",
+    [
+      "GET"
+    ],
+    "core_pipeline.export_markdown"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/human-records",
+    [
+      "GET"
+    ],
+    "core_pipeline.human_record_options"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/human-records",
+    [
+      "POST"
+    ],
+    "core_pipeline.human_record"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/memory/note",
+    [
+      "GET"
+    ],
+    "core_pipeline.memory_note"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/memory/retry",
+    [
+      "POST"
+    ],
+    "core_pipeline.retry_memory"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/publication/retry",
+    [
+      "POST"
+    ],
+    "core_pipeline.retry_publication"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/results",
+    [
+      "GET"
+    ],
+    "core_pipeline.results"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/results/<result_id>",
+    [
+      "GET"
+    ],
+    "core_pipeline.result"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/resume",
+    [
+      "POST"
+    ],
+    "core_pipeline.resume"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/table-pilot",
+    [
+      "GET"
+    ],
+    "core_pipeline.table_pilot_options"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/table-pilot/<method_id>",
+    [
+      "POST"
+    ],
+    "core_pipeline.table_pilot_register"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/viewer",
+    [
+      "GET"
+    ],
+    "core_pipeline.viewer_timeline"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/viewer/entries/<entry_id>",
+    [
+      "GET"
+    ],
+    "core_pipeline.viewer_entry"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/<run_id>/viewer/sources/<utterance_id>",
+    [
+      "GET"
+    ],
+    "core_pipeline.viewer_source"
+  ],
+  [
+    "/api/library/<item_id>/analysis/core-pipeline/viewer",
+    [
+      "GET"
+    ],
+    "core_pipeline.viewer_runs"
   ],
   [
     "/api/library/<item_id>/analysis/definitions/<definition_id>",
@@ -425,6 +593,13 @@
       "GET"
     ],
     "analysis_orchestration.viewer_source"
+  ],
+  [
+    "/api/library/<item_id>/analysis/orchestration/reanalysis/source/<source_analysis_id>",
+    [
+      "GET"
+    ],
+    "analysis_orchestration.reanalysis_source"
   ],
   [
     "/api/library/<item_id>/analysis/orchestration/viewer",
@@ -659,6 +834,13 @@
     "prepare_obsidian_finishing_route"
   ],
   [
+    "/api/library/<item_id>/outline",
+    [
+      "POST"
+    ],
+    "library_outline.rerun_library_outline"
+  ],
+  [
     "/api/library/<item_id>/preparation",
     [
       "PUT"
@@ -855,6 +1037,27 @@
       "POST"
     ],
     "restore_library_trash"
+  ],
+  [
+    "/api/obsidian/obussql",
+    [
+      "GET"
+    ],
+    "obussql_status"
+  ],
+  [
+    "/api/obsidian/obussql/notes",
+    [
+      "GET"
+    ],
+    "obussql_notes"
+  ],
+  [
+    "/api/obsidian/obussql/preview",
+    [
+      "POST"
+    ],
+    "obussql_preview"
   ],
   [
     "/api/select-input",

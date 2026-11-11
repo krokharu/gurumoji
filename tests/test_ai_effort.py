@@ -30,7 +30,7 @@ class AiEffortTests(unittest.TestCase):
     def test_local_request_uses_supported_off_value(self):
         with patch.object(app, 'lmstudio_reasoning_settings', return_value={
                 'allowed_options': ['off', 'on'], 'default': 'on'}), \
-                patch.object(app, 'post_json', return_value={}) as post, \
+                patch.object(app, 'post_json', return_value={'choices': [{'finish_reason': 'stop'}]}) as post, \
                 patch.object(app, 'extract_lmstudio_text', return_value='{}'):
             app.call_ai_json('lmstudio', '', 'local-qwen', 's', 'p', 'transcript_cleanup', {},
                              ai_efforts={'cleanup': 'low'})
@@ -52,7 +52,7 @@ class AiEffortTests(unittest.TestCase):
         for schema, expected in [('meeting_outline', 'low'), ('transcript_cleanup', 'high'),
                                  ('speaker_identity_extraction', 'medium'),
                                  ('speaker_identity_link_verification', 'low')]:
-            with self.subTest(schema=schema), patch.object(app, 'post_json', return_value={}) as post, \
+            with self.subTest(schema=schema), patch.object(app, 'post_json', return_value={'status': 'completed'}) as post, \
                     patch.object(app, 'extract_openai_text', return_value='{}'):
                 app.call_ai_json('openai', 'test', 'test-model', 'system', 'prompt', schema, {},
                                  ai_efforts=efforts)

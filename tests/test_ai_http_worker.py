@@ -49,6 +49,7 @@ class AiHttpWorkerTests(unittest.TestCase):
         }
         collected = []
         openai_response = {
+            "status": "completed",
             "output_text": '{"ok": true}',
             "usage": {
                 "input_tokens": 120,
@@ -71,7 +72,7 @@ class AiHttpWorkerTests(unittest.TestCase):
         self.assertEqual(collected[-1]["reasoning_tokens"], 8)
 
         gemini_response = {
-            "candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}],
+            "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": '{"ok": true}'}]}}],
             "usageMetadata": {
                 "promptTokenCount": 200,
                 "candidatesTokenCount": 40,

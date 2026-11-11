@@ -110,7 +110,7 @@ class AiModelSettingsTests(unittest.TestCase):
             "additionalProperties": False,
         }
         response = {
-            "choices": [{"message": {"content": '{"ok":true}'}}],
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"ok":true}'}}],
             "usage": {"prompt_tokens": 6, "completion_tokens": 2, "total_tokens": 8},
         }
         collected = []

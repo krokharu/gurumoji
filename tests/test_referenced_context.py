@@ -101,7 +101,7 @@ class ReferenceTransportTests(unittest.TestCase):
         for provider in ("lmstudio", "openai", "google"):
             posted = []
             response = {"choices": [{"finish_reason": "stop", "message": {"content": '{"ok":true}'}}]}
-            if provider == "openai": response = {"output": [{"content": [{"type": "output_text", "text": '{"ok":true}'}]}]}
+            if provider == "openai": response = {"status": "completed", "output": [{"content": [{"type": "output_text", "text": '{"ok":true}'}]}]}
             if provider == "google": response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": '{"ok":true}'}]}}]}
             def post(url, headers, payload, **kwargs):
                 posted.append(payload)

@@ -39,7 +39,7 @@ class EffortCompatibilityTests(unittest.TestCase):
                     with self.subTest(schema=schema, capability=label, level=level):
                         efforts = normalize_efforts({stage: level})
                         before = copy.deepcopy(efforts)
-                        post = Mock(return_value={'choices': [{'message': {'content': '{}'}}]})
+                        post = Mock(return_value={'choices': [{'finish_reason': 'stop', 'message': {'content': '{}'}}]})
                         kwargs = dict(post=post, lmstudio_base=lambda _: 'http://synthetic.invalid/v1',
                                       lmstudio_model_id=lambda model: model,
                                       lmstudio_reasoning=lambda *_: capability, providers={'lmstudio'},
